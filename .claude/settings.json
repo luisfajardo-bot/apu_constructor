@@ -19,7 +19,8 @@
       "Bash(python -m pytest tests/test_texto.py tests/test_matching.py -v)",
       "Bash(bash \"C:/Users/luis.fajardo/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/review-package\" af3ebb6 2d6f62c)",
       "Bash(python -m pytest tests/test_precios_db.py -v)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(python -m pytest tests/test_pricing_cruce.py -v)"
     ]
   }
 }

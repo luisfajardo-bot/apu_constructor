@@ -131,6 +131,7 @@ class CostedComponent:
     precio_unitario: float        # precio usado (catálogo actual o histórico)
     fuente_precio: str
     costo: float                  # rendimiento * precio_unitario
+    calidad_cruce: str = "exacto" # exacto | aproximado | ambiguo | huerfano (aviso del cruce)
 
 
 @dataclass

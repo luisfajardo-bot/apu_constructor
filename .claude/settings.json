@@ -15,7 +15,11 @@
       "PowerShell($env:PYTHONPATH = \\(Get-Location\\).Path; python \"C:\\\\Users\\\\LUIS~1.FAJ\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-luis-fajardo-Downloads-intento-plan\\\\f32fd584-61aa-4feb-b4ec-886ffa3aa326\\\\scratchpad\\\\busca_transporte.py\")",
       "PowerShell($env:PYTHONPATH = \\(Get-Location\\).Path; python \"C:\\\\Users\\\\LUIS~1.FAJ\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-luis-fajardo-Downloads-intento-plan\\\\f32fd584-61aa-4feb-b4ec-886ffa3aa326\\\\scratchpad\\\\confirma_4613.py\")",
       "Bash(git --version)",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "Bash(python -m pytest tests/test_texto.py tests/test_matching.py -v)",
+      "Bash(bash \"C:/Users/luis.fajardo/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/review-package\" af3ebb6 2d6f62c)",
+      "Bash(python -m pytest tests/test_precios_db.py -v)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

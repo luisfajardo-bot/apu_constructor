@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(python run_cli.py demo)",
+      "PowerShell(python \"C:\\\\Users\\\\LUIS~1.FAJ\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-luis-fajardo-Downloads-intento-plan\\\\f32fd584-61aa-4feb-b4ec-886ffa3aa326\\\\scratchpad\\\\demo_db.py\")",
+      "PowerShell($env:PYTHONPATH = \\(Get-Location\\).Path; python \"C:\\\\Users\\\\LUIS~1.FAJ\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-luis-fajardo-Downloads-intento-plan\\\\f32fd584-61aa-4feb-b4ec-886ffa3aa326\\\\scratchpad\\\\demo_db.py\")",
+      "PowerShell($env:PYTHONPATH = \\(Get-Location\\).Path; python -c \"import sqlite3; c=sqlite3.connect\\('data/apu.db'\\); print\\(c.execute\\(\\\\\"SELECT sql FROM sqlite_master WHERE name='insumo_precios'\\\\\"\\).fetchone\\(\\)[0]\\)\")",
+      "PowerShell(python \"C:\\\\Users\\\\LUIS~1.FAJ\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-luis-fajardo-Downloads-intento-plan\\\\f32fd584-61aa-4feb-b4ec-886ffa3aa326\\\\scratchpad\\\\check_schema.py\")",
+      "PowerShell(python -m pytest tests/test_schema_sql.py::test_reset_recrea_esquema_sobre_base_vieja -v)",
+      "PowerShell(python -m pytest tests/ -q)",
+      "PowerShell($env:PYTHONPATH = \\(Get-Location\\).Path; python \"C:\\\\Users\\\\LUIS~1.FAJ\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-luis-fajardo-Downloads-intento-plan\\\\f32fd584-61aa-4feb-b4ec-886ffa3aa326\\\\scratchpad\\\\dump_cuadro.py\")",
+      "PowerShell(Get-ChildItem -Path .\\\\salidas\\\\ -File | Sort-Object LastWriteTime | Select-Object Name, @{N='Tamaño KB';E={[math]::Round\\($_.Length/1KB,1\\)}}, LastWriteTime | Format-Table -AutoSize)",
+      "PowerShell($env:PYTHONPATH = \\(Get-Location\\).Path; python \"C:\\\\Users\\\\LUIS~1.FAJ\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-luis-fajardo-Downloads-intento-plan\\\\f32fd584-61aa-4feb-b4ec-886ffa3aa326\\\\scratchpad\\\\inspect_source.py\")",
+      "PowerShell($env:PYTHONPATH = \\(Get-Location\\).Path; python \"C:\\\\Users\\\\LUIS~1.FAJ\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-luis-fajardo-Downloads-intento-plan\\\\f32fd584-61aa-4feb-b4ec-886ffa3aa326\\\\scratchpad\\\\peek_ppto.py\")",
+      "PowerShell($env:PYTHONPATH = \\(Get-Location\\).Path; python \"C:\\\\Users\\\\LUIS~1.FAJ\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-luis-fajardo-Downloads-intento-plan\\\\f32fd584-61aa-4feb-b4ec-886ffa3aa326\\\\scratchpad\\\\busca_transporte.py\")",
+      "PowerShell($env:PYTHONPATH = \\(Get-Location\\).Path; python \"C:\\\\Users\\\\LUIS~1.FAJ\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-luis-fajardo-Downloads-intento-plan\\\\f32fd584-61aa-4feb-b4ec-886ffa3aa326\\\\scratchpad\\\\confirma_4613.py\")",
+      "Bash(git --version)",
+      "Bash(git config *)"
+    ]
+  }
+}

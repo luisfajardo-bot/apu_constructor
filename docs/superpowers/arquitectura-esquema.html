@@ -1,0 +1,286 @@
+<title>Armador de APUs — Arquitectura objetivo</title>
+<style>
+  :root{
+    --ground:#D7DAD9;     /* concreto, gris frío */
+    --paper:#E9EBE9;      /* lámina */
+    --card:#F4F5F3;       /* módulos */
+    --ink:#15202B;        /* tinta */
+    --line:#93A0A7;       /* línea técnica */
+    --steel:#566169;      /* anotación */
+    --amber:#C07A10;      /* señalización: énfasis / propuesto */
+    --amber-soft:#F4E7CC;
+    --cut:#B23A22;        /* línea de corte: frontera de dinero */
+    --font-display:"Helvetica Neue",Helvetica,Arial,system-ui,sans-serif;
+    --font-mono:ui-monospace,"Cascadia Code","Consolas","SF Mono",Menlo,monospace;
+    --font-body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;}
+  .wrap{
+    background:
+      repeating-linear-gradient(0deg,transparent 0 39px,rgba(86,97,105,.05) 39px 40px),
+      repeating-linear-gradient(90deg,transparent 0 39px,rgba(86,97,105,.05) 39px 40px),
+      var(--ground);
+    color:var(--ink);
+    font-family:var(--font-body);
+    padding:clamp(14px,3vw,40px);
+    min-height:100vh;
+  }
+  .sheet{
+    max-width:1080px;margin:0 auto;
+    background:var(--paper);
+    border:1.5px solid var(--ink);
+    box-shadow:0 1px 0 var(--line),0 18px 50px -28px rgba(21,32,43,.55);
+  }
+  /* ---- cajetín / title block ---- */
+  .cajetin{
+    display:grid;grid-template-columns:1fr auto;gap:18px;
+    align-items:end;padding:22px 26px;border-bottom:1.5px solid var(--ink);
+  }
+  .cajetin h1{
+    font-family:var(--font-display);font-weight:800;
+    font-size:clamp(20px,3.4vw,34px);line-height:1;letter-spacing:-.02em;
+    text-transform:uppercase;margin:0;
+  }
+  .cajetin .sub{font-family:var(--font-mono);font-size:12px;color:var(--steel);margin-top:9px;letter-spacing:.02em;}
+  .meta{
+    font-family:var(--font-mono);font-size:11px;color:var(--steel);
+    border:1px solid var(--line);display:grid;grid-template-columns:auto auto;
+  }
+  .meta span{padding:4px 10px;border-bottom:1px solid var(--line);}
+  .meta span:nth-child(odd){border-right:1px solid var(--line);color:var(--ink);}
+  .meta span:nth-last-child(-n+2){border-bottom:none;}
+  .body{padding:clamp(16px,2.6vw,30px);}
+  .eyebrow{
+    font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--steel);margin:0 0 10px;
+  }
+  /* ---- usuarios ---- */
+  .usuarios{
+    border:1.5px solid var(--ink);background:var(--card);
+    padding:16px 18px;display:flex;flex-wrap:wrap;gap:14px 26px;align-items:center;
+  }
+  .usuarios .who{font-family:var(--font-display);font-weight:700;font-size:clamp(15px,2vw,19px);}
+  .usuarios .who b{color:var(--amber);}
+  .usuarios .entradas{display:flex;gap:10px;flex-wrap:wrap;margin-left:auto;}
+  .pill{
+    font-family:var(--font-mono);font-size:12px;border:1.4px solid var(--ink);
+    padding:6px 12px;background:var(--paper);white-space:nowrap;
+  }
+  .pill.fut{border-style:dashed;border-color:var(--amber);color:var(--amber);}
+  .flow-down{display:flex;justify-content:center;color:var(--steel);font-size:20px;line-height:1;margin:6px 0;}
+  /* ---- stack de niveles ---- */
+  .stack{display:flex;flex-direction:column;gap:12px;}
+  .nivel{
+    display:grid;grid-template-columns:120px 1fr;
+    border:1.5px solid var(--ink);background:var(--card);
+  }
+  .nivel.fut{border-style:dashed;border-color:var(--amber);background:var(--paper);}
+  .rail{
+    border-right:1.5px solid var(--ink);padding:14px 12px;
+    display:flex;flex-direction:column;gap:6px;justify-content:center;
+    background:var(--ink);color:var(--paper);
+  }
+  .nivel.fut .rail{background:var(--amber);border-right-color:var(--amber);color:#fff;}
+  .rail .n{font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;opacity:.8;}
+  .rail .nm{font-family:var(--font-display);font-weight:800;text-transform:uppercase;font-size:14px;line-height:1.05;}
+  .rail .fg{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.12em;margin-top:2px;}
+  .cont{padding:14px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+  .mod{
+    font-family:var(--font-mono);font-size:12.5px;border:1.4px solid var(--steel);
+    background:var(--paper);padding:7px 12px;
+  }
+  .mod.fut{border-style:dashed;border-color:var(--amber);color:var(--amber);background:#fff;}
+  .mod.db{border-color:var(--ink);border-width:1.6px;font-weight:600;}
+  .arrow{color:var(--line);font-family:var(--font-mono);}
+  .note-inline{flex-basis:100%;font-family:var(--font-mono);font-size:11px;color:var(--steel);margin-top:2px;}
+  /* frontera de dinero */
+  .corte{
+    flex-basis:100%;margin-top:6px;border-top:2px dashed var(--cut);
+    display:flex;align-items:center;gap:8px;padding-top:7px;
+    font-family:var(--font-mono);font-size:11.5px;color:var(--cut);letter-spacing:.02em;
+  }
+  .mod.ia{border-color:var(--cut);color:var(--cut);}
+  /* ---- flujo de uso ---- */
+  .flujo{border:1.5px solid var(--ink);background:var(--card);padding:16px 18px;}
+  .pasos{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;}
+  .paso{
+    flex:1 1 130px;border:1.4px solid var(--steel);background:var(--paper);
+    padding:10px 12px;position:relative;
+  }
+  .paso .k{font-family:var(--font-mono);font-size:10px;color:var(--steel);letter-spacing:.1em;}
+  .paso .v{font-family:var(--font-display);font-weight:700;font-size:13.5px;margin-top:3px;line-height:1.15;}
+  .paso.out{border-color:var(--amber);background:var(--amber-soft);}
+  .paso.out .v{color:#7a4d06;}
+  .paso.lock .k{color:var(--cut);}
+  /* ---- hoja de ruta ---- */
+  .ruta{display:flex;flex-wrap:wrap;gap:10px;}
+  .step{
+    flex:1 1 150px;border:1.4px solid var(--line);background:var(--card);padding:12px 13px;
+  }
+  .step .num{font-family:var(--font-display);font-weight:800;font-size:22px;line-height:1;}
+  .step .t{font-family:var(--font-body);font-size:12.5px;margin-top:6px;line-height:1.25;}
+  .step.here{border:2px solid var(--amber);background:var(--amber-soft);}
+  .step.here .num{color:var(--amber);}
+  .badge-here{
+    display:inline-block;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.12em;
+    background:var(--amber);color:#fff;padding:2px 7px;margin-bottom:7px;text-transform:uppercase;
+    animation:pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.55;}}
+  /* ---- notas / leyenda ---- */
+  .notas{border:1.5px solid var(--ink);background:var(--card);padding:14px 18px;}
+  .leyenda{display:flex;flex-wrap:wrap;gap:10px 24px;font-family:var(--font-mono);font-size:11.5px;color:var(--steel);}
+  .leyenda b{color:var(--ink);}
+  .lg-solid,.lg-dash{display:inline-block;width:30px;vertical-align:middle;margin-right:6px;}
+  .lg-solid{border-top:2px solid var(--ink);}
+  .lg-dash{border-top:2px dashed var(--amber);}
+  .lg-cut{border-top:2px dashed var(--cut);display:inline-block;width:30px;vertical-align:middle;margin-right:6px;}
+  .invs{margin:12px 0 0;padding:0;list-style:none;display:grid;gap:7px;}
+  .invs li{font-size:13px;padding-left:20px;position:relative;}
+  .invs li::before{content:"▸";position:absolute;left:0;color:var(--amber);font-family:var(--font-mono);}
+  .invs b{font-weight:700;}
+  .sech{font-family:var(--font-display);font-weight:800;text-transform:uppercase;font-size:13px;letter-spacing:.04em;margin:0 0 12px;}
+  .gap{height:clamp(18px,2.4vw,30px);}
+  @media(max-width:680px){
+    .cajetin{grid-template-columns:1fr;}
+    .nivel{grid-template-columns:84px 1fr;}
+    .rail .nm{font-size:12px;}
+  }
+  @media(prefers-reduced-motion:reduce){.badge-here{animation:none;}}
+</style>
+
+<div class="wrap">
+  <div class="sheet">
+
+    <!-- title block -->
+    <header class="cajetin">
+      <div>
+        <h1>Armador de APUs<br>Arquitectura objetivo</h1>
+        <div class="sub">obra civil · costos internos de empresa · contractual vs. costo</div>
+      </div>
+      <div class="meta">
+        <span>PROYECTO</span><span>intento_plan</span>
+        <span>VISTA</span><span>norte + hoja de ruta</span>
+        <span>FECHA</span><span>2026-06</span>
+        <span>LÁMINA</span><span>A-01</span>
+      </div>
+    </header>
+
+    <div class="body">
+
+      <!-- usuarios -->
+      <p class="eyebrow">Quién lo usa y cómo</p>
+      <div class="usuarios">
+        <div class="who">Equipo de la empresa — <b>analistas y presupuestadores</b><br>
+          <span style="font-weight:400;font-size:13px;color:var(--steel)">arman sus licitaciones contra una data central común</span>
+        </div>
+        <div class="entradas">
+          <span class="pill fut">▸ navegador (app web)</span>
+          <span class="pill">▸ CLI / automatización</span>
+        </div>
+      </div>
+      <div class="flow-down">▼</div>
+
+      <!-- stack -->
+      <div class="stack">
+
+        <div class="nivel fut">
+          <div class="rail"><span class="n">NIVEL 04</span><span class="nm">Interfaz</span><span class="fg">objetivo</span></div>
+          <div class="cont">
+            <span class="mod fut">App web (navegador)</span>
+            <span class="mod">CLI / automatización</span>
+            <span class="note-inline">la app web es el destino; la CLI se conserva para operar y automatizar.</span>
+          </div>
+        </div>
+
+        <div class="nivel fut">
+          <div class="rail"><span class="n">NIVEL 03</span><span class="nm">Servicio · API</span><span class="fg">objetivo</span></div>
+          <div class="cont">
+            <span class="mod fut">FastAPI</span>
+            <span class="arrow">·</span>
+            <span class="mod fut">mantener precios</span>
+            <span class="mod fut">mantener APUs</span>
+            <span class="mod fut">armar licitación</span>
+            <span class="mod fut">generar cuadro</span>
+            <span class="mod fut">chequeo integridad</span>
+            <span class="note-inline">expone el motor por HTTP · autenticación ligera de equipo.</span>
+          </div>
+        </div>
+
+        <div class="nivel">
+          <div class="rail"><span class="n">NIVEL 02</span><span class="nm">Dominio · Motor</span><span class="fg">existe hoy</span></div>
+          <div class="cont">
+            <span class="mod">matching</span><span class="arrow">▸</span>
+            <span class="mod">ensamblado</span><span class="arrow">▸</span>
+            <span class="mod ia">IA · decide estructura</span><span class="arrow">▸</span>
+            <span class="mod">costeo</span><span class="arrow">▸</span>
+            <span class="mod">reporte</span>
+            <div class="corte">🔒 LÍNEA DE CORTE — la IA solo recibe estructura (insumo, unidad, rendimiento). Nunca precio ni costo.</div>
+            <span class="note-inline">lógica pura y reutilizable, sin UI ni red → se consolida como librería con API clara.</span>
+          </div>
+        </div>
+
+        <div class="nivel">
+          <div class="rail"><span class="n">NIVEL 01</span><span class="nm">Plataforma de datos</span><span class="fg">fundación</span></div>
+          <div class="cont">
+            <span class="mod db">precios.db — catálogo + libro de precios</span>
+            <span class="mod db">apus.db — biblioteca histórica</span>
+            <span class="mod fut">↗ Postgres / nube</span>
+            <span class="note-inline">fuente de verdad · dos bases independientes · SQLite hoy → un servidor central después. El Excel queda como semilla de importación.</span>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="gap"></div>
+
+      <!-- flujo de uso -->
+      <p class="eyebrow">Flujo de uso — de la licitación al cuadro</p>
+      <div class="flujo">
+        <div class="pasos">
+          <div class="paso"><div class="k">01 ENTRADA</div><div class="v">Presupuesto por capítulos</div></div>
+          <div class="paso"><div class="k">02 MATCH</div><div class="v">Cruce con la biblioteca de APUs (por código)</div></div>
+          <div class="paso lock"><div class="k">03 IA 🔒</div><div class="v">Decide la estructura del APU (sin dinero)</div></div>
+          <div class="paso"><div class="k">04 COSTEO</div><div class="v">Precio interno vigente del catálogo</div></div>
+          <div class="paso out"><div class="k">05 SALIDA</div><div class="v">Cuadro: contractual vs. costo, por capítulo</div></div>
+        </div>
+      </div>
+
+      <div class="gap"></div>
+
+      <!-- hoja de ruta -->
+      <p class="eyebrow">Hoja de ruta — orden de construcción</p>
+      <div class="ruta">
+        <div class="step here">
+          <span class="badge-here">estás aquí</span>
+          <div class="num">1</div>
+          <div class="t">Datos canónicos y separados (precios.db + apus.db, fuente de verdad)</div>
+        </div>
+        <div class="step"><div class="num">2</div><div class="t">Dominio como librería con API clara</div></div>
+        <div class="step"><div class="num">3</div><div class="t">Migrar almacenamiento a Postgres (nube)</div></div>
+        <div class="step"><div class="num">4</div><div class="t">Capa de servicio / API (FastAPI)</div></div>
+        <div class="step"><div class="num">5</div><div class="t">App web sobre la API</div></div>
+        <div class="step"><div class="num">6</div><div class="t">Endurecer multiusuario (concurrencia, auditoría)</div></div>
+      </div>
+
+      <div class="gap"></div>
+
+      <!-- notas / leyenda -->
+      <div class="notas">
+        <p class="sech">Notas y convenciones</p>
+        <div class="leyenda">
+          <span><span class="lg-solid"></span><b>existe hoy</b> — funcional</span>
+          <span><span class="lg-dash"></span><b>propuesto</b> — futuro de la ruta</span>
+          <span><span class="lg-cut"></span><b>línea de corte</b> — frontera de dinero</span>
+        </div>
+        <ul class="invs">
+          <li><b>Regla de oro:</b> el dominio no sabe dónde viven los datos ni quién lo llama — por eso cada migración (local→nube, CLI→web) es barata.</li>
+          <li><b>Invariante #1:</b> la IA nunca ve dinero; solo estructura. Es ley del dominio.</li>
+          <li><b>Precios confidenciales:</b> equipo de confianza por ahora (sin roles), pero el diseño no lo impide después.</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</div>

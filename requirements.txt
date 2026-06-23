@@ -1,0 +1,5 @@
+# Dependencias del armador de APUs
+openpyxl>=3.1        # lectura/escritura de Excel
+anthropic>=0.40      # IA acotada (opcional; sin API key se usa fallback determinístico)
+pytest>=7.0          # pruebas (solo para desarrollo)
+# tkinter viene con la instalación estándar de Python en Windows.

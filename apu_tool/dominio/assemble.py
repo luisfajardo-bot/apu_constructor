@@ -109,9 +109,10 @@ class Assembler:
 
         comps: list[ApuComponent] = []
         for cc in result.componentes:
-            ins = self.alm.precios.get_insumo(cc.insumo_codigo)
-            if ins is None:
+            cands = self.alm.precios.get_candidatos(cc.insumo_codigo)
+            if not cands:
                 continue
+            ins = cands[0]   # la IA solo da código; el costeo re-resuelve por nombre
             comps.append(ApuComponent(
                 apu_codigo="", shift=item.shift, insumo_codigo=ins.codigo,
                 insumo_nombre=ins.nombre, unidad=ins.unidad,

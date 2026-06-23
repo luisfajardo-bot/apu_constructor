@@ -12,13 +12,12 @@ dependencias externas para que corra en cualquier máquina.
 """
 from __future__ import annotations
 
-import re
-import unicodedata
 from difflib import SequenceMatcher
 from functools import lru_cache
 
 from apu_tool import config
 from apu_tool.nucleo.models import LicitacionItem, MatchCandidate, MatchResult, MatchStatus
+from apu_tool.nucleo.texto import normalizar as _normalizar
 
 _STOPWORDS = {
     "de", "la", "el", "los", "las", "del", "y", "o", "en", "para", "por", "con",
@@ -27,19 +26,9 @@ _STOPWORDS = {
 }
 
 
-def _strip_accents(text: str) -> str:
-    return "".join(
-        c for c in unicodedata.normalize("NFD", text)
-        if unicodedata.category(c) != "Mn"
-    )
-
-
 @lru_cache(maxsize=20000)
 def normalize(text: str) -> str:
-    text = _strip_accents((text or "").upper())
-    text = re.sub(r"[^A-Z0-9 ]+", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return _normalizar(text)
 
 
 def _tokens(text: str) -> frozenset[str]:

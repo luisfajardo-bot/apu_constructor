@@ -27,6 +27,7 @@ class Insumo:
     grupo: str
     precio: float
     fuente_precio: str          # "PRECIO IDU", "COSTO INTERNO", etc.
+    id: Optional[int] = None    # id interno del catálogo (None si aún no persistido)
 
     @property
     def es_confidencial(self) -> bool:

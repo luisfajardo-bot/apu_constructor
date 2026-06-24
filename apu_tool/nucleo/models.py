@@ -168,3 +168,33 @@ class AssembledApu:
     def margen_pct(self) -> float:
         base = self.item.precio_contractual
         return (self.margen_unitario / base) if base else 0.0
+
+
+# ---------------------------------------------------------------------------
+# Estado de aplicación: la corrida (armado web en progreso)
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class CorridaMeta:
+    id: Optional[int]
+    creada_en: str                # ISO 8601
+    archivo: str
+    turno_def: str
+    use_ai: Optional[bool]
+    estado: str                   # 'en_revision' | 'finalizada'
+    cuadro_path: Optional[str] = None
+
+
+@dataclass
+class CorridaItemRow:
+    seq: int
+    item: LicitacionItem
+    status: str                   # auto | review | new | confirmed | rejected
+    apu_codigo: Optional[str]
+    apu_nombre: str
+    unidad: str
+    shift: str
+    origen: str
+    confianza: float
+    explicacion: str
+    componentes: list[dict]       # [{insumo_codigo, insumo_nombre, unidad, rendimiento}] (sin dinero)
+    candidatos: list[dict]        # [{apu_codigo, apu_nombre, score, motivo}] (sin dinero)

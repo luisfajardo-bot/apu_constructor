@@ -1,6 +1,5 @@
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Insumo
-from apu_tool.datos import seed
 
 
 def test_dedup_por_codigo_y_nombre(tmp_path):

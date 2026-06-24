@@ -7,6 +7,7 @@ Reutiliza el parser de pestañas del histórico (antes en ingest.py).
 """
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -187,8 +188,13 @@ def seed(almacen: Optional[Almacen] = None, xlsx_path: Optional[Path] = None,
          force: bool = False) -> dict:
     config.ensure_dirs()
     alm = almacen or Almacen()
-    alm.init_schema()
-    c = alm.counts()
+    # Sondeo defensivo: la base puede no existir, estar vacía o traer un esquema
+    # viejo. NO llamamos init_schema() aquí — crearía índices nuevos sobre tablas
+    # viejas y reventaría. reset() (más abajo) es la autoridad del esquema.
+    try:
+        c = alm.counts()
+    except sqlite3.OperationalError:
+        c = {}
     if (c.get("apus", 0) or c.get("insumos", 0)) and not force:
         raise SeedExistente(
             "precios.db/apus.db ya tienen datos. Usa --force para re-semillar "

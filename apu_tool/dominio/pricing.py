@@ -11,8 +11,6 @@ Este módulo NO se le pasa nunca a la IA.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio import cruce
 from apu_tool.nucleo.models import ApuComponent, CostedComponent

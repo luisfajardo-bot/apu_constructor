@@ -2,7 +2,6 @@ import pytest
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Insumo, LicitacionItem
 from apu_tool.dominio.assemble import Assembler
-from apu_tool.dominio.ai_assist import ComposeResult
 
 
 class _Advisor:

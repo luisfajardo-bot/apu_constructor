@@ -39,3 +39,20 @@ def test_reporte_subtotales_y_gran_total(tmp_path):
     plano = [c for fila in valores for c in fila]
     assert 400 in plano       # gran total contractual
     assert 310 in plano       # gran total costo
+
+
+def test_columna_cruce_aparece_en_el_detalle(tmp_path):
+    it = LicitacionItem(item="1", descripcion="ACT 1", unidad="M3", cantidad=1.0,
+                        precio_contractual=100, shift="DIURNO", categoria="A",
+                        codigo_sugerido="1")
+    comp = CostedComponent("4513", "BASE GRANULAR", "M3", 1.0, 190300, "PRECIO IDU",
+                           190300, calidad_cruce="aproximado")
+    apu = AssembledApu(item=it, apu_codigo="1", apu_nombre="ACT 1", unidad="M3",
+                       shift="DIURNO", componentes=[comp], costo_unitario=190300,
+                       status=MatchStatus.AUTO, confianza=1.0)
+    out = write_report_categorizado([apu], tmp_path / "cat.xlsx")
+    wb = openpyxl.load_workbook(out, data_only=True)
+    celdas = [c for ws in wb.worksheets for fila in ws.iter_rows(values_only=True)
+              for c in fila]
+    assert "Cruce" in celdas        # encabezado de la columna
+    assert "aproximado" in celdas   # el aviso del cruce, en la fila del insumo

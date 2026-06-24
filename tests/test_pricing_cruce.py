@@ -44,4 +44,5 @@ def test_huerfano_avisa(alm):
     eng = PricingEngine(alm)
     costed, _ = eng.cost_apu("A1", "DIURNO")
     h = [c for c in costed if c.insumo_codigo == "0000"][0]
-    assert h.precio_unitario == 700 and h.calidad_cruce == "huerfano"
+    assert h.precio_unitario == 700 and h.fuente_precio == "histórico"
+    assert h.calidad_cruce == "huerfano"

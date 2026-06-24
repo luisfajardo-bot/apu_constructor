@@ -27,3 +27,13 @@ def test_detecta_ambiguo(tmp_path):
     a.apus.insert_components([ApuComponent("A1", "DIURNO", "4513", "TORNILLO X", "UN", 1.0, 0)])
     rep = integridad.revisar(a)
     assert rep["ambiguos"] == 1
+
+def test_detecta_aproximado(tmp_path):
+    a = _alm(tmp_path)
+    # un solo insumo bajo el código; el APU lo cita con un nombre casi igual
+    a.precios.insert_insumos([Insumo("500", "CONCRETO 3000 PSI", "M3", "MAT", 600000, "PRECIO IDU")])
+    a.apus.insert_apus([Apu("A1", "PLACA", "M3", "DIURNO")])
+    a.apus.insert_components([ApuComponent("A1", "DIURNO", "500", "CONCRETO 3000", "M3", 1.0, 0)])
+    rep = integridad.revisar(a)
+    assert rep["aproximados"] == 1
+    assert rep["detalles"][0]["cat_nom"] == "CONCRETO 3000 PSI"

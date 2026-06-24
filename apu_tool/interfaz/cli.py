@@ -128,8 +128,15 @@ def cmd_db_update_price(args) -> int:
     except ValueError as e:
         print(str(e))
         return 1
-    print(f"Precio actualizado para {args.codigo}"
-          + (f" / {args.nombre}" if args.nombre else "") + f" -> ${args.precio:,.0f}")
+    # Re-leer de la base para confirmar el precio persistido (no el de entrada).
+    actualizados = alm.precios.get_candidatos(args.codigo)
+    if args.nombre:
+        from apu_tool.nucleo.texto import normalizar
+        objetivo = normalizar(args.nombre)
+        actualizados = [i for i in actualizados if normalizar(i.nombre) == objetivo]
+    ins = actualizados[0]
+    print(f"Precio actualizado: {ins.codigo}  {ins.nombre} -> "
+          f"${ins.precio:,.0f} ({ins.fuente_precio})")
     print("Los APUs que usan este insumo tomarán el nuevo precio automáticamente.")
     return 0
 

@@ -7,12 +7,13 @@ def _ins(cod, nom): return Insumo(cod, nom, "UN", "G", 100, "PRECIO IDU", id=1)
 
 def test_huerfano_sin_candidatos():
     r = resolver([], "CEMENTO GRIS")
-    assert r.calidad == CalidadCruce.HUERFANO and r.insumo is None
+    assert r.calidad == CalidadCruce.HUERFANO and r.insumo is None and r.score == 0.0
 
 def test_exacto_por_nombre_normalizado():
     cands = [_ins("100", "BASE GRANULAR"), _ins("100", "CEMENTO GRIS")]
     r = resolver(cands, "  cemento   gris ")
     assert r.calidad == CalidadCruce.EXACTO and r.insumo.nombre == "CEMENTO GRIS"
+    assert r.score == 1.0
 
 def test_aproximado_cuando_uno_destaca():
     cands = [_ins("100", "DUCTO TELEFONICO LIVIANO PVC TIPO EB D=3"),

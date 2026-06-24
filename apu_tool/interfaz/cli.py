@@ -78,42 +78,58 @@ def cmd_status(args) -> int:
 def cmd_db_check(args) -> int:
     from apu_tool.dominio import integridad
     rep = integridad.revisar(get_almacen())
-    print(f"Huérfanos:   {rep['huerfanos']}")
-    print(f"Aproximados: {rep['aproximados']}")
-    print(f"Ambiguos:    {rep['ambiguos']}")
+    print(f"Huérfanos (código sin insumo): {rep['huerfanos']}")
+    print(f"Aproximados (cruce difuso):     {rep['aproximados']}")
+    print(f"Ambiguos (código no resuelve):  {rep['ambiguos']}")
     for d in sorted(rep["detalles"], key=lambda x: -x["n"])[:25]:
-        print(f"  {d['codigo']:>7}  x{d['n']:<3}  [{d['calidad'][:4]}]  "
-              f"{d['apu_nom'][:26]} -> {d['cat_nom'][:30]}")
+        print(f"  [{d['calidad']:<10}] {d['codigo']:>7}  x{d['n']:<3}  "
+              f"{d['apu_nom'][:30]}" + (f" -> {d['cat_nom'][:30]}" if d['cat_nom'] else ""))
     return 0
 
 
 def cmd_db_price(args) -> int:
     alm = get_almacen()
-    ins = alm.precios.get_insumo(args.codigo)
-    if not ins:
+    cands = alm.precios.get_candidatos(args.codigo)
+    if not cands:
         print(f"No existe el insumo {args.codigo}.")
         return 1
-    print(f"{ins.codigo}  {ins.nombre}")
-    print(f"  Unidad: {ins.unidad}   Grupo: {ins.grupo}")
-    print(f"  Precio vigente: ${ins.precio:,.0f}   Fuente: {ins.fuente_precio} "
-          f"({'confidencial' if ins.es_confidencial else 'público'})")
-    hist = alm.precios.price_history(args.codigo)
-    if len(hist) > 1:
-        print("  Historial:")
-        for h in hist:
-            flag = " (vigente)" if h["vigente"] else ""
-            print(f"    {h['fecha']}  ${h['precio']:,.0f}  {h['fuente']}{flag}")
+    if len(cands) > 1:
+        print(f"⚠ El código {args.codigo} tiene {len(cands)} insumos distintos:")
+    for ins in cands:
+        print(f"  id={ins.id}  {ins.codigo}  {ins.nombre}")
+        print(f"     Unidad: {ins.unidad}   Grupo: {ins.grupo}")
+        print(f"     Precio vigente: ${ins.precio:,.0f}   Fuente: {ins.fuente_precio} "
+              f"({'confidencial' if ins.es_confidencial else 'público'})")
+        hist = alm.precios.price_history(ins.codigo, nombre=ins.nombre)
+        if len(hist) > 1:
+            print("     Historial:")
+            for h in hist:
+                flag = " (vigente)" if h["vigente"] else ""
+                print(f"       {h['fecha']}  ${h['precio']:,.0f}  {h['fuente']}{flag}")
     return 0
 
 
 def cmd_db_update_price(args) -> int:
     alm = get_almacen()
-    if not alm.precios.get_insumo(args.codigo):
+    cands = alm.precios.get_candidatos(args.codigo)
+    if not cands:
         print(f"No existe el insumo {args.codigo}.")
         return 1
-    alm.precios.set_precio(args.codigo, args.precio, fuente=args.fuente or "ACTUALIZACION MANUAL")
-    ins = alm.precios.get_insumo(args.codigo)
-    print(f"Precio actualizado: {ins.codigo} -> ${ins.precio:,.0f} ({ins.fuente_precio})")
+    if len(cands) > 1 and not args.nombre:
+        print(f"⚠ El código {args.codigo} es ambiguo ({len(cands)} insumos). "
+              f"Repite con --nombre \"<nombre exacto>\":")
+        for ins in cands:
+            print(f"  - {ins.nombre}")
+        return 1
+    try:
+        alm.precios.set_precio(args.codigo, args.precio,
+                               fuente=args.fuente or "ACTUALIZACION MANUAL",
+                               nombre=args.nombre)
+    except ValueError as e:
+        print(str(e))
+        return 1
+    print(f"Precio actualizado para {args.codigo}"
+          + (f" / {args.nombre}" if args.nombre else "") + f" -> ${args.precio:,.0f}")
     print("Los APUs que usan este insumo tomarán el nuevo precio automáticamente.")
     return 0
 
@@ -213,6 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
     db_up.add_argument("codigo")
     db_up.add_argument("precio", type=float)
     db_up.add_argument("--fuente", default="")
+    db_up.add_argument("--nombre", help="Nombre exacto del insumo (desambigua códigos repetidos).")
     db_up.set_defaults(func=cmd_db_update_price)
 
     pd = sub.add_parser("demo", help="Seed + ejemplo + build (todo de una).")

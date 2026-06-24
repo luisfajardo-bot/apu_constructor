@@ -2,7 +2,7 @@
 Fachada de almacenamiento: agrupa las dos bases (precios + APUs).
 
 El resto de la app recibe un Almacen y usa el repo correcto:
-    almacen.precios.get_insumo(...)      # precios.db
+    almacen.precios.get_candidatos(...)  # precios.db
     almacen.apus.get_components(...)      # apus.db
 Cambiar a un backend de nube = cambiar lo que se instancia aquí, sin tocar el dominio.
 """

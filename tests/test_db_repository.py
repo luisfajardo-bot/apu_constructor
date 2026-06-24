@@ -23,13 +23,13 @@ def alm(tmp_path):
 def test_price_classification(alm):
     assert config.classify_price_source("PRECIO IDU") == "publico"
     assert config.classify_price_source("COMPRAS 2026") == "interno"
-    assert alm.precios.get_insumo("100").es_confidencial is False
-    assert alm.precios.get_insumo("200").es_confidencial is True
+    assert alm.precios.get_candidatos("100")[0].es_confidencial is False
+    assert alm.precios.get_candidatos("200")[0].es_confidencial is True
 
 
 def test_set_precio_changes_current_and_keeps_history(alm):
     alm.precios.set_precio("100", 1500, fuente="COMPRAS 2026")
-    ins = alm.precios.get_insumo("100")
+    ins = alm.precios.get_candidatos("100")[0]
     assert ins.precio == 1500
     assert ins.fuente_precio == "COMPRAS 2026"
     hist = alm.precios.price_history("100")

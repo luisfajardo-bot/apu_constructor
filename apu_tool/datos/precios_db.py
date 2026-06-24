@@ -134,11 +134,6 @@ class PreciosDB:
                 "WHERE i.id = ?", (int(insumo_id),)).fetchone()
         return self._fila_a_insumo(r) if r else None
 
-    def get_insumo(self, codigo: str) -> Optional[Insumo]:
-        """TRANSITORIO (se retira en la Tarea 10): primer candidato del código."""
-        cands = self.get_candidatos(codigo)
-        return cands[0] if cands else None
-
     def price_history(self, codigo: str, nombre: Optional[str] = None) -> list[dict]:
         with self.connect() as conn:
             q = ("SELECT p.precio, p.fuente, p.clasificacion, p.fecha, p.vigente "

@@ -21,6 +21,7 @@ SAMPLE_DIR = PROJECT_ROOT / "ejemplos"
 # Bases canónicas separadas (fuente de verdad).
 PRECIOS_DB_PATH = DATA_DIR / "precios.db"
 APUS_DB_PATH = DATA_DIR / "apus.db"
+CORRIDAS_DB_PATH = DATA_DIR / "corridas.db"
 
 # ---------------------------------------------------------------------------
 # Modelo de IA. Por defecto Claude Opus 4.8. La IA es OPCIONAL: si no hay API key

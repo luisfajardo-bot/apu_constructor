@@ -96,3 +96,53 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
                     "margen_pct": ((tot_c - tot_k) / tot_c) if tot_c else 0.0,
                     "n_items": len(items), "n_revision": n_rev},
     }
+
+
+def detalle_item(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
+    row = alm.corridas.get_item(corrida_id, seq)
+    if row is None:
+        return None
+    ens = _costear_row(alm, row)
+    return {
+        "seq": row.seq, "descripcion": row.item.descripcion,
+        "apu_codigo": row.apu_codigo, "apu_nombre": row.apu_nombre,
+        "status": row.status, "explicacion": row.explicacion,
+        "candidatos": row.candidatos,
+        "composicion": [{
+            "insumo_codigo": c.insumo_codigo, "insumo_nombre": c.insumo_nombre,
+            "unidad": c.unidad, "rendimiento": c.rendimiento,
+            "precio_unitario": c.precio_unitario, "fuente_precio": c.fuente_precio,
+            "costo": c.costo, "calidad_cruce": c.calidad_cruce}
+            for c in ens.componentes],
+        "costo_unitario": ens.costo_unitario,
+    }
+
+
+def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
+                   shift: Optional[str] = None) -> Optional[dict]:
+    row = alm.corridas.get_item(corrida_id, seq)
+    if row is None:
+        return None
+    assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False))
+    ens = assembler.reassemble_with_choice(row.item, apu_codigo, shift or row.shift)
+    alm.corridas.actualizar_eleccion(
+        corrida_id, seq, status=MatchStatus.CONFIRMED.value, apu_codigo=ens.apu_codigo,
+        apu_nombre=ens.apu_nombre, unidad=ens.unidad, shift=ens.shift, origen=ens.origen,
+        confianza=ens.confianza, explicacion=ens.explicacion,
+        componentes=_estructura(ens.componentes))
+    return vista_corrida(alm, corrida_id)
+
+
+def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    config.ensure_dirs()
+    rows = alm.corridas.get_items(corrida_id)
+    assembled = [_costear_row(alm, r) for r in rows]
+    stamp = meta.creada_en.replace(":", "").replace("-", "").replace("T", "_")
+    out = config.OUTPUT_DIR / f"cuadro_corrida_{corrida_id}_{stamp}.xlsx"
+    write_report(assembled, out)
+    alm.corridas.set_cuadro(corrida_id, str(out))
+    alm.corridas.set_estado(corrida_id, "finalizada")
+    return out

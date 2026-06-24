@@ -98,13 +98,14 @@ def build_desde_presupuesto(
 # Generación de un ejemplo de licitación a partir del histórico
 # ---------------------------------------------------------------------------
 def generate_sample(n: int = 15, margen: float = 0.18, seed: int = 7,
-                    out_path: Optional[Path] = None) -> Path:
+                    out_path: Optional[Path] = None,
+                    alm: Optional[Almacen] = None) -> Path:
     """Crea una lista de licitación de ejemplo con una mezcla de casos:
     coincidencias exactas, descripciones reformuladas (dudosas) y actividades nuevas.
     El precio contractual = costo histórico * (1 + margen), para que el cuadro muestre
     márgenes realistas."""
     config.ensure_dirs()
-    alm = get_almacen()
+    alm = alm or get_almacen()
     if db_is_empty(alm):
         ensure_seeded()
     rng = random.Random(seed)

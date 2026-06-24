@@ -34,3 +34,33 @@ def test_construir_y_vista(tmp_path):
 def test_vista_corrida_inexistente(tmp_path):
     alm = _almacen_seed(tmp_path)
     assert svc.vista_corrida(alm, 999) is None
+
+
+def test_detalle_confirmar_y_cuadro(tmp_path):
+    alm = _almacen_seed(tmp_path)
+    # segundo APU para poder "elegir otro"
+    alm.apus.insert_apus([Apu("A2", "Concreto clase E", "M3", "DIURNO", "ESTR")])
+    alm.apus.insert_components([
+        ApuComponent("A2", "DIURNO", "100", "Concreto 3000 PSI", "M3", 2.0, 350000.0)])
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False)
+
+    det = svc.detalle_item(alm, cid, 0)
+    assert det["apu_codigo"] == "A1"
+    assert det["composicion"][0]["precio_unitario"] == 350000.0
+
+    vista = svc.confirmar_item(alm, cid, 0, apu_codigo="A2")
+    fila = vista["items"][0]
+    assert fila["status"] == "confirmed" and fila["apu_codigo"] == "A2"
+    assert fila["costo_unitario"] == 2.0 * 350000.0      # recosteado: 700000.0
+
+    out = svc.generar_cuadro(alm, cid)
+    assert out.exists()
+    assert alm.corridas.get_corrida(cid).estado == "finalizada"
+
+
+def test_detalle_item_inexistente(tmp_path):
+    alm = _almacen_seed(tmp_path)
+    assert svc.detalle_item(alm, 1, 0) is None
+    assert svc.confirmar_item(alm, 1, 0, "A1") is None

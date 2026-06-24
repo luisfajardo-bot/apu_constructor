@@ -94,7 +94,7 @@ def cmd_db_price(args) -> int:
         print(f"No existe el insumo {args.codigo}.")
         return 1
     if len(cands) > 1:
-        print(f"⚠ El código {args.codigo} tiene {len(cands)} insumos distintos:")
+        print(f"OJO: El código {args.codigo} tiene {len(cands)} insumos distintos:")
     for ins in cands:
         print(f"  id={ins.id}  {ins.codigo}  {ins.nombre}")
         print(f"     Unidad: {ins.unidad}   Grupo: {ins.grupo}")
@@ -116,7 +116,7 @@ def cmd_db_update_price(args) -> int:
         print(f"No existe el insumo {args.codigo}.")
         return 1
     if len(cands) > 1 and not args.nombre:
-        print(f"⚠ El código {args.codigo} es ambiguo ({len(cands)} insumos). "
+        print(f"OJO: El código {args.codigo} es ambiguo ({len(cands)} insumos). "
               f"Repite con --nombre \"<nombre exacto>\":")
         for ins in cands:
             print(f"  - {ins.nombre}")

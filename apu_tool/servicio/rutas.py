@@ -61,8 +61,12 @@ def crear_sample(alm: Almacen = Depends(get_almacen)):
     try:
         generate_sample(out_path=Path(sample_path), alm=alm)
         items = read_licitacion(sample_path, default_shift=config.SHIFT_DIURNO)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         os.unlink(sample_path)
+    if not items:
+        raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
     cid = svc.construir_corrida(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False)
     return {"id": cid, "resumen": svc.vista_corrida(alm, cid)["totales"]}
 

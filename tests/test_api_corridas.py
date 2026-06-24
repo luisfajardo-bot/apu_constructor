@@ -24,6 +24,7 @@ def test_status(tmp_path):
     assert r.status_code == 200
     body = r.json()
     assert body["apus"] == 1 and body["insumos"] == 1 and "ia" in body
+    assert isinstance(body["ia"], bool)
 
 
 def _xlsx_lic(tmp_path):
@@ -77,3 +78,4 @@ def test_archivo_ilegible_400(tmp_path):
         r = cli.post("/api/corridas", data={"turno": "DIURNO"},
                      files={"archivo": ("mala.csv", f, "text/csv")})
     assert r.status_code == 400
+    assert r.json()["detail"]

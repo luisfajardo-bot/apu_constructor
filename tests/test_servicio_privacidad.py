@@ -1,10 +1,11 @@
+import json
+from pathlib import Path
+
+
 def test_fastapi_disponible():
     import fastapi  # noqa: F401
     import httpx    # noqa: F401
 
-
-import json
-from pathlib import Path
 
 FORBIDDEN = {"precio", "costo", "valor", "margen", "price", "cost", "total",
              "precio_unitario", "precio_contractual", "fuente_precio"}

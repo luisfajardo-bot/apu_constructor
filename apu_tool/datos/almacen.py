@@ -1,3 +1,18 @@
+"""Fachada de persistencia que agrupa los tres repositorios SQLite del proyecto.
+
+Centraliza el acceso a datos para que la capa de dominio y de servicio
+trabajen con una sola dependencia. Pensado para migración a nube: reemplazar
+los tres repos por implementaciones remotas (Protocol ``Repository``) sin tocar
+el resto del código.
+
+Uso típico::
+
+    almacen = Almacen()
+    almacen.init_schema()
+    almacen.precios.insert_insumos([...])
+    almacen.apus.insert_apus([...])
+    almacen.corridas.get_items(corrida_id)   # repo añadido en feat/web-v1
+"""
 from __future__ import annotations
 
 from pathlib import Path

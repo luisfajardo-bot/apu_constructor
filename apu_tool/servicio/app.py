@@ -27,6 +27,10 @@ def create_app(almacen: Optional[Almacen] = None) -> FastAPI:
     if WEB_DIST.exists():
         app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
 
+        # IMPORTANTE: esta ruta DEBE ser la ULTIMA registrada. Al ser greedy
+        # ({full_path:path}), cualquier ruta /api/* o de FastAPI (/docs,
+        # /openapi.json) añadida DESPUES de este decorador quedaría ensombrecida
+        # y devolvería index.html en lugar de su handler real.
         @app.get("/{full_path:path}")
         def spa(full_path: str):
             return FileResponse(WEB_DIST / "index.html")

@@ -38,6 +38,10 @@ def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
         estado="en_revision", cuadro_path=None))
     filas: list[CorridaItemRow] = []
     for seq, item in enumerate(items):
+        # Doble match intencional: matcher.match() genera los candidatos para
+        # mostrar al usuario; assemble_item() vuelve a correr el mismo matcher
+        # determinístico internamente para elegir el APU final. No optimizar
+        # eliminando una de las dos llamadas.
         result = assembler.matcher.match(item)
         candidatos = [{"apu_codigo": c.apu_codigo, "apu_nombre": c.apu_nombre,
                        "score": c.score, "motivo": c.motivo}

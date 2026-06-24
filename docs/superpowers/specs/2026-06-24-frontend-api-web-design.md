@@ -87,7 +87,7 @@ frontera de la IA es interna y no se toca.
 | Método + ruta | Hace | Dominio que usa |
 |---|---|---|
 | `GET /api/status` | Estado de las bases (conteos, IA on/off) para el encabezado | `alm.counts()`, `config.ai_available()` |
-| `POST /api/sample` | Genera una licitación de ejemplo y la deja lista para subir | `generate_sample` |
+| `POST /api/sample` | Genera una licitación de ejemplo **y crea una corrida a partir de ella**; devuelve `{id, resumen}` igual que `POST /api/corridas` (un clic → directo al cuadro) | `generate_sample` + `Assembler.assemble_all` → `RepositorioCorridas` |
 | `POST /api/corridas` | **Crea la corrida.** Multipart: archivo `.xlsx/.csv` + `turno` + `use_ai`. Lee, matchea y arma todos los ítems (aquí corre la IA para REVIEW/NEW), persiste y devuelve `{id, resumen}` | `read_licitacion` + `Assembler.assemble_all` → `RepositorioCorridas` |
 | `GET /api/corridas/{id}` | Cuadro completo: ítems con status, APU elegido y números recosteados + totales | re-costeo determinístico + repo |
 | `GET /api/corridas/{id}/items/{seq}` | Detalle de un ítem: candidatos con score + composición costeada del APU elegido | repo + `pricing` |
@@ -163,7 +163,8 @@ Tres vistas, React + `shadcn/ui`. Cliente `/api` tipado en `web/src/api`.
   **IA: habilitada / fallback**.
 - Zona de carga: arrastrar/soltar `.xlsx`/`.csv`, selector de **turno por defecto**
   (DIURNO/NOCTURNO) y toggle **usar IA**.
-- Botón secundario **"Usar ejemplo"** (`POST /api/sample`) para probar sin datos reales.
+- Botón secundario **"Usar ejemplo"** (`POST /api/sample`): genera un ejemplo, crea la
+  corrida y navega directo al cuadro. Para probar sin datos reales.
 - Al subir → `POST /api/corridas` (spinner) → navega a la corrida.
 
 **2. Corrida (el cuadro)** — `GET /api/corridas/{id}`

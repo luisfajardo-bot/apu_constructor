@@ -34,6 +34,10 @@ MATCH_ACCEPT = 0.88   # >= se acepta automáticamente
 MATCH_REVIEW = 0.55   # entre REVIEW y ACCEPT -> candidato dudoso (revisar)
 #                     # < REVIEW -> sin match (armado por analogía / manual)
 
+# Umbrales del cruce código+nombre (resolver de insumos, dominio/cruce.py).
+CRUCE_UMBRAL = 0.60   # similitud mínima de nombre para aceptar un cruce aproximado
+CRUCE_MARGEN = 0.10   # ventaja mínima del mejor candidato sobre el segundo
+
 # Etiquetas de turno.
 SHIFT_DIURNO = "DIURNO"
 SHIFT_NOCTURNO = "NOCTURNO"

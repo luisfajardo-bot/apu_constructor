@@ -116,25 +116,26 @@ def _build_resumen(ws, apus: list[AssembledApu]) -> None:
 
 def _build_desglose(ws, apus: list[AssembledApu]) -> None:
     headers = ["Ítem", "APU", "Actividad", "Insumo Cód", "Insumo",
-               "Und", "Rendimiento", "Precio Unit.", "Fuente precio", "Costo"]
+               "Und", "Rendimiento", "Precio Unit.", "Fuente precio", "Costo", "Cruce"]
     ws.append(headers)
     _style_header(ws, 1, len(headers))
     ws.freeze_panes = "A2"
     for a in apus:
         if not a.componentes:
             ws.append([a.item.item, a.apu_codigo or "", a.apu_nombre,
-                       "", "(sin composición — armar manual)", "", "", "", "", ""])
+                       "", "(sin composición — armar manual)", "", "", "", "", "", ""])
             continue
         for c in a.componentes:
             ws.append([a.item.item, a.apu_codigo or "", a.apu_nombre,
                        c.insumo_codigo, c.insumo_nombre, c.unidad,
-                       c.rendimiento, c.precio_unitario, c.fuente_precio, c.costo])
+                       c.rendimiento, c.precio_unitario, c.fuente_precio, c.costo,
+                       c.calidad_cruce])
             r = ws.max_row
             ws.cell(row=r, column=7).number_format = _REND
             ws.cell(row=r, column=8).number_format = _MONEY
             ws.cell(row=r, column=10).number_format = _MONEY
     _autosize(ws, {1: 8, 2: 8, 3: 40, 4: 10, 5: 40, 6: 8, 7: 14, 8: 14,
-                   9: 18, 10: 14})
+                   9: 18, 10: 14, 11: 12})
 
 
 def _build_alertas(ws, apus: list[AssembledApu]) -> None:

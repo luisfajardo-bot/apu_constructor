@@ -27,6 +27,7 @@ class Insumo:
     grupo: str
     precio: float
     fuente_precio: str          # "PRECIO IDU", "COSTO INTERNO", etc.
+    id: Optional[int] = None    # id interno del catálogo (None si aún no persistido)
 
     @property
     def es_confidencial(self) -> bool:
@@ -130,6 +131,7 @@ class CostedComponent:
     precio_unitario: float        # precio usado (catálogo actual o histórico)
     fuente_precio: str
     costo: float                  # rendimiento * precio_unitario
+    calidad_cruce: str = "exacto" # exacto | aproximado | ambiguo | huerfano (aviso del cruce)
 
 
 @dataclass

@@ -116,7 +116,7 @@ def _build_apus(ws, apus: list[AssembledApu]) -> None:
     """Cada APU como bloque apilado: título + insumos + costo unitario."""
     from openpyxl.styles import PatternFill
     sub = ["Insumo Cód", "Insumo", "Und", "Rendimiento", "Precio Unit.",
-           "Fuente", "Costo"]
+           "Fuente precio", "Costo", "Cruce"]
     for a in apus:
         titulo = f"{a.item.item}   {a.apu_nombre}   ({a.unidad})"
         ws.append([titulo])
@@ -129,22 +129,22 @@ def _build_apus(ws, apus: list[AssembledApu]) -> None:
         _style_header(ws, ws.max_row, len(sub))
 
         if not a.componentes:
-            ws.append(["", "(sin composición — armar manual)", "", "", "", "", ""])
+            ws.append(["", "(sin composición — armar manual)", "", "", "", "", "", ""])
         for c in a.componentes:
             ws.append([c.insumo_codigo, c.insumo_nombre, c.unidad, c.rendimiento,
-                       c.precio_unitario, c.fuente_precio, c.costo])
+                       c.precio_unitario, c.fuente_precio, c.costo, c.calidad_cruce])
             r = ws.max_row
             ws.cell(row=r, column=4).number_format = _REND
             ws.cell(row=r, column=5).number_format = _MONEY
             ws.cell(row=r, column=7).number_format = _MONEY
 
-        ws.append(["", "COSTO UNITARIO APU", "", "", "", "", a.costo_unitario])
+        ws.append(["", "COSTO UNITARIO APU", "", "", "", "", a.costo_unitario, ""])
         r = ws.max_row
         ws.cell(row=r, column=2).font = Font(bold=True)
         ws.cell(row=r, column=7).number_format = _MONEY
         ws.cell(row=r, column=7).font = Font(bold=True)
         ws.append([])  # línea en blanco entre APUs
-    _autosize(ws, {1: 12, 2: 46, 3: 8, 4: 14, 5: 14, 6: 18, 7: 14})
+    _autosize(ws, {1: 12, 2: 46, 3: 8, 4: 14, 5: 14, 6: 18, 7: 14, 8: 12})
 
 
 def _build_alertas(ws, apus: list[AssembledApu]) -> None:

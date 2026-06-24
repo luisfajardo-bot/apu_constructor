@@ -15,6 +15,7 @@ from typing import Iterable, Iterator, Optional
 
 from apu_tool import config
 from apu_tool.nucleo.models import Insumo
+from apu_tool.nucleo.texto import normalizar
 
 SCHEMA_PATH = config.PROJECT_ROOT / "db" / "precios.sql"
 
@@ -54,35 +55,53 @@ class PreciosDB:
 
     # ---- escritura ----
     def insert_insumos(self, insumos: Iterable[Insumo]) -> int:
-        identidad, precios, seen = [], [], set()
         hoy = date.today().isoformat()
-        for i in insumos:
-            if i.codigo in seen:
-                continue
-            seen.add(i.codigo)
-            identidad.append((i.codigo, i.nombre, i.unidad, i.grupo))
-            precios.append((i.codigo, i.precio, i.fuente_precio,
-                            config.classify_price_source(i.fuente_precio), hoy, 1))
+        n = 0
         with self.connect() as conn:
-            conn.executemany(
-                "INSERT OR REPLACE INTO insumos (codigo, nombre, unidad, grupo) "
-                "VALUES (?,?,?,?)", identidad)
-            conn.executemany(
-                "INSERT INTO insumo_precios "
-                "(codigo, precio, fuente, clasificacion, fecha, vigente) "
-                "VALUES (?,?,?,?,?,?)", precios)
-        return len(identidad)
+            for i in insumos:
+                nombre_norm = normalizar(i.nombre)
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO insumos "
+                    "(codigo, nombre, nombre_norm, unidad, grupo) VALUES (?,?,?,?,?)",
+                    (i.codigo, i.nombre, nombre_norm, i.unidad, i.grupo))
+                if not cur.rowcount:
+                    continue  # identidad (codigo, nombre_norm) ya existía; no duplicar precio
+                iid = cur.lastrowid
+                conn.execute(
+                    "INSERT INTO insumo_precios "
+                    "(insumo_id, precio, fuente, clasificacion, fecha, vigente) "
+                    "VALUES (?,?,?,?,?,1)",
+                    (iid, i.precio, i.fuente_precio,
+                     config.classify_price_source(i.fuente_precio), hoy))
+                n += 1
+        return n
+
+    def _ids_de(self, conn, codigo: str, nombre: Optional[str]) -> list[int]:
+        if nombre is None:
+            rows = conn.execute("SELECT id FROM insumos WHERE codigo=?",
+                                (str(codigo),)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id FROM insumos WHERE codigo=? AND nombre_norm=?",
+                (str(codigo), normalizar(nombre))).fetchall()
+        return [r["id"] for r in rows]
 
     def set_precio(self, codigo: str, precio: float, fuente: str = "",
-                   fecha: Optional[str] = None) -> None:
+                   fecha: Optional[str] = None, nombre: Optional[str] = None) -> None:
         fecha = fecha or date.today().isoformat()
         with self.connect() as conn:
-            conn.execute("UPDATE insumo_precios SET vigente=0 WHERE codigo=?", (str(codigo),))
+            ids = self._ids_de(conn, codigo, nombre)
+            if len(ids) != 1:
+                raise ValueError(
+                    f"Código {codigo} resuelve a {len(ids)} insumos; "
+                    f"especifica el nombre exacto para desambiguar.")
+            iid = ids[0]
+            conn.execute("UPDATE insumo_precios SET vigente=0 WHERE insumo_id=?", (iid,))
             conn.execute(
                 "INSERT INTO insumo_precios "
-                "(codigo, precio, fuente, clasificacion, fecha, vigente) "
+                "(insumo_id, precio, fuente, clasificacion, fecha, vigente) "
                 "VALUES (?,?,?,?,?,1)",
-                (str(codigo), float(precio), fuente,
+                (iid, float(precio), fuente,
                  config.classify_price_source(fuente), fecha))
 
     def set_meta(self, clave: str, valor: str) -> None:
@@ -91,33 +110,50 @@ class PreciosDB:
                          (clave, str(valor)))
 
     # ---- lectura ----
-    def get_insumo(self, codigo: str) -> Optional[Insumo]:
-        with self.connect() as conn:
-            r = conn.execute(
-                "SELECT i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente "
-                "FROM insumos i LEFT JOIN insumo_precios p "
-                "  ON p.codigo = i.codigo AND p.vigente = 1 "
-                "WHERE i.codigo = ?", (str(codigo),)).fetchone()
-        if not r:
-            return None
+    def _fila_a_insumo(self, r) -> Insumo:
         return Insumo(codigo=r["codigo"], nombre=r["nombre"], unidad=r["unidad"] or "",
                       grupo=r["grupo"] or "", precio=r["precio"] or 0.0,
-                      fuente_precio=r["fuente"] or "")
+                      fuente_precio=r["fuente"] or "", id=r["id"])
 
-    def price_history(self, codigo: str) -> list[dict]:
+    def get_candidatos(self, codigo: str) -> list[Insumo]:
+        """Todos los insumos con ese código (cada uno con su precio vigente e id)."""
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT precio, fuente, clasificacion, fecha, vigente "
-                "FROM insumo_precios WHERE codigo=? ORDER BY id", (str(codigo),)).fetchall()
+                "SELECT i.id, i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente "
+                "FROM insumos i LEFT JOIN insumo_precios p "
+                "  ON p.insumo_id = i.id AND p.vigente = 1 "
+                "WHERE i.codigo = ? ORDER BY i.id", (str(codigo),)).fetchall()
+        return [self._fila_a_insumo(r) for r in rows]
+
+    def get_insumo_por_id(self, insumo_id: int) -> Optional[Insumo]:
+        with self.connect() as conn:
+            r = conn.execute(
+                "SELECT i.id, i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente "
+                "FROM insumos i LEFT JOIN insumo_precios p "
+                "  ON p.insumo_id = i.id AND p.vigente = 1 "
+                "WHERE i.id = ?", (int(insumo_id),)).fetchone()
+        return self._fila_a_insumo(r) if r else None
+
+    def price_history(self, codigo: str, nombre: Optional[str] = None) -> list[dict]:
+        with self.connect() as conn:
+            q = ("SELECT p.precio, p.fuente, p.clasificacion, p.fecha, p.vigente "
+                 "FROM insumo_precios p JOIN insumos i ON i.id = p.insumo_id "
+                 "WHERE i.codigo = ?")
+            params: list = [str(codigo)]
+            if nombre is not None:
+                q += " AND i.nombre_norm = ?"
+                params.append(normalizar(nombre))
+            q += " ORDER BY p.id"
+            rows = conn.execute(q, params).fetchall()
         return [dict(r) for r in rows]
 
     def search_insumos(self, texto: str, limit: int = 20) -> list[Insumo]:
         like = f"%{texto.strip()}%"
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT codigo FROM insumos WHERE nombre LIKE ? OR codigo LIKE ? LIMIT ?",
+                "SELECT id FROM insumos WHERE nombre LIKE ? OR codigo LIKE ? LIMIT ?",
                 (like, like, limit)).fetchall()
-        return [self.get_insumo(r["codigo"]) for r in rows]
+        return [self.get_insumo_por_id(r["id"]) for r in rows]
 
     def search_insumos_por_palabras(self, palabras: list[str], limit: int = 60) -> list[Insumo]:
         """Insumos cuyo nombre contiene alguna de las `palabras` (ya tokenizadas por el dominio)."""
@@ -128,8 +164,8 @@ class PreciosDB:
         params = [f"%{p}%" for p in palabras] + [limit]
         with self.connect() as conn:
             rows = conn.execute(
-                f"SELECT codigo FROM insumos WHERE {clauses} LIMIT ?", params).fetchall()
-        return [self.get_insumo(r["codigo"]) for r in rows]
+                f"SELECT id FROM insumos WHERE {clauses} LIMIT ?", params).fetchall()
+        return [self.get_insumo_por_id(r["id"]) for r in rows]
 
     def counts(self) -> dict[str, int]:
         with self.connect() as conn:

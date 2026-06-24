@@ -46,8 +46,8 @@ def test_pricing_falls_back_to_historical(alm):
 
 
 def test_insumo_confidencial_flag(alm):
-    assert alm.precios.get_insumo("9999").es_confidencial is True
-    assert alm.precios.get_insumo("4279").es_confidencial is False
+    assert alm.precios.get_candidatos("9999")[0].es_confidencial is True
+    assert alm.precios.get_candidatos("4279")[0].es_confidencial is False
 
 
 def test_depriced_apu_has_no_price_fields(alm):

@@ -7,6 +7,7 @@ Reutiliza el parser de pestañas del histórico (antes en ingest.py).
 """
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -18,6 +19,7 @@ from apu_tool import config
 from apu_tool.datos import correcciones
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
+from apu_tool.nucleo.texto import normalizar
 
 
 # ---------------------------------------------------------------------------
@@ -89,12 +91,12 @@ class InsumoSheet:
     start_row: int = 2
 
 
-# Orden importante: la primera ocurrencia de un código gana (dedupe por código).
-# 'listado_insumos_idu' va primero por ser el catálogo principal y más completo.
+# Orden importante: la primera ocurrencia de una identidad (código, nombre) gana.
+# 'INSUMOS_IDU-INT' va PRIMERO: es la base autoritativa con todos los insumos.
 INSUMO_SHEETS = [
-    InsumoSheet("listado_insumos_idu", col_codigo=2, col_nombre=3, col_unidad=4,
-                col_precio=5, col_fuente=6, col_grupo=1),
     InsumoSheet("INSUMOS_IDU-INT", col_codigo=2, col_nombre=3, col_unidad=4,
+                col_precio=5, col_fuente=6, col_grupo=1),
+    InsumoSheet("listado_insumos_idu", col_codigo=2, col_nombre=3, col_unidad=4,
                 col_precio=5, col_fuente=6, col_grupo=1),
     InsumoSheet("insumos_apus_especificos", col_codigo=2, col_nombre=3, col_unidad=4,
                 col_precio=5, col_fuente=6),
@@ -186,8 +188,13 @@ def seed(almacen: Optional[Almacen] = None, xlsx_path: Optional[Path] = None,
          force: bool = False) -> dict:
     config.ensure_dirs()
     alm = almacen or Almacen()
-    alm.init_schema()
-    c = alm.counts()
+    # Sondeo defensivo: la base puede no existir, estar vacía o traer un esquema
+    # viejo. NO llamamos init_schema() aquí — crearía índices nuevos sobre tablas
+    # viejas y reventaría. reset() (más abajo) es la autoridad del esquema.
+    try:
+        c = alm.counts()
+    except sqlite3.OperationalError:
+        c = {}
     if (c.get("apus", 0) or c.get("insumos", 0)) and not force:
         raise SeedExistente(
             "precios.db/apus.db ya tienen datos. Usa --force para re-semillar "
@@ -202,10 +209,10 @@ def seed(almacen: Optional[Almacen] = None, xlsx_path: Optional[Path] = None,
     alm.reset()
     wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
     try:
-        insumos: dict[str, Insumo] = {}
+        insumos: dict[tuple[str, str], Insumo] = {}
         for sheet in INSUMO_SHEETS:
             for ins in _read_insumos(wb, sheet):
-                insumos.setdefault(ins.codigo, ins)
+                insumos.setdefault((ins.codigo, normalizar(ins.nombre)), ins)
         alm.precios.insert_insumos(insumos.values())
 
         apus, comps = _read_apus(wb)

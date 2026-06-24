@@ -11,34 +11,28 @@ Este módulo NO se le pasa nunca a la IA.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from apu_tool.datos.almacen import Almacen
+from apu_tool.dominio import cruce
 from apu_tool.nucleo.models import ApuComponent, CostedComponent
 
 
 class PricingEngine:
     def __init__(self, almacen: Almacen):
         self.alm = almacen
-        self._cache: dict[str, Optional[tuple[float, str]]] = {}
+        self._cache: dict[str, list] = {}   # codigo -> list[Insumo] candidatos
 
-    def _insumo_price(self, codigo: str) -> Optional[tuple[float, str]]:
-        """Devuelve (precio, fuente) del catálogo, o None si no está."""
+    def _candidatos(self, codigo: str) -> list:
         if not codigo:
-            return None
-        if codigo in self._cache:
-            return self._cache[codigo]
-        ins = self.alm.precios.get_insumo(codigo)
-        result = (ins.precio, ins.fuente_precio) if ins else None
-        self._cache[codigo] = result
-        return result
+            return []
+        if codigo not in self._cache:
+            self._cache[codigo] = self.alm.precios.get_candidatos(codigo)
+        return self._cache[codigo]
 
     def cost_component(self, comp: ApuComponent) -> CostedComponent:
-        cat = self._insumo_price(comp.insumo_codigo)
-        if cat is not None and cat[0] > 0:
-            precio, fuente = cat
-        else:
-            # Respaldo: precio histórico embebido en la composición.
+        r = cruce.resolver(self._candidatos(comp.insumo_codigo), comp.insumo_nombre)
+        if r.insumo is not None and r.insumo.precio > 0:        # EXACTO o APROXIMADO
+            precio, fuente = r.insumo.precio, r.insumo.fuente_precio
+        else:                                                   # AMBIGUO o HUERFANO
             precio, fuente = comp.precio_unitario_hist, "histórico"
         costo = comp.rendimiento * precio
         return CostedComponent(
@@ -49,6 +43,7 @@ class PricingEngine:
             precio_unitario=precio,
             fuente_precio=fuente,
             costo=costo,
+            calidad_cruce=r.calidad.value,
         )
 
     def cost_components(self, comps: list[ApuComponent]) -> tuple[list[CostedComponent], float]:

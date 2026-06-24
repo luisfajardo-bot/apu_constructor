@@ -76,12 +76,14 @@ def cmd_status(args) -> int:
 
 
 def cmd_db_check(args) -> int:
-    from apu_tool.datos import integridad
+    from apu_tool.dominio import integridad
     rep = integridad.revisar(get_almacen())
-    print(f"Huérfanos: {rep['huerfanos']}")
-    print(f"Descalces de nombre: {len(rep['descalces'])}")
-    for d in sorted(rep["descalces"], key=lambda x: -x["n"])[:25]:
-        print(f"  {d['codigo']:>7}  x{d['n']:<3}  {d['apu_nom'][:26]} -> {d['cat_nom'][:30]}")
+    print(f"Huérfanos:   {rep['huerfanos']}")
+    print(f"Aproximados: {rep['aproximados']}")
+    print(f"Ambiguos:    {rep['ambiguos']}")
+    for d in sorted(rep["detalles"], key=lambda x: -x["n"])[:25]:
+        print(f"  {d['codigo']:>7}  x{d['n']:<3}  [{d['calidad'][:4]}]  "
+              f"{d['apu_nom'][:26]} -> {d['cat_nom'][:30]}")
     return 0
 
 

@@ -1,5 +1,11 @@
 // Tipos de dominio — shapes exactos que devuelve el backend
 
+export interface Progreso {
+  i: number;
+  total: number;
+  descripcion: string;
+}
+
 export interface Totales {
   contractual: number;
   costo: number;

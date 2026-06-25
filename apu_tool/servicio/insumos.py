@@ -45,6 +45,6 @@ def aplicar_cambios(alm: Almacen, cambios: list[dict]) -> dict:
             alm.precios.set_precio_por_id(int(c["insumo_id"]), precio,
                                           str(c.get("fuente", "") or ""))
             aplicados += 1
-        except (ValueError, KeyError, TypeError) as e:
+        except Exception as e:
             errores.append({"insumo_id": c.get("insumo_id"), "error": str(e)})
     return {"aplicados": aplicados, "errores": errores}

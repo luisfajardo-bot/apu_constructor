@@ -34,9 +34,10 @@ def test_detalle_con_historial(tmp_path):
 def test_aplicar_cambios_ok_y_errores(tmp_path):
     alm = _alm(tmp_path)
     iid = alm.precios.get_candidatos("100")[0].id
+    iid2 = alm.precios.get_candidatos("200")[0].id
     res = svc.aplicar_cambios(alm, [
         {"insumo_id": iid, "precio": 380000.0, "fuente": "COMPRAS"},
         {"insumo_id": 99999, "precio": 1.0, "fuente": "X"},      # id malo
-        {"insumo_id": iid, "precio": -5.0, "fuente": "Y"}])      # precio inválido
+        {"insumo_id": iid2, "precio": -5.0, "fuente": "Y"}])     # precio inválido
     assert res["aplicados"] == 1 and len(res["errores"]) == 2
     assert alm.precios.get_insumo_por_id(iid).precio == 380000.0

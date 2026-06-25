@@ -3,6 +3,8 @@ import { listarInsumos, getFuentes, type ListarInsumosParams } from "@/api/insum
 import type { Insumo } from "@/lib/tipos";
 import { BarraFiltros, type FiltrosState } from "@/components/insumos/BarraFiltros";
 import { TablaInsumos } from "@/components/insumos/TablaInsumos";
+import { Button } from "@/components/ui/button";
+import { DialogoTransformar } from "@/components/insumos/DialogoTransformar";
 
 const LIMIT = 100;
 
@@ -19,6 +21,7 @@ export default function Insumos() {
   const [fuentes, setFuentes] = useState<string[]>([]);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [transformarOpen, setTransformarOpen] = useState(false);
 
   const cargar = useCallback(async (f: FiltrosState) => {
     setCargando(true);
@@ -67,6 +70,15 @@ export default function Insumos() {
         {cargando && (
           <span className="text-xs text-muted-foreground animate-pulse">cargando…</span>
         )}
+        <div className="ml-auto">
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => setTransformarOpen(true)}
+          >
+            Transformar
+          </Button>
+        </div>
       </div>
 
       <BarraFiltros
@@ -83,6 +95,18 @@ export default function Insumos() {
       )}
 
       <TablaInsumos insumos={insumos} fuentes={fuentes} onReload={recargar} />
+
+      <DialogoTransformar
+        open={transformarOpen}
+        onOpenChange={setTransformarOpen}
+        filtro={{
+          q: filtros.q || undefined,
+          grupo: filtros.grupo || undefined,
+          fuente: filtros.fuente || undefined,
+          clasificacion: filtros.clasificacion || undefined,
+        }}
+        onAplicado={recargar}
+      />
     </div>
   );
 }

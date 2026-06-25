@@ -182,6 +182,7 @@ class CorridaMeta:
     use_ai: Optional[bool]
     estado: str                   # 'en_revision' | 'finalizada'
     cuadro_path: Optional[str] = None
+    duracion_ms: Optional[int] = None
 
 
 @dataclass

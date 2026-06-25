@@ -1,5 +1,7 @@
+import sqlite3
 from apu_tool.nucleo.models import CorridaItemRow, CorridaMeta, LicitacionItem
 from apu_tool.datos.almacen import Almacen
+from apu_tool.datos.corridas_db import CorridasDB
 
 
 def test_corrida_meta_y_item_row_se_construyen():
@@ -94,3 +96,32 @@ def test_listar_y_eliminar_corridas(tmp_path):
     assert alm.corridas.get_items(c2) == []           # cascade borró los ítems
     assert [m.id for m in alm.corridas.listar_corridas()] == [c1]
     assert alm.corridas.eliminar_corrida(99999) is False
+
+
+def test_set_duracion_y_lee(tmp_path):
+    alm = _almacen_tmp(tmp_path)
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-06-25T10:00:00", archivo="a.xlsx",
+        turno_def="DIURNO", use_ai=False, estado="en_revision"))
+    assert alm.corridas.get_corrida(cid).duracion_ms is None
+    alm.corridas.set_duracion(cid, 3210)
+    assert alm.corridas.get_corrida(cid).duracion_ms == 3210
+    assert alm.corridas.listar_corridas()[0].duracion_ms == 3210
+
+
+def test_migracion_agrega_duracion_ms(tmp_path):
+    # DB con esquema viejo (sin duracion_ms): init_schema la agrega sin romper
+    p = tmp_path / "old.db"
+    conn = sqlite3.connect(p)
+    conn.executescript(
+        "CREATE TABLE corrida (id INTEGER PRIMARY KEY AUTOINCREMENT, creada_en TEXT, "
+        "archivo TEXT, turno_def TEXT, use_ai INTEGER, estado TEXT, cuadro_path TEXT);")
+    conn.execute("INSERT INTO corrida (creada_en, archivo, turno_def, use_ai, estado) "
+                 "VALUES ('x','a.xlsx','DIURNO',0,'en_revision')")
+    conn.commit(); conn.close()
+    db = CorridasDB(p)
+    db.init_schema()  # debe agregar duracion_ms (idempotente) sin perder la fila
+    metas = db.listar_corridas()
+    assert len(metas) == 1 and metas[0].duracion_ms is None
+    db.set_duracion(metas[0].id, 999)
+    assert db.get_corrida(metas[0].id).duracion_ms == 999

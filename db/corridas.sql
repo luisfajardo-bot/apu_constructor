@@ -5,7 +5,8 @@ CREATE TABLE IF NOT EXISTS corrida (
   turno_def     TEXT NOT NULL,
   use_ai        INTEGER,
   estado        TEXT NOT NULL,
-  cuadro_path   TEXT
+  cuadro_path   TEXT,
+  duracion_ms   INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS corrida_item (

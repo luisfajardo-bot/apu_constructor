@@ -45,6 +45,9 @@ class CorridasDB:
     def init_schema(self) -> None:
         with self.connect() as conn:
             conn.executescript(_load_schema())
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(corrida)").fetchall()}
+            if "duracion_ms" not in cols:
+                conn.execute("ALTER TABLE corrida ADD COLUMN duracion_ms INTEGER")
 
     def reset(self) -> None:
         with self.connect() as conn:
@@ -101,6 +104,11 @@ class CorridasDB:
         with self.connect() as conn:
             conn.execute("UPDATE corrida SET estado=? WHERE id=?", (estado, corrida_id))
 
+    def set_duracion(self, corrida_id: int, duracion_ms: int) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE corrida SET duracion_ms=? WHERE id=?",
+                         (int(duracion_ms), int(corrida_id)))
+
     # ---- lectura ----
     def _row_to_item(self, r: sqlite3.Row) -> CorridaItemRow:
         return CorridaItemRow(
@@ -117,7 +125,8 @@ class CorridasDB:
             id=r["id"], creada_en=r["creada_en"], archivo=r["archivo"],
             turno_def=r["turno_def"],
             use_ai=None if r["use_ai"] is None else bool(r["use_ai"]),
-            estado=r["estado"], cuadro_path=r["cuadro_path"])
+            estado=r["estado"], cuadro_path=r["cuadro_path"],
+            duracion_ms=r["duracion_ms"])
 
     def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
         with self.connect() as conn:

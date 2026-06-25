@@ -5,28 +5,81 @@ import TablaItems from "@/components/corrida/TablaItems";
 import { getCorrida, descargarCuadroUrl } from "@/api/corridas";
 import { cop, pct } from "@/lib/moneda";
 import { fmtDuracion } from "@/lib/tiempo";
-import type { CorridaDetalle } from "@/lib/tipos";
+import { useArmadoVivo } from "@/lib/armado";
+import type { CorridaDetalle, ItemCuadro, Totales } from "@/lib/tipos";
+
+const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
+
+function totalesDe(filas: ItemCuadro[]): Totales {
+  const contractual = filas.reduce((s, f) => s + f.contractual_total, 0);
+  const costo = filas.reduce((s, f) => s + f.costo_total, 0);
+  const margen = contractual - costo;
+  return {
+    contractual,
+    costo,
+    margen,
+    margen_pct: contractual ? margen / contractual : 0,
+    n_items: filas.length,
+    n_revision: filas.filter((f) => REVISABLE.has(f.status)).length,
+  };
+}
 
 export default function Corrida() {
   const { id } = useParams<{ id: string }>();
   const corridaId = Number(id);
+  const vivo = useArmadoVivo();
+  const live = vivo.corridaId === corridaId && vivo.estado === "armando";
 
   const [corrida, setCorrida] = useState<CorridaDetalle | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setCargando(true);
+    if (live) {
+      // Mientras se arma en vivo en esta pestaña, la tabla viene del stream; no se
+      // consulta el backend (al terminar, `live` pasa a false y se relee abajo).
+      setCargando(false);
+      return;
+    }
+    let cancelado = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     setError(null);
-    getCorrida(corridaId)
-      .then(setCorrida)
-      .catch((err: unknown) =>
-        setError(err instanceof Error ? err.message : "Error al cargar la corrida"),
-      )
-      .finally(() => setCargando(false));
-  }, [corridaId]);
+    const cargar = () => {
+      getCorrida(corridaId)
+        .then((c) => {
+          if (cancelado) return;
+          setCorrida(c);
+          setCargando(false);
+          // Recarga durante un armado sin stream local (p. ej. otra pestaña):
+          // refrescar hasta que deje de estar 'armando'.
+          if (c.estado === "armando") timer = setTimeout(cargar, 2000);
+        })
+        .catch((err: unknown) => {
+          if (cancelado) return;
+          setError(err instanceof Error ? err.message : "Error al cargar la corrida");
+          setCargando(false);
+        });
+    };
+    cargar();
+    return () => {
+      cancelado = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [corridaId, live]);
 
-  if (cargando) {
+  // Datos a mostrar: en vivo desde el stream, o lo persistido.
+  const data: CorridaDetalle | null = live
+    ? {
+        id: corridaId,
+        archivo: "(armando)",
+        estado: "armando",
+        items: vivo.filas,
+        totales: totalesDe(vivo.filas),
+        duracion_ms: null,
+      }
+    : corrida;
+
+  if (!live && cargando) {
     return (
       <div style={{ padding: "1rem" }} className="text-sm text-muted-foreground">
         Cargando corrida #{id}…
@@ -34,7 +87,7 @@ export default function Corrida() {
     );
   }
 
-  if (error) {
+  if (!live && error) {
     return (
       <div style={{ padding: "1rem" }} className="text-sm text-destructive">
         {error}
@@ -42,9 +95,9 @@ export default function Corrida() {
     );
   }
 
-  if (!corrida) return null;
+  if (!data) return null;
 
-  const { totales } = corrida;
+  const { totales } = data;
   const margenNegativo = totales.margen < 0;
 
   return (
@@ -53,19 +106,21 @@ export default function Corrida() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h2 className="text-sm font-semibold text-foreground">
-            Corrida #{corrida.id}
+            Corrida #{data.id}
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {corrida.archivo} &mdash; {corrida.estado}
+            {data.archivo} &mdash; {data.estado}
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => window.open(descargarCuadroUrl(corridaId))}
-        >
-          Descargar cuadro
-        </Button>
+        {!live && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => window.open(descargarCuadroUrl(corridaId))}
+          >
+            Descargar cuadro
+          </Button>
+        )}
       </div>
 
       {/* Totals bar */}
@@ -73,14 +128,8 @@ export default function Corrida() {
         className="grid gap-px rounded-lg border bg-muted/30 overflow-hidden"
         style={{ gridTemplateColumns: "repeat(4, 1fr)" }}
       >
-        <TotalStat
-          label="Contractual"
-          value={cop(totales.contractual)}
-        />
-        <TotalStat
-          label="Costo"
-          value={cop(totales.costo)}
-        />
+        <TotalStat label="Contractual" value={cop(totales.contractual)} />
+        <TotalStat label="Costo" value={cop(totales.costo)} />
         <TotalStat
           label="Margen"
           value={cop(totales.margen)}
@@ -95,7 +144,15 @@ export default function Corrida() {
 
       {/* Counters sub-line */}
       <div className="flex items-center gap-4 text-xs text-muted-foreground">
-        <span>{totales.n_items} APUs · armada en {fmtDuracion(corrida.duracion_ms)}</span>
+        {live ? (
+          <span className="text-blue-700 font-medium">
+            Armando {vivo.filas.length}/{vivo.total}…
+          </span>
+        ) : (
+          <span>
+            {totales.n_items} APUs · armada en {fmtDuracion(data.duracion_ms)}
+          </span>
+        )}
         {totales.n_revision > 0 && (
           <span className="text-amber-700 font-medium">
             {totales.n_revision} por revisar
@@ -103,10 +160,10 @@ export default function Corrida() {
         )}
       </div>
 
-      {/* Dense table */}
+      {/* Dense table (se llena APU por APU en vivo) */}
       <TablaItems
         corridaId={corridaId}
-        items={corrida.items}
+        items={data.items}
         onConfirmado={(c) => setCorrida(c)}
       />
     </div>

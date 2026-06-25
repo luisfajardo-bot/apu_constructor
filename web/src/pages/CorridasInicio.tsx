@@ -1,15 +1,14 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { crearCorridaStream, crearSampleStream } from "@/api/corridas";
-import type { Progreso } from "@/lib/tipos";
+import { useArmadoVivo } from "@/lib/armado";
 
 export default function CorridasInicio() {
   const navigate = useNavigate();
+  const { armarArchivo, armarEjemplo } = useArmadoVivo();
   const fileRef = useRef<HTMLInputElement>(null);
   const [usarIA, setUsarIA] = useState(true);
   const [cargando, setCargando] = useState(false);
-  const [progreso, setProgreso] = useState<Progreso | null>(null);
 
   async function handleArmar(e: React.FormEvent) {
     e.preventDefault();
@@ -23,32 +22,23 @@ export default function CorridasInicio() {
     form.append("use_ai", String(usarIA));
     setCargando(true);
     try {
-      const { id } = await crearCorridaStream(form, (p) => {
-        setProgreso(p);
-        console.log(`[${p.i}/${p.total}] ${p.descripcion}`);
-      });
-      navigate(`/corridas/${id}`);
+      // Navega apenas la corrida arranca (evento started); la tabla se llena en vivo allí.
+      await armarArchivo(form, (id) => navigate(`/corridas/${id}`));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al crear la corrida");
     } finally {
       setCargando(false);
-      setProgreso(null);
     }
   }
 
   async function handleEjemplo() {
     setCargando(true);
     try {
-      const { id } = await crearSampleStream((p) => {
-        setProgreso(p);
-        console.log(`[${p.i}/${p.total}] ${p.descripcion}`);
-      });
-      navigate(`/corridas/${id}`);
+      await armarEjemplo((id) => navigate(`/corridas/${id}`));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al crear corrida de ejemplo");
     } finally {
       setCargando(false);
-      setProgreso(null);
     }
   }
 
@@ -89,7 +79,7 @@ export default function CorridasInicio() {
           {/* Botones */}
           <div style={styles.botones}>
             <button type="submit" style={styles.btnPrimario} disabled={cargando}>
-              {cargando ? (progreso ? `Armando… ${progreso.i}/${progreso.total}` : "Armando…") : "Armar"}
+              {cargando ? "Armando…" : "Armar"}
             </button>
             <button
               type="button"
@@ -101,11 +91,6 @@ export default function CorridasInicio() {
             </button>
           </div>
         </form>
-        {cargando && progreso && (
-          <p style={styles.progresoLinea}>
-            {progreso.i}/{progreso.total} — {progreso.descripcion}
-          </p>
-        )}
     </div>
   );
 }

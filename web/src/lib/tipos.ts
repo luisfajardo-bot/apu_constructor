@@ -4,6 +4,12 @@ export interface Progreso {
   i: number;
   total: number;
   descripcion: string;
+  fila?: ItemCuadro; // fila ya costeada del APU recién armado (para la tabla en vivo)
+}
+
+export interface CorridaIniciada {
+  id: number;
+  total: number;
 }
 
 export interface Totales {

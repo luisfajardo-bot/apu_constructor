@@ -86,6 +86,16 @@ class PreciosDB:
                 (str(codigo), normalizar(nombre))).fetchall()
         return [r["id"] for r in rows]
 
+    def _insertar_precio_vigente(self, conn, insumo_id: int, precio: float,
+                                fuente: str, fecha: str) -> None:
+        conn.execute("UPDATE insumo_precios SET vigente=0 WHERE insumo_id=?", (int(insumo_id),))
+        conn.execute(
+            "INSERT INTO insumo_precios "
+            "(insumo_id, precio, fuente, clasificacion, fecha, vigente) "
+            "VALUES (?,?,?,?,?,1)",
+            (int(insumo_id), float(precio), fuente,
+             config.classify_price_source(fuente), fecha))
+
     def set_precio(self, codigo: str, precio: float, fuente: str = "",
                    fecha: Optional[str] = None, nombre: Optional[str] = None) -> None:
         fecha = fecha or date.today().isoformat()
@@ -95,14 +105,16 @@ class PreciosDB:
                 raise ValueError(
                     f"Código {codigo} resuelve a {len(ids)} insumos; "
                     f"especifica el nombre exacto para desambiguar.")
-            iid = ids[0]
-            conn.execute("UPDATE insumo_precios SET vigente=0 WHERE insumo_id=?", (iid,))
-            conn.execute(
-                "INSERT INTO insumo_precios "
-                "(insumo_id, precio, fuente, clasificacion, fecha, vigente) "
-                "VALUES (?,?,?,?,?,1)",
-                (iid, float(precio), fuente,
-                 config.classify_price_source(fuente), fecha))
+            self._insertar_precio_vigente(conn, ids[0], precio, fuente, fecha)
+
+    def set_precio_por_id(self, insumo_id: int, precio: float, fuente: str = "",
+                          fecha: Optional[str] = None) -> None:
+        fecha = fecha or date.today().isoformat()
+        with self.connect() as conn:
+            r = conn.execute("SELECT id FROM insumos WHERE id=?", (int(insumo_id),)).fetchone()
+            if r is None:
+                raise ValueError(f"No existe el insumo id={insumo_id}.")
+            self._insertar_precio_vigente(conn, int(insumo_id), precio, fuente, fecha)
 
     def set_meta(self, clave: str, valor: str) -> None:
         with self.connect() as conn:

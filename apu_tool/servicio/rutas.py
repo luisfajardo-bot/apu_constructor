@@ -31,6 +31,18 @@ def status(alm: Almacen = Depends(get_almacen)):
                      ia=config.ai_available())
 
 
+@router.get("/corridas")
+def listar_corridas(alm: Almacen = Depends(get_almacen)):
+    return svc.listar_corridas(alm)
+
+
+@router.delete("/corridas/{cid}")
+def eliminar_corrida(cid: int, alm: Almacen = Depends(get_almacen)):
+    if not svc.eliminar_corrida(alm, cid):
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return {"eliminada": cid}
+
+
 @router.post("/corridas")
 async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
                         use_ai: Optional[bool] = Form(None),
@@ -43,7 +55,7 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
         tmp.write(await archivo.read())
         tmp_path = tmp.name
     try:
-        items = read_licitacion(tmp_path, default_shift=turno)
+        items = read_licitacion(tmp_path, default_shift=turno, require_turno=True)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     finally:
@@ -94,7 +106,7 @@ async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
         tmp.write(await archivo.read())
         tmp_path = tmp.name
     try:
-        items = read_licitacion(tmp_path, default_shift=turno)
+        items = read_licitacion(tmp_path, default_shift=turno, require_turno=True)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     finally:

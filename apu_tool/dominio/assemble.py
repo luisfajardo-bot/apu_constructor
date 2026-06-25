@@ -24,6 +24,7 @@ from apu_tool.nucleo.models import (
     AssembledApu,
     DePricedApu,
     LicitacionItem,
+    MatchResult,
     MatchStatus,
 )
 from apu_tool.dominio.pricing import PricingEngine
@@ -41,7 +42,11 @@ class Assembler:
         self._codigos_apu = {cod for cod, _, _ in almacen.apus.apu_index()}
 
     # ------------------------------------------------------------------ items
-    def assemble_item(self, item: LicitacionItem) -> AssembledApu:
+    def assemble_item(self, item: LicitacionItem,
+                      match_result: Optional[MatchResult] = None) -> AssembledApu:
+        # `match_result`: si se pasa el MatchResult ya calculado (p. ej. el stream lo
+        # calcula una vez para mostrar candidatos), se reusa en vez de re-correr el
+        # matcher — mismo resultado, sin el doble match. Si es None, se calcula aquí.
         # Armado por código directo (presupuesto): si el ítem trae un código IDU y
         # ese APU existe, se usa directo — el código es autoritativo, sin fuzzy/IA.
         if item.codigo_sugerido and item.codigo_sugerido in self._codigos_apu:
@@ -49,7 +54,7 @@ class Assembler:
                 item, item.codigo_sugerido, item.shift, MatchStatus.AUTO, 1.0,
                 f"Armado por código del presupuesto ({item.codigo_sugerido}).")
 
-        result = self.matcher.match(item)
+        result = match_result if match_result is not None else self.matcher.match(item)
 
         if result.status == MatchStatus.AUTO and result.elegido:
             return self._build(item, result.elegido.apu_codigo, item.shift,

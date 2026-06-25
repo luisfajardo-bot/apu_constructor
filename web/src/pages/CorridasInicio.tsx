@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { crearCorrida, crearSample } from "@/api/corridas";
+import { crearCorridaStream, crearSampleStream } from "@/api/corridas";
+import type { Progreso } from "@/lib/tipos";
 
 type Turno = "DIURNO" | "NOCTURNO";
 
@@ -11,6 +12,7 @@ export default function CorridasInicio() {
   const [turno, setTurno] = useState<Turno>("DIURNO");
   const [usarIA, setUsarIA] = useState(true);
   const [cargando, setCargando] = useState(false);
+  const [progreso, setProgreso] = useState<Progreso | null>(null);
 
   async function handleArmar(e: React.FormEvent) {
     e.preventDefault();
@@ -25,24 +27,32 @@ export default function CorridasInicio() {
     form.append("use_ai", String(usarIA));
     setCargando(true);
     try {
-      const { id } = await crearCorrida(form);
+      const { id } = await crearCorridaStream(form, (p) => {
+        setProgreso(p);
+        console.log(`[${p.i}/${p.total}] ${p.descripcion}`);
+      });
       navigate(`/corridas/${id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al crear la corrida");
     } finally {
       setCargando(false);
+      setProgreso(null);
     }
   }
 
   async function handleEjemplo() {
     setCargando(true);
     try {
-      const { id } = await crearSample();
+      const { id } = await crearSampleStream((p) => {
+        setProgreso(p);
+        console.log(`[${p.i}/${p.total}] ${p.descripcion}`);
+      });
       navigate(`/corridas/${id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al crear corrida de ejemplo");
     } finally {
       setCargando(false);
+      setProgreso(null);
     }
   }
 
@@ -100,7 +110,7 @@ export default function CorridasInicio() {
           {/* Botones */}
           <div style={styles.botones}>
             <button type="submit" style={styles.btnPrimario} disabled={cargando}>
-              {cargando ? "Armando…" : "Armar"}
+              {cargando ? (progreso ? `Armando… ${progreso.i}/${progreso.total}` : "Armando…") : "Armar"}
             </button>
             <button
               type="button"
@@ -112,6 +122,11 @@ export default function CorridasInicio() {
             </button>
           </div>
         </form>
+        {cargando && progreso && (
+          <p style={styles.progresoLinea}>
+            {progreso.i}/{progreso.total} — {progreso.descripcion}
+          </p>
+        )}
     </div>
   );
 }
@@ -193,5 +208,10 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #cbd5e0",
     borderRadius: "4px",
     cursor: "pointer",
+  },
+  progresoLinea: {
+    margin: "8px 0 0",
+    fontSize: "11px",
+    color: "#4a5568",
   },
 };

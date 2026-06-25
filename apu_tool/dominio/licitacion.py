@@ -133,9 +133,10 @@ def read_licitacion(path: Path | str, default_shift: str = config.SHIFT_DIURNO,
             shift=shift,
         ))
     if require_turno and sin_turno:
-        raise ValueError(
-            "Estos ítems no tienen turno (DIURNO/NOCTURNO): "
-            + ", ".join(sin_turno[:20]))
+        msg = "Estos ítems no tienen turno (DIURNO/NOCTURNO): " + ", ".join(sin_turno[:20])
+        if len(sin_turno) > 20:
+            msg += f" (+{len(sin_turno) - 20} más)"
+        raise ValueError(msg)
     return items
 
 

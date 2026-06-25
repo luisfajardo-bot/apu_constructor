@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import {
   Table,
   TableBody,
@@ -121,8 +121,8 @@ export default function TablaItems({
             const abierto = estado !== undefined;
 
             return (
-              <>
-                <TableRow key={it.seq} className="hover:bg-muted/40">
+              <Fragment key={it.seq}>
+                <TableRow className="hover:bg-muted/40">
                   {/* Chevron control */}
                   <TableCell className="w-6 px-1 py-1">
                     <button
@@ -198,7 +198,7 @@ export default function TablaItems({
                     </TableCell>
                   </TableRow>
                 )}
-              </>
+              </Fragment>
             );
           })}
           {visible.length === 0 && (

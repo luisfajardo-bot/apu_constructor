@@ -42,3 +42,12 @@ def test_sin_require_turno_retrocompatible(tmp_path):
               [["1", "Concreto", "M3", 10, 400000]])
     items = read_licitacion(p, default_shift="DIURNO")
     assert items and items[0].shift == "DIURNO"
+
+
+def test_require_turno_valor_no_reconocido(tmp_path):
+    """Un turno con valor no reconocido (ej. 'TARDE') debe generar ValueError."""
+    p = _xlsx(tmp_path, ["ITEM", "DESCRIPCION", "UNIDAD", "CANTIDAD", "PRECIO", "TURNO"],
+              [["1", "Concreto", "M3", 10, 400000, "DIURNO"],
+               ["2", "Excavacion", "M3", 5, 200000, "TARDE"]])
+    with pytest.raises(ValueError):
+        read_licitacion(p, require_turno=True)

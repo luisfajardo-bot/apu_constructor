@@ -103,6 +103,15 @@ def _xlsx_bytes_headers(headers, filas):
     buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
 
 
+def test_preview_transformar_filtro_clasificacion(tmp_path):
+    alm = _alm(tmp_path)
+    # Solo debería afectar al insumo "200" (PRECIO IDU = publico), no a "100" (COSTO INTERNO)
+    out = svc.preview_transformar(alm, {"clasificacion": "publico"},
+                                  {"tipo": "precio_pct", "valor": 10})
+    assert out["afectados"] == 1
+    assert out["cambios"][0]["codigo"] == "200"
+
+
 def test_parse_tabla_sin_codigo_lanza_valueerror(tmp_path):
     contenido = _xlsx_bytes_headers(["NOMBRE", "PRECIO"], [["Arena", 5000]])
     with pytest.raises(ValueError):

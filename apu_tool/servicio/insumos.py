@@ -139,7 +139,7 @@ def preview_import(alm: Almacen, contenido: bytes, nombre: str) -> dict:
 def preview_transformar(alm: Almacen, filtro: dict, operacion: dict) -> dict:
     items, _ = alm.precios.list_insumos(
         q=filtro.get("q"), grupo=filtro.get("grupo"), fuente=filtro.get("fuente"),
-        limit=1_000_000, offset=0)
+        clasificacion=filtro.get("clasificacion"), limit=1_000_000, offset=0)
     tipo, valor = operacion.get("tipo"), operacion.get("valor")
     cambios = []
     for ins in items:

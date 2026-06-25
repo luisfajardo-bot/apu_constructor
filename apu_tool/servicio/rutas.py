@@ -79,7 +79,7 @@ def _event_stream(gen):
         for evento, payload in gen:
             yield f"event: {evento}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
     except Exception as e:  # nunca dejar el stream a medias sin avisar
-        yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
+        yield f"event: error\ndata: {json.dumps({'detail': str(e)}, ensure_ascii=False)}\n\n"
 
 
 @router.post("/corridas/stream")

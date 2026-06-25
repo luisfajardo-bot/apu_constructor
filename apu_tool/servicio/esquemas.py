@@ -15,3 +15,18 @@ class StatusOut(BaseModel):
 class ConfirmarIn(BaseModel):
     apu_codigo: str
     shift: Optional[str] = None
+
+
+class CambioIn(BaseModel):
+    insumo_id: int
+    precio: float
+    fuente: str = ""
+
+
+class CambiosIn(BaseModel):
+    cambios: list[CambioIn]
+
+
+class TransformarIn(BaseModel):
+    filtro: dict
+    operacion: dict

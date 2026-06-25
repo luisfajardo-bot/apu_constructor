@@ -14,8 +14,9 @@ from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.licitacion import read_licitacion
 from apu_tool.dominio.pipeline import ensure_seeded, generate_sample
 from apu_tool.servicio import corridas as svc
+from apu_tool.servicio import insumos as insumos_svc
 from apu_tool.servicio.dependencias import get_almacen
-from apu_tool.servicio.esquemas import ConfirmarIn, StatusOut
+from apu_tool.servicio.esquemas import CambiosIn, ConfirmarIn, StatusOut, TransformarIn
 
 router = APIRouter()
 
@@ -102,3 +103,51 @@ def cuadro(cid: int, alm: Almacen = Depends(get_almacen)):
     if out is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return FileResponse(str(out), filename=out.name, media_type=_XLSX)
+
+
+@router.get("/insumos")
+def listar_insumos(q: Optional[str] = None, grupo: Optional[str] = None,
+                   fuente: Optional[str] = None, limit: int = 100, offset: int = 0,
+                   alm: Almacen = Depends(get_almacen)):
+    return insumos_svc.listar(alm, q, grupo, fuente, limit, offset)
+
+
+@router.get("/insumos/grupos")
+def insumos_grupos(alm: Almacen = Depends(get_almacen)):
+    return alm.precios.grupos()
+
+
+@router.get("/insumos/fuentes")
+def insumos_fuentes(alm: Almacen = Depends(get_almacen)):
+    return alm.precios.fuentes()
+
+
+@router.get("/insumos/{insumo_id}")
+def insumo_detalle(insumo_id: int, alm: Almacen = Depends(get_almacen)):
+    d = insumos_svc.detalle(alm, insumo_id)
+    if d is None:
+        raise HTTPException(status_code=404, detail="Insumo no encontrado.")
+    return d
+
+
+@router.post("/insumos/cambios")
+def insumos_cambios(body: CambiosIn, alm: Almacen = Depends(get_almacen)):
+    return insumos_svc.aplicar_cambios(alm, [c.model_dump() for c in body.cambios])
+
+
+@router.post("/insumos/importar/preview")
+async def insumos_importar_preview(archivo: UploadFile = File(...),
+                                   alm: Almacen = Depends(get_almacen)):
+    contenido = await archivo.read()
+    try:
+        return insumos_svc.preview_import(alm, contenido, archivo.filename or "lista.xlsx")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/insumos/transformar/preview")
+def insumos_transformar_preview(body: TransformarIn, alm: Almacen = Depends(get_almacen)):
+    try:
+        return insumos_svc.preview_transformar(alm, body.filtro, body.operacion)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

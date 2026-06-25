@@ -28,8 +28,11 @@ def _estructura(componentes) -> list[dict]:
              "unidad": c.unidad, "rendimiento": c.rendimiento} for c in componentes]
 
 
-def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
-                      turno_def: str, use_ai: Optional[bool]) -> int:
+def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
+                             turno_def: str, use_ai: Optional[bool]):
+    """Arma la corrida emitiendo progreso. Genera ('progress', {...}) por ítem y
+    ('done', {'id', 'resumen'}) al final. La lógica de armado por ítem es idéntica
+    a la versión no-stream; solo se añaden el log de consola y los yields."""
     advisor = ApuAdvisor(enabled=use_ai)
     assembler = Assembler(alm, advisor=advisor)
     corrida_id = alm.corridas.crear_corrida(CorridaMeta(
@@ -37,11 +40,10 @@ def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
         archivo=archivo, turno_def=turno_def, use_ai=use_ai,
         estado="en_revision", cuadro_path=None))
     filas: list[CorridaItemRow] = []
+    total = len(items)
     for seq, item in enumerate(items):
-        # Doble match intencional: matcher.match() genera los candidatos para
-        # mostrar al usuario; assemble_item() vuelve a correr el mismo matcher
-        # determinístico internamente para elegir el APU final. No optimizar
-        # eliminando una de las dos llamadas.
+        i = seq + 1
+        print(f"  [{i}/{total}] {item.descripcion[:60]}", flush=True)
         result = assembler.matcher.match(item)
         candidatos = [{"apu_codigo": c.apu_codigo, "apu_nombre": c.apu_nombre,
                        "score": c.score, "motivo": c.motivo}
@@ -52,7 +54,19 @@ def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
             apu_nombre=ens.apu_nombre, unidad=ens.unidad, shift=ens.shift,
             origen=ens.origen, confianza=ens.confianza, explicacion=ens.explicacion,
             componentes=_estructura(ens.componentes), candidatos=candidatos))
+        yield ("progress", {"i": i, "total": total, "descripcion": item.descripcion})
     alm.corridas.guardar_items(corrida_id, filas)
+    resumen = vista_corrida(alm, corrida_id)["totales"]
+    yield ("done", {"id": corrida_id, "resumen": resumen})
+
+
+def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
+                      turno_def: str, use_ai: Optional[bool]) -> int:
+    """Envoltorio no-stream: drena el generador e ignora el progreso; devuelve el id."""
+    corrida_id = -1
+    for evento, payload in construir_corrida_stream(alm, archivo, items, turno_def, use_ai):
+        if evento == "done":
+            corrida_id = payload["id"]
     return corrida_id
 
 

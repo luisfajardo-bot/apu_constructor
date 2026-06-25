@@ -64,3 +64,28 @@ def test_detalle_item_inexistente(tmp_path):
     alm = _almacen_seed(tmp_path)
     assert svc.detalle_item(alm, 1, 0) is None
     assert svc.confirmar_item(alm, 1, 0, "A1") is None
+
+
+from apu_tool.nucleo.models import LicitacionItem
+
+
+def test_construir_corrida_stream_emite_progreso_y_done(tmp_path):
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    eventos = list(svc.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False))
+    tipos = [e[0] for e in eventos]
+    assert tipos == ["progress", "done"]
+    assert eventos[0][1] == {"i": 1, "total": 1, "descripcion": "Concreto clase D"}
+    assert isinstance(eventos[1][1]["id"], int)
+    assert eventos[1][1]["resumen"]["n_items"] == 1
+
+
+def test_construir_corrida_sigue_devolviendo_id(tmp_path):
+    # REGRESION: el envoltorio debe comportarse igual que antes.
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False)
+    assert isinstance(cid, int)
+    assert svc.vista_corrida(alm, cid)["totales"]["n_items"] == 1

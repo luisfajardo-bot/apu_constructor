@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import TablaItems from "@/components/corrida/TablaItems";
-import PanelRevision from "@/components/corrida/PanelRevision";
 import { getCorrida, descargarCuadroUrl } from "@/api/corridas";
 import { cop, pct } from "@/lib/moneda";
 import type { CorridaDetalle } from "@/lib/tipos";
@@ -14,7 +13,6 @@ export default function Corrida() {
   const [corrida, setCorrida] = useState<CorridaDetalle | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [seqAbierto, setSeqAbierto] = useState<number | null>(null);
 
   useEffect(() => {
     setCargando(true);
@@ -26,10 +24,6 @@ export default function Corrida() {
       )
       .finally(() => setCargando(false));
   }, [corridaId]);
-
-  function handleConfirmed(actualizada: CorridaDetalle) {
-    setCorrida(actualizada);
-  }
 
   if (cargando) {
     return (
@@ -109,14 +103,10 @@ export default function Corrida() {
       </div>
 
       {/* Dense table */}
-      <TablaItems items={corrida.items} onSelectItem={setSeqAbierto} />
-
-      {/* Revision panel */}
-      <PanelRevision
+      <TablaItems
         corridaId={corridaId}
-        seq={seqAbierto}
-        onClose={() => setSeqAbierto(null)}
-        onConfirmed={handleConfirmed}
+        items={corrida.items}
+        onConfirmado={(c) => setCorrida(c)}
       />
     </div>
   );

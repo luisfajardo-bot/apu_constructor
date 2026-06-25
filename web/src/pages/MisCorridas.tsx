@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { listarCorridas, eliminarCorrida } from "@/api/corridas";
+import { fmtDuracion } from "@/lib/tiempo";
 import type { CorridaResumen } from "@/lib/tipos";
 
 function fechaLegible(iso: string): string {
@@ -73,6 +74,7 @@ export default function MisCorridas() {
                 <th style={styles.th}>Nombre</th>
                 <th style={{ ...styles.th, ...styles.thNum }}>Items</th>
                 <th style={{ ...styles.th, ...styles.thNum }}>Por revisar</th>
+                <th style={{ ...styles.th, ...styles.thNum }}>Tiempo</th>
                 <th style={styles.th}>Estado</th>
                 <th style={styles.th}></th>
               </tr>
@@ -96,6 +98,7 @@ export default function MisCorridas() {
                   </td>
                   <td style={{ ...styles.td, ...styles.tdNum }}>{c.n_items}</td>
                   <td style={{ ...styles.td, ...styles.tdNum }}>{c.n_revision}</td>
+                  <td style={{ ...styles.td, ...styles.tdNum }}>{fmtDuracion(c.duracion_ms)}</td>
                   <td style={styles.td}>
                     <span style={{ ...styles.badge, ...estadoBadgeStyle(c.estado) }}>
                       {c.estado}

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import TablaItems from "@/components/corrida/TablaItems";
 import { getCorrida, descargarCuadroUrl } from "@/api/corridas";
 import { cop, pct } from "@/lib/moneda";
+import { fmtDuracion } from "@/lib/tiempo";
 import type { CorridaDetalle } from "@/lib/tipos";
 
 export default function Corrida() {
@@ -94,7 +95,7 @@ export default function Corrida() {
 
       {/* Counters sub-line */}
       <div className="flex items-center gap-4 text-xs text-muted-foreground">
-        <span>{totales.n_items} ítems</span>
+        <span>{totales.n_items} APUs · armada en {fmtDuracion(corrida.duracion_ms)}</span>
         {totales.n_revision > 0 && (
           <span className="text-amber-700 font-medium">
             {totales.n_revision} por revisar

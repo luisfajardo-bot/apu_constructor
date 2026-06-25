@@ -105,6 +105,7 @@ export interface CorridaResumen {
   estado: string;
   n_items: number;
   n_revision: number;
+  duracion_ms: number | null;
 }
 
 // Wrappers de respuesta
@@ -126,6 +127,7 @@ export interface CorridaDetalle {
   estado: string;
   items: ItemCuadro[];
   totales: Totales;
+  duracion_ms: number | null;
 }
 
 export interface ListaInsumos {

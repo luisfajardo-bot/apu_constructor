@@ -41,7 +41,7 @@ python -m pytest tests/ -q  # pruebas
 ```
 
 La IA se activa solo si existe `ANTHROPIC_API_KEY`; sin ella se usa un fallback
-determinístico y todo corre igual. Modelo por defecto: `claude-opus-4-8`
+determinístico y todo corre igual. Modelo por defecto: `claude-haiku-4-5-20251001`
 (`apu_tool/config.py::AI_MODEL`).
 
 ## Arquitectura (flujo)

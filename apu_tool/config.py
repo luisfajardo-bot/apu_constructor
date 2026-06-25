@@ -24,10 +24,11 @@ APUS_DB_PATH = DATA_DIR / "apus.db"
 CORRIDAS_DB_PATH = DATA_DIR / "corridas.db"
 
 # ---------------------------------------------------------------------------
-# Modelo de IA. Por defecto Claude Opus 4.8. La IA es OPCIONAL: si no hay API key
-# el armador usa el matcher determinístico y nunca falla por ello.
+# Modelo de IA. Por defecto Claude Haiku 4.5 (más barato; se puede subir con
+# APU_AI_MODEL). La IA es OPCIONAL: si no hay API key el armador usa el matcher
+# determinístico y nunca falla por ello.
 # ---------------------------------------------------------------------------
-AI_MODEL = os.environ.get("APU_AI_MODEL", "claude-opus-4-8")
+AI_MODEL = os.environ.get("APU_AI_MODEL", "claude-haiku-4-5-20251001")
 AI_ENABLED_ENV = "ANTHROPIC_API_KEY"  # si está presente, se habilita la IA
 
 # Umbrales del matcher determinístico (similaridad 0..1).

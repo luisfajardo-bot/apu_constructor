@@ -6,6 +6,10 @@ from apu_tool.nucleo.models import Apu, ApuComponent, Insumo, LicitacionItem
 from apu_tool.servicio.app import create_app
 
 
+def _cli(tmp_path):  # alias usado por los tests de stream
+    return _cliente(tmp_path)
+
+
 def _cliente(tmp_path):
     alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
                   corridas_path=tmp_path / "c.db")
@@ -79,3 +83,35 @@ def test_archivo_ilegible_400(tmp_path):
                      files={"archivo": ("mala.csv", f, "text/csv")})
     assert r.status_code == 400
     assert r.json()["detail"]
+
+
+def test_corridas_stream_emite_progreso_y_done(tmp_path):
+    cli, _ = _cli(tmp_path)
+    lic = _xlsx_lic(tmp_path)
+    with open(lic, "rb") as f:
+        r = cli.post("/api/corridas/stream",
+                     data={"turno": "DIURNO", "use_ai": "false"},
+                     files={"archivo": ("lic.xlsx", f,
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert r.status_code == 200
+    assert "text/event-stream" in r.headers["content-type"]
+    body = r.text
+    assert "event: progress" in body
+    assert "event: done" in body
+
+
+def test_sample_stream_ok(tmp_path):
+    cli, _ = _cli(tmp_path)
+    r = cli.post("/api/sample/stream")
+    assert r.status_code == 200
+    assert "event: done" in r.text
+
+
+def test_corridas_stream_archivo_malo_400(tmp_path):
+    cli, _ = _cli(tmp_path)
+    mala = tmp_path / "mala.csv"
+    mala.write_text("foo,bar\n1,2\n", encoding="utf-8")
+    with open(mala, "rb") as f:
+        r = cli.post("/api/corridas/stream", data={"turno": "DIURNO"},
+                     files={"archivo": ("mala.csv", f, "text/csv")})
+    assert r.status_code == 400

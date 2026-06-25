@@ -1,13 +1,14 @@
 """Endpoints de la API. Delgados: validan y delegan en apu_tool.servicio.corridas."""
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
 from typing import Optional
 
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, UploadFile)
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
@@ -70,6 +71,59 @@ def crear_sample(alm: Almacen = Depends(get_almacen)):
         raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
     cid = svc.construir_corrida(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False)
     return {"id": cid, "resumen": svc.vista_corrida(alm, cid)["totales"]}
+
+
+def _event_stream(gen):
+    """Serializa los eventos del generador como SSE; cualquier fallo a mitad -> event: error."""
+    try:
+        for evento, payload in gen:
+            yield f"event: {evento}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    except Exception as e:  # nunca dejar el stream a medias sin avisar
+        yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
+
+
+@router.post("/corridas/stream")
+async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
+                               use_ai: Optional[bool] = Form(None),
+                               archivo: UploadFile = File(...),
+                               alm: Almacen = Depends(get_almacen)):
+    if alm.counts().get("apus", 0) == 0:
+        ensure_seeded()
+    suf = Path(archivo.filename or "lic.xlsx").suffix or ".xlsx"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suf) as tmp:
+        tmp.write(await archivo.read())
+        tmp_path = tmp.name
+    try:
+        items = read_licitacion(tmp_path, default_shift=turno)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        os.unlink(tmp_path)
+    if not items:
+        raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
+    gen = svc.construir_corrida_stream(alm, archivo.filename or "licitacion", items, turno, use_ai)
+    return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
+
+
+@router.post("/sample/stream")
+def crear_sample_stream(alm: Almacen = Depends(get_almacen)):
+    if alm.counts().get("apus", 0) == 0:
+        ensure_seeded()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        sample_path = tmp.name
+    try:
+        generate_sample(out_path=Path(sample_path), alm=alm)
+        items = read_licitacion(sample_path, default_shift=config.SHIFT_DIURNO)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        os.unlink(sample_path)
+    if not items:
+        raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
+    gen = svc.construir_corrida_stream(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False)
+    return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/corridas/{cid}")

@@ -110,6 +110,28 @@ def test_stream_persiste_duracion(tmp_path):
     assert alm.corridas.get_corrida(done["id"]).duracion_ms == done["duracion_ms"]
 
 
+def test_stream_no_persiste_corrida_hasta_done(tmp_path):
+    # REGRESION (bug "FOREIGN KEY constraint failed" en lista larga):
+    # la corrida y sus ítems se persisten ATÓMICAMENTE al final. Antes la fila
+    # `corrida` se creaba al inicio y quedaba vacía/borrable durante TODO el armado
+    # (minutos en listas largas); si se borraba o reseteaba en el ínterin, el
+    # guardar_items final insertaba corrida_item contra una corrida inexistente ->
+    # FOREIGN KEY constraint failed. Ahora no existe corrida a medio armar.
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO"),
+             LicitacionItem(item="2", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=5.0, precio_contractual=200000.0, shift="DIURNO")]
+    gen = svc.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False)
+    ev, _ = next(gen)                                   # primer progress emitido
+    assert ev == "progress"
+    assert alm.corridas.counts()["corrida"] == 0        # nada persistido a medio armar
+    resto = list(gen)                                   # consumir hasta 'done'
+    assert resto[-1][0] == "done"
+    assert alm.corridas.counts()["corrida"] == 1        # aparece sólo al final
+    assert alm.corridas.counts()["corrida_item"] == 2   # con sus ítems, atómico
+
+
 def test_vista_y_lista_exponen_duracion(tmp_path):
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",

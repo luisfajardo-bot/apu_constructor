@@ -56,31 +56,56 @@ class CorridasDB:
             conn.executescript(_load_schema())
 
     # ---- escritura ----
-    def crear_corrida(self, meta: CorridaMeta) -> int:
-        with self.connect() as conn:
-            cur = conn.execute(
-                "INSERT INTO corrida (creada_en, archivo, turno_def, use_ai, estado, cuadro_path) "
-                "VALUES (?,?,?,?,?,?)",
-                (meta.creada_en, meta.archivo, meta.turno_def,
-                 None if meta.use_ai is None else int(meta.use_ai),
-                 meta.estado, meta.cuadro_path))
-            return int(cur.lastrowid)
+    _INSERT_ITEM_SQL = (
+        "INSERT INTO corrida_item "
+        "(corrida_id, seq, item_json, status, apu_codigo, apu_nombre, unidad, "
+        " shift, origen, confianza, explicacion, componentes_json, candidatos_json) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
 
-    def guardar_items(self, corrida_id: int, items: list[CorridaItemRow]) -> int:
-        rows = []
-        for it in items:
-            rows.append((
-                corrida_id, it.seq, json.dumps(asdict(it.item), ensure_ascii=False),
+    @staticmethod
+    def _item_tuple(corrida_id: int, it: CorridaItemRow) -> tuple:
+        return (corrida_id, it.seq, json.dumps(asdict(it.item), ensure_ascii=False),
                 it.status, it.apu_codigo, it.apu_nombre, it.unidad, it.shift,
                 it.origen, it.confianza, it.explicacion,
                 json.dumps(it.componentes, ensure_ascii=False),
-                json.dumps(it.candidatos, ensure_ascii=False)))
+                json.dumps(it.candidatos, ensure_ascii=False))
+
+    def _insert_corrida(self, conn: sqlite3.Connection, meta: CorridaMeta) -> int:
+        cur = conn.execute(
+            "INSERT INTO corrida (creada_en, archivo, turno_def, use_ai, estado, "
+            "cuadro_path, duracion_ms) VALUES (?,?,?,?,?,?,?)",
+            (meta.creada_en, meta.archivo, meta.turno_def,
+             None if meta.use_ai is None else int(meta.use_ai),
+             meta.estado, meta.cuadro_path, meta.duracion_ms))
+        return int(cur.lastrowid)
+
+    def crear_corrida(self, meta: CorridaMeta) -> int:
         with self.connect() as conn:
+            return self._insert_corrida(conn, meta)
+
+    def crear_corrida_con_items(self, meta: CorridaMeta,
+                                items: list[CorridaItemRow]) -> int:
+        """Crea la corrida y guarda sus ítems en UNA sola transacción (atómico).
+
+        A diferencia de ``crear_corrida()`` + ``guardar_items()`` (dos
+        transacciones separadas), aquí la corrida NO existe hasta que sus ítems
+        están listos. Así no se expone una corrida vacía "a medio armar" — que
+        durante un armado largo podría borrarse o resetearse y dejar el guardado
+        final insertando ``corrida_item`` contra una corrida inexistente
+        (``FOREIGN KEY constraint failed``) — ni quedan corridas huérfanas si el
+        armado se abandona. ``duracion_ms`` se inserta directamente desde la meta.
+        """
+        with self.connect() as conn:
+            corrida_id = self._insert_corrida(conn, meta)
             conn.executemany(
-                "INSERT INTO corrida_item "
-                "(corrida_id, seq, item_json, status, apu_codigo, apu_nombre, unidad, "
-                " shift, origen, confianza, explicacion, componentes_json, candidatos_json) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+                self._INSERT_ITEM_SQL,
+                [self._item_tuple(corrida_id, it) for it in items])
+            return corrida_id
+
+    def guardar_items(self, corrida_id: int, items: list[CorridaItemRow]) -> int:
+        rows = [self._item_tuple(corrida_id, it) for it in items]
+        with self.connect() as conn:
+            conn.executemany(self._INSERT_ITEM_SQL, rows)
         return len(rows)
 
     def actualizar_eleccion(self, corrida_id: int, seq: int, *, status: str,

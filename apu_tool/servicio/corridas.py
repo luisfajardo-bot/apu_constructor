@@ -32,14 +32,17 @@ def _estructura(componentes) -> list[dict]:
 def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
                              turno_def: str, use_ai: Optional[bool]):
     """Arma la corrida emitiendo progreso. Genera ('progress', {...}) por ítem y
-    ('done', {'id', 'resumen'}) al final. La lógica de armado por ítem es idéntica
-    a la versión no-stream; solo se añaden el log de consola y los yields."""
+    ('done', {'id', 'resumen', 'duracion_ms'}) al final. La lógica de armado por
+    ítem es idéntica a la versión no-stream; solo se añaden el log y los yields.
+
+    La corrida y sus ítems se PERSISTEN al final, atómicamente
+    (`crear_corrida_con_items`): durante el armado no existe ninguna fila
+    `corrida` a medio hacer. Esto evita el bug en el que una corrida vacía
+    `en_revision`, creada al inicio de un armado largo, podía borrarse o
+    resetearse antes del guardado final y reventar con
+    `FOREIGN KEY constraint failed`; y evita corridas huérfanas si se abandona."""
     advisor = ApuAdvisor(enabled=use_ai)
     assembler = Assembler(alm, advisor=advisor)
-    corrida_id = alm.corridas.crear_corrida(CorridaMeta(
-        id=None, creada_en=datetime.now().isoformat(timespec="seconds"),
-        archivo=archivo, turno_def=turno_def, use_ai=use_ai,
-        estado="en_revision", cuadro_path=None))
     t0 = time.monotonic()
     filas: list[CorridaItemRow] = []
     total = len(items)
@@ -61,9 +64,12 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
             origen=ens.origen, confianza=ens.confianza, explicacion=ens.explicacion,
             componentes=_estructura(ens.componentes), candidatos=candidatos))
         yield ("progress", {"i": i, "total": total, "descripcion": item.descripcion})
-    alm.corridas.guardar_items(corrida_id, filas)
     duracion_ms = round((time.monotonic() - t0) * 1000)
-    alm.corridas.set_duracion(corrida_id, duracion_ms)
+    corrida_id = alm.corridas.crear_corrida_con_items(
+        CorridaMeta(id=None, creada_en=datetime.now().isoformat(timespec="seconds"),
+                    archivo=archivo, turno_def=turno_def, use_ai=use_ai,
+                    estado="en_revision", cuadro_path=None, duracion_ms=duracion_ms),
+        filas)
     resumen = vista_corrida(alm, corrida_id)["totales"]
     yield ("done", {"id": corrida_id, "resumen": resumen, "duracion_ms": duracion_ms})
 

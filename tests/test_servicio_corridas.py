@@ -66,9 +66,6 @@ def test_detalle_item_inexistente(tmp_path):
     assert svc.confirmar_item(alm, 1, 0, "A1") is None
 
 
-from apu_tool.nucleo.models import LicitacionItem
-
-
 def test_construir_corrida_stream_emite_progreso_y_done(tmp_path):
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",

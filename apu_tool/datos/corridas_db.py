@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 from apu_tool import config
+from apu_tool.datos.repositorio import CorridaEliminada
 from apu_tool.nucleo.models import CorridaItemRow, CorridaMeta, LicitacionItem
 
 SCHEMA_PATH = config.PROJECT_ROOT / "db" / "corridas.sql"
@@ -83,30 +84,24 @@ class CorridasDB:
         with self.connect() as conn:
             return self._insert_corrida(conn, meta)
 
-    def crear_corrida_con_items(self, meta: CorridaMeta,
-                                items: list[CorridaItemRow]) -> int:
-        """Crea la corrida y guarda sus ítems en UNA sola transacción (atómico).
-
-        A diferencia de ``crear_corrida()`` + ``guardar_items()`` (dos
-        transacciones separadas), aquí la corrida NO existe hasta que sus ítems
-        están listos. Así no se expone una corrida vacía "a medio armar" — que
-        durante un armado largo podría borrarse o resetearse y dejar el guardado
-        final insertando ``corrida_item`` contra una corrida inexistente
-        (``FOREIGN KEY constraint failed``) — ni quedan corridas huérfanas si el
-        armado se abandona. ``duracion_ms`` se inserta directamente desde la meta.
-        """
-        with self.connect() as conn:
-            corrida_id = self._insert_corrida(conn, meta)
-            conn.executemany(
-                self._INSERT_ITEM_SQL,
-                [self._item_tuple(corrida_id, it) for it in items])
-            return corrida_id
-
     def guardar_items(self, corrida_id: int, items: list[CorridaItemRow]) -> int:
         rows = [self._item_tuple(corrida_id, it) for it in items]
         with self.connect() as conn:
             conn.executemany(self._INSERT_ITEM_SQL, rows)
         return len(rows)
+
+    def agregar_item(self, corrida_id: int, fila: CorridaItemRow) -> None:
+        """Inserta un ítem (armado incremental: se persiste cada APU al armarlo).
+
+        Si la corrida ya no existe (la borraron o se reseteó durante el armado), el
+        INSERT viola la FK; se traduce a ``CorridaEliminada`` para que la capa de
+        servicio cancele el armado limpio en vez de propagar el error de integridad.
+        """
+        try:
+            with self.connect() as conn:
+                conn.execute(self._INSERT_ITEM_SQL, self._item_tuple(corrida_id, fila))
+        except sqlite3.IntegrityError as e:
+            raise CorridaEliminada(corrida_id) from e
 
     def actualizar_eleccion(self, corrida_id: int, seq: int, *, status: str,
                             apu_codigo: Optional[str], apu_nombre: str, unidad: str,

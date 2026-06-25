@@ -14,6 +14,7 @@ from typing import Optional
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
+from apu_tool.datos.repositorio import CorridaEliminada
 from apu_tool.dominio.assemble import Assembler, ApuAdvisor
 from apu_tool.dominio.pricing import PricingEngine
 from apu_tool.dominio.report import write_report
@@ -31,21 +32,26 @@ def _estructura(componentes) -> list[dict]:
 
 def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
                              turno_def: str, use_ai: Optional[bool]):
-    """Arma la corrida emitiendo progreso. Genera ('progress', {...}) por ítem y
-    ('done', {'id', 'resumen', 'duracion_ms'}) al final. La lógica de armado por
-    ítem es idéntica a la versión no-stream; solo se añaden el log y los yields.
+    """Arma la corrida de forma INCREMENTAL, emitiendo eventos:
+      ('started', {'id', 'total'})           — al crear la corrida (estado 'armando').
+      ('progress', {'i','total','descripcion','fila'}) — por ítem, con la fila ya
+                                                costeada; el ítem ya quedó persistido.
+      ('done', {'id','resumen','duracion_ms'}) — al terminar (estado 'en_revision').
+      ('error', {'detail': ...})             — si la corrida se borra/resetea a mitad
+                                                (cancelación limpia, sin FK crudo).
 
-    La corrida y sus ítems se PERSISTEN al final, atómicamente
-    (`crear_corrida_con_items`): durante el armado no existe ninguna fila
-    `corrida` a medio hacer. Esto evita el bug en el que una corrida vacía
-    `en_revision`, creada al inicio de un armado largo, podía borrarse o
-    resetearse antes del guardado final y reventar con
-    `FOREIGN KEY constraint failed`; y evita corridas huérfanas si se abandona."""
+    Cada APU se guarda al armarlo (no todo al final), así la tabla se llena en vivo y
+    lo ya armado sobrevive si se abandona. La corrida nace 'armando'; si desaparece
+    durante el armado, `agregar_item` lanza CorridaEliminada y se cancela."""
     advisor = ApuAdvisor(enabled=use_ai)
     assembler = Assembler(alm, advisor=advisor)
-    t0 = time.monotonic()
-    filas: list[CorridaItemRow] = []
+    corrida_id = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en=datetime.now().isoformat(timespec="seconds"),
+        archivo=archivo, turno_def=turno_def, use_ai=use_ai,
+        estado="armando", cuadro_path=None))
     total = len(items)
+    yield ("started", {"id": corrida_id, "total": total})
+    t0 = time.monotonic()
     for seq, item in enumerate(items):
         i = seq + 1
         print(f"  [{i}/{total}] {item.descripcion[:60]}", flush=True)
@@ -57,18 +63,22 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
                        "score": c.score, "motivo": c.motivo}
                       for c in result.candidatos]
         ens = assembler.assemble_item(item, result)
-        filas.append(CorridaItemRow(
+        fila = CorridaItemRow(
             seq=seq, item=item, status=ens.status.value, apu_codigo=ens.apu_codigo,
             apu_nombre=ens.apu_nombre, unidad=ens.unidad, shift=ens.shift,
             origen=ens.origen, confianza=ens.confianza, explicacion=ens.explicacion,
-            componentes=_estructura(ens.componentes), candidatos=candidatos))
-        yield ("progress", {"i": i, "total": total, "descripcion": item.descripcion})
+            componentes=_estructura(ens.componentes), candidatos=candidatos)
+        try:
+            alm.corridas.agregar_item(corrida_id, fila)
+        except CorridaEliminada:
+            yield ("error", {"detail": "Armado cancelado: la corrida fue eliminada."})
+            return
+        yield ("progress", {"i": i, "total": total,
+                            "descripcion": item.descripcion,
+                            "fila": _vista_item(ens, seq, ens.status.value)})
     duracion_ms = round((time.monotonic() - t0) * 1000)
-    corrida_id = alm.corridas.crear_corrida_con_items(
-        CorridaMeta(id=None, creada_en=datetime.now().isoformat(timespec="seconds"),
-                    archivo=archivo, turno_def=turno_def, use_ai=use_ai,
-                    estado="en_revision", cuadro_path=None, duracion_ms=duracion_ms),
-        filas)
+    alm.corridas.set_estado(corrida_id, "en_revision")
+    alm.corridas.set_duracion(corrida_id, duracion_ms)
     resumen = vista_corrida(alm, corrida_id)["totales"]
     yield ("done", {"id": corrida_id, "resumen": resumen, "duracion_ms": duracion_ms})
 

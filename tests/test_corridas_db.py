@@ -1,7 +1,9 @@
 import sqlite3
+import pytest
 from apu_tool.nucleo.models import CorridaItemRow, CorridaMeta, LicitacionItem
 from apu_tool.datos.almacen import Almacen
 from apu_tool.datos.corridas_db import CorridasDB
+from apu_tool.datos.repositorio import CorridaEliminada
 
 
 def test_corrida_meta_y_item_row_se_construyen():
@@ -109,31 +111,31 @@ def test_set_duracion_y_lee(tmp_path):
     assert alm.corridas.listar_corridas()[0].duracion_ms == 3210
 
 
-def test_crear_corrida_con_items_atomico(tmp_path):
-    # La corrida y sus ítems se crean en UNA transacción (no hay corrida vacía
-    # intermedia); duracion_ms se inserta directamente.
+def test_agregar_item_incremental(tmp_path):
+    # Armado incremental: cada ítem se persiste al agregarlo (no todo al final).
     alm = _almacen_tmp(tmp_path)
-    meta = CorridaMeta(id=None, creada_en="2026-06-25T10:00:00", archivo="lic.xlsx",
-                       turno_def="DIURNO", use_ai=False, estado="en_revision",
-                       duracion_ms=1234)
-    cid = alm.corridas.crear_corrida_con_items(meta, [_fila(0), _fila(1)])
-    assert isinstance(cid, int)
-    got = alm.corridas.get_corrida(cid)
-    assert got.archivo == "lic.xlsx" and got.use_ai is False and got.duracion_ms == 1234
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="x", archivo="a.xlsx", turno_def="DIURNO",
+        use_ai=False, estado="armando"))
+    alm.corridas.agregar_item(cid, _fila(0))
+    assert len(alm.corridas.get_items(cid)) == 1     # ya persistido, no al final
+    alm.corridas.agregar_item(cid, _fila(1))
     items = alm.corridas.get_items(cid)
-    assert len(items) == 2
+    assert [it.seq for it in items] == [0, 1]
     assert items[0].componentes[0]["insumo_codigo"] == "100"
     assert items[1].candidatos[0]["apu_codigo"] == "A1"
 
 
-def test_crear_corrida_con_items_sin_items(tmp_path):
-    # Caso borde: lista vacía -> corrida creada, cero ítems, sin reventar.
+def test_agregar_item_corrida_eliminada(tmp_path):
+    # Si la corrida se borró durante el armado, agregar_item lanza CorridaEliminada
+    # (no un FOREIGN KEY crudo) para que el servicio cancele limpio.
     alm = _almacen_tmp(tmp_path)
-    meta = CorridaMeta(id=None, creada_en="x", archivo="vacia.xlsx",
-                       turno_def="DIURNO", use_ai=None, estado="en_revision")
-    cid = alm.corridas.crear_corrida_con_items(meta, [])
-    assert alm.corridas.get_corrida(cid) is not None
-    assert alm.corridas.get_items(cid) == []
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="x", archivo="a.xlsx", turno_def="DIURNO",
+        use_ai=False, estado="armando"))
+    assert alm.corridas.eliminar_corrida(cid) is True
+    with pytest.raises(CorridaEliminada):
+        alm.corridas.agregar_item(cid, _fila(0))
 
 
 def test_migracion_agrega_duracion_ms(tmp_path):

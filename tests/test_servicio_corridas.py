@@ -66,16 +66,21 @@ def test_detalle_item_inexistente(tmp_path):
     assert svc.confirmar_item(alm, 1, 0, "A1") is None
 
 
-def test_construir_corrida_stream_emite_progreso_y_done(tmp_path):
+def test_construir_corrida_stream_emite_started_progreso_done(tmp_path):
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
     eventos = list(svc.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False))
-    tipos = [e[0] for e in eventos]
-    assert tipos == ["progress", "done"]
-    assert eventos[0][1] == {"i": 1, "total": 1, "descripcion": "Concreto clase D"}
-    assert isinstance(eventos[1][1]["id"], int)
-    assert eventos[1][1]["resumen"]["n_items"] == 1
+    assert [e[0] for e in eventos] == ["started", "progress", "done"]
+    started = eventos[0][1]
+    assert isinstance(started["id"], int) and started["total"] == 1
+    prog = eventos[1][1]
+    assert prog["i"] == 1 and prog["total"] == 1 and prog["descripcion"] == "Concreto clase D"
+    # El progress trae la fila ya costeada (para pintar la tabla en vivo).
+    assert prog["fila"]["apu_codigo"] == "A1"
+    assert prog["fila"]["costo_unitario"] == 1.05 * 350000.0
+    done = eventos[2][1]
+    assert done["id"] == started["id"] and done["resumen"]["n_items"] == 1
 
 
 def test_construir_corrida_sigue_devolviendo_id(tmp_path):
@@ -110,26 +115,46 @@ def test_stream_persiste_duracion(tmp_path):
     assert alm.corridas.get_corrida(done["id"]).duracion_ms == done["duracion_ms"]
 
 
-def test_stream_no_persiste_corrida_hasta_done(tmp_path):
-    # REGRESION (bug "FOREIGN KEY constraint failed" en lista larga):
-    # la corrida y sus ítems se persisten ATÓMICAMENTE al final. Antes la fila
-    # `corrida` se creaba al inicio y quedaba vacía/borrable durante TODO el armado
-    # (minutos en listas largas); si se borraba o reseteaba en el ínterin, el
-    # guardar_items final insertaba corrida_item contra una corrida inexistente ->
-    # FOREIGN KEY constraint failed. Ahora no existe corrida a medio armar.
+def test_stream_arma_incremental_y_estado(tmp_path):
+    # Armado incremental: la corrida nace 'armando' y cada ítem se persiste al
+    # emitir su 'progress' (la tabla crece, no aparece toda al final); al terminar
+    # queda 'en_revision'.
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO"),
              LicitacionItem(item="2", descripcion="Concreto clase D", unidad="M3",
                             cantidad=5.0, precio_contractual=200000.0, shift="DIURNO")]
     gen = svc.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False)
-    ev, _ = next(gen)                                   # primer progress emitido
+    ev, payload = next(gen)                              # started
+    assert ev == "started"
+    cid = payload["id"]
+    assert alm.corridas.get_corrida(cid).estado == "armando"
+    assert len(alm.corridas.get_items(cid)) == 0        # aún sin ítems
+    ev, _ = next(gen)                                    # progress 1
     assert ev == "progress"
-    assert alm.corridas.counts()["corrida"] == 0        # nada persistido a medio armar
-    resto = list(gen)                                   # consumir hasta 'done'
+    assert len(alm.corridas.get_items(cid)) == 1        # persistido al vuelo
+    resto = list(gen)                                    # progress 2 + done
     assert resto[-1][0] == "done"
-    assert alm.corridas.counts()["corrida"] == 1        # aparece sólo al final
-    assert alm.corridas.counts()["corrida_item"] == 2   # con sus ítems, atómico
+    assert len(alm.corridas.get_items(cid)) == 2
+    assert alm.corridas.get_corrida(cid).estado == "en_revision"
+
+
+def test_stream_cancela_si_borran_corrida(tmp_path):
+    # Si la corrida se elimina durante el armado, el stream emite 'error' de
+    # cancelación (no propaga FOREIGN KEY) y se detiene.
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO"),
+             LicitacionItem(item="2", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=5.0, precio_contractual=200000.0, shift="DIURNO")]
+    gen = svc.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False)
+    _, payload = next(gen)                               # started
+    cid = payload["id"]
+    next(gen)                                            # progress 1 (item 0 persistido)
+    assert alm.corridas.eliminar_corrida(cid) is True    # el usuario la borra a mitad
+    resto = list(gen)                                    # debe cerrar con 'error', sin excepción
+    assert resto[-1][0] == "error"
+    assert "cancel" in resto[-1][1]["detail"].lower()
 
 
 def test_vista_y_lista_exponen_duracion(tmp_path):

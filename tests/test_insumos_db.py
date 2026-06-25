@@ -29,3 +29,29 @@ def test_set_precio_por_id_id_inexistente(tmp_path):
     alm = _alm(tmp_path)
     with pytest.raises(ValueError):
         alm.precios.set_precio_por_id(99999, 1.0, "X")
+
+
+def test_list_insumos_filtros_y_total(tmp_path):
+    alm = _alm(tmp_path)
+    items, total = alm.precios.list_insumos(limit=10, offset=0)
+    assert total == 2 and len(items) == 2
+    items, total = alm.precios.list_insumos(q="acero")
+    assert total == 1 and items[0].codigo == "200"
+    items, total = alm.precios.list_insumos(grupo="CONCRETOS")
+    assert total == 1 and items[0].codigo == "100"
+    items, total = alm.precios.list_insumos(fuente="PRECIO IDU")
+    assert total == 1 and items[0].codigo == "200"
+
+
+def test_list_insumos_paginacion(tmp_path):
+    alm = _alm(tmp_path)
+    items, total = alm.precios.list_insumos(limit=1, offset=0)
+    assert total == 2 and len(items) == 1
+    items2, _ = alm.precios.list_insumos(limit=1, offset=1)
+    assert items[0].id != items2[0].id
+
+
+def test_grupos_y_fuentes(tmp_path):
+    alm = _alm(tmp_path)
+    assert set(alm.precios.grupos()) == {"ACEROS", "CONCRETOS"}
+    assert set(alm.precios.fuentes()) == {"COSTO INTERNO", "PRECIO IDU"}

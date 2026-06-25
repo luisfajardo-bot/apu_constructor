@@ -159,6 +159,45 @@ class PreciosDB:
             rows = conn.execute(q, params).fetchall()
         return [dict(r) for r in rows]
 
+    def list_insumos(self, q=None, grupo=None, fuente=None,
+                     limit: int = 100, offset: int = 0):
+        base = ("FROM insumos i LEFT JOIN insumo_precios p "
+                "ON p.insumo_id = i.id AND p.vigente = 1")
+        where, params = [], []
+        if q:
+            where.append("(i.nombre LIKE ? OR i.codigo LIKE ?)")
+            like = f"%{q.strip()}%"
+            params += [like, like]
+        if grupo:
+            where.append("i.grupo = ?")
+            params.append(grupo)
+        if fuente:
+            where.append("p.fuente = ?")
+            params.append(fuente)
+        wsql = (" WHERE " + " AND ".join(where)) if where else ""
+        with self.connect() as conn:
+            total = conn.execute(f"SELECT COUNT(*) {base}{wsql}", params).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT i.id, i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente "
+                f"{base}{wsql} ORDER BY i.codigo, i.id LIMIT ? OFFSET ?",
+                params + [int(limit), int(offset)]).fetchall()
+        return [self._fila_a_insumo(r) for r in rows], int(total)
+
+    def grupos(self) -> list[str]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT grupo FROM insumos "
+                "WHERE grupo IS NOT NULL AND grupo <> '' ORDER BY grupo").fetchall()
+        return [r["grupo"] for r in rows]
+
+    def fuentes(self) -> list[str]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT fuente FROM insumo_precios "
+                "WHERE vigente = 1 AND fuente IS NOT NULL AND fuente <> '' "
+                "ORDER BY fuente").fetchall()
+        return [r["fuente"] for r in rows]
+
     def search_insumos(self, texto: str, limit: int = 20) -> list[Insumo]:
         like = f"%{texto.strip()}%"
         with self.connect() as conn:

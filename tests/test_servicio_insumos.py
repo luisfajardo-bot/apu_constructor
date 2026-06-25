@@ -1,4 +1,9 @@
 # tests/test_servicio_insumos.py
+import io
+
+import openpyxl
+import pytest
+
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Insumo
 from apu_tool.servicio import insumos as svc
@@ -43,10 +48,6 @@ def test_aplicar_cambios_ok_y_errores(tmp_path):
     assert alm.precios.get_insumo_por_id(iid).precio == 380000.0
 
 
-import io
-import openpyxl
-
-
 def _xlsx_bytes(filas):
     wb = openpyxl.Workbook(); ws = wb.active
     ws.append(["CODIGO", "PRECIO", "FUENTE"])
@@ -75,3 +76,49 @@ def test_preview_transformar_operaciones(tmp_path):
     out2 = svc.preview_transformar(alm, {"fuente": "PRECIO IDU"},
                                    {"tipo": "fuente", "valor": "IDU 2026"})
     assert out2["afectados"] == 1 and out2["cambios"][0]["fuente_nueva"] == "IDU 2026"
+
+
+def test_preview_transformar_precio_factor(tmp_path):
+    alm = _alm(tmp_path)
+    out = svc.preview_transformar(alm, {"grupo": "CONCRETOS"},
+                                  {"tipo": "precio_factor", "valor": 2.0})
+    assert out["afectados"] == 1
+    assert out["cambios"][0]["precio_nuevo"] == 700000.0   # 350000 * 2.0
+
+
+def test_preview_transformar_precio_set(tmp_path):
+    alm = _alm(tmp_path)
+    out = svc.preview_transformar(alm, {"grupo": "CONCRETOS"},
+                                  {"tipo": "precio_set", "valor": 999.0})
+    assert out["afectados"] == 1
+    assert out["cambios"][0]["precio_nuevo"] == 999.0
+
+
+def _xlsx_bytes_headers(headers, filas):
+    """Construye un xlsx con encabezados arbitrarios."""
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(headers)
+    for f in filas:
+        ws.append(f)
+    buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
+
+
+def test_parse_tabla_sin_codigo_lanza_valueerror(tmp_path):
+    contenido = _xlsx_bytes_headers(["NOMBRE", "PRECIO"], [["Arena", 5000]])
+    with pytest.raises(ValueError):
+        svc._parse_tabla(contenido, "x.xlsx")
+
+
+def test_preview_import_ambiguos(tmp_path):
+    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
+                  corridas_path=tmp_path / "c.db")
+    alm.init_schema()
+    # Dos insumos con el mismo código pero distinto nombre → candidatos ambiguos
+    alm.precios.insert_insumos([
+        Insumo("300", 'Tubería PVC 4"', "ML", "TUBERIAS", 10000.0, "COSTO INTERNO"),
+        Insumo("300", 'Tubería PVC 6"', "ML", "TUBERIAS", 20000.0, "COSTO INTERNO")])
+    contenido = _xlsx_bytes([["300", 15000, "COMPRAS"]])
+    out = svc.preview_import(alm, contenido, "lista.xlsx")
+    assert len(out["ambiguos"]) == 1
+    assert out["ambiguos"][0]["codigo"] == "300"
+    assert len(out["ambiguos"][0]["candidatos"]) == 2

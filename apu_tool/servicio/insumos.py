@@ -7,7 +7,12 @@ cada cambio crea historial vía PreciosDB.set_precio_por_id.
 """
 from __future__ import annotations
 
+import csv
+import io
+import unicodedata
 from typing import Optional
+
+import openpyxl
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
@@ -48,13 +53,6 @@ def aplicar_cambios(alm: Almacen, cambios: list[dict]) -> dict:
         except Exception as e:
             errores.append({"insumo_id": c.get("insumo_id"), "error": str(e)})
     return {"aplicados": aplicados, "errores": errores}
-
-
-import csv
-import io
-import unicodedata
-
-import openpyxl
 
 
 def _norm_h(s: str) -> str:
@@ -154,6 +152,6 @@ def preview_transformar(alm: Almacen, filtro: dict, operacion: dict) -> dict:
         elif tipo == "precio_set":
             nuevo_precio = float(valor)
         else:
-            raise ValueError(f"Operacion desconocida: {tipo}")
+            raise ValueError(f"Operación desconocida: {tipo}")
         cambios.append(_cambio(ins, nuevo_precio, nueva_fuente))
     return {"cambios": cambios, "afectados": len(cambios)}

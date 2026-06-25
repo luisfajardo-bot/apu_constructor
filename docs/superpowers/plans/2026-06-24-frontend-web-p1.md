@@ -51,7 +51,7 @@ web/                            # [nuevo] Vite + React + TS + Tailwind + shadcn
 
 ## FASE A — Backend de insumos
 
-### Task A1: `set_precio_por_id` (edición por id, con historial)
+### Task 1: `set_precio_por_id` (edición por id, con historial)
 
 **Files:**
 - Modify: `apu_tool/datos/precios_db.py`
@@ -162,7 +162,7 @@ git commit -m "feat(datos): set_precio_por_id (edición por id con historial)"
 
 ---
 
-### Task A2: `list_insumos`, `grupos`, `fuentes`
+### Task 2: `list_insumos`, `grupos`, `fuentes`
 
 **Files:**
 - Modify: `apu_tool/datos/precios_db.py`
@@ -279,7 +279,7 @@ git commit -m "feat(datos): list_insumos filtrable + grupos/fuentes"
 
 ---
 
-### Task A3: Servicio de insumos — listar, detalle, aplicar_cambios
+### Task 3: Servicio de insumos — listar, detalle, aplicar_cambios
 
 **Files:**
 - Create: `apu_tool/servicio/insumos.py`
@@ -416,7 +416,7 @@ git commit -m "feat(servicio): insumos listar/detalle/aplicar_cambios"
 
 ---
 
-### Task A4: Servicio de insumos — preview de importación y transformación
+### Task 4: Servicio de insumos — preview de importación y transformación
 
 **Files:**
 - Modify: `apu_tool/servicio/insumos.py`
@@ -601,7 +601,7 @@ git commit -m "feat(servicio): preview de importación y transformación de insu
 
 ---
 
-### Task A5: Endpoints `/api/insumos*`
+### Task 5: Endpoints `/api/insumos*`
 
 **Files:**
 - Modify: `apu_tool/servicio/rutas.py`
@@ -774,7 +774,7 @@ git commit -m "feat(api): endpoints /api/insumos (listar, cambios, importar, tra
 
 > A partir de aquí las tareas son frontend (estilo contrato + verificación ejecutando). Trabaja en `web/`. Node debe estar disponible (`node -v`, `npm -v`). La estética es **densa, table-first, sin cards**.
 
-### Task B1: Scaffold del proyecto web
+### Task 6: Scaffold del proyecto web
 
 **Files:**
 - Create: `web/` (Vite React-TS + Tailwind + shadcn) — `package.json`, `vite.config.ts`, `tsconfig*.json`, `index.html`, `src/main.tsx`, `src/App.tsx`, `src/index.css`, `components.json`.
@@ -818,7 +818,7 @@ git commit -m "chore(web): scaffold Vite + React + TS + Tailwind + shadcn"
 
 ---
 
-### Task B2: Cliente API tipado
+### Task 7: Cliente API tipado
 
 **Files:**
 - Create: `web/src/api/client.ts`, `web/src/api/corridas.ts`, `web/src/api/insumos.ts`, `web/src/lib/tipos.ts`, `web/src/lib/moneda.ts`
@@ -892,7 +892,7 @@ git commit -m "feat(web): cliente API tipado + helpers de moneda"
 
 ---
 
-### Task B3: Layout/shell + routing + chip de estado
+### Task 8: Layout/shell + routing + chip de estado
 
 **Files:**
 - Create: `web/src/components/Layout.tsx`; Modify: `web/src/App.tsx`, `web/src/main.tsx`
@@ -923,7 +923,7 @@ git commit -m "feat(web): shell con navegación y chip de estado"
 
 ## FASE C — Frontend: flujo de corrida
 
-### Task C1: Página Inicio / Nueva corrida
+### Task 9: Página Inicio / Nueva corrida
 
 **Files:**
 - Create: `web/src/pages/CorridasInicio.tsx`
@@ -945,7 +945,7 @@ git commit -m "feat(web): página nueva corrida (subir / ejemplo)"
 
 ---
 
-### Task C2: Página Corrida (cuadro) + panel de revisión
+### Task 10: Página Corrida (cuadro) + panel de revisión
 
 **Files:**
 - Create: `web/src/pages/Corrida.tsx`, `web/src/components/corrida/TablaItems.tsx`, `web/src/components/corrida/PanelRevision.tsx`, `web/src/components/corrida/EstadoBadge.tsx`
@@ -971,7 +971,7 @@ git commit -m "feat(web): cuadro de corrida + panel de revisión (confirmar/reco
 
 ## FASE D — Frontend: módulo de insumos
 
-### Task D1: Hook `useDirtyRows` + tabla editable de insumos (individual + batch)
+### Task 11: Hook `useDirtyRows` + tabla editable de insumos (individual + batch)
 
 **Files:**
 - Create: `web/src/lib/useDirtyRows.ts`, `web/src/pages/Insumos.tsx`, `web/src/components/insumos/TablaInsumos.tsx`, `web/src/components/insumos/BarraFiltros.tsx`
@@ -1015,7 +1015,7 @@ git commit -m "feat(web): grid editable de insumos (individual + batch) con hist
 
 ---
 
-### Task D2: Diálogo "Transformar por filtro"
+### Task 12: Diálogo "Transformar por filtro"
 
 **Files:**
 - Create: `web/src/components/insumos/DialogoTransformar.tsx`; Modify: `web/src/pages/Insumos.tsx` (botón que lo abre)
@@ -1035,7 +1035,7 @@ git commit -m "feat(web): transformación masiva de insumos por filtro"
 
 ---
 
-### Task D3: Diálogo "Importar Excel/CSV"
+### Task 13: Diálogo "Importar Excel/CSV"
 
 **Files:**
 - Create: `web/src/components/insumos/DialogoImportar.tsx`; Modify: `web/src/pages/Insumos.tsx` (botón)
@@ -1054,7 +1054,7 @@ git commit -m "feat(web): importación de precios por Excel/CSV con preview"
 
 ---
 
-### Task D4: Integración build + verificación end-to-end
+### Task 14: Integración build + verificación end-to-end
 
 **Files:**
 - Modify: `.gitignore` (si hace falta), docs si aplica. (`web/dist` se genera, no se commitea.)

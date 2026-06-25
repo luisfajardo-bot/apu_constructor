@@ -1,8 +1,9 @@
-import { apiGet, apiPost } from "@/api/client";
+import { apiGet, apiPost, apiDelete } from "@/api/client";
 import type {
   StatusResponse,
   CorridaCreada,
   CorridaDetalle,
+  CorridaResumen,
   DetalleItem,
   Progreso,
 } from "@/lib/tipos";
@@ -17,6 +18,14 @@ export function crearSample(): Promise<CorridaCreada> {
 
 export function crearCorrida(form: FormData): Promise<CorridaCreada> {
   return apiPost<CorridaCreada>("/corridas", form);
+}
+
+export function listarCorridas(): Promise<CorridaResumen[]> {
+  return apiGet<CorridaResumen[]>("/corridas");
+}
+
+export function eliminarCorrida(id: number): Promise<void> {
+  return apiDelete(`/corridas/${id}`);
 }
 
 export function getCorrida(id: number): Promise<CorridaDetalle> {

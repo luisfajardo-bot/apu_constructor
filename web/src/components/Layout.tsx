@@ -5,8 +5,8 @@ import { getStatus } from "@/api/corridas";
 import type { StatusResponse } from "@/lib/tipos";
 
 const NAV_LINKS = [
-  { to: "/corridas", label: "Corridas" },
-  { to: "/insumos", label: "Insumos" },
+  { to: "/corridas", label: "Corridas", end: false },
+  { to: "/insumos", label: "Insumos", end: true },
 ];
 
 export default function Layout() {
@@ -36,10 +36,11 @@ export default function Layout() {
         {/* Navegacion lateral */}
         <nav style={styles.sidebar}>
           <ul style={styles.navList}>
-            {NAV_LINKS.map(({ to, label }) => (
+            {NAV_LINKS.map(({ to, label, end }) => (
               <li key={to}>
                 <NavLink
                   to={to}
+                  end={end}
                   style={({ isActive }) => ({
                     ...styles.navLink,
                     ...(isActive ? styles.navLinkActive : {}),

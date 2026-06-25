@@ -98,6 +98,15 @@ export interface CambioPreview {
   fuente_nueva: string;
 }
 
+export interface CorridaResumen {
+  id: number;
+  archivo: string;
+  creada_en: string;
+  estado: string;
+  n_items: number;
+  n_revision: number;
+}
+
 // Wrappers de respuesta
 
 export interface StatusResponse {

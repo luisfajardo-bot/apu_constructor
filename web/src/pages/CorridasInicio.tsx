@@ -4,12 +4,9 @@ import { toast } from "sonner";
 import { crearCorridaStream, crearSampleStream } from "@/api/corridas";
 import type { Progreso } from "@/lib/tipos";
 
-type Turno = "DIURNO" | "NOCTURNO";
-
 export default function CorridasInicio() {
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [turno, setTurno] = useState<Turno>("DIURNO");
   const [usarIA, setUsarIA] = useState(true);
   const [cargando, setCargando] = useState(false);
   const [progreso, setProgreso] = useState<Progreso | null>(null);
@@ -23,7 +20,6 @@ export default function CorridasInicio() {
     }
     const form = new FormData();
     form.append("archivo", archivo);
-    form.append("turno", turno);
     form.append("use_ai", String(usarIA));
     setCargando(true);
     try {
@@ -73,23 +69,6 @@ export default function CorridasInicio() {
               style={styles.inputFile}
               disabled={cargando}
             />
-          </div>
-
-          {/* Turno */}
-          <div style={styles.campo}>
-            <label style={styles.label} htmlFor="turno">
-              Turno
-            </label>
-            <select
-              id="turno"
-              value={turno}
-              onChange={(e) => setTurno(e.target.value as Turno)}
-              style={styles.select}
-              disabled={cargando}
-            >
-              <option value="DIURNO">DIURNO</option>
-              <option value="NOCTURNO">NOCTURNO</option>
-            </select>
           </div>
 
           {/* Usar IA */}
@@ -160,15 +139,6 @@ const styles: Record<string, React.CSSProperties> = {
   inputFile: {
     fontSize: "12px",
     color: "#2d3748",
-  },
-  select: {
-    fontSize: "12px",
-    padding: "4px 8px",
-    border: "1px solid #cbd5e0",
-    borderRadius: "4px",
-    background: "#fff",
-    color: "#2d3748",
-    width: "160px",
   },
   campoInline: {
     display: "flex",

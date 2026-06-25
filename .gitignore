@@ -13,3 +13,7 @@ salidas/
 
 # Scratch de orquestación (subagent-driven-development)
 .superpowers/
+
+# Frontend web
+web/node_modules/
+web/dist/

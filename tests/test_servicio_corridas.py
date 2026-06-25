@@ -86,3 +86,15 @@ def test_construir_corrida_sigue_devolviendo_id(tmp_path):
     cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False)
     assert isinstance(cid, int)
     assert svc.vista_corrida(alm, cid)["totales"]["n_items"] == 1
+
+
+def test_svc_listar_y_eliminar(tmp_path):
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False)
+    lista = svc.listar_corridas(alm)
+    assert lista and lista[0]["id"] == cid
+    assert lista[0]["n_items"] == 1 and "creada_en" in lista[0]
+    assert svc.eliminar_corrida(alm, cid) is True
+    assert svc.listar_corridas(alm) == []

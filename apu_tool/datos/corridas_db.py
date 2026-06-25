@@ -112,16 +112,28 @@ class CorridasDB:
             componentes=json.loads(r["componentes_json"] or "[]"),
             candidatos=json.loads(r["candidatos_json"] or "[]"))
 
-    def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
-        with self.connect() as conn:
-            r = conn.execute("SELECT * FROM corrida WHERE id=?", (corrida_id,)).fetchone()
-        if r is None:
-            return None
+    def _row_to_meta(self, r: sqlite3.Row) -> CorridaMeta:
         return CorridaMeta(
             id=r["id"], creada_en=r["creada_en"], archivo=r["archivo"],
             turno_def=r["turno_def"],
             use_ai=None if r["use_ai"] is None else bool(r["use_ai"]),
             estado=r["estado"], cuadro_path=r["cuadro_path"])
+
+    def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
+        with self.connect() as conn:
+            r = conn.execute("SELECT * FROM corrida WHERE id=?", (corrida_id,)).fetchone()
+        return self._row_to_meta(r) if r else None
+
+    def listar_corridas(self) -> list[CorridaMeta]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM corrida ORDER BY creada_en DESC, id DESC").fetchall()
+        return [self._row_to_meta(r) for r in rows]
+
+    def eliminar_corrida(self, corrida_id: int) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute("DELETE FROM corrida WHERE id=?", (int(corrida_id),))
+            return cur.rowcount > 0
 
     def get_items(self, corrida_id: int) -> list[CorridaItemRow]:
         with self.connect() as conn:

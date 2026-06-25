@@ -155,6 +155,20 @@ def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
     return vista_corrida(alm, corrida_id)
 
 
+def listar_corridas(alm: Almacen) -> list[dict]:
+    out: list[dict] = []
+    for meta in alm.corridas.listar_corridas():
+        items = alm.corridas.get_items(meta.id)
+        n_rev = sum(1 for it in items if it.status in ("review", "new"))
+        out.append({"id": meta.id, "archivo": meta.archivo, "creada_en": meta.creada_en,
+                    "estado": meta.estado, "n_items": len(items), "n_revision": n_rev})
+    return out
+
+
+def eliminar_corrida(alm: Almacen, corrida_id: int) -> bool:
+    return alm.corridas.eliminar_corrida(corrida_id)
+
+
 def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:

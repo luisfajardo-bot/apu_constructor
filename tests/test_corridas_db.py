@@ -73,3 +73,24 @@ def test_actualizar_eleccion_y_estado(tmp_path):
 def test_get_corrida_inexistente(tmp_path):
     alm = _almacen_tmp(tmp_path)
     assert alm.corridas.get_corrida(999) is None
+
+
+def test_listar_y_eliminar_corridas(tmp_path):
+    alm = _almacen_tmp(tmp_path)
+    c1 = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-06-25T10:00:00", archivo="a.xlsx",
+        turno_def="DIURNO", use_ai=False, estado="en_revision"))
+    c2 = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-06-25T11:00:00", archivo="b.xlsx",
+        turno_def="DIURNO", use_ai=False, estado="en_revision"))
+    alm.corridas.guardar_items(c2, [_fila(0)])
+
+    metas = alm.corridas.listar_corridas()
+    assert [m.id for m in metas] == [c2, c1]          # más reciente primero
+    assert metas[0].archivo == "b.xlsx"
+
+    assert alm.corridas.eliminar_corrida(c2) is True
+    assert alm.corridas.get_corrida(c2) is None       # se fue
+    assert alm.corridas.get_items(c2) == []           # cascade borró los ítems
+    assert [m.id for m in alm.corridas.listar_corridas()] == [c1]
+    assert alm.corridas.eliminar_corrida(99999) is False

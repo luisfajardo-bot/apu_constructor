@@ -98,3 +98,22 @@ def test_svc_listar_y_eliminar(tmp_path):
     assert lista[0]["n_items"] == 1 and "creada_en" in lista[0]
     assert svc.eliminar_corrida(alm, cid) is True
     assert svc.listar_corridas(alm) == []
+
+
+def test_stream_persiste_duracion(tmp_path):
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    eventos = list(svc.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False))
+    done = next(p for ev, p in eventos if ev == "done")
+    assert isinstance(done["duracion_ms"], int) and done["duracion_ms"] >= 0
+    assert alm.corridas.get_corrida(done["id"]).duracion_ms == done["duracion_ms"]
+
+
+def test_vista_y_lista_exponen_duracion(tmp_path):
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False)
+    assert "duracion_ms" in svc.vista_corrida(alm, cid)
+    assert "duracion_ms" in svc.listar_corridas(alm)[0]

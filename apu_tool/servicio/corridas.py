@@ -7,6 +7,7 @@ el equipo), pero nunca abre un camino hacia la IA.
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -39,6 +40,7 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
         id=None, creada_en=datetime.now().isoformat(timespec="seconds"),
         archivo=archivo, turno_def=turno_def, use_ai=use_ai,
         estado="en_revision", cuadro_path=None))
+    t0 = time.monotonic()
     filas: list[CorridaItemRow] = []
     total = len(items)
     for seq, item in enumerate(items):
@@ -60,8 +62,10 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
             componentes=_estructura(ens.componentes), candidatos=candidatos))
         yield ("progress", {"i": i, "total": total, "descripcion": item.descripcion})
     alm.corridas.guardar_items(corrida_id, filas)
+    duracion_ms = round((time.monotonic() - t0) * 1000)
+    alm.corridas.set_duracion(corrida_id, duracion_ms)
     resumen = vista_corrida(alm, corrida_id)["totales"]
-    yield ("done", {"id": corrida_id, "resumen": resumen})
+    yield ("done", {"id": corrida_id, "resumen": resumen, "duracion_ms": duracion_ms})
 
 
 def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
@@ -113,7 +117,8 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
     tot_k = sum(i["costo_total"] for i in items)
     n_rev = sum(1 for i in items if i["status"] in ("review", "new"))
     return {
-        "id": meta.id, "archivo": meta.archivo, "estado": meta.estado, "items": items,
+        "id": meta.id, "archivo": meta.archivo, "estado": meta.estado,
+        "duracion_ms": meta.duracion_ms, "items": items,
         "totales": {"contractual": tot_c, "costo": tot_k, "margen": tot_c - tot_k,
                     "margen_pct": ((tot_c - tot_k) / tot_c) if tot_c else 0.0,
                     "n_items": len(items), "n_revision": n_rev},
@@ -161,7 +166,8 @@ def listar_corridas(alm: Almacen) -> list[dict]:
         items = alm.corridas.get_items(meta.id)
         n_rev = sum(1 for it in items if it.status in ("review", "new"))
         out.append({"id": meta.id, "archivo": meta.archivo, "creada_en": meta.creada_en,
-                    "estado": meta.estado, "n_items": len(items), "n_revision": n_rev})
+                    "estado": meta.estado, "duracion_ms": meta.duracion_ms,
+                    "n_items": len(items), "n_revision": n_rev})
     return out
 
 

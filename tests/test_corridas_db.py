@@ -109,6 +109,33 @@ def test_set_duracion_y_lee(tmp_path):
     assert alm.corridas.listar_corridas()[0].duracion_ms == 3210
 
 
+def test_crear_corrida_con_items_atomico(tmp_path):
+    # La corrida y sus ítems se crean en UNA transacción (no hay corrida vacía
+    # intermedia); duracion_ms se inserta directamente.
+    alm = _almacen_tmp(tmp_path)
+    meta = CorridaMeta(id=None, creada_en="2026-06-25T10:00:00", archivo="lic.xlsx",
+                       turno_def="DIURNO", use_ai=False, estado="en_revision",
+                       duracion_ms=1234)
+    cid = alm.corridas.crear_corrida_con_items(meta, [_fila(0), _fila(1)])
+    assert isinstance(cid, int)
+    got = alm.corridas.get_corrida(cid)
+    assert got.archivo == "lic.xlsx" and got.use_ai is False and got.duracion_ms == 1234
+    items = alm.corridas.get_items(cid)
+    assert len(items) == 2
+    assert items[0].componentes[0]["insumo_codigo"] == "100"
+    assert items[1].candidatos[0]["apu_codigo"] == "A1"
+
+
+def test_crear_corrida_con_items_sin_items(tmp_path):
+    # Caso borde: lista vacía -> corrida creada, cero ítems, sin reventar.
+    alm = _almacen_tmp(tmp_path)
+    meta = CorridaMeta(id=None, creada_en="x", archivo="vacia.xlsx",
+                       turno_def="DIURNO", use_ai=None, estado="en_revision")
+    cid = alm.corridas.crear_corrida_con_items(meta, [])
+    assert alm.corridas.get_corrida(cid) is not None
+    assert alm.corridas.get_items(cid) == []
+
+
 def test_migracion_agrega_duracion_ms(tmp_path):
     # DB con esquema viejo (sin duracion_ms): init_schema la agrega sin romper
     p = tmp_path / "old.db"

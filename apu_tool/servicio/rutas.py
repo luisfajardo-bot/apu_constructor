@@ -107,9 +107,10 @@ def cuadro(cid: int, alm: Almacen = Depends(get_almacen)):
 
 @router.get("/insumos")
 def listar_insumos(q: Optional[str] = None, grupo: Optional[str] = None,
-                   fuente: Optional[str] = None, limit: int = 100, offset: int = 0,
+                   fuente: Optional[str] = None, clasificacion: Optional[str] = None,
+                   limit: int = 100, offset: int = 0,
                    alm: Almacen = Depends(get_almacen)):
-    return insumos_svc.listar(alm, q, grupo, fuente, limit, offset)
+    return insumos_svc.listar(alm, q, grupo, fuente, clasificacion, limit, offset)
 
 
 @router.get("/insumos/grupos")

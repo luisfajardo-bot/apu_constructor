@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { listarInsumos } from "@/api/insumos";
+import { listarInsumos, getFuentes, type ListarInsumosParams } from "@/api/insumos";
 import type { Insumo } from "@/lib/tipos";
 import { BarraFiltros, type FiltrosState } from "@/components/insumos/BarraFiltros";
 import { TablaInsumos } from "@/components/insumos/TablaInsumos";
@@ -16,6 +16,7 @@ export default function Insumos() {
   });
   const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [total, setTotal] = useState(0);
+  const [fuentes, setFuentes] = useState<string[]>([]);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,15 +24,13 @@ export default function Insumos() {
     setCargando(true);
     setError(null);
     try {
-      const params: Record<string, string | number> = {
+      const params: ListarInsumosParams = {
         limit: LIMIT,
         offset: f.offset,
       };
       if (f.q) params.q = f.q;
       if (f.grupo) params.grupo = f.grupo;
       if (f.fuente) params.fuente = f.fuente;
-      // clasificacion filter: handled via fuente or q if backend supports it
-      // pass as extra param if present
       if (f.clasificacion) params.clasificacion = f.clasificacion;
 
       const res = await listarInsumos(params);
@@ -43,6 +42,10 @@ export default function Insumos() {
     } finally {
       setCargando(false);
     }
+  }, []);
+
+  useEffect(() => {
+    getFuentes().then(setFuentes).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -79,7 +82,7 @@ export default function Insumos() {
         </div>
       )}
 
-      <TablaInsumos insumos={insumos} onReload={recargar} />
+      <TablaInsumos insumos={insumos} fuentes={fuentes} onReload={recargar} />
     </div>
   );
 }

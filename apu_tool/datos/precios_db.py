@@ -160,6 +160,7 @@ class PreciosDB:
         return [dict(r) for r in rows]
 
     def list_insumos(self, q=None, grupo=None, fuente=None,
+                     clasificacion: Optional[str] = None,
                      limit: int = 100, offset: int = 0):
         base = ("FROM insumos i LEFT JOIN insumo_precios p "
                 "ON p.insumo_id = i.id AND p.vigente = 1")
@@ -174,6 +175,14 @@ class PreciosDB:
         if fuente:
             where.append("p.fuente = ?")
             params.append(fuente)
+        if clasificacion == "publico":
+            placeholders = ",".join("?" * len(config.PUBLIC_PRICE_SOURCES))
+            where.append(f"p.fuente IN ({placeholders})")
+            params += list(config.PUBLIC_PRICE_SOURCES)
+        elif clasificacion == "interno":
+            placeholders = ",".join("?" * len(config.PUBLIC_PRICE_SOURCES))
+            where.append(f"(p.fuente IS NULL OR p.fuente NOT IN ({placeholders}))")
+            params += list(config.PUBLIC_PRICE_SOURCES)
         wsql = (" WHERE " + " AND ".join(where)) if where else ""
         with self.connect() as conn:
             total = conn.execute(f"SELECT COUNT(*) {base}{wsql}", params).fetchone()[0]

@@ -11,6 +11,7 @@ export interface ListarInsumosParams {
   q?: string;
   grupo?: string;
   fuente?: string;
+  clasificacion?: string;
   limit?: number;
   offset?: number;
 }
@@ -20,6 +21,7 @@ function buildQuery(params: ListarInsumosParams): string {
   if (params.q !== undefined) qs.set("q", params.q);
   if (params.grupo !== undefined) qs.set("grupo", params.grupo);
   if (params.fuente !== undefined) qs.set("fuente", params.fuente);
+  if (params.clasificacion !== undefined) qs.set("clasificacion", params.clasificacion);
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   const str = qs.toString();

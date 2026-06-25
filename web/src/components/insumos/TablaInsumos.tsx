@@ -15,10 +15,11 @@ import { cop as fmtMoneda } from "@/lib/moneda";
 
 interface TablaInsumosProps {
   insumos: Insumo[];
+  fuentes?: string[];
   onReload: () => void;
 }
 
-export function TablaInsumos({ insumos, onReload }: TablaInsumosProps) {
+export function TablaInsumos({ insumos, fuentes = [], onReload }: TablaInsumosProps) {
   const { setCampo, descartar, cambios, count, dirty } = useDirtyRows(
     insumos.map((i) => ({ id: i.id, precio: i.precio, fuente: i.fuente }))
   );
@@ -64,6 +65,12 @@ export function TablaInsumos({ insumos, onReload }: TablaInsumosProps) {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden relative">
+      {/* Datalist shared for fuente autocomplete */}
+      <datalist id="fuentes-list">
+        {fuentes.map((f) => (
+          <option key={f} value={f} />
+        ))}
+      </datalist>
       {/* Table area */}
       <div className="flex-1 overflow-auto">
         <table className="w-full text-xs border-collapse">
@@ -151,9 +158,10 @@ export function TablaInsumos({ insumos, onReload }: TablaInsumosProps) {
                       value={precioEdit as number}
                       min={0}
                       step="any"
-                      onChange={(e) =>
-                        setCampo(ins.id, "precio", parseFloat(e.target.value) || 0)
-                      }
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (!Number.isNaN(v)) setCampo(ins.id, "precio", v);
+                      }}
                     />
                   </td>
                   {/* Editable - fuente */}
@@ -163,7 +171,7 @@ export function TablaInsumos({ insumos, onReload }: TablaInsumosProps) {
                       className="h-6 text-xs"
                       value={fuenteEdit as string}
                       onChange={(e) => setCampo(ins.id, "fuente", e.target.value)}
-                      list={`fuentes-${ins.id}`}
+                      list="fuentes-list"
                     />
                   </td>
                   {/* Clasif */}

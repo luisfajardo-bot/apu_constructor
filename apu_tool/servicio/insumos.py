@@ -26,8 +26,9 @@ def _insumo_out(ins) -> dict:
 
 
 def listar(alm: Almacen, q: Optional[str] = None, grupo: Optional[str] = None,
-           fuente: Optional[str] = None, limit: int = 100, offset: int = 0) -> dict:
-    items, total = alm.precios.list_insumos(q, grupo, fuente, limit, offset)
+           fuente: Optional[str] = None, clasificacion: Optional[str] = None,
+           limit: int = 100, offset: int = 0) -> dict:
+    items, total = alm.precios.list_insumos(q, grupo, fuente, clasificacion, limit, offset)
     return {"items": [_insumo_out(i) for i in items], "total": total,
             "limit": limit, "offset": offset}
 

@@ -41,7 +41,7 @@ export function BarraFiltros({ filtros, total, limit, onChange }: BarraFiltrosPr
       if (inputQ !== filtros.q) onChange({ q: inputQ, offset: 0 });
     }, 300);
     return () => clearTimeout(t);
-  }, [inputQ]);
+  }, [inputQ, filtros.q, onChange]);
 
   const hasPrev = filtros.offset > 0;
   const hasNext = filtros.offset + limit < total;

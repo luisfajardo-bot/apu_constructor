@@ -55,3 +55,15 @@ def test_grupos_y_fuentes(tmp_path):
     alm = _alm(tmp_path)
     assert set(alm.precios.grupos()) == {"ACEROS", "CONCRETOS"}
     assert set(alm.precios.fuentes()) == {"COSTO INTERNO", "PRECIO IDU"}
+
+
+def test_list_insumos_clasificacion(tmp_path):
+    alm = _alm(tmp_path)
+    # "200" es PRECIO IDU (publico); "100" es COSTO INTERNO (interno)
+    items, total = alm.precios.list_insumos(clasificacion="publico")
+    assert total == 1
+    assert items[0].codigo == "200"
+
+    items, total = alm.precios.list_insumos(clasificacion="interno")
+    assert total == 1
+    assert items[0].codigo == "100"

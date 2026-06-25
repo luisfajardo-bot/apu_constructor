@@ -86,7 +86,7 @@ class PreciosDB:
                 (str(codigo), normalizar(nombre))).fetchall()
         return [r["id"] for r in rows]
 
-    def _insertar_precio_vigente(self, conn, insumo_id: int, precio: float,
+    def _insertar_precio_vigente(self, conn: sqlite3.Connection, insumo_id: int, precio: float,
                                 fuente: str, fecha: str) -> None:
         conn.execute("UPDATE insumo_precios SET vigente=0 WHERE insumo_id=?", (int(insumo_id),))
         conn.execute(
@@ -161,7 +161,7 @@ class PreciosDB:
 
     def list_insumos(self, q=None, grupo=None, fuente=None,
                      clasificacion: Optional[str] = None,
-                     limit: int = 100, offset: int = 0):
+                     limit: int = 100, offset: int = 0) -> tuple[list[Insumo], int]:
         base = ("FROM insumos i LEFT JOIN insumo_precios p "
                 "ON p.insumo_id = i.id AND p.vigente = 1")
         where, params = [], []
@@ -177,12 +177,12 @@ class PreciosDB:
             params.append(fuente)
         if clasificacion == "publico":
             placeholders = ",".join("?" * len(config.PUBLIC_PRICE_SOURCES))
-            where.append(f"p.fuente IN ({placeholders})")
-            params += list(config.PUBLIC_PRICE_SOURCES)
+            where.append(f"UPPER(p.fuente) IN ({placeholders})")
+            params += [s.upper() for s in config.PUBLIC_PRICE_SOURCES]
         elif clasificacion == "interno":
             placeholders = ",".join("?" * len(config.PUBLIC_PRICE_SOURCES))
-            where.append(f"(p.fuente IS NULL OR p.fuente NOT IN ({placeholders}))")
-            params += list(config.PUBLIC_PRICE_SOURCES)
+            where.append(f"(p.fuente IS NULL OR UPPER(p.fuente) NOT IN ({placeholders}))")
+            params += [s.upper() for s in config.PUBLIC_PRICE_SOURCES]
         wsql = (" WHERE " + " AND ".join(where)) if where else ""
         with self.connect() as conn:
             total = conn.execute(f"SELECT COUNT(*) {base}{wsql}", params).fetchone()[0]

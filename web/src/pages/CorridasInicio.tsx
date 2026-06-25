@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Toaster, toast } from "sonner";
+import { toast } from "sonner";
 import { crearCorrida, crearSample } from "@/api/corridas";
 
 type Turno = "DIURNO" | "NOCTURNO";
@@ -47,9 +47,7 @@ export default function CorridasInicio() {
   }
 
   return (
-    <>
-      <Toaster position="top-right" richColors />
-      <div style={styles.container}>
+    <div style={styles.container}>
         <h2 style={styles.titulo}>Nueva corrida</h2>
         <form onSubmit={handleArmar} style={styles.form}>
           {/* Archivo */}
@@ -114,8 +112,7 @@ export default function CorridasInicio() {
             </button>
           </div>
         </form>
-      </div>
-    </>
+    </div>
   );
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import { Toaster } from "sonner";
 import { getStatus } from "@/api/corridas";
 import type { StatusResponse } from "@/lib/tipos";
 
@@ -56,6 +57,7 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+      <Toaster richColors position="top-right" />
     </div>
   );
 }

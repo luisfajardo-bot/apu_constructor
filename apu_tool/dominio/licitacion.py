@@ -87,8 +87,8 @@ def _rows_from_csv(path: Path) -> list[list]:
         return [row for row in csv.reader(f)]
 
 
-def read_licitacion(path: Path | str, default_shift: str = config.SHIFT_DIURNO
-                    ) -> list[LicitacionItem]:
+def read_licitacion(path: Path | str, default_shift: str = config.SHIFT_DIURNO,
+                    require_turno: bool = False) -> list[LicitacionItem]:
     path = Path(path)
     rows = _rows_from_xlsx(path) if path.suffix.lower() in (".xlsx", ".xlsm") \
         else _rows_from_csv(path)
@@ -103,8 +103,12 @@ def read_licitacion(path: Path | str, default_shift: str = config.SHIFT_DIURNO
             "No se encontró la columna de descripción/actividad en la lista. "
             f"Encabezados detectados: {headers}"
         )
+    if require_turno and "shift" not in mapping:
+        raise ValueError(
+            "La lista debe incluir una columna de turno (DIURNO/NOCTURNO) por ítem.")
 
     items: list[LicitacionItem] = []
+    sin_turno: list[str] = []
     for i, row in enumerate(rows[1:], start=1):
         def get(field, default=""):
             idx = mapping.get(field)
@@ -115,7 +119,11 @@ def read_licitacion(path: Path | str, default_shift: str = config.SHIFT_DIURNO
         desc = str(get("descripcion") or "").strip()
         if not desc:
             continue
-        shift = _shift_value(str(get("shift", "")), default_shift)
+        raw_turno = str(get("shift", "") or "").strip()
+        if require_turno and _shift_value(raw_turno, "?") == "?":
+            sin_turno.append(str(get("item", i) or i))
+            continue
+        shift = _shift_value(raw_turno, default_shift)
         items.append(LicitacionItem(
             item=str(get("item", i) or i).strip(),
             descripcion=desc,
@@ -124,6 +132,10 @@ def read_licitacion(path: Path | str, default_shift: str = config.SHIFT_DIURNO
             precio_contractual=_to_float(get("precio_contractual", 0)),
             shift=shift,
         ))
+    if require_turno and sin_turno:
+        raise ValueError(
+            "Estos ítems no tienen turno (DIURNO/NOCTURNO): "
+            + ", ".join(sin_turno[:20]))
     return items
 
 

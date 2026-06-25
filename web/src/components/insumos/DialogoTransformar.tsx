@@ -95,6 +95,23 @@ export function DialogoTransformar({
         setErrorMsg("El valor debe ser un número.");
         return;
       }
+      // Validación por operación
+      if (tipo === "precio_factor") {
+        if (n <= 0) {
+          setErrorMsg("El factor debe ser mayor que 0.");
+          return;
+        }
+      } else if (tipo === "precio_pct") {
+        if (n <= -100) {
+          setErrorMsg("El porcentaje debe ser mayor que -100.");
+          return;
+        }
+      } else if (tipo === "precio_set") {
+        if (n < 0) {
+          setErrorMsg("El precio no puede ser negativo.");
+          return;
+        }
+      }
     }
     setPrevisualizando(true);
     try {
@@ -188,6 +205,7 @@ export function DialogoTransformar({
             className="h-7 w-40 text-xs"
             type={tipo === "fuente" ? "text" : "number"}
             step={tipo === "precio_factor" ? "0.01" : "any"}
+            min={tipo === "precio_factor" || tipo === "precio_set" ? "0" : undefined}
             placeholder={placeholderValor[tipo]}
             value={valor}
             onChange={(e) => { setValor(e.target.value); setPreview(null); setErrorMsg(null); }}
@@ -289,7 +307,7 @@ export function DialogoTransformar({
             onClick={aplicar}
             disabled={!preview || preview.cambios.length === 0 || aplicando}
           >
-            {aplicando ? "Aplicando…" : `Aplicar${preview ? ` (${preview.afectados})` : ""}`}
+            {aplicando ? "Aplicando…" : `Aplicar${preview ? ` (${preview.cambios.length})` : ""}`}
           </Button>
         </DialogFooter>
       </DialogContent>

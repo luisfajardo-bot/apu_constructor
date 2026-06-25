@@ -125,10 +125,21 @@ export interface CambiosAplicados {
   errores: { insumo_id: number; error: string }[];
 }
 
+export interface ImportAmbiguo {
+  codigo: string;
+  precio: number;
+  candidatos: { id: number; nombre: string }[];
+}
+
+export interface ImportNoEncontrado {
+  codigo: string;
+  precio: number;
+}
+
 export interface ImportarPreviewResponse {
   cambios: CambioPreview[];
-  ambiguos: unknown[];
-  no_encontrados: unknown[];
+  ambiguos: ImportAmbiguo[];
+  no_encontrados: ImportNoEncontrado[];
 }
 
 export interface TransformarPreviewResponse {

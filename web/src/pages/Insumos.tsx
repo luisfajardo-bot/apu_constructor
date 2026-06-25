@@ -5,6 +5,7 @@ import { BarraFiltros, type FiltrosState } from "@/components/insumos/BarraFiltr
 import { TablaInsumos } from "@/components/insumos/TablaInsumos";
 import { Button } from "@/components/ui/button";
 import { DialogoTransformar } from "@/components/insumos/DialogoTransformar";
+import { DialogoImportar } from "@/components/insumos/DialogoImportar";
 
 const LIMIT = 100;
 
@@ -22,6 +23,7 @@ export default function Insumos() {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [transformarOpen, setTransformarOpen] = useState(false);
+  const [importarOpen, setImportarOpen] = useState(false);
 
   const cargar = useCallback(async (f: FiltrosState) => {
     setCargando(true);
@@ -70,7 +72,14 @@ export default function Insumos() {
         {cargando && (
           <span className="text-xs text-muted-foreground animate-pulse">cargando…</span>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto flex gap-2">
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => setImportarOpen(true)}
+          >
+            Importar
+          </Button>
           <Button
             size="xs"
             variant="outline"
@@ -105,6 +114,12 @@ export default function Insumos() {
           fuente: filtros.fuente || undefined,
           clasificacion: filtros.clasificacion || undefined,
         }}
+        onAplicado={recargar}
+      />
+
+      <DialogoImportar
+        open={importarOpen}
+        onOpenChange={setImportarOpen}
         onAplicado={recargar}
       />
     </div>

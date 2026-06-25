@@ -41,3 +41,37 @@ def test_aplicar_cambios_ok_y_errores(tmp_path):
         {"insumo_id": iid2, "precio": -5.0, "fuente": "Y"}])     # precio inválido
     assert res["aplicados"] == 1 and len(res["errores"]) == 2
     assert alm.precios.get_insumo_por_id(iid).precio == 380000.0
+
+
+import io
+import openpyxl
+
+
+def _xlsx_bytes(filas):
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["CODIGO", "PRECIO", "FUENTE"])
+    for f in filas:
+        ws.append(f)
+    buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
+
+
+def test_preview_import_reconocido_y_no_encontrado(tmp_path):
+    alm = _alm(tmp_path)
+    contenido = _xlsx_bytes([["100", 390000, "COMPRAS"], ["999", 10, "X"]])
+    out = svc.preview_import(alm, contenido, "lista.xlsx")
+    assert len(out["cambios"]) == 1 and out["cambios"][0]["codigo"] == "100"
+    assert out["cambios"][0]["precio_nuevo"] == 390000
+    assert len(out["no_encontrados"]) == 1 and out["no_encontrados"][0]["codigo"] == "999"
+
+
+def test_preview_transformar_operaciones(tmp_path):
+    alm = _alm(tmp_path)
+    out = svc.preview_transformar(alm, {"grupo": "CONCRETOS"},
+                                  {"tipo": "precio_pct", "valor": 10})
+    assert out["afectados"] == 1
+    c = out["cambios"][0]
+    assert c["codigo"] == "100" and c["precio_nuevo"] == 385000.0    # 350000 * 1.10
+
+    out2 = svc.preview_transformar(alm, {"fuente": "PRECIO IDU"},
+                                   {"tipo": "fuente", "valor": "IDU 2026"})
+    assert out2["afectados"] == 1 and out2["cambios"][0]["fuente_nueva"] == "IDU 2026"

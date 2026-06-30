@@ -73,3 +73,19 @@ def test_seed_force_sobre_esquema_viejo(old_schema_precios, mini_xlsx, tmp_path)
     assert len(cands) == 1, f"Se esperaba 1 candidato, got: {len(cands)}"
     assert cands[0].nombre == "CEMENTO", f"Nombre esperado CEMENTO, got: {cands[0].nombre}"
     assert cands[0].id is not None, "El insumo del nuevo esquema debe tener id surrogate"
+
+
+def test_seed_preserva_corridas(mini_xlsx, tmp_path):
+    """Re-sembrar el catálogo NO debe borrar las corridas guardadas (regresión:
+    'las corridas se borran después de un rato' = seed reseteaba corridas.db)."""
+    from apu_tool.nucleo.models import CorridaMeta
+    alm = Almacen(tmp_path / "p.db", tmp_path / "a.db", tmp_path / "c.db")
+    alm.init_schema()
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="x", archivo="lic.xlsx", turno_def="DIURNO",
+        use_ai=False, estado="en_revision"))
+
+    seed(alm, xlsx_path=mini_xlsx, force=True)
+
+    assert alm.corridas.get_corrida(cid) is not None    # la corrida sobrevive al re-seed
+    assert alm.counts()["insumos"] >= 1                 # y el catálogo sí se sembró

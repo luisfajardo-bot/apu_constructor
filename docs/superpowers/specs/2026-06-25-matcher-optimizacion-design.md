@@ -52,26 +52,50 @@ candidatos de baja puntuación pueda variar (candidatos de relleno).
 > Nota: el comentario "Doble match intencional… no optimizar" se elimina/actualiza;
 > la intención (mostrar candidatos + elegir APU) se preserva con **un** cómputo.
 
-### A.2 — Índice invertido por tokens (bloqueo) — `apu_tool/dominio/matching.py`
+### A.2 — Índice invertido + ramificación y poda (branch-and-bound) — `apu_tool/dominio/matching.py`
 
-- `Matcher.__init__` construye, además del `_by_shift` actual, un índice
+> Nota: el bloqueo por tokens "puro" (puntuar toda la unión de postings) **no**
+> aceleró lo suficiente — en obra civil los tokens frecuentes (CONCRETO, SUMINISTRO,
+> EXCAVACIÓN…) están en cientos de APUs, así que la unión ≈ pool completo. El costo
+> real es el `SequenceMatcher` O(L²). La solución es **branch-and-bound** sobre el
+> jaccard (barato), calculando el `SequenceMatcher` caro solo donde aún pueda ganar.
+
+- `Matcher.__init__` construye, además del `_by_shift` actual, un índice invertido
   `_postings_by_shift: dict[str, dict[str, list[int]]]` (token → posiciones en la
-  lista del turno) y un índice combinado para el *fallback* de turno.
+  lista del turno) y un índice/pool combinado para el *fallback* de turno.
 - `Matcher.candidates(descripcion, shift, top_n=5)`:
-  - `qtokens = _tokens(descripcion)`. Si `qtokens` está vacío → `return []`.
-  - Reúne los índices candidatos = unión de postings de cada token de `qtokens`.
-  - Puntúa **solo** esos APUs con `similarity(descripcion, nombre)` (la función de
-    score **no cambia**, para que los scores sean idénticos a los de hoy en los
-    APUs puntuados), filtra `score > 0`, ordena desc, devuelve `top_n`.
-  - Si el pool del turno está vacío, usa el índice combinado (fallback actual).
+  - `qtokens = _tokens(descripcion)`; vía el índice, cuenta tokens compartidos por
+    APU candidato y calcula su **jaccard** = `|∩| / |∪|` (idéntico al de
+    `similarity`, con sets precomputados — barato).
+  - **Ramificación y poda:** ordena los candidatos por jaccard desc y recorre
+    calculando `score = round(similarity(...), 4)` (función de score **sin cambios**),
+    llevando el mejor. **Corta** en cuanto la cota superior `0.4 + 0.6·jaccard`
+    (con `seq = 1`) cae por debajo del mejor actual (margen `1e-4` por el redondeo):
+    ningún candidato restante (de menor jaccard) puede superarlo.
+  - Si el mejor con tokens en común alcanza `MATCH_REVIEW (0.55)`, ese es el mejor
+    global → devuelve `top_n` (orden score desc; empates por orden del pool, idéntico
+    al escaneo). Si no, **escaneo completo exacto** del pool (caso novedoso, donde el
+    mejor global podría ser un APU sin tokens comunes con alto `seq`).
+  - Si el pool del turno está vacío, usa el índice/pool combinado (fallback actual).
 - `Matcher.match()` no cambia su lógica de umbrales.
 
-**Correctitud del bloqueo:** `score = 0.4·seq + 0.6·jaccard`. Un APU sin tokens
-compartidos con el ítem tiene `jaccard = 0` → `score ≤ 0.4 < MATCH_REVIEW (0.55)
-< MATCH_ACCEPT (0.88)`. Por tanto un APU excluido **nunca** puede ser el mejor en
-AUTO ni alcanzar REVISAR; el `elegido` (solo se fija en AUTO) y el estado quedan
-idénticos. Solo cambia la cola de relleno cuando hay menos de `top_n` APUs con
-tokens compartidos.
+**Correctitud (exacta con IA apagada):**
+- `score = 0.4·seq + 0.6·jaccard` y `seq ≤ 1` ⟹ la cota `0.4 + 0.6·jaccard` es un
+  techo real del score. La poda solo descarta candidatos cuyo techo ya no alcanza al
+  mejor, así que el **mejor global** (y su score) se encuentra exacto; el desempate
+  se replica ordenando por `(−score, idx_pool)`.
+- Un APU sin tokens compartidos tiene `jaccard = 0` → `score ≤ 0.4 < 0.55`. Si el
+  mejor global `≥ 0.55`, tiene tokens comunes y la fase rápida lo encuentra (estado y
+  `elegido` AUTO idénticos). Si `< 0.55`, el escaneo completo de respaldo preserva la
+  base sugerida exacta (`candidatos[0]`, que usa el fallback determinista de
+  `assemble_item`).
+- Lo único que flexiona es la **cola** (posiciones 2..top_n) en ítems con match
+  fuerte; no afecta la decisión (el armado con IA apagada usa solo `candidatos[0]`).
+
+**Medido (catálogo real, 1098 APUs, 665 consultas):** 0 diferencias de decisión
+contra el escaneo completo; ~427× más rápido en ítems que matchean (0.57 ms/consulta
+vs 245 ms). Los ítems novedosos caen al escaneo completo (~245 ms) — minoría en una
+licitación real; optimizarlos queda como mejora futura.
 
 ### A.3 — Reusar tokens precomputados (menor)
 
@@ -82,10 +106,11 @@ Si añade riesgo, se omite (el grueso del ahorro es A.1 + A.2).
 
 ## Caso borde
 
-- Ítem sin tokens (solo stopwords / vacío): hoy puntúa todo el pool con score ≤ 0.4
-  y devuelve estado NUEVO; con el bloqueo devuelve `[]` → estado NUEVO ("Sin
-  candidatos"). **Mismo estado**, distinta `explicacion`/`confianza` (cosmético,
-  dentro de la barra acordada).
+- Ítem sin tokens (solo stopwords / vacío): la vía rápida no halla candidatos →
+  cae al **escaneo completo** → resultado idéntico a hoy.
+- Lista de puros ítems novedosos (todos `< 0.55`): degrada a escaneo completo en
+  esos ítems (sin ganancia, pero exacto). En una licitación real la mayoría matchea
+  el histórico, así que el grueso usa la vía rápida.
 
 ## Pruebas
 

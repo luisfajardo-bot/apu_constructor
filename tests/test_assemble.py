@@ -46,6 +46,15 @@ def test_reassemble_with_choice(assembler):
     assert a.costo_unitario == pytest.approx(60000)
 
 
+def test_assemble_item_acepta_match_precomputado(assembler):
+    # A.1: pasar el MatchResult ya calculado produce el MISMO AssembledApu que
+    # calcularlo adentro (permite eliminar el doble match del stream).
+    item = LicitacionItem("1", "EXCAVACION MANUAL PARA REDES", "M3", 10, 80000, "DIURNO")
+    base = assembler.assemble_item(item)
+    pre = assembler.matcher.match(item)
+    assert assembler.assemble_item(item, pre) == base
+
+
 def test_totals_consistency(assembler):
     item = LicitacionItem("1", "EXCAVACION MANUAL PARA REDES", "M3", 3, 80000, "DIURNO")
     a = assembler.assemble_item(item)

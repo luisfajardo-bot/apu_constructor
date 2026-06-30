@@ -128,7 +128,10 @@ function estadoBadgeStyle(estado: string): React.CSSProperties {
     case "ok":
     case "listo":
       return { background: "#c6f6d5", color: "#276749" };
+    case "armando":
+      return { background: "#bee3f8", color: "#2a4365" };
     case "revision":
+    case "en_revision":
     case "por_revisar":
       return { background: "#fefcbf", color: "#744210" };
     case "error":

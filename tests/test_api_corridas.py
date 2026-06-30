@@ -86,8 +86,8 @@ def test_archivo_ilegible_400(tmp_path):
     assert r.json()["detail"]
 
 
-def test_corridas_stream_emite_progreso_y_done(tmp_path):
-    cli, _ = _cli(tmp_path)
+def test_corridas_stream_emite_started_progreso_done(tmp_path):
+    cli, alm = _cli(tmp_path)
     lic = _xlsx_lic(tmp_path)
     with open(lic, "rb") as f:
         r = cli.post("/api/corridas/stream",
@@ -97,8 +97,13 @@ def test_corridas_stream_emite_progreso_y_done(tmp_path):
     assert r.status_code == 200
     assert "text/event-stream" in r.headers["content-type"]
     body = r.text
+    assert "event: started" in body         # id de la corrida al inicio
     assert "event: progress" in body
     assert "event: done" in body
+    # El progress trae la fila ya costeada (para la tabla en vivo).
+    assert '"fila"' in body and '"costo_unitario"' in body
+    # Persistencia incremental: la corrida quedó armada y consultable.
+    assert len(alm.corridas.listar_corridas()) == 1
 
 
 def test_sample_stream_ok(tmp_path):

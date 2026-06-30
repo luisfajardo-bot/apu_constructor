@@ -3,6 +3,7 @@ import type {
   StatusResponse,
   CorridaCreada,
   CorridaDetalle,
+  CorridaIniciada,
   CorridaResumen,
   DetalleItem,
   Progreso,
@@ -72,6 +73,7 @@ async function streamCorrida(
   path: string,
   init: RequestInit,
   onProgress: (p: Progreso) => void,
+  onStarted?: (c: CorridaIniciada) => void,
 ): Promise<CorridaCreada> {
   const r = await fetch("/api" + path, init);
   if (!r.ok || !r.body) {
@@ -91,7 +93,8 @@ async function streamCorrida(
       const ev = parseSse(buf.slice(0, idx));
       buf = buf.slice(idx + 2);
       if (!ev) continue;
-      if (ev.event === "progress") onProgress(ev.data as Progreso);
+      if (ev.event === "started") onStarted?.(ev.data as CorridaIniciada);
+      else if (ev.event === "progress") onProgress(ev.data as Progreso);
       else if (ev.event === "done") done = ev.data as CorridaCreada;
       else if (ev.event === "error")
         throw new Error((ev.data as { detail?: string }).detail || "Error al armar");
@@ -101,10 +104,17 @@ async function streamCorrida(
   return done;
 }
 
-export function crearCorridaStream(form: FormData, onProgress: (p: Progreso) => void) {
-  return streamCorrida("/corridas/stream", { method: "POST", body: form }, onProgress);
+export function crearCorridaStream(
+  form: FormData,
+  onProgress: (p: Progreso) => void,
+  onStarted?: (c: CorridaIniciada) => void,
+) {
+  return streamCorrida("/corridas/stream", { method: "POST", body: form }, onProgress, onStarted);
 }
 
-export function crearSampleStream(onProgress: (p: Progreso) => void) {
-  return streamCorrida("/sample/stream", { method: "POST" }, onProgress);
+export function crearSampleStream(
+  onProgress: (p: Progreso) => void,
+  onStarted?: (c: CorridaIniciada) => void,
+) {
+  return streamCorrida("/sample/stream", { method: "POST" }, onProgress, onStarted);
 }

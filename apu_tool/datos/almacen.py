@@ -37,9 +37,19 @@ class Almacen:
         self.corridas.init_schema()
 
     def reset(self) -> None:
+        """Reseteo COMPLETO de las tres bases (uso explícito; borra también corridas)."""
         self.precios.reset()
         self.apus.reset()
         self.corridas.reset()
+
+    def reset_catalogo(self) -> None:
+        """Resetea solo el catálogo (precios + apus), preservando las corridas.
+
+        El catálogo se re-siembra desde el Excel fuente; las corridas son estado de
+        aplicación del usuario y NO deben borrarse al re-sembrar (regresión: 'las
+        corridas se borran después de un rato')."""
+        self.precios.reset()
+        self.apus.reset()
 
     def counts(self) -> dict[str, int]:
         return {**self.precios.counts(), **self.apus.counts(), **self.corridas.counts()}

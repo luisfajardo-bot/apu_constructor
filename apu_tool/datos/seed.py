@@ -206,7 +206,9 @@ def seed(almacen: Optional[Almacen] = None, xlsx_path: Optional[Path] = None,
             "No se encontró el Excel histórico. Pásalo con --xlsx <ruta> "
             "o define la variable APU_SOURCE_XLSX.")
 
-    alm.reset()
+    # Resetea SOLO el catálogo (precios + apus): re-sembrar NO debe borrar las
+    # corridas del usuario (son estado de aplicación, no datos de la fuente).
+    alm.reset_catalogo()
     wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
     try:
         insumos: dict[tuple[str, str], Insumo] = {}

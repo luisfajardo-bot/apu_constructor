@@ -6,6 +6,8 @@ import { TablaInsumos } from "@/components/insumos/TablaInsumos";
 import { Button } from "@/components/ui/button";
 import { DialogoTransformar } from "@/components/insumos/DialogoTransformar";
 import { DialogoImportar } from "@/components/insumos/DialogoImportar";
+import { DialogoAgregarInsumo } from "@/components/autoria/DialogoAgregarInsumo";
+import { DialogoImportarCrearInsumos } from "@/components/autoria/DialogoImportarCrearInsumos";
 
 const LIMIT = 100;
 
@@ -24,6 +26,8 @@ export default function Insumos() {
   const [error, setError] = useState<string | null>(null);
   const [transformarOpen, setTransformarOpen] = useState(false);
   const [importarOpen, setImportarOpen] = useState(false);
+  const [agregarOpen, setAgregarOpen] = useState(false);
+  const [importarCrearOpen, setImportarCrearOpen] = useState(false);
 
   const cargar = useCallback(async (f: FiltrosState) => {
     setCargando(true);
@@ -76,6 +80,20 @@ export default function Insumos() {
           <Button
             size="xs"
             variant="outline"
+            onClick={() => setAgregarOpen(true)}
+          >
+            Agregar insumo
+          </Button>
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => setImportarCrearOpen(true)}
+          >
+            Importar para crear
+          </Button>
+          <Button
+            size="xs"
+            variant="outline"
             onClick={() => setImportarOpen(true)}
           >
             Importar
@@ -120,6 +138,18 @@ export default function Insumos() {
       <DialogoImportar
         open={importarOpen}
         onOpenChange={setImportarOpen}
+        onAplicado={recargar}
+      />
+
+      <DialogoAgregarInsumo
+        open={agregarOpen}
+        onOpenChange={setAgregarOpen}
+        onCreado={recargar}
+      />
+
+      <DialogoImportarCrearInsumos
+        open={importarCrearOpen}
+        onOpenChange={setImportarCrearOpen}
         onAplicado={recargar}
       />
     </div>

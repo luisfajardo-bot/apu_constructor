@@ -43,7 +43,8 @@ nueva `web/src/pages/Apus.tsx`, `web/src/App.tsx`, `web/src/components/Layout.ts
 - Nav + ruta `/apus`. Vitest ligero (validación form) + `npm run build` 0 TS.
 
 ## Estado
-- [ ] Tarea 1
-- [ ] Tarea 2
-- [ ] Tarea 3
-- [ ] Tarea 4
+- [x] Tarea 1 — datos (crear_insumo/crear_apu/list_apus/component_counts) · 145 verde
+- [x] Tarea 2 — servicio autoria.py (crear + import preview/aplicar) · 152 verde
+- [x] Tarea 3 — API + esquemas + servicio apus.py (lectura) · 158 verde
+- [x] Tarea 4 — frontend (Insumos +agregar/+importar-crear; página APUs) · build 0 TS, Vitest 8
+=== TODAS LAS TAREAS COMPLETAS — listo para revisión/fusión ===

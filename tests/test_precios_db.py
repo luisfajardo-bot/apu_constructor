@@ -62,3 +62,21 @@ def test_busqueda(precios):
 def test_counts(precios):
     c = precios.counts()
     assert c["insumos"] == 3 and c["insumo_precios"] == 3
+
+
+def test_crear_insumo_nuevo(precios):
+    iid = precios.crear_insumo(Insumo("300", "GRAVA COMUN", "M3", "MAT", 80000, "PRECIO IDU"))
+    assert isinstance(iid, int)
+    ins = precios.get_insumo_por_id(iid)
+    assert ins.codigo == "300" and ins.nombre == "GRAVA COMUN" and ins.precio == 80000
+    assert ins.es_confidencial is False  # PRECIO IDU -> publico
+
+def test_crear_insumo_duplicado_falla(precios):
+    # misma identidad (codigo, nombre_norm) ya existe -> no se pisa
+    with pytest.raises(ValueError):
+        precios.crear_insumo(Insumo("100", "Cemento Gris", "KG", "MAT", 1, "PRECIO IDU"))
+
+def test_crear_insumo_mismo_codigo_otro_nombre_ok(precios):
+    iid = precios.crear_insumo(Insumo("100", "CAL HIDRATADA", "KG", "MAT", 2000, "PRECIO IDU"))
+    assert precios.get_insumo_por_id(iid).nombre == "CAL HIDRATADA"
+    assert len(precios.get_candidatos("100")) == 3  # convive con las 2 previas

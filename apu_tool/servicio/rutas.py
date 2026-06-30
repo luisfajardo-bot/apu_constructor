@@ -14,10 +14,13 @@ from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.licitacion import read_licitacion
 from apu_tool.dominio.pipeline import ensure_seeded, generate_sample
+from apu_tool.servicio import apus as apus_svc
+from apu_tool.servicio import autoria
 from apu_tool.servicio import corridas as svc
 from apu_tool.servicio import insumos as insumos_svc
 from apu_tool.servicio.dependencias import get_almacen
-from apu_tool.servicio.esquemas import CambiosIn, ConfirmarIn, StatusOut, TransformarIn
+from apu_tool.servicio.esquemas import (
+    ApuNuevoIn, CambiosIn, ConfirmarIn, InsumoNuevoIn, StatusOut, TransformarIn)
 
 router = APIRouter()
 
@@ -218,3 +221,75 @@ def insumos_transformar_preview(body: TransformarIn, alm: Almacen = Depends(get_
         return insumos_svc.preview_transformar(alm, body.filtro, body.operacion)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ---- autoría: crear / importar insumos y APUs ----
+@router.post("/insumos/crear")
+def crear_insumo(body: InsumoNuevoIn, alm: Almacen = Depends(get_almacen)):
+    try:
+        return autoria.crear_insumo(alm, body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/insumos/importar-crear/preview")
+async def insumos_importar_crear_preview(archivo: UploadFile = File(...),
+                                         alm: Almacen = Depends(get_almacen)):
+    contenido = await archivo.read()
+    try:
+        return autoria.preview_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/insumos/importar-crear")
+async def insumos_importar_crear(archivo: UploadFile = File(...),
+                                 alm: Almacen = Depends(get_almacen)):
+    contenido = await archivo.read()
+    try:
+        return autoria.aplicar_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/apus")
+def listar_apus(q: Optional[str] = None, grupo: Optional[str] = None,
+                turno: Optional[str] = None, limit: int = 100, offset: int = 0,
+                alm: Almacen = Depends(get_almacen)):
+    return apus_svc.listar(alm, q, grupo, turno, limit, offset)
+
+
+@router.post("/apus/crear")
+def crear_apu(body: ApuNuevoIn, alm: Almacen = Depends(get_almacen)):
+    try:
+        return autoria.crear_apu(alm, body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/apus/importar/preview")
+async def apus_importar_preview(archivo: UploadFile = File(...),
+                                alm: Almacen = Depends(get_almacen)):
+    contenido = await archivo.read()
+    try:
+        return autoria.preview_importar_apus(alm, contenido)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/apus/importar")
+async def apus_importar(archivo: UploadFile = File(...),
+                        alm: Almacen = Depends(get_almacen)):
+    contenido = await archivo.read()
+    try:
+        return autoria.aplicar_importar_apus(alm, contenido)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/apus/{codigo}/{turno}")
+def detalle_apu(codigo: str, turno: str, alm: Almacen = Depends(get_almacen)):
+    d = apus_svc.detalle(alm, codigo, turno)
+    if d is None:
+        raise HTTPException(status_code=404, detail="APU no encontrado.")
+    return d

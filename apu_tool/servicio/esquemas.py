@@ -30,3 +30,28 @@ class CambiosIn(BaseModel):
 class TransformarIn(BaseModel):
     filtro: dict
     operacion: dict
+
+
+class InsumoNuevoIn(BaseModel):
+    codigo: str
+    nombre: str
+    unidad: str = ""
+    grupo: str = ""
+    precio: float = 0.0
+    fuente: str = ""
+
+
+class ComponenteIn(BaseModel):
+    insumo_codigo: str
+    rendimiento: float
+    insumo_nombre: str = ""
+    unidad: str = ""
+
+
+class ApuNuevoIn(BaseModel):
+    codigo: str
+    turno: str
+    nombre: str
+    unidad: str = ""
+    grupo: str = ""
+    componentes: list[ComponenteIn] = []

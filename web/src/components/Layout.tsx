@@ -7,6 +7,7 @@ import type { StatusResponse } from "@/lib/tipos";
 const NAV_LINKS = [
   { to: "/corridas", label: "Corridas", end: false },
   { to: "/insumos", label: "Insumos", end: true },
+  { to: "/apus", label: "APUs", end: true },
 ];
 
 export default function Layout() {

@@ -84,6 +84,31 @@ class ApusDB:
                 " rendimiento, precio_unitario_hist) VALUES (?,?,?,?,?,?,?,?)", rows)
         return len(rows)
 
+    def crear_apu(self, apu: Apu, componentes: list[ApuComponent]) -> None:
+        """Crea un APU NUEVO con su composición, atómico. Identidad (código, turno):
+        si ya existe → ValueError (NO se pisa, a diferencia de insert_apus que hace
+        INSERT OR REPLACE). Los componentes se numeran 0..n-1; ligan al insumo por
+        código (enlace blando, sin FK a precios)."""
+        if not str(apu.codigo or "").strip() or not str(apu.nombre or "").strip():
+            raise ValueError("El APU necesita código y nombre.")
+        with self.connect() as conn:
+            existe = conn.execute("SELECT 1 FROM apus WHERE codigo=? AND shift=?",
+                                  (str(apu.codigo), apu.shift)).fetchone()
+            if existe:
+                raise ValueError(
+                    f"Ya existe un APU con código {apu.codigo} en turno {apu.shift}.")
+            conn.execute(
+                "INSERT INTO apus (codigo, shift, nombre, unidad, grupo) VALUES (?,?,?,?,?)",
+                (str(apu.codigo), apu.shift, apu.nombre, apu.unidad, apu.grupo))
+            rows = [(str(apu.codigo), apu.shift, seq, c.insumo_codigo, c.insumo_nombre,
+                     c.unidad, c.rendimiento, c.precio_unitario_hist)
+                    for seq, c in enumerate(componentes)]
+            if rows:
+                conn.executemany(
+                    "INSERT INTO apu_componentes "
+                    "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
+                    " rendimiento, precio_unitario_hist) VALUES (?,?,?,?,?,?,?,?)", rows)
+
     def set_meta(self, clave: str, valor: str) -> None:
         with self.connect() as conn:
             conn.execute("INSERT OR REPLACE INTO meta (clave, valor) VALUES (?,?)",
@@ -99,6 +124,30 @@ class ApusDB:
         with self.connect() as conn:
             rows = conn.execute("SELECT codigo, nombre, shift FROM apus").fetchall()
         return [(r["codigo"], r["nombre"], r["shift"]) for r in rows]
+
+    def list_apus(self, q: Optional[str] = None, grupo: Optional[str] = None,
+                  shift: Optional[str] = None, limit: int = 100,
+                  offset: int = 0) -> tuple[list[Apu], int]:
+        where, params = [], []
+        if q:
+            where.append("(nombre LIKE ? OR codigo LIKE ?)")
+            like = f"%{q.strip()}%"
+            params += [like, like]
+        if grupo:
+            where.append("grupo = ?")
+            params.append(grupo)
+        if shift:
+            where.append("shift = ?")
+            params.append(shift)
+        wsql = (" WHERE " + " AND ".join(where)) if where else ""
+        with self.connect() as conn:
+            total = conn.execute(f"SELECT COUNT(*) FROM apus{wsql}", params).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT codigo, nombre, unidad, shift, grupo FROM apus{wsql} "
+                f"ORDER BY codigo, shift LIMIT ? OFFSET ?",
+                params + [int(limit), int(offset)]).fetchall()
+        return ([Apu(r["codigo"], r["nombre"], r["unidad"], r["shift"], r["grupo"])
+                 for r in rows], int(total))
 
     def search_apus(self, texto: str, limit: int = 20) -> list[Apu]:
         like = f"%{texto.strip()}%"
@@ -136,6 +185,14 @@ class ApusDB:
             componentes=tuple(
                 DePricedComponent(c.insumo_codigo, c.insumo_nombre, c.unidad, c.rendimiento)
                 for c in comps))
+
+    def component_counts(self) -> dict[tuple[str, str], int]:
+        """nº de componentes por APU, en una sola consulta (para la lista de APUs)."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT apu_codigo, shift, COUNT(*) n FROM apu_componentes "
+                "GROUP BY apu_codigo, shift").fetchall()
+        return {(r["apu_codigo"], r["shift"]): r["n"] for r in rows}
 
     def counts(self) -> dict[str, int]:
         with self.connect() as conn:

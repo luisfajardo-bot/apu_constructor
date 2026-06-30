@@ -169,3 +169,82 @@ export interface TransformarPreviewResponse {
   cambios: CambioPreview[];
   afectados: number;
 }
+
+// ─── Autoría de la base — agregar insumos y APUs ───────────────────────────────
+
+export interface InsumoNuevo {
+  codigo: string;
+  nombre: string;
+  unidad: string;
+  grupo: string;
+  precio: number;
+  fuente: string;
+}
+
+export interface ComponenteNuevo {
+  insumo_codigo: string;
+  rendimiento: number;
+  insumo_nombre?: string;
+  unidad?: string;
+}
+
+export interface ApuNuevo {
+  codigo: string;
+  turno: string;
+  nombre: string;
+  unidad: string;
+  grupo: string;
+  componentes: ComponenteNuevo[];
+}
+
+export interface ApuResumen {
+  codigo: string;
+  turno: string;
+  nombre: string;
+  unidad: string;
+  grupo: string;
+  n_componentes: number;
+}
+
+export interface ApuDetalle {
+  codigo: string;
+  turno: string;
+  nombre: string;
+  unidad: string;
+  grupo: string;
+  costo_unitario: number;
+  composicion: LineaComposicion[];
+}
+
+export interface ListaApus {
+  items: ApuResumen[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// Fila candidata a crear / ya existente en una importación de insumos
+export interface InsumoImportFila {
+  codigo: string;
+  nombre: string;
+  unidad: string;
+  grupo: string;
+  precio: number;
+  fuente: string;
+}
+
+export interface ImportInsumosPreview {
+  crear: InsumoImportFila[];
+  ya_existe: InsumoImportFila[];
+  invalida: InsumoImportFila[];
+}
+
+export interface ImportApusPreview {
+  crear: ApuResumen[];
+  ya_existe: ApuResumen[];
+}
+
+export interface ImportResultado {
+  creados: number;
+  errores: { codigo: string; turno?: string; error: string }[];
+}

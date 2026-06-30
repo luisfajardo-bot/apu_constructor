@@ -186,6 +186,14 @@ class ApusDB:
                 DePricedComponent(c.insumo_codigo, c.insumo_nombre, c.unidad, c.rendimiento)
                 for c in comps))
 
+    def component_counts(self) -> dict[tuple[str, str], int]:
+        """nº de componentes por APU, en una sola consulta (para la lista de APUs)."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT apu_codigo, shift, COUNT(*) n FROM apu_componentes "
+                "GROUP BY apu_codigo, shift").fetchall()
+        return {(r["apu_codigo"], r["shift"]): r["n"] for r in rows}
+
     def counts(self) -> dict[str, int]:
         with self.connect() as conn:
             return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]

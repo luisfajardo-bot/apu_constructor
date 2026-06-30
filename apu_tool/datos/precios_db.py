@@ -76,6 +76,32 @@ class PreciosDB:
                 n += 1
         return n
 
+    def crear_insumo(self, insumo: Insumo) -> int:
+        """Crea un insumo NUEVO + su precio vigente; devuelve el id.
+
+        Identidad (código, nombre_norm): si ya existe → ValueError (no se pisa, a
+        diferencia de actualizar precio). Mismo código con otro nombre sí se permite
+        (identidad distinta). A diferencia de insert_insumos (lote, INSERT OR IGNORE),
+        este es para altas individuales con detección de duplicado."""
+        if not str(insumo.codigo or "").strip() or not str(insumo.nombre or "").strip():
+            raise ValueError("El insumo necesita código y nombre.")
+        nombre_norm = normalizar(insumo.nombre)
+        hoy = date.today().isoformat()
+        with self.connect() as conn:
+            existe = conn.execute(
+                "SELECT 1 FROM insumos WHERE codigo=? AND nombre_norm=?",
+                (str(insumo.codigo), nombre_norm)).fetchone()
+            if existe:
+                raise ValueError(
+                    f"Ya existe un insumo con código {insumo.codigo} y ese nombre.")
+            cur = conn.execute(
+                "INSERT INTO insumos (codigo, nombre, nombre_norm, unidad, grupo) "
+                "VALUES (?,?,?,?,?)",
+                (str(insumo.codigo), insumo.nombre, nombre_norm, insumo.unidad, insumo.grupo))
+            iid = int(cur.lastrowid)
+            self._insertar_precio_vigente(conn, iid, insumo.precio, insumo.fuente_precio, hoy)
+            return iid
+
     def _ids_de(self, conn, codigo: str, nombre: Optional[str]) -> list[int]:
         if nombre is None:
             rows = conn.execute("SELECT id FROM insumos WHERE codigo=?",

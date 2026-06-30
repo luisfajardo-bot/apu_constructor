@@ -40,3 +40,30 @@ def test_fk_componente_requiere_apu(apus):
         with apus.connect() as c:
             c.execute("INSERT INTO apu_componentes (apu_codigo, shift, seq) "
                       "VALUES ('NOEXISTE', 'DIURNO', 0)")
+
+
+def test_crear_apu_con_componentes(apus):
+    apus.crear_apu(
+        Apu("B2", "PISO EN CONCRETO", "M2", "DIURNO", "ACABADOS"),
+        [ApuComponent("B2", "DIURNO", "100", "CEMENTO", "KG", 2.0, 900),
+         ApuComponent("B2", "DIURNO", "200", "ARENA", "M3", 0.5, 50)])
+    assert apus.get_apu("B2", "DIURNO").nombre == "PISO EN CONCRETO"
+    comps = apus.get_components("B2", "DIURNO")
+    assert [c.insumo_codigo for c in comps] == ["100", "200"]   # seq correlativo
+
+def test_crear_apu_duplicado_falla(apus):
+    with pytest.raises(ValueError):
+        apus.crear_apu(Apu("A1", "MURO", "M2", "DIURNO"), [])   # (A1, DIURNO) ya existe
+
+def test_crear_apu_mismo_codigo_otro_turno_ok(apus):
+    apus.crear_apu(Apu("A1", "MURO", "M2", "NOCTURNO"), [])     # misma PK distinta -> ok
+    assert apus.get_apu("A1", "NOCTURNO") is not None
+
+def test_list_apus_filtra_y_pagina(apus):
+    apus.crear_apu(Apu("B2", "PISO CERAMICO", "M2", "DIURNO", "ACABADOS"), [])
+    items, total = apus.list_apus()
+    assert total == 2
+    items_f, total_f = apus.list_apus(q="PISO")
+    assert total_f == 1 and items_f[0].codigo == "B2"
+    _, total_g = apus.list_apus(grupo="ACABADOS")
+    assert total_g == 1

@@ -7,6 +7,13 @@ from __future__ import annotations
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+# Limiter global keyeado por IP remota. `enabled` se fija en create_app desde config
+# (default true; los tests lo apagan). default_limits aplica a TODA ruta vía SlowAPIMiddleware.
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+
 
 class LimiteSubida(BaseHTTPMiddleware):
     def __init__(self, app, max_bytes: int):

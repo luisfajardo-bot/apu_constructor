@@ -7,9 +7,13 @@ from typing import Optional
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
+from apu_tool.servicio import limites
 from apu_tool.servicio import rutas
 from apu_tool.servicio.limites import LimiteSubida
 from apu_tool.servicio.seguridad_headers import CabecerasSeguridad
@@ -38,6 +42,10 @@ def create_app(almacen: Optional[Almacen] = None) -> FastAPI:
     app.include_router(rutas.router, prefix="/api")
     app.add_middleware(CabecerasSeguridad)   # cabeceras en TODA respuesta (incl. errores y estáticos)
     app.add_middleware(LimiteSubida, max_bytes=config.max_upload_mb() * 1024 * 1024)
+    limites.limiter.enabled = config.ratelimit_enabled()
+    app.state.limiter = limites.limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
 
     @app.exception_handler(ValueError)
     async def _manejar_valor(request: Request, exc: ValueError):

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import (APIRouter, Depends, File, Form, HTTPException, UploadFile)
+from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request, UploadFile)
 from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl.utils.exceptions import InvalidFileException
 
@@ -26,6 +26,7 @@ from apu_tool.servicio import insumos as insumos_svc
 from apu_tool.servicio import usuarios as usuarios_svc
 from apu_tool.servicio.auth import requiere_rol
 from apu_tool.servicio.dependencias import get_almacen
+from apu_tool.servicio import limites
 from apu_tool.servicio.esquemas import (
     ApuNuevoIn, CambiosIn, ConfirmarIn, EstadoIn, InsumoNuevoIn, RolIn, StatusOut,
     TransformarIn, UsuarioInvitarIn)
@@ -383,7 +384,8 @@ def usuarios_listar(alm: Almacen = Depends(get_almacen),
 
 
 @router.post("/usuarios/invitar")
-def usuarios_invitar(body: UsuarioInvitarIn, alm: Almacen = Depends(get_almacen),
+@limites.limiter.limit("3/minute")
+def usuarios_invitar(request: Request, body: UsuarioInvitarIn, alm: Almacen = Depends(get_almacen),
                      admin=Depends(get_admin_supabase),
                      actor=Depends(requiere_rol("admin"))):
     try:

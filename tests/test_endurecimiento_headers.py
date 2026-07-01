@@ -25,3 +25,17 @@ def test_csp_incluye_host_supabase(tmp_path, monkeypatch):
     monkeypatch.setenv("SUPABASE_PROJECT_REF", "abcxyz")
     csp = TestClient(_app(tmp_path)).get("/openapi.json").headers["Content-Security-Policy"]
     assert "connect-src 'self' https://abcxyz.supabase.co wss://abcxyz.supabase.co" in csp
+
+
+def test_cabeceras_en_respuesta_413(tmp_path, monkeypatch):
+    # El 413 de LimiteSubida es una respuesta de corte (short-circuit): debe
+    # llevar las mismas cabeceras de seguridad que una respuesta normal.
+    monkeypatch.setenv("APU_MAX_UPLOAD_MB", "1")   # límite 1 MB para el test
+    cli = TestClient(_app(tmp_path))
+    grande = b"x" * (2 * 1024 * 1024)              # 2 MB > 1 MB
+    r = cli.post("/api/insumos/importar/preview",
+                 files={"archivo": ("grande.xlsx", grande,
+                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert r.status_code == 413, r.text
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert "default-src 'self'" in r.headers["Content-Security-Policy"]

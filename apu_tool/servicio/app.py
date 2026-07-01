@@ -40,15 +40,22 @@ def create_app(almacen: Optional[Almacen] = None) -> FastAPI:
     app = FastAPI(title="Armador de APUs", lifespan=lifespan)
     app.state.almacen = almacen or _crear_almacen()
     app.include_router(rutas.router, prefix="/api")
-    app.add_middleware(CabecerasSeguridad)   # cabeceras en TODA respuesta (incl. errores y estáticos)
+    # add_middleware PREPENDE: el último agregado queda MÁS AFUERA. Por eso
+    # CabecerasSeguridad se registra AL FINAL, para envolver a LimiteSubida y
+    # SlowAPIMiddleware y así poner cabeceras en TODA respuesta (incl. 413/429
+    # y estáticos). Excepción: un 500 desde el handler de Exception sale por
+    # ServerErrorMiddleware de Starlette, que está por fuera de TODO middleware
+    # de usuario — ninguna cabecera de usuario puede alcanzarlo (límite de Starlette).
     app.add_middleware(LimiteSubida, max_bytes=config.max_upload_mb() * 1024 * 1024)
     limites.limiter.enabled = config.ratelimit_enabled()
     app.state.limiter = limites.limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     app.add_middleware(SlowAPIMiddleware)
+    app.add_middleware(CabecerasSeguridad)
 
     @app.exception_handler(ValueError)
     async def _manejar_valor(request: Request, exc: ValueError):
+        logger.warning("ValueError no controlado en %s %s", request.method, request.url.path)
         return JSONResponse(status_code=400, content={"detail": "Solicitud inválida."})
 
     @app.exception_handler(Exception)

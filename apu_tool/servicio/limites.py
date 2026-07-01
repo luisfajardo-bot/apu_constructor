@@ -12,6 +12,8 @@ from slowapi.util import get_remote_address
 
 # Limiter global keyeado por IP remota. `enabled` se fija en create_app desde config
 # (default true; los tests lo apagan). default_limits aplica a TODA ruta vía SlowAPIMiddleware.
+# Nota: el storage por defecto es en memoria y por-proceso; con varios workers de
+# gunicorn el límite efectivo es POR WORKER (mitigación de abuso, no una cuota global exacta).
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 

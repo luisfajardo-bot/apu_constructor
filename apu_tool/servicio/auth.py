@@ -55,3 +55,65 @@ def obtener_claims(token: str) -> dict:
     except Exception as e:  # PyJWKClientError, red, kid inválido → auth inválida
         raise ErrorAuth(f"No se pudo resolver la llave de firma: {e}") from e
     return verificar_token(token, signing_key.key, issuer=issuer)
+
+
+import datetime as _dt
+
+from fastapi import Depends, Request, HTTPException
+
+from apu_tool.datos.almacen import Almacen
+from apu_tool.nucleo.models import Perfil
+from apu_tool.servicio.dependencias import get_almacen
+
+RANGO = {"consulta": 1, "editor": 2, "admin": 3}
+
+
+def resolver_perfil(alm: Almacen, user_id: str, email: str) -> Perfil:
+    """Devuelve el Perfil activo del usuario; bootstrap admin por APU_ADMIN_EMAILS.
+
+    Lanza ErrorAuth si el usuario está inactivo o no está autorizado (no invitado).
+    """
+    p = alm.perfiles.get(user_id)
+    if p is not None:
+        if p.estado != "activo":
+            raise ErrorAuth("Usuario inactivo.")
+        return p
+    if (email or "").strip().lower() in config.admin_emails():
+        nuevo = Perfil(user_id=user_id, email=email, rol="admin", estado="activo",
+                       nombre="", creado_en=_dt.date.today().isoformat())
+        alm.perfiles.upsert(nuevo)
+        return nuevo
+    raise ErrorAuth("Usuario no autorizado (no invitado).")
+
+
+def _extraer_bearer(request: Request) -> str:
+    h = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    if not h.lower().startswith("bearer "):
+        raise ErrorAuth("Falta el token Bearer.")
+    return h[7:].strip()
+
+
+def usuario_actual(request: Request, alm: Almacen = Depends(get_almacen)) -> Perfil:
+    """Dependencia FastAPI: verifica el JWT y resuelve el perfil. 401/403."""
+    try:
+        token = _extraer_bearer(request)
+        claims = obtener_claims(token)
+    except ErrorAuth as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    user_id = claims.get("sub", "")
+    email = claims.get("email", "")
+    try:
+        return resolver_perfil(alm, user_id, email)
+    except ErrorAuth as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+
+def requiere_rol(minimo: str):
+    """Fábrica de dependencia: exige rol >= minimo (jerarquía). 403 si no."""
+    min_rango = RANGO[minimo]
+
+    def _dep(usuario: Perfil = Depends(usuario_actual)) -> Perfil:
+        if RANGO.get(usuario.rol, 0) < min_rango:
+            raise HTTPException(status_code=403, detail="Permiso insuficiente.")
+        return usuario
+    return _dep

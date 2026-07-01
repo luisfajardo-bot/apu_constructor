@@ -159,9 +159,12 @@ class CorridasDB:
                 "SELECT * FROM corrida ORDER BY creada_en DESC, id DESC").fetchall()
         return [self._row_to_meta(r) for r in rows]
 
-    def eliminar_corrida(self, corrida_id: int) -> bool:
-        with self.connect() as conn:
+    def eliminar_corrida(self, corrida_id: int, conn=None) -> bool:
+        if conn is not None:
             cur = conn.execute("DELETE FROM corrida WHERE id=?", (int(corrida_id),))
+            return cur.rowcount > 0
+        with self.connect() as c:
+            cur = c.execute("DELETE FROM corrida WHERE id=?", (int(corrida_id),))
             return cur.rowcount > 0
 
     def get_items(self, corrida_id: int) -> list[CorridaItemRow]:

@@ -48,29 +48,33 @@ class PerfilesDB:
             r = conn.execute("SELECT * FROM perfiles WHERE user_id=?", (user_id,)).fetchone()
         return self._fila(r) if r else None
 
-    def upsert(self, p: Perfil) -> None:
-        with self.connect() as conn:
-            conn.execute(
-                "INSERT INTO perfiles (user_id,email,rol,estado,nombre,creado_en) "
-                "VALUES (?,?,?,?,?,?) "
-                "ON CONFLICT(user_id) DO UPDATE SET email=excluded.email, rol=excluded.rol, "
-                "estado=excluded.estado, nombre=excluded.nombre "
-                # creado_en es inmutable: marca de creación
-                "",
-                (p.user_id, p.email, p.rol, p.estado, p.nombre, p.creado_en))
+    def upsert(self, p: Perfil, conn=None) -> None:
+        sql = ("INSERT INTO perfiles (user_id,email,rol,estado,nombre,creado_en) "
+               "VALUES (?,?,?,?,?,?) "
+               "ON CONFLICT(user_id) DO UPDATE SET email=excluded.email, rol=excluded.rol, "
+               "estado=excluded.estado, nombre=excluded.nombre")
+        params = (p.user_id, p.email, p.rol, p.estado, p.nombre, p.creado_en)
+        if conn is not None:
+            conn.execute(sql, params); return
+        with self.connect() as c:
+            c.execute(sql, params)
 
     def listar(self) -> list[Perfil]:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM perfiles ORDER BY email").fetchall()
         return [self._fila(r) for r in rows]
 
-    def set_rol(self, user_id: str, rol: str) -> None:
-        with self.connect() as conn:
-            conn.execute("UPDATE perfiles SET rol=? WHERE user_id=?", (rol, user_id))
+    def set_rol(self, user_id: str, rol: str, conn=None) -> None:
+        if conn is not None:
+            conn.execute("UPDATE perfiles SET rol=? WHERE user_id=?", (rol, user_id)); return
+        with self.connect() as c:
+            c.execute("UPDATE perfiles SET rol=? WHERE user_id=?", (rol, user_id))
 
-    def set_estado(self, user_id: str, estado: str) -> None:
-        with self.connect() as conn:
-            conn.execute("UPDATE perfiles SET estado=? WHERE user_id=?", (estado, user_id))
+    def set_estado(self, user_id: str, estado: str, conn=None) -> None:
+        if conn is not None:
+            conn.execute("UPDATE perfiles SET estado=? WHERE user_id=?", (estado, user_id)); return
+        with self.connect() as c:
+            c.execute("UPDATE perfiles SET estado=? WHERE user_id=?", (estado, user_id))
 
     def contar_admins_activos(self) -> int:
         with self.connect() as conn:

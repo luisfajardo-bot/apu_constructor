@@ -62,27 +62,32 @@ class ApusPg:
                 " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
         return len(rows)
 
-    def crear_apu(self, apu: Apu, componentes: list[ApuComponent]) -> None:
+    def crear_apu(self, apu: Apu, componentes: list[ApuComponent], conn=None) -> None:
         if not str(apu.codigo or "").strip() or not str(apu.nombre or "").strip():
             raise ValueError("El APU necesita código y nombre.")
-        with self.cx.connection() as conn:
-            existe = conn.execute("SELECT 1 FROM apus.apus WHERE codigo=%s AND shift=%s",
-                                  (str(apu.codigo), apu.shift)).fetchone()
-            if existe:
-                raise ValueError(
-                    f"Ya existe un APU con código {apu.codigo} en turno {apu.shift}.")
-            conn.execute(
-                "INSERT INTO apus.apus (codigo, shift, nombre, unidad, grupo) "
-                "VALUES (%s,%s,%s,%s,%s)",
-                (str(apu.codigo), apu.shift, apu.nombre, apu.unidad, apu.grupo))
-            rows = [(str(apu.codigo), apu.shift, seq, c.insumo_codigo, c.insumo_nombre,
-                     c.unidad, c.rendimiento, c.precio_unitario_hist)
-                    for seq, c in enumerate(componentes)]
-            if rows:
-                conn.executemany(
-                    "INSERT INTO apus.apu_componentes "
-                    "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
-                    " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
+        if conn is not None:
+            return self._crear_apu(conn, apu, componentes)
+        with self.cx.connection() as c:
+            return self._crear_apu(c, apu, componentes)
+
+    def _crear_apu(self, conn, apu: Apu, componentes: list[ApuComponent]) -> None:
+        existe = conn.execute("SELECT 1 FROM apus.apus WHERE codigo=%s AND shift=%s",
+                              (str(apu.codigo), apu.shift)).fetchone()
+        if existe:
+            raise ValueError(
+                f"Ya existe un APU con código {apu.codigo} en turno {apu.shift}.")
+        conn.execute(
+            "INSERT INTO apus.apus (codigo, shift, nombre, unidad, grupo) "
+            "VALUES (%s,%s,%s,%s,%s)",
+            (str(apu.codigo), apu.shift, apu.nombre, apu.unidad, apu.grupo))
+        rows = [(str(apu.codigo), apu.shift, seq, c.insumo_codigo, c.insumo_nombre,
+                 c.unidad, c.rendimiento, c.precio_unitario_hist)
+                for seq, c in enumerate(componentes)]
+        if rows:
+            conn.executemany(
+                "INSERT INTO apus.apu_componentes "
+                "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
+                " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
 
     def set_meta(self, clave: str, valor: str) -> None:
         with self.cx.connection() as conn:

@@ -34,30 +34,33 @@ class PerfilesPg:
                              (user_id,)).fetchone()
         return self._fila(r) if r else None
 
-    def upsert(self, p: Perfil) -> None:
-        with self.cx.connection() as conn:
-            conn.execute(
-                "INSERT INTO seguridad.perfiles (user_id,email,rol,estado,nombre,creado_en) "
-                "VALUES (%s,%s,%s,%s,%s,%s) "
-                "ON CONFLICT (user_id) DO UPDATE SET email=EXCLUDED.email, rol=EXCLUDED.rol, "
-                "estado=EXCLUDED.estado, nombre=EXCLUDED.nombre "
-                # creado_en es inmutable: marca de creación
-                "",
-                (p.user_id, p.email, p.rol, p.estado, p.nombre, p.creado_en))
+    def upsert(self, p: Perfil, conn=None) -> None:
+        sql = ("INSERT INTO seguridad.perfiles (user_id,email,rol,estado,nombre,creado_en) "
+               "VALUES (%s,%s,%s,%s,%s,%s) "
+               "ON CONFLICT (user_id) DO UPDATE SET email=EXCLUDED.email, rol=EXCLUDED.rol, "
+               "estado=EXCLUDED.estado, nombre=EXCLUDED.nombre")
+        params = (p.user_id, p.email, p.rol, p.estado, p.nombre, p.creado_en)
+        if conn is not None:
+            conn.execute(sql, params); return
+        with self.cx.connection() as c:
+            c.execute(sql, params)
 
     def listar(self) -> list[Perfil]:
         with self.cx.connection() as conn:
             rows = conn.execute("SELECT * FROM seguridad.perfiles ORDER BY email").fetchall()
         return [self._fila(r) for r in rows]
 
-    def set_rol(self, user_id: str, rol: str) -> None:
-        with self.cx.connection() as conn:
-            conn.execute("UPDATE seguridad.perfiles SET rol=%s WHERE user_id=%s", (rol, user_id))
+    def set_rol(self, user_id: str, rol: str, conn=None) -> None:
+        if conn is not None:
+            conn.execute("UPDATE seguridad.perfiles SET rol=%s WHERE user_id=%s", (rol, user_id)); return
+        with self.cx.connection() as c:
+            c.execute("UPDATE seguridad.perfiles SET rol=%s WHERE user_id=%s", (rol, user_id))
 
-    def set_estado(self, user_id: str, estado: str) -> None:
-        with self.cx.connection() as conn:
-            conn.execute("UPDATE seguridad.perfiles SET estado=%s WHERE user_id=%s",
-                         (estado, user_id))
+    def set_estado(self, user_id: str, estado: str, conn=None) -> None:
+        if conn is not None:
+            conn.execute("UPDATE seguridad.perfiles SET estado=%s WHERE user_id=%s", (estado, user_id)); return
+        with self.cx.connection() as c:
+            c.execute("UPDATE seguridad.perfiles SET estado=%s WHERE user_id=%s", (estado, user_id))
 
     def contar_admins_activos(self) -> int:
         with self.cx.connection() as conn:

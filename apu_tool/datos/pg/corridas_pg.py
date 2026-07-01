@@ -127,9 +127,12 @@ class CorridasPg:
                 "SELECT * FROM corridas.corrida ORDER BY creada_en DESC, id DESC").fetchall()
         return [self._row_to_meta(r) for r in rows]
 
-    def eliminar_corrida(self, corrida_id: int) -> bool:
-        with self.cx.connection() as conn:
+    def eliminar_corrida(self, corrida_id: int, conn=None) -> bool:
+        if conn is not None:
             cur = conn.execute("DELETE FROM corridas.corrida WHERE id=%s", (int(corrida_id),))
+            return cur.rowcount > 0
+        with self.cx.connection() as c:
+            cur = c.execute("DELETE FROM corridas.corrida WHERE id=%s", (int(corrida_id),))
             return cur.rowcount > 0
 
     def get_items(self, corrida_id: int) -> list[CorridaItemRow]:

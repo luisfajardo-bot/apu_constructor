@@ -21,7 +21,14 @@ def _crear_almacen() -> Almacen:
 
 
 def create_app(almacen: Optional[Almacen] = None) -> FastAPI:
-    app = FastAPI(title="Armador de APUs")
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        app.state.almacen.cerrar()  # cierra el pool Postgres (no-op en SQLite)
+
+    app = FastAPI(title="Armador de APUs", lifespan=lifespan)
     app.state.almacen = almacen or _crear_almacen()
     app.include_router(rutas.router, prefix="/api")
     if WEB_DIST.exists():

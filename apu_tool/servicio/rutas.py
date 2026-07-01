@@ -16,6 +16,7 @@ from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.licitacion import read_licitacion
 from apu_tool.dominio.pipeline import ensure_seeded, generate_sample
 from apu_tool.servicio import apus as apus_svc
+from apu_tool.servicio import auditoria as auditoria_svc
 from apu_tool.servicio import autoria
 from apu_tool.servicio import corridas as svc
 from apu_tool.servicio import insumos as insumos_svc
@@ -38,6 +39,18 @@ def get_admin_supabase() -> AdminSupabase:
 def yo(usuario=Depends(requiere_rol("consulta"))):
     return {"email": usuario.email, "rol": usuario.rol, "nombre": usuario.nombre}
 
+
+@router.get("/auditoria")
+def auditoria_listar(user_id: Optional[str] = None, accion: Optional[str] = None,
+                     entidad_tipo: Optional[str] = None, desde: Optional[str] = None,
+                     hasta: Optional[str] = None, lote_id: Optional[str] = None,
+                     limit: int = 100, offset: int = 0,
+                     alm: Almacen = Depends(get_almacen),
+                     _: object = Depends(requiere_rol("admin"))):
+    return auditoria_svc.listar(alm, user_id=user_id, accion=accion, entidad_tipo=entidad_tipo,
+                                desde=desde, hasta=hasta, lote_id=lote_id,
+                                limit=limit, offset=offset)
+
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
@@ -57,8 +70,8 @@ def listar_corridas(alm: Almacen = Depends(get_almacen),
 
 @router.delete("/corridas/{cid}")
 def eliminar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
-                     _: object = Depends(requiere_rol("consulta"))):
-    if not svc.eliminar_corrida(alm, cid):
+                     actor=Depends(requiere_rol("consulta"))):
+    if not svc.eliminar_corrida(alm, cid, actor=actor):
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return {"eliminada": cid}
 
@@ -231,8 +244,8 @@ def insumo_detalle(insumo_id: int, alm: Almacen = Depends(get_almacen),
 
 @router.post("/insumos/cambios")
 def insumos_cambios(body: CambiosIn, alm: Almacen = Depends(get_almacen),
-                    _: object = Depends(requiere_rol("editor"))):
-    return insumos_svc.aplicar_cambios(alm, [c.model_dump() for c in body.cambios])
+                    actor=Depends(requiere_rol("editor"))):
+    return insumos_svc.aplicar_cambios(alm, [c.model_dump() for c in body.cambios], actor=actor)
 
 
 @router.post("/insumos/importar/preview")
@@ -258,9 +271,9 @@ def insumos_transformar_preview(body: TransformarIn, alm: Almacen = Depends(get_
 # ---- autoría: crear / importar insumos y APUs ----
 @router.post("/insumos/crear")
 def crear_insumo(body: InsumoNuevoIn, alm: Almacen = Depends(get_almacen),
-                 _: object = Depends(requiere_rol("editor"))):
+                 actor=Depends(requiere_rol("editor"))):
     try:
-        return autoria.crear_insumo(alm, body.model_dump())
+        return autoria.crear_insumo(alm, body.model_dump(), actor=actor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -279,10 +292,11 @@ async def insumos_importar_crear_preview(archivo: UploadFile = File(...),
 @router.post("/insumos/importar-crear")
 async def insumos_importar_crear(archivo: UploadFile = File(...),
                                  alm: Almacen = Depends(get_almacen),
-                                 _: object = Depends(requiere_rol("editor"))):
+                                 actor=Depends(requiere_rol("editor"))):
     contenido = await archivo.read()
     try:
-        return autoria.aplicar_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx")
+        return autoria.aplicar_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx",
+                                                actor=actor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -297,9 +311,9 @@ def listar_apus(q: Optional[str] = None, grupo: Optional[str] = None,
 
 @router.post("/apus/crear")
 def crear_apu(body: ApuNuevoIn, alm: Almacen = Depends(get_almacen),
-             _: object = Depends(requiere_rol("editor"))):
+             actor=Depends(requiere_rol("editor"))):
     try:
-        return autoria.crear_apu(alm, body.model_dump())
+        return autoria.crear_apu(alm, body.model_dump(), actor=actor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -318,10 +332,10 @@ async def apus_importar_preview(archivo: UploadFile = File(...),
 @router.post("/apus/importar")
 async def apus_importar(archivo: UploadFile = File(...),
                         alm: Almacen = Depends(get_almacen),
-                        _: object = Depends(requiere_rol("editor"))):
+                        actor=Depends(requiere_rol("editor"))):
     contenido = await archivo.read()
     try:
-        return autoria.aplicar_importar_apus(alm, contenido)
+        return autoria.aplicar_importar_apus(alm, contenido, actor=actor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -345,9 +359,9 @@ def usuarios_listar(alm: Almacen = Depends(get_almacen),
 @router.post("/usuarios/invitar")
 def usuarios_invitar(body: UsuarioInvitarIn, alm: Almacen = Depends(get_almacen),
                      admin=Depends(get_admin_supabase),
-                     _: object = Depends(requiere_rol("admin"))):
+                     actor=Depends(requiere_rol("admin"))):
     try:
-        return usuarios_svc.invitar(alm, admin, body.email, body.rol, body.nombre)
+        return usuarios_svc.invitar(alm, admin, body.email, body.rol, body.nombre, actor=actor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except httpx.HTTPStatusError:

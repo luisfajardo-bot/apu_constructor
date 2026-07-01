@@ -20,7 +20,7 @@ interface TablaInsumosProps {
   puedeEditar?: boolean;
 }
 
-export function TablaInsumos({ insumos, fuentes = [], onReload, puedeEditar = true }: TablaInsumosProps) {
+export function TablaInsumos({ insumos, fuentes = [], onReload, puedeEditar = false }: TablaInsumosProps) {
   const { setCampo, descartar, cambios, count, dirty } = useDirtyRows(
     insumos.map((i) => ({ id: i.id, precio: i.precio, fuente: i.fuente }))
   );

@@ -15,7 +15,7 @@ _ALGOS = ["ES256", "RS256"]
 
 
 class ErrorAuth(Exception):
-    """Autenticación inválida (token ausente/expirado/firma mala). → 401."""
+    """Fallos de autenticación (token inválido → 401) y autorización (inactivo/no invitado → 403)."""
 
 
 def verificar_token(token: str, public_key, *, issuer: str,
@@ -28,7 +28,7 @@ def verificar_token(token: str, public_key, *, issuer: str,
         return jwt.decode(
             token, public_key, algorithms=_ALGOS, audience=audience, issuer=issuer,
             options={"require": ["exp", "aud", "iss"]})
-    except jwt.InvalidTokenError as e:
+    except jwt.PyJWTError as e:
         raise ErrorAuth(str(e)) from e
 
 

@@ -1,3 +1,14 @@
+import { vi } from "vitest";
+
+vi.mock("@/lib/supabase", () => ({
+  supabase: {
+    auth: {
+      getSession: vi.fn(async () => ({ data: { session: null } })),
+      signOut: vi.fn(async () => ({})),
+    },
+  },
+}));
+
 import { parseSse } from "@/api/corridas";
 
 test("parseSse interpreta un bloque progress", () => {

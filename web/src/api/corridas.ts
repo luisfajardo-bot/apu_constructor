@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiDelete } from "@/api/client";
+import { apiGet, apiPost, apiDelete, authHeader } from "@/api/client";
 import type {
   StatusResponse,
   CorridaCreada,
@@ -75,7 +75,15 @@ async function streamCorrida(
   onProgress: (p: Progreso) => void,
   onStarted?: (c: CorridaIniciada) => void,
 ): Promise<CorridaCreada> {
-  const r = await fetch("/api" + path, init);
+  const r = await fetch("/api" + path, {
+    ...init,
+    headers: { ...(init.headers || {}), ...(await authHeader()) },
+  });
+  if (r.status === 401) {
+    const { supabase } = await import("@/lib/supabase");
+    await supabase.auth.signOut();
+    throw new Error("Sesión expirada.");
+  }
   if (!r.ok || !r.body) {
     const err = await r.json().catch(() => ({}) as { detail?: string });
     throw new Error(err.detail || r.statusText);

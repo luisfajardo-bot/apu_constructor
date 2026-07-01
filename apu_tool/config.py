@@ -93,3 +93,37 @@ def db_backend() -> str:
     if os.environ.get("APU_DB_BACKEND", "").strip().lower() == "postgres":
         return "postgres"
     return "postgres" if database_url() else "sqlite"
+
+
+# ---------------------------------------------------------------------------
+# Auth (Supabase). Todo por variables de entorno; sin secretos en el repo.
+# ---------------------------------------------------------------------------
+def supabase_project_ref() -> str | None:
+    return os.environ.get("SUPABASE_PROJECT_REF") or None
+
+
+def supabase_url() -> str | None:
+    url = os.environ.get("SUPABASE_URL")
+    if url:
+        return url.rstrip("/")
+    ref = supabase_project_ref()
+    return f"https://{ref}.supabase.co" if ref else None
+
+
+def supabase_issuer() -> str | None:
+    base = supabase_url()
+    return f"{base}/auth/v1" if base else None
+
+
+def supabase_jwks_url() -> str | None:
+    base = supabase_url()
+    return f"{base}/auth/v1/.well-known/jwks.json" if base else None
+
+
+def supabase_service_role_key() -> str | None:
+    return os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or None
+
+
+def admin_emails() -> set[str]:
+    raw = os.environ.get("APU_ADMIN_EMAILS", "")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}

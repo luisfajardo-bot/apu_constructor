@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: armador-apus
+    runtime: docker
+    plan: starter            # evita el spin-down del free tier
+    healthCheckPath: /api/health
+    autoDeploy: true
+    branch: master
+    dockerfilePath: ./Dockerfile
+    envVars:
+      # VITE_* se bakean en el build (públicas); se pasan como build-args del Docker.
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      # Secretos de runtime (se llenan en el dashboard).
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_PROJECT_REF
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: APU_ADMIN_EMAILS
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: APU_MAX_UPLOAD_MB
+        value: "15"
+      - key: APU_RATELIMIT_ENABLED
+        value: "true"
+      - key: WEB_CONCURRENCY
+        value: "2"

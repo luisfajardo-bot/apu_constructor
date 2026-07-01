@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -30,6 +31,8 @@ from apu_tool.servicio.supabase_admin import AdminSupabase, AdminSupabaseHTTP
 
 router = APIRouter()
 
+logger = logging.getLogger("apu_tool")
+
 
 def get_admin_supabase() -> AdminSupabase:
     return AdminSupabaseHTTP()
@@ -38,6 +41,12 @@ def get_admin_supabase() -> AdminSupabase:
 @router.get("/yo")
 def yo(usuario=Depends(requiere_rol("consulta"))):
     return {"email": usuario.email, "rol": usuario.rol, "nombre": usuario.nombre}
+
+
+@router.get("/health")
+def health():
+    """Sonda de salud pública (sin auth) para el health-check del PaaS."""
+    return {"status": "ok"}
 
 
 @router.get("/auditoria")
@@ -121,12 +130,13 @@ def crear_sample(alm: Almacen = Depends(get_almacen),
 
 
 def _event_stream(gen):
-    """Serializa los eventos del generador como SSE; cualquier fallo a mitad -> event: error."""
+    """Serializa los eventos del generador como SSE; cualquier fallo a mitad -> event: error genérico."""
     try:
         for evento, payload in gen:
             yield f"event: {evento}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-    except Exception as e:  # nunca dejar el stream a medias sin avisar
-        yield f"event: error\ndata: {json.dumps({'detail': str(e)}, ensure_ascii=False)}\n\n"
+    except Exception:  # nunca dejar el stream a medias sin avisar; detalle solo al log
+        logger.exception("Error durante el streaming de la corrida")
+        yield f"event: error\ndata: {json.dumps({'detail': 'Error interno.'}, ensure_ascii=False)}\n\n"
 
 
 @router.post("/corridas/stream")

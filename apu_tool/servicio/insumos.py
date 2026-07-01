@@ -16,6 +16,7 @@ import openpyxl
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
+from apu_tool.servicio.auditoria import nuevo_lote, registrar_auditoria
 
 
 def _insumo_out(ins) -> dict:
@@ -41,15 +42,26 @@ def detalle(alm: Almacen, insumo_id: int) -> Optional[dict]:
             "historial": alm.precios.price_history(ins.codigo, nombre=ins.nombre)}
 
 
-def aplicar_cambios(alm: Almacen, cambios: list[dict]) -> dict:
+def aplicar_cambios(alm: Almacen, cambios: list[dict], actor=None) -> dict:
     aplicados, errores = 0, []
+    lote = nuevo_lote()
     for c in cambios:
         try:
             precio = float(c["precio"])
             if precio < 0:
                 raise ValueError("El precio no puede ser negativo.")
-            alm.precios.set_precio_por_id(int(c["insumo_id"]), precio,
-                                          str(c.get("fuente", "") or ""))
+            iid = int(c["insumo_id"])
+            fuente = str(c.get("fuente", "") or "")
+            antes_ins = alm.precios.get_insumo_por_id(iid)   # estado previo (lectura)
+            with alm.transaccion("precios") as conn:
+                alm.precios.set_precio_por_id(iid, precio, fuente, conn=conn,
+                                              creado_por=(actor.user_id if actor else None))
+                registrar_auditoria(
+                    alm, conn, actor, "precio.editar", "insumo", iid,
+                    antes=({"precio": antes_ins.precio, "fuente": antes_ins.fuente_precio}
+                           if antes_ins else None),
+                    despues={"precio": precio, "fuente": fuente},
+                    contexto={"origen": "edicion", "lote_id": lote})
             aplicados += 1
         except Exception as e:
             errores.append({"insumo_id": c.get("insumo_id"), "error": str(e)})

@@ -21,11 +21,12 @@ from apu_tool.datos.almacen import Almacen
 from apu_tool.datos.seed import _read_apus
 from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
 from apu_tool.nucleo.texto import normalizar
+from apu_tool.servicio.auditoria import nuevo_lote, registrar_auditoria
 from apu_tool.servicio.insumos import _insumo_out, _norm_h, _to_float
 
 
 # ----------------------------------------------------------------- individual
-def crear_insumo(alm: Almacen, datos: dict) -> dict:
+def crear_insumo(alm: Almacen, datos: dict, actor=None) -> dict:
     codigo = str(datos.get("codigo", "") or "").strip()
     nombre = str(datos.get("nombre", "") or "").strip()
     if not codigo or not nombre:
@@ -37,7 +38,14 @@ def crear_insumo(alm: Almacen, datos: dict) -> dict:
                  unidad=str(datos.get("unidad", "") or ""),
                  grupo=str(datos.get("grupo", "") or ""),
                  precio=precio, fuente_precio=str(datos.get("fuente", "") or ""))
-    iid = alm.precios.crear_insumo(ins)   # ValueError si ya existe
+    with alm.transaccion("precios") as conn:
+        iid = alm.precios.crear_insumo(ins, conn=conn,
+                                       creado_por=(actor.user_id if actor else None))
+        registrar_auditoria(
+            alm, conn, actor, "insumo.crear", "insumo", iid, antes=None,
+            despues={"codigo": ins.codigo, "nombre": ins.nombre, "unidad": ins.unidad,
+                     "grupo": ins.grupo, "precio": ins.precio, "fuente": ins.fuente_precio},
+            contexto={"origen": "individual"})
     return _insumo_out(alm.precios.get_insumo_por_id(iid))
 
 
@@ -64,7 +72,7 @@ def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str) -> list[Ap
     return comps
 
 
-def crear_apu(alm: Almacen, datos: dict) -> dict:
+def crear_apu(alm: Almacen, datos: dict, actor=None) -> dict:
     codigo = str(datos.get("codigo", "") or "").strip()
     nombre = str(datos.get("nombre", "") or "").strip()
     turno = str(datos.get("turno", "") or "").strip().upper()
@@ -75,7 +83,13 @@ def crear_apu(alm: Almacen, datos: dict) -> dict:
     comps = _componentes_de(alm, datos.get("componentes", []) or [], turno)
     apu = Apu(codigo=codigo, nombre=nombre, unidad=str(datos.get("unidad", "") or ""),
               shift=turno, grupo=str(datos.get("grupo", "") or ""))
-    alm.apus.crear_apu(apu, comps)   # ValueError si ya existe
+    with alm.transaccion("apus") as conn:
+        alm.apus.crear_apu(apu, comps, conn=conn)
+        registrar_auditoria(
+            alm, conn, actor, "apu.crear", "apu", codigo, antes=None,
+            despues={"codigo": codigo, "turno": turno, "nombre": nombre,
+                     "unidad": apu.unidad, "grupo": apu.grupo, "n_componentes": len(comps)},
+            contexto={"origen": "individual"})
     return {"codigo": codigo, "shift": turno, "nombre": nombre,
             "unidad": apu.unidad, "grupo": apu.grupo, "n_componentes": len(comps)}
 
@@ -141,17 +155,26 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
     return {"crear": crear, "ya_existe": ya_existe, "invalida": invalida}
 
 
-def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str) -> dict:
+def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
+                             actor=None) -> dict:
     creados, errores = 0, []
+    lote = nuevo_lote()
     for f in _filas_insumos(contenido, nombre_archivo):
         if not f["codigo"] or not f["nombre"]:
             continue                                   # inválida: se omite
         if _existe_identidad(alm, f["codigo"], f["nombre"]):
             continue                                   # ya existe: no se pisa
         try:
-            alm.precios.crear_insumo(Insumo(
-                codigo=f["codigo"], nombre=f["nombre"], unidad=f["unidad"],
-                grupo=f["grupo"], precio=f["precio"], fuente_precio=f["fuente"]))
+            ins = Insumo(codigo=f["codigo"], nombre=f["nombre"], unidad=f["unidad"],
+                         grupo=f["grupo"], precio=f["precio"], fuente_precio=f["fuente"])
+            with alm.transaccion("precios") as conn:
+                iid = alm.precios.crear_insumo(ins, conn=conn,
+                                               creado_por=(actor.user_id if actor else None))
+                registrar_auditoria(
+                    alm, conn, actor, "insumo.crear", "insumo", iid, antes=None,
+                    despues={"codigo": ins.codigo, "nombre": ins.nombre, "unidad": ins.unidad,
+                             "grupo": ins.grupo, "precio": ins.precio, "fuente": ins.fuente_precio},
+                    contexto={"origen": "import", "lote_id": lote, "archivo": nombre_archivo})
             creados += 1
         except ValueError as e:
             errores.append({"codigo": f["codigo"], "error": str(e)})
@@ -187,14 +210,22 @@ def preview_importar_apus(alm: Almacen, contenido: bytes) -> dict:
     return {"crear": crear, "ya_existe": ya_existe}
 
 
-def aplicar_importar_apus(alm: Almacen, contenido: bytes) -> dict:
+def aplicar_importar_apus(alm: Almacen, contenido: bytes, actor=None) -> dict:
     apus, comps_por = _parse_apus(contenido)
     creados, errores = 0, []
+    lote = nuevo_lote()
     for a in apus:
         if alm.apus.get_apu(a.codigo, a.shift):
             continue                                   # ya existe: no se pisa
         try:
-            alm.apus.crear_apu(a, comps_por.get((a.codigo, a.shift), []))
+            comps = comps_por.get((a.codigo, a.shift), [])
+            with alm.transaccion("apus") as conn:
+                alm.apus.crear_apu(a, comps, conn=conn)
+                registrar_auditoria(
+                    alm, conn, actor, "apu.crear", "apu", a.codigo, antes=None,
+                    despues={"codigo": a.codigo, "turno": a.shift, "nombre": a.nombre,
+                             "unidad": a.unidad, "grupo": a.grupo, "n_componentes": len(comps)},
+                    contexto={"origen": "import", "lote_id": lote})
             creados += 1
         except ValueError as e:
             errores.append({"codigo": a.codigo, "turno": a.shift, "error": str(e)})

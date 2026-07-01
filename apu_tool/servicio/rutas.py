@@ -33,6 +33,11 @@ router = APIRouter()
 def get_admin_supabase() -> AdminSupabase:
     return AdminSupabaseHTTP()
 
+
+@router.get("/yo")
+def yo(usuario=Depends(requiere_rol("consulta"))):
+    return {"email": usuario.email, "rol": usuario.rol, "nombre": usuario.nombre}
+
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 

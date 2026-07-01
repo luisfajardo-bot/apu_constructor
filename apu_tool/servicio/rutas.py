@@ -5,12 +5,14 @@ import json
 import logging
 import os
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Optional
 
 import httpx
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, UploadFile)
 from fastapi.responses import FileResponse, StreamingResponse
+from openpyxl.utils.exceptions import InvalidFileException
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
@@ -101,6 +103,8 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
         items = read_licitacion(tmp_path, default_shift=turno, require_turno=True)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
     finally:
         os.unlink(tmp_path)
     if not items:
@@ -155,6 +159,8 @@ async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
         items = read_licitacion(tmp_path, default_shift=turno, require_turno=True)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
     finally:
         os.unlink(tmp_path)
     if not items:
@@ -267,6 +273,8 @@ async def insumos_importar_preview(archivo: UploadFile = File(...),
         return insumos_svc.preview_import(alm, contenido, archivo.filename or "lista.xlsx")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
 @router.post("/insumos/transformar/preview")
@@ -297,6 +305,8 @@ async def insumos_importar_crear_preview(archivo: UploadFile = File(...),
         return autoria.preview_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
 @router.post("/insumos/importar-crear")
@@ -309,6 +319,8 @@ async def insumos_importar_crear(archivo: UploadFile = File(...),
                                                 actor=actor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
 @router.get("/apus")
@@ -337,6 +349,8 @@ async def apus_importar_preview(archivo: UploadFile = File(...),
         return autoria.preview_importar_apus(alm, contenido)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
 @router.post("/apus/importar")
@@ -348,6 +362,8 @@ async def apus_importar(archivo: UploadFile = File(...),
         return autoria.aplicar_importar_apus(alm, contenido, actor=actor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
 @router.get("/apus/{codigo}/{turno}")

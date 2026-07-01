@@ -77,3 +77,19 @@ def ensure_dirs() -> None:
 def ai_available() -> bool:
     """True si hay credenciales para usar la IA."""
     return bool(os.environ.get(AI_ENABLED_ENV))
+
+
+# ---------------------------------------------------------------------------
+# Selección de backend de persistencia. Por defecto SQLite (local/dev/tests).
+# En producción se usa Postgres (Supabase) si hay DATABASE_URL o se fuerza con
+# APU_DB_BACKEND=postgres.
+# ---------------------------------------------------------------------------
+def database_url() -> str | None:
+    return os.environ.get("DATABASE_URL") or None
+
+
+def db_backend() -> str:
+    """'postgres' | 'sqlite'. Postgres si se fuerza por env o hay DATABASE_URL."""
+    if os.environ.get("APU_DB_BACKEND", "").strip().lower() == "postgres":
+        return "postgres"
+    return "postgres" if database_url() else "sqlite"

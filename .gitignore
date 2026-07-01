@@ -17,3 +17,11 @@ salidas/
 # Frontend web
 web/node_modules/
 web/dist/
+
+# Excel fuente confidencial en la raíz (libro de precios/costos internos): NO versionar.
+# Se usa localmente como fuente de 'seed'; el catálogo vive en la base de datos.
+/*.xlsx
+
+# Secretos / entorno
+.env
+.env.*

@@ -19,6 +19,7 @@
 - **Identidad de insumo = (codigo, nombre_norm)**; el código NO es único. El precio cuelga del `id` interno.
 - **Turno** (DIURNO/NOCTURNO) es parte de la clave de un APU y su composición.
 - TDD, commits frecuentes. Rama: `feat/produccion-multiusuario`.
+- **Aplicación de DDL multi-sentencia (corrección Task 3):** psycopg3 usa el protocolo extendido en `conn.execute()`, que **rechaza múltiples comandos** en una sola llamada ("cannot insert multiple commands into a prepared statement"). Por eso los archivos `db/pg/*.sql` (que tienen varias sentencias) NO se aplican con `conn.execute(read_text())` sino con el helper `ejecutar_script(conn, sql)` de `apu_tool/datos/pg/conexion.py` (parte por `;` y ejecuta cada sentencia). Esto aplica a `init_schema()`/`reset()` de PreciosPg/ApusPg/CorridasPg (Tasks 3–5), al `migrate-pg`/tests de la Task 8 y a cualquier test que aplique el esquema. Las sentencias sueltas (p. ej. `DROP SCHEMA … CASCADE`) sí usan `conn.execute(...)` directo.
 
 ---
 

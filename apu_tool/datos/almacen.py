@@ -5,6 +5,8 @@ Backend por config: 'sqlite' (local/dev/tests, por defecto) o 'postgres'
 """
 from __future__ import annotations
 
+import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 from apu_tool import config
@@ -63,6 +65,36 @@ class Almacen:
         """Resetea solo el catálogo (precios + apus), preservando las corridas."""
         self.precios.reset()
         self.apus.reset()
+
+    @contextmanager
+    def transaccion(self, dominio: str):
+        """Unidad de trabajo: cede UNA conexión que ve la tabla del `dominio`
+        ('precios'|'apus'|'corridas'|'seguridad') y la tabla `auditoria`, para
+        escribir mutación + auditoría atómicamente. Commit único al salir OK;
+        rollback ante excepción.
+
+        Postgres: conexión del pool (todos los schemas visibles).
+        SQLite: conexión sobre el archivo del dominio; si no es 'seguridad', ATTACH
+        de seguridad.db (`auditoria` resuelve sin calificar por ser la única base que
+        la contiene). NO usar WAL: rompería el commit atómico multi-archivo.
+        """
+        if self._cx is not None:  # Postgres: el pool hace commit/rollback al salir
+            with self._cx.transaccion() as conn:
+                yield conn
+            return
+        conn = sqlite3.connect(self._paths[dominio])
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        if dominio != "seguridad":
+            conn.execute("ATTACH DATABASE ? AS seg", (str(self._seg_path),))
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()  # SQLite hace DETACH de las bases adjuntas al cerrar
 
     def counts(self) -> dict[str, int]:
         return {**self.precios.counts(), **self.apus.counts(), **self.corridas.counts()}

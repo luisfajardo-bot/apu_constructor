@@ -45,6 +45,9 @@ class PreciosDB:
     def init_schema(self) -> None:
         with self.connect() as conn:
             conn.executescript(_load_schema())
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(insumo_precios)").fetchall()}
+            if "creado_por" not in cols:
+                conn.execute("ALTER TABLE insumo_precios ADD COLUMN creado_por TEXT")
 
     def reset(self) -> None:
         """Reconstruye el esquema desde cero (descarta y recrea desde db/precios.sql)."""
@@ -76,7 +79,8 @@ class PreciosDB:
                 n += 1
         return n
 
-    def crear_insumo(self, insumo: Insumo) -> int:
+    def crear_insumo(self, insumo: Insumo, conn: Optional[sqlite3.Connection] = None,
+                     creado_por: Optional[str] = None) -> int:
         """Crea un insumo NUEVO + su precio vigente; devuelve el id.
 
         Identidad (código, nombre_norm): si ya existe → ValueError (no se pisa, a
@@ -85,22 +89,27 @@ class PreciosDB:
         este es para altas individuales con detección de duplicado."""
         if not str(insumo.codigo or "").strip() or not str(insumo.nombre or "").strip():
             raise ValueError("El insumo necesita código y nombre.")
+        if conn is not None:
+            return self._crear_insumo(conn, insumo, creado_por)
+        with self.connect() as c:
+            return self._crear_insumo(c, insumo, creado_por)
+
+    def _crear_insumo(self, conn, insumo: Insumo, creado_por: Optional[str]) -> int:
         nombre_norm = normalizar(insumo.nombre)
         hoy = date.today().isoformat()
-        with self.connect() as conn:
-            existe = conn.execute(
-                "SELECT 1 FROM insumos WHERE codigo=? AND nombre_norm=?",
-                (str(insumo.codigo), nombre_norm)).fetchone()
-            if existe:
-                raise ValueError(
-                    f"Ya existe un insumo con código {insumo.codigo} y ese nombre.")
-            cur = conn.execute(
-                "INSERT INTO insumos (codigo, nombre, nombre_norm, unidad, grupo) "
-                "VALUES (?,?,?,?,?)",
-                (str(insumo.codigo), insumo.nombre, nombre_norm, insumo.unidad, insumo.grupo))
-            iid = int(cur.lastrowid)
-            self._insertar_precio_vigente(conn, iid, insumo.precio, insumo.fuente_precio, hoy)
-            return iid
+        existe = conn.execute(
+            "SELECT 1 FROM insumos WHERE codigo=? AND nombre_norm=?",
+            (str(insumo.codigo), nombre_norm)).fetchone()
+        if existe:
+            raise ValueError(
+                f"Ya existe un insumo con código {insumo.codigo} y ese nombre.")
+        cur = conn.execute(
+            "INSERT INTO insumos (codigo, nombre, nombre_norm, unidad, grupo) "
+            "VALUES (?,?,?,?,?)",
+            (str(insumo.codigo), insumo.nombre, nombre_norm, insumo.unidad, insumo.grupo))
+        iid = int(cur.lastrowid)
+        self._insertar_precio_vigente(conn, iid, insumo.precio, insumo.fuente_precio, hoy, creado_por)
+        return iid
 
     def _ids_de(self, conn, codigo: str, nombre: Optional[str]) -> list[int]:
         if nombre is None:
@@ -113,14 +122,14 @@ class PreciosDB:
         return [r["id"] for r in rows]
 
     def _insertar_precio_vigente(self, conn: sqlite3.Connection, insumo_id: int, precio: float,
-                                fuente: str, fecha: str) -> None:
+                                fuente: str, fecha: str, creado_por: Optional[str] = None) -> None:
         conn.execute("UPDATE insumo_precios SET vigente=0 WHERE insumo_id=?", (int(insumo_id),))
         conn.execute(
             "INSERT INTO insumo_precios "
-            "(insumo_id, precio, fuente, clasificacion, fecha, vigente) "
-            "VALUES (?,?,?,?,?,1)",
+            "(insumo_id, precio, fuente, clasificacion, fecha, vigente, creado_por) "
+            "VALUES (?,?,?,?,?,1,?)",
             (int(insumo_id), float(precio), fuente,
-             config.classify_price_source(fuente), fecha))
+             config.classify_price_source(fuente), fecha, creado_por))
 
     def set_precio(self, codigo: str, precio: float, fuente: str = "",
                    fecha: Optional[str] = None, nombre: Optional[str] = None) -> None:
@@ -134,13 +143,20 @@ class PreciosDB:
             self._insertar_precio_vigente(conn, ids[0], precio, fuente, fecha)
 
     def set_precio_por_id(self, insumo_id: int, precio: float, fuente: str = "",
-                          fecha: Optional[str] = None) -> None:
+                          fecha: Optional[str] = None, conn: Optional[sqlite3.Connection] = None,
+                          creado_por: Optional[str] = None) -> None:
         fecha = fecha or date.today().isoformat()
-        with self.connect() as conn:
-            r = conn.execute("SELECT id FROM insumos WHERE id=?", (int(insumo_id),)).fetchone()
-            if r is None:
-                raise ValueError(f"No existe el insumo id={insumo_id}.")
-            self._insertar_precio_vigente(conn, int(insumo_id), precio, fuente, fecha)
+        if conn is not None:
+            self._set_precio_por_id(conn, insumo_id, precio, fuente, fecha, creado_por)
+            return
+        with self.connect() as c:
+            self._set_precio_por_id(c, insumo_id, precio, fuente, fecha, creado_por)
+
+    def _set_precio_por_id(self, conn, insumo_id, precio, fuente, fecha, creado_por) -> None:
+        r = conn.execute("SELECT id FROM insumos WHERE id=?", (int(insumo_id),)).fetchone()
+        if r is None:
+            raise ValueError(f"No existe el insumo id={insumo_id}.")
+        self._insertar_precio_vigente(conn, int(insumo_id), precio, fuente, fecha, creado_por)
 
     def set_meta(self, clave: str, valor: str) -> None:
         with self.connect() as conn:

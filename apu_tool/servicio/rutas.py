@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, UploadFile)
 from fastapi.responses import FileResponse, StreamingResponse
 
@@ -18,11 +19,19 @@ from apu_tool.servicio import apus as apus_svc
 from apu_tool.servicio import autoria
 from apu_tool.servicio import corridas as svc
 from apu_tool.servicio import insumos as insumos_svc
+from apu_tool.servicio import usuarios as usuarios_svc
+from apu_tool.servicio.auth import requiere_rol
 from apu_tool.servicio.dependencias import get_almacen
 from apu_tool.servicio.esquemas import (
-    ApuNuevoIn, CambiosIn, ConfirmarIn, InsumoNuevoIn, StatusOut, TransformarIn)
+    ApuNuevoIn, CambiosIn, ConfirmarIn, EstadoIn, InsumoNuevoIn, RolIn, StatusOut,
+    TransformarIn, UsuarioInvitarIn)
+from apu_tool.servicio.supabase_admin import AdminSupabase, AdminSupabaseHTTP
 
 router = APIRouter()
+
+
+def get_admin_supabase() -> AdminSupabase:
+    return AdminSupabaseHTTP()
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -293,3 +302,43 @@ def detalle_apu(codigo: str, turno: str, alm: Almacen = Depends(get_almacen)):
     if d is None:
         raise HTTPException(status_code=404, detail="APU no encontrado.")
     return d
+
+
+# ---- usuarios (solo Admin) ----
+@router.get("/usuarios")
+def usuarios_listar(alm: Almacen = Depends(get_almacen),
+                    _: object = Depends(requiere_rol("admin"))):
+    return usuarios_svc.listar(alm)
+
+
+@router.post("/usuarios/invitar")
+def usuarios_invitar(body: UsuarioInvitarIn, alm: Almacen = Depends(get_almacen),
+                     admin=Depends(get_admin_supabase),
+                     _: object = Depends(requiere_rol("admin"))):
+    try:
+        return usuarios_svc.invitar(alm, admin, body.email, body.rol, body.nombre)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except httpx.HTTPStatusError:
+        raise HTTPException(status_code=400,
+                            detail="No se pudo invitar (¿el email ya existe?).")
+
+
+@router.patch("/usuarios/{user_id}/rol")
+def usuarios_cambiar_rol(user_id: str, body: RolIn,
+                         alm: Almacen = Depends(get_almacen),
+                         actor=Depends(requiere_rol("admin"))):
+    try:
+        return usuarios_svc.cambiar_rol(alm, actor, user_id, body.rol)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.patch("/usuarios/{user_id}/estado")
+def usuarios_cambiar_estado(user_id: str, body: EstadoIn,
+                            alm: Almacen = Depends(get_almacen),
+                            actor=Depends(requiere_rol("admin"))):
+    try:
+        return usuarios_svc.cambiar_estado(alm, actor, user_id, body.estado)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

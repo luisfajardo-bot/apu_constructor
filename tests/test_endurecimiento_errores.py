@@ -15,7 +15,14 @@ def test_health_publico_sin_token(tmp_path):
     assert r.status_code == 200 and r.json() == {"status": "ok"}
 
 
-def test_error_interno_es_generico_sin_traza(tmp_path):
+def test_error_interno_es_generico_sin_traza(tmp_path, monkeypatch):
+    import apu_tool.servicio.app as app_module
+
+    # Forzamos que NO se monte el catch-all de la SPA (que ensombrecería la ruta
+    # de prueba agregada abajo), independientemente de si existe un web/dist
+    # local compilado en esta máquina.
+    monkeypatch.setattr(app_module, "WEB_DIST", tmp_path / "no-existe-dist")
+
     app = _app(tmp_path)
 
     @app.get("/api/_boom")

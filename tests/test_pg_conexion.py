@@ -32,3 +32,19 @@ def test_conexion_hace_ping():
             assert r["uno"] == 1
     finally:
         cx.cerrar()
+
+
+def test_ejecutar_script_parte_en_sentencias():
+    from apu_tool.datos.pg.conexion import ejecutar_script
+
+    class _StubConn:
+        def __init__(self):
+            self.ejecutadas = []
+        def execute(self, sql):
+            self.ejecutadas.append(sql.strip())
+
+    stub = _StubConn()
+    ejecutar_script(stub, "CREATE TABLE a (id int);\nCREATE INDEX ix ON a(id);\n")
+    assert len(stub.ejecutadas) == 2
+    assert stub.ejecutadas[0].startswith("CREATE TABLE a")
+    assert stub.ejecutadas[1].startswith("CREATE INDEX ix")

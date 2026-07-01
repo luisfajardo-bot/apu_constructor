@@ -10,7 +10,7 @@ from datetime import date
 from typing import Iterable, Optional
 
 from apu_tool import config
-from apu_tool.datos.pg.conexion import Conexion
+from apu_tool.datos.pg.conexion import Conexion, ejecutar_script
 from apu_tool.nucleo.models import Insumo
 from apu_tool.nucleo.texto import normalizar
 
@@ -23,12 +23,12 @@ class PreciosPg:
 
     def init_schema(self) -> None:
         with self.cx.connection() as conn:
-            conn.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
+            ejecutar_script(conn, SCHEMA_PATH.read_text(encoding="utf-8"))
 
     def reset(self) -> None:
         with self.cx.connection() as conn:
             conn.execute("DROP SCHEMA IF EXISTS precios CASCADE")
-            conn.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
+            ejecutar_script(conn, SCHEMA_PATH.read_text(encoding="utf-8"))
 
     # ---- escritura ----
     def insert_insumos(self, insumos: Iterable[Insumo]) -> int:

@@ -8,9 +8,10 @@ pytestmark = pytest.mark.skipif(
 
 def _aplicar_todo(conn):
     from apu_tool import config
+    from apu_tool.datos.pg.conexion import ejecutar_script
     for archivo in ("precios.sql", "apus.sql", "corridas.sql"):
         sql = (config.PROJECT_ROOT / "db" / "pg" / archivo).read_text(encoding="utf-8")
-        conn.execute(sql)
+        ejecutar_script(conn, sql)
 
 
 def test_esquema_crea_tablas_calificadas():

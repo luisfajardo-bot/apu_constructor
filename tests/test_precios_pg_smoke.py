@@ -9,12 +9,12 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture()
 def precios_pg():
     from apu_tool import config
-    from apu_tool.datos.pg.conexion import Conexion
+    from apu_tool.datos.pg.conexion import Conexion, ejecutar_script
     from apu_tool.datos.pg.precios_pg import PreciosPg
     cx = Conexion(os.environ["TEST_DATABASE_URL"])
     with cx.connection() as conn:
         conn.execute("DROP SCHEMA IF EXISTS precios CASCADE")
-        conn.execute((config.PROJECT_ROOT / "db" / "pg" / "precios.sql").read_text("utf-8"))
+        ejecutar_script(conn, (config.PROJECT_ROOT / "db" / "pg" / "precios.sql").read_text("utf-8"))
     repo = PreciosPg(cx)
     yield repo
     cx.cerrar()

@@ -40,3 +40,17 @@ class Conexion:
 
     def cerrar(self) -> None:
         self._pool.close()
+
+
+def ejecutar_script(conn, sql: str) -> None:
+    """Ejecuta un script DDL multi-sentencia en Postgres.
+
+    psycopg3 usa el protocolo extendido en execute(), que rechaza múltiples
+    sentencias en un solo comando ('cannot insert multiple commands into a
+    prepared statement'). Partimos el script por ';' y ejecutamos cada
+    sentencia en la misma transacción. Asume que el DDL no contiene ';' dentro
+    de literales/identificadores (cierto para nuestros db/pg/*.sql).
+    """
+    for sentencia in sql.split(";"):
+        if sentencia.strip():
+            conn.execute(sentencia)

@@ -1,11 +1,11 @@
 """API de autoría: crear/importar insumos y APUs + listar/detalle de APUs."""
 import io
 import openpyxl
-from fastapi.testclient import TestClient
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Apu, Insumo
 from apu_tool.servicio.app import create_app
+from tests.conftest import cliente
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -16,7 +16,7 @@ def _cli(tmp_path):
     alm.init_schema()
     alm.precios.insert_insumos([Insumo("100", "CEMENTO GRIS", "KG", "MAT", 1000, "PRECIO IDU")])
     alm.apus.insert_apus([Apu("A1", "MURO EXISTENTE", "M2", "DIURNO", "ESTR")])
-    return TestClient(create_app(almacen=alm)), alm
+    return cliente(create_app(almacen=alm), rol="admin"), alm
 
 
 def test_crear_insumo_endpoint(tmp_path):

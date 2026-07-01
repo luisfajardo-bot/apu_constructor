@@ -37,19 +37,22 @@ _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 @router.get("/status", response_model=StatusOut)
-def status(alm: Almacen = Depends(get_almacen)):
+def status(alm: Almacen = Depends(get_almacen),
+          _: object = Depends(requiere_rol("consulta"))):
     c = alm.counts()
     return StatusOut(insumos=c.get("insumos", 0), apus=c.get("apus", 0),
                      ia=config.ai_available())
 
 
 @router.get("/corridas")
-def listar_corridas(alm: Almacen = Depends(get_almacen)):
+def listar_corridas(alm: Almacen = Depends(get_almacen),
+                    _: object = Depends(requiere_rol("consulta"))):
     return svc.listar_corridas(alm)
 
 
 @router.delete("/corridas/{cid}")
-def eliminar_corrida(cid: int, alm: Almacen = Depends(get_almacen)):
+def eliminar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
+                     _: object = Depends(requiere_rol("consulta"))):
     if not svc.eliminar_corrida(alm, cid):
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return {"eliminada": cid}
@@ -59,7 +62,8 @@ def eliminar_corrida(cid: int, alm: Almacen = Depends(get_almacen)):
 async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
                         use_ai: Optional[bool] = Form(None),
                         archivo: UploadFile = File(...),
-                        alm: Almacen = Depends(get_almacen)):
+                        alm: Almacen = Depends(get_almacen),
+                        _: object = Depends(requiere_rol("consulta"))):
     if alm.counts().get("apus", 0) == 0:
         ensure_seeded()
     suf = Path(archivo.filename or "lic.xlsx").suffix or ".xlsx"
@@ -79,7 +83,8 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
 
 
 @router.post("/sample")
-def crear_sample(alm: Almacen = Depends(get_almacen)):
+def crear_sample(alm: Almacen = Depends(get_almacen),
+                 _: object = Depends(requiere_rol("consulta"))):
     if alm.counts().get("apus", 0) == 0:
         ensure_seeded()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
@@ -110,7 +115,8 @@ def _event_stream(gen):
 async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
                                use_ai: Optional[bool] = Form(None),
                                archivo: UploadFile = File(...),
-                               alm: Almacen = Depends(get_almacen)):
+                               alm: Almacen = Depends(get_almacen),
+                               _: object = Depends(requiere_rol("consulta"))):
     if alm.counts().get("apus", 0) == 0:
         ensure_seeded()
     suf = Path(archivo.filename or "lic.xlsx").suffix or ".xlsx"
@@ -131,7 +137,8 @@ async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
 
 
 @router.post("/sample/stream")
-def crear_sample_stream(alm: Almacen = Depends(get_almacen)):
+def crear_sample_stream(alm: Almacen = Depends(get_almacen),
+                        _: object = Depends(requiere_rol("consulta"))):
     if alm.counts().get("apus", 0) == 0:
         ensure_seeded()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
@@ -151,7 +158,8 @@ def crear_sample_stream(alm: Almacen = Depends(get_almacen)):
 
 
 @router.get("/corridas/{cid}")
-def get_corrida(cid: int, alm: Almacen = Depends(get_almacen)):
+def get_corrida(cid: int, alm: Almacen = Depends(get_almacen),
+                _: object = Depends(requiere_rol("consulta"))):
     v = svc.vista_corrida(alm, cid)
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
@@ -159,7 +167,8 @@ def get_corrida(cid: int, alm: Almacen = Depends(get_almacen)):
 
 
 @router.get("/corridas/{cid}/items/{seq}")
-def get_item(cid: int, seq: int, alm: Almacen = Depends(get_almacen)):
+def get_item(cid: int, seq: int, alm: Almacen = Depends(get_almacen),
+            _: object = Depends(requiere_rol("consulta"))):
     d = svc.detalle_item(alm, cid, seq)
     if d is None:
         raise HTTPException(status_code=404, detail="Ítem no encontrado.")
@@ -168,7 +177,8 @@ def get_item(cid: int, seq: int, alm: Almacen = Depends(get_almacen)):
 
 @router.post("/corridas/{cid}/items/{seq}/confirmar")
 def confirmar(cid: int, seq: int, body: ConfirmarIn,
-              alm: Almacen = Depends(get_almacen)):
+              alm: Almacen = Depends(get_almacen),
+              _: object = Depends(requiere_rol("consulta"))):
     v = svc.confirmar_item(alm, cid, seq, body.apu_codigo, body.shift)
     if v is None:
         raise HTTPException(status_code=404, detail="Ítem no encontrado.")
@@ -176,7 +186,8 @@ def confirmar(cid: int, seq: int, body: ConfirmarIn,
 
 
 @router.get("/corridas/{cid}/cuadro")
-def cuadro(cid: int, alm: Almacen = Depends(get_almacen)):
+def cuadro(cid: int, alm: Almacen = Depends(get_almacen),
+          _: object = Depends(requiere_rol("consulta"))):
     out = svc.generar_cuadro(alm, cid)
     if out is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
@@ -187,22 +198,26 @@ def cuadro(cid: int, alm: Almacen = Depends(get_almacen)):
 def listar_insumos(q: Optional[str] = None, grupo: Optional[str] = None,
                    fuente: Optional[str] = None, clasificacion: Optional[str] = None,
                    limit: int = 100, offset: int = 0,
-                   alm: Almacen = Depends(get_almacen)):
+                   alm: Almacen = Depends(get_almacen),
+                   _: object = Depends(requiere_rol("consulta"))):
     return insumos_svc.listar(alm, q, grupo, fuente, clasificacion, limit, offset)
 
 
 @router.get("/insumos/grupos")
-def insumos_grupos(alm: Almacen = Depends(get_almacen)):
+def insumos_grupos(alm: Almacen = Depends(get_almacen),
+                   _: object = Depends(requiere_rol("consulta"))):
     return alm.precios.grupos()
 
 
 @router.get("/insumos/fuentes")
-def insumos_fuentes(alm: Almacen = Depends(get_almacen)):
+def insumos_fuentes(alm: Almacen = Depends(get_almacen),
+                    _: object = Depends(requiere_rol("consulta"))):
     return alm.precios.fuentes()
 
 
 @router.get("/insumos/{insumo_id}")
-def insumo_detalle(insumo_id: int, alm: Almacen = Depends(get_almacen)):
+def insumo_detalle(insumo_id: int, alm: Almacen = Depends(get_almacen),
+                   _: object = Depends(requiere_rol("consulta"))):
     d = insumos_svc.detalle(alm, insumo_id)
     if d is None:
         raise HTTPException(status_code=404, detail="Insumo no encontrado.")
@@ -210,13 +225,15 @@ def insumo_detalle(insumo_id: int, alm: Almacen = Depends(get_almacen)):
 
 
 @router.post("/insumos/cambios")
-def insumos_cambios(body: CambiosIn, alm: Almacen = Depends(get_almacen)):
+def insumos_cambios(body: CambiosIn, alm: Almacen = Depends(get_almacen),
+                    _: object = Depends(requiere_rol("editor"))):
     return insumos_svc.aplicar_cambios(alm, [c.model_dump() for c in body.cambios])
 
 
 @router.post("/insumos/importar/preview")
 async def insumos_importar_preview(archivo: UploadFile = File(...),
-                                   alm: Almacen = Depends(get_almacen)):
+                                   alm: Almacen = Depends(get_almacen),
+                                   _: object = Depends(requiere_rol("editor"))):
     contenido = await archivo.read()
     try:
         return insumos_svc.preview_import(alm, contenido, archivo.filename or "lista.xlsx")
@@ -225,7 +242,8 @@ async def insumos_importar_preview(archivo: UploadFile = File(...),
 
 
 @router.post("/insumos/transformar/preview")
-def insumos_transformar_preview(body: TransformarIn, alm: Almacen = Depends(get_almacen)):
+def insumos_transformar_preview(body: TransformarIn, alm: Almacen = Depends(get_almacen),
+                                _: object = Depends(requiere_rol("editor"))):
     try:
         return insumos_svc.preview_transformar(alm, body.filtro, body.operacion)
     except ValueError as e:
@@ -234,7 +252,8 @@ def insumos_transformar_preview(body: TransformarIn, alm: Almacen = Depends(get_
 
 # ---- autoría: crear / importar insumos y APUs ----
 @router.post("/insumos/crear")
-def crear_insumo(body: InsumoNuevoIn, alm: Almacen = Depends(get_almacen)):
+def crear_insumo(body: InsumoNuevoIn, alm: Almacen = Depends(get_almacen),
+                 _: object = Depends(requiere_rol("editor"))):
     try:
         return autoria.crear_insumo(alm, body.model_dump())
     except ValueError as e:
@@ -243,7 +262,8 @@ def crear_insumo(body: InsumoNuevoIn, alm: Almacen = Depends(get_almacen)):
 
 @router.post("/insumos/importar-crear/preview")
 async def insumos_importar_crear_preview(archivo: UploadFile = File(...),
-                                         alm: Almacen = Depends(get_almacen)):
+                                         alm: Almacen = Depends(get_almacen),
+                                         _: object = Depends(requiere_rol("editor"))):
     contenido = await archivo.read()
     try:
         return autoria.preview_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx")
@@ -253,7 +273,8 @@ async def insumos_importar_crear_preview(archivo: UploadFile = File(...),
 
 @router.post("/insumos/importar-crear")
 async def insumos_importar_crear(archivo: UploadFile = File(...),
-                                 alm: Almacen = Depends(get_almacen)):
+                                 alm: Almacen = Depends(get_almacen),
+                                 _: object = Depends(requiere_rol("editor"))):
     contenido = await archivo.read()
     try:
         return autoria.aplicar_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx")
@@ -264,12 +285,14 @@ async def insumos_importar_crear(archivo: UploadFile = File(...),
 @router.get("/apus")
 def listar_apus(q: Optional[str] = None, grupo: Optional[str] = None,
                 turno: Optional[str] = None, limit: int = 100, offset: int = 0,
-                alm: Almacen = Depends(get_almacen)):
+                alm: Almacen = Depends(get_almacen),
+                _: object = Depends(requiere_rol("consulta"))):
     return apus_svc.listar(alm, q, grupo, turno, limit, offset)
 
 
 @router.post("/apus/crear")
-def crear_apu(body: ApuNuevoIn, alm: Almacen = Depends(get_almacen)):
+def crear_apu(body: ApuNuevoIn, alm: Almacen = Depends(get_almacen),
+             _: object = Depends(requiere_rol("editor"))):
     try:
         return autoria.crear_apu(alm, body.model_dump())
     except ValueError as e:
@@ -278,7 +301,8 @@ def crear_apu(body: ApuNuevoIn, alm: Almacen = Depends(get_almacen)):
 
 @router.post("/apus/importar/preview")
 async def apus_importar_preview(archivo: UploadFile = File(...),
-                                alm: Almacen = Depends(get_almacen)):
+                                alm: Almacen = Depends(get_almacen),
+                                _: object = Depends(requiere_rol("editor"))):
     contenido = await archivo.read()
     try:
         return autoria.preview_importar_apus(alm, contenido)
@@ -288,7 +312,8 @@ async def apus_importar_preview(archivo: UploadFile = File(...),
 
 @router.post("/apus/importar")
 async def apus_importar(archivo: UploadFile = File(...),
-                        alm: Almacen = Depends(get_almacen)):
+                        alm: Almacen = Depends(get_almacen),
+                        _: object = Depends(requiere_rol("editor"))):
     contenido = await archivo.read()
     try:
         return autoria.aplicar_importar_apus(alm, contenido)
@@ -297,7 +322,8 @@ async def apus_importar(archivo: UploadFile = File(...),
 
 
 @router.get("/apus/{codigo}/{turno}")
-def detalle_apu(codigo: str, turno: str, alm: Almacen = Depends(get_almacen)):
+def detalle_apu(codigo: str, turno: str, alm: Almacen = Depends(get_almacen),
+                _: object = Depends(requiere_rol("consulta"))):
     d = apus_svc.detalle(alm, codigo, turno)
     if d is None:
         raise HTTPException(status_code=404, detail="APU no encontrado.")

@@ -1,10 +1,10 @@
 import openpyxl
-from fastapi.testclient import TestClient
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.licitacion import write_sample_licitacion
 from apu_tool.nucleo.models import Apu, ApuComponent, Insumo, LicitacionItem
 from apu_tool.servicio.app import create_app
+from tests.conftest import cliente
 
 
 def _cli(tmp_path):  # alias usado por los tests de stream
@@ -20,7 +20,7 @@ def _cliente(tmp_path):
     alm.apus.insert_apus([Apu("A1", "Concreto clase D", "M3", "DIURNO", "ESTR")])
     alm.apus.insert_components([ApuComponent("A1", "DIURNO", "100",
                                "Concreto 3000 PSI", "M3", 1.05, 350000.0)])
-    return TestClient(create_app(almacen=alm)), alm
+    return cliente(create_app(almacen=alm), rol="admin"), alm
 
 
 def test_status(tmp_path):

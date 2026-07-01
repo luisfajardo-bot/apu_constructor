@@ -1,10 +1,10 @@
 # tests/test_api_insumos.py
-from fastapi.testclient import TestClient
 import io, openpyxl
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Insumo
 from apu_tool.servicio.app import create_app
+from tests.conftest import cliente
 
 
 def _cli(tmp_path):
@@ -14,7 +14,7 @@ def _cli(tmp_path):
     alm.precios.insert_insumos([
         Insumo("100", "Concreto 3000 PSI", "M3", "CONCRETOS", 350000.0, "COSTO INTERNO"),
         Insumo("200", "Acero de refuerzo", "KG", "ACEROS", 4500.0, "PRECIO IDU")])
-    return TestClient(create_app(almacen=alm)), alm
+    return cliente(create_app(almacen=alm), rol="admin"), alm
 
 
 def test_listar_filtros_grupos_fuentes(tmp_path):

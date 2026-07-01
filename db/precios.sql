@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS insumo_precios (
     clasificacion TEXT,          -- 'publico' | 'interno'
     fecha         TEXT,          -- ISO (YYYY-MM-DD)
     vigente       INTEGER NOT NULL DEFAULT 1,
+    creado_por    TEXT,          -- user_id de quien fijó el precio (NULL = histórico/seed)
     FOREIGN KEY (insumo_id) REFERENCES insumos(id)
 );
 

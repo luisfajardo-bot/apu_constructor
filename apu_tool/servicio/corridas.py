@@ -22,6 +22,7 @@ from apu_tool.nucleo.models import (
     ApuComponent, AssembledApu, CorridaItemRow, CorridaMeta, LicitacionItem,
     MatchStatus,
 )
+from apu_tool.servicio.auditoria import registrar_auditoria
 
 
 def _estructura(componentes) -> list[dict]:
@@ -186,8 +187,18 @@ def listar_corridas(alm: Almacen) -> list[dict]:
     return out
 
 
-def eliminar_corrida(alm: Almacen, corrida_id: int) -> bool:
-    return alm.corridas.eliminar_corrida(corrida_id)
+def eliminar_corrida(alm: Almacen, corrida_id: int, actor=None) -> bool:
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return False
+    with alm.transaccion("corridas") as conn:
+        ok = alm.corridas.eliminar_corrida(corrida_id, conn=conn)
+        if ok:
+            registrar_auditoria(
+                alm, conn, actor, "corrida.eliminar", "corrida", corrida_id,
+                antes={"archivo": meta.archivo, "creada_en": meta.creada_en, "estado": meta.estado},
+                despues=None)
+    return ok
 
 
 def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:

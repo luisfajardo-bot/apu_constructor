@@ -9,6 +9,7 @@ import Corrida from "@/pages/Corrida";
 import Insumos from "@/pages/Insumos";
 import Apus from "@/pages/Apus";
 import Usuarios from "@/pages/Usuarios";
+import Auditoria from "@/pages/Auditoria";
 import { ArmadoVivoProvider } from "@/lib/armado";
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="apus" element={<Apus />} />
             <Route element={<RequiereRol minimo="admin" />}>
               <Route path="usuarios" element={<Usuarios />} />
+              <Route path="auditoria" element={<Auditoria />} />
             </Route>
           </Route>
         </Route>

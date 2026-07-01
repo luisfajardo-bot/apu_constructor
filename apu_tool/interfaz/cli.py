@@ -176,6 +176,29 @@ def cmd_build_ppto(args) -> int:
     return 0
 
 
+def cmd_migrate_pg(args) -> int:
+    from apu_tool import config
+    from apu_tool.datos.pg.conexion import Conexion, ejecutar_script
+    from apu_tool.datos import migracion_pg
+    dsn = config.database_url()
+    if not dsn:
+        print("Falta DATABASE_URL (destino Postgres/Supabase).")
+        return 2
+    cx = Conexion(dsn)
+    try:
+        # aplicar esquema destino
+        with cx.connection() as conn:
+            for f in ("precios.sql", "apus.sql", "corridas.sql"):
+                ejecutar_script(conn, (config.PROJECT_ROOT / "db" / "pg" / f).read_text("utf-8"))
+        n = migracion_pg.migrar_catalogo(config.PRECIOS_DB_PATH, config.APUS_DB_PATH, cx)
+        ver = migracion_pg.verificar(config.PRECIOS_DB_PATH, config.APUS_DB_PATH, cx)
+        print(f"Migrado: {n}")
+        print(f"Verificación: {'OK' if ver['ok'] else 'DISCREPANCIA'} -> {ver['detalle']}")
+        return 0 if ver["ok"] else 1
+    finally:
+        cx.cerrar()
+
+
 def cmd_demo(args) -> int:
     print("1) Semillado del histórico…")
     print("  ", ensure_seeded())
@@ -243,6 +266,10 @@ def build_parser() -> argparse.ArgumentParser:
     pd.add_argument("-n", type=int, default=15, help="Número de ítems del ejemplo.")
     pd.add_argument("--no-ai", action="store_true", help="Forzar fallback determinístico.")
     pd.set_defaults(func=cmd_demo)
+
+    pmg = sub.add_parser("migrate-pg",
+                         help="Migrar el catálogo (SQLite) a Postgres/Supabase (DATABASE_URL).")
+    pmg.set_defaults(func=cmd_migrate_pg)
     return p
 
 

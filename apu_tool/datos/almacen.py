@@ -6,7 +6,6 @@ Backend por config: 'sqlite' (local/dev/tests, por defecto) o 'postgres'
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from apu_tool import config
 from apu_tool.datos.apus_db import ApusDB

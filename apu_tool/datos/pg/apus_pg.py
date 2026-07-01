@@ -1,4 +1,9 @@
-"""Backend Postgres de APUs. Implementa RepositorioApus. Port 1:1 de apus_db.py."""
+"""
+Backend Postgres de APUs. Implementa RepositorioApus. Port 1:1 de apus_db.py.
+
+NO toca dinero (precio_unitario_hist es un respaldo embebido, no se expone a la IA).
+get_depriced_apu devuelve la vista SIN dinero para la IA.
+"""
 from __future__ import annotations
 
 from typing import Iterable, Optional

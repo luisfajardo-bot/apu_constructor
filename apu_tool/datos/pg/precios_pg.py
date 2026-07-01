@@ -40,6 +40,7 @@ class PreciosPg:
                 cur = conn.execute(
                     "INSERT INTO precios.insumos "
                     "(codigo, nombre, nombre_norm, unidad, grupo) VALUES (%s,%s,%s,%s,%s) "
+                    # ON CONFLICT sobre la única restricción unique de la tabla (además de PK identity)
                     "ON CONFLICT (codigo, nombre_norm) DO NOTHING RETURNING id",
                     (i.codigo, i.nombre, nombre_norm, i.unidad, i.grupo))
                 row = cur.fetchone()

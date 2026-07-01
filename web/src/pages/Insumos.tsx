@@ -8,10 +8,14 @@ import { DialogoTransformar } from "@/components/insumos/DialogoTransformar";
 import { DialogoImportar } from "@/components/insumos/DialogoImportar";
 import { DialogoAgregarInsumo } from "@/components/autoria/DialogoAgregarInsumo";
 import { DialogoImportarCrearInsumos } from "@/components/autoria/DialogoImportarCrearInsumos";
+import { useAuth } from "@/lib/auth";
+import { puede } from "@/components/rutas";
 
 const LIMIT = 100;
 
 export default function Insumos() {
+  const { perfil } = useAuth();
+  const puedeEditar = puede(perfil?.rol, "editor");
   const [filtros, setFiltros] = useState<FiltrosState>({
     q: "",
     grupo: "",
@@ -76,36 +80,38 @@ export default function Insumos() {
         {cargando && (
           <span className="text-xs text-muted-foreground animate-pulse">cargando…</span>
         )}
-        <div className="ml-auto flex gap-2">
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() => setAgregarOpen(true)}
-          >
-            Agregar insumo
-          </Button>
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() => setImportarCrearOpen(true)}
-          >
-            Importar para crear
-          </Button>
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() => setImportarOpen(true)}
-          >
-            Importar
-          </Button>
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() => setTransformarOpen(true)}
-          >
-            Transformar
-          </Button>
-        </div>
+        {puedeEditar && (
+          <div className="ml-auto flex gap-2">
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => setAgregarOpen(true)}
+            >
+              Agregar insumo
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => setImportarCrearOpen(true)}
+            >
+              Importar para crear
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => setImportarOpen(true)}
+            >
+              Importar
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => setTransformarOpen(true)}
+            >
+              Transformar
+            </Button>
+          </div>
+        )}
       </div>
 
       <BarraFiltros
@@ -121,37 +127,46 @@ export default function Insumos() {
         </div>
       )}
 
-      <TablaInsumos insumos={insumos} fuentes={fuentes} onReload={recargar} />
-
-      <DialogoTransformar
-        open={transformarOpen}
-        onOpenChange={setTransformarOpen}
-        filtro={{
-          q: filtros.q || undefined,
-          grupo: filtros.grupo || undefined,
-          fuente: filtros.fuente || undefined,
-          clasificacion: filtros.clasificacion || undefined,
-        }}
-        onAplicado={recargar}
+      <TablaInsumos
+        insumos={insumos}
+        fuentes={fuentes}
+        onReload={recargar}
+        puedeEditar={puedeEditar}
       />
 
-      <DialogoImportar
-        open={importarOpen}
-        onOpenChange={setImportarOpen}
-        onAplicado={recargar}
-      />
+      {puedeEditar && (
+        <>
+          <DialogoTransformar
+            open={transformarOpen}
+            onOpenChange={setTransformarOpen}
+            filtro={{
+              q: filtros.q || undefined,
+              grupo: filtros.grupo || undefined,
+              fuente: filtros.fuente || undefined,
+              clasificacion: filtros.clasificacion || undefined,
+            }}
+            onAplicado={recargar}
+          />
 
-      <DialogoAgregarInsumo
-        open={agregarOpen}
-        onOpenChange={setAgregarOpen}
-        onCreado={recargar}
-      />
+          <DialogoImportar
+            open={importarOpen}
+            onOpenChange={setImportarOpen}
+            onAplicado={recargar}
+          />
 
-      <DialogoImportarCrearInsumos
-        open={importarCrearOpen}
-        onOpenChange={setImportarCrearOpen}
-        onAplicado={recargar}
-      />
+          <DialogoAgregarInsumo
+            open={agregarOpen}
+            onOpenChange={setAgregarOpen}
+            onCreado={recargar}
+          />
+
+          <DialogoImportarCrearInsumos
+            open={importarCrearOpen}
+            onOpenChange={setImportarCrearOpen}
+            onAplicado={recargar}
+          />
+        </>
+      )}
     </div>
   );
 }

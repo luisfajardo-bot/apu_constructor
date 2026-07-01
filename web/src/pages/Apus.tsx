@@ -21,6 +21,8 @@ import type { ApuResumen, ApuDetalle } from "@/lib/tipos";
 import { cop } from "@/lib/moneda";
 import { DialogoAgregarApu } from "@/components/autoria/DialogoAgregarApu";
 import { DialogoImportarApus } from "@/components/autoria/DialogoImportarApus";
+import { useAuth } from "@/lib/auth";
+import { puede } from "@/components/rutas";
 
 const LIMIT = 100;
 
@@ -31,6 +33,8 @@ function clave(a: ApuResumen): string {
 }
 
 export default function Apus() {
+  const { perfil } = useAuth();
+  const puedeEditar = puede(perfil?.rol, "editor");
   const [q, setQ] = useState("");
   const [inputQ, setInputQ] = useState("");
   const [turno, setTurno] = useState("");
@@ -111,14 +115,16 @@ export default function Apus() {
         {cargando && (
           <span className="text-xs text-muted-foreground animate-pulse">cargando…</span>
         )}
-        <div className="ml-auto flex gap-2">
-          <Button size="xs" variant="outline" onClick={() => setAgregarOpen(true)}>
-            Agregar APU
-          </Button>
-          <Button size="xs" variant="outline" onClick={() => setImportarOpen(true)}>
-            Importar APUs
-          </Button>
-        </div>
+        {puedeEditar && (
+          <div className="ml-auto flex gap-2">
+            <Button size="xs" variant="outline" onClick={() => setAgregarOpen(true)}>
+              Agregar APU
+            </Button>
+            <Button size="xs" variant="outline" onClick={() => setImportarOpen(true)}>
+              Importar APUs
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Filtros */}
@@ -265,16 +271,20 @@ export default function Apus() {
         </Table>
       </div>
 
-      <DialogoAgregarApu
-        open={agregarOpen}
-        onOpenChange={setAgregarOpen}
-        onCreado={recargar}
-      />
-      <DialogoImportarApus
-        open={importarOpen}
-        onOpenChange={setImportarOpen}
-        onAplicado={recargar}
-      />
+      {puedeEditar && (
+        <>
+          <DialogoAgregarApu
+            open={agregarOpen}
+            onOpenChange={setAgregarOpen}
+            onCreado={recargar}
+          />
+          <DialogoImportarApus
+            open={importarOpen}
+            onOpenChange={setImportarOpen}
+            onAplicado={recargar}
+          />
+        </>
+      )}
     </div>
   );
 }

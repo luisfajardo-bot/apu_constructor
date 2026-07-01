@@ -17,9 +17,10 @@ interface TablaInsumosProps {
   insumos: Insumo[];
   fuentes?: string[];
   onReload: () => void;
+  puedeEditar?: boolean;
 }
 
-export function TablaInsumos({ insumos, fuentes = [], onReload }: TablaInsumosProps) {
+export function TablaInsumos({ insumos, fuentes = [], onReload, puedeEditar = true }: TablaInsumosProps) {
   const { setCampo, descartar, cambios, count, dirty } = useDirtyRows(
     insumos.map((i) => ({ id: i.id, precio: i.precio, fuente: i.fuente }))
   );
@@ -158,6 +159,7 @@ export function TablaInsumos({ insumos, fuentes = [], onReload }: TablaInsumosPr
                       value={precioEdit as number}
                       min={0}
                       step="any"
+                      disabled={!puedeEditar}
                       onChange={(e) => {
                         const v = parseFloat(e.target.value);
                         if (!Number.isNaN(v)) setCampo(ins.id, "precio", v);
@@ -170,6 +172,7 @@ export function TablaInsumos({ insumos, fuentes = [], onReload }: TablaInsumosPr
                       type="text"
                       className="h-6 text-xs"
                       value={fuenteEdit as string}
+                      disabled={!puedeEditar}
                       onChange={(e) => setCampo(ins.id, "fuente", e.target.value)}
                       list="fuentes-list"
                     />
@@ -207,7 +210,7 @@ export function TablaInsumos({ insumos, fuentes = [], onReload }: TablaInsumosPr
       </div>
 
       {/* Sticky bottom action bar */}
-      {count > 0 && (
+      {puedeEditar && count > 0 && (
         <div className="sticky bottom-0 z-20 flex items-center gap-3 border-t bg-background px-4 py-2 shadow-[0_-2px_8px_rgba(0,0,0,.08)]">
           <span className="text-sm text-amber-700 dark:text-amber-400 font-medium">
             {count} cambio{count !== 1 ? "s" : ""} sin guardar

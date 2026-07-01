@@ -3,15 +3,12 @@ import { NavLink, Outlet } from "react-router-dom";
 import { Toaster } from "sonner";
 import { getStatus } from "@/api/corridas";
 import type { StatusResponse } from "@/lib/tipos";
-
-const NAV_LINKS = [
-  { to: "/corridas", label: "Corridas", end: false },
-  { to: "/insumos", label: "Insumos", end: true },
-  { to: "/apus", label: "APUs", end: true },
-];
+import { useAuth } from "@/lib/auth";
+import { puede } from "@/components/rutas";
 
 export default function Layout() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const { perfil, logout } = useAuth();
 
   useEffect(() => {
     getStatus()
@@ -25,19 +22,50 @@ export default function Layout() {
     ? `${status.insumos} insumos · ${status.apus} APUs · IA: ${status.ia ? "habilitada" : "fallback"}`
     : "cargando…";
 
+  const links = [
+    { to: "/corridas", label: "Corridas", end: false },
+    { to: "/insumos", label: "Insumos", end: true },
+    { to: "/apus", label: "APUs", end: true },
+    ...(puede(perfil?.rol, "admin") ? [{ to: "/usuarios", label: "Usuarios", end: true }] : []),
+  ];
+
   return (
     <div style={styles.root}>
       {/* Barra superior */}
       <header style={styles.topbar}>
-        <span style={styles.brand}>Armador de APUs</span>
-        <span style={styles.chip}>{chipText}</span>
+        <div style={styles.topbarLeft}>
+          <span style={styles.brand}>Armador de APUs</span>
+          <span style={styles.chip}>{chipText}</span>
+        </div>
+        {perfil && (
+          <div style={styles.userMenu}>
+            <span style={styles.userIdentity}>
+              <span style={styles.userEmail}>{perfil.email}</span>
+              <span style={styles.userRoleDot}>·</span>
+              <span style={styles.userRole}>{perfil.rol}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => logout()}
+              style={styles.logoutButton}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,0.12)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+              }}
+            >
+              Cerrar sesión
+            </button>
+          </div>
+        )}
       </header>
 
       <div style={styles.body}>
         {/* Navegacion lateral */}
         <nav style={styles.sidebar}>
           <ul style={styles.navList}>
-            {NAV_LINKS.map(({ to, label, end }) => (
+            {links.map(({ to, label, end }) => (
               <li key={to}>
                 <NavLink
                   to={to}
@@ -82,10 +110,17 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#e2e8f0",
     flexShrink: 0,
   },
+  topbarLeft: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    minWidth: 0,
+  },
   brand: {
     fontWeight: 600,
     fontSize: "13px",
     letterSpacing: "0.02em",
+    whiteSpace: "nowrap",
   },
   chip: {
     fontSize: "11px",
@@ -94,6 +129,47 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "10px",
     color: "#a0aec0",
     whiteSpace: "nowrap",
+  },
+  userMenu: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    flexShrink: 0,
+  },
+  userIdentity: {
+    display: "flex",
+    alignItems: "center",
+    gap: "5px",
+    fontSize: "11px",
+    padding: "3px 8px",
+    borderRadius: "10px",
+    background: "rgba(255,255,255,0.06)",
+    whiteSpace: "nowrap",
+  },
+  userEmail: {
+    color: "#e2e8f0",
+  },
+  userRoleDot: {
+    color: "#5a5f78",
+  },
+  userRole: {
+    color: "#8fb3e8",
+    fontWeight: 600,
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    fontSize: "10px",
+  },
+  logoutButton: {
+    fontSize: "11px",
+    fontFamily: "inherit",
+    color: "#e2e8f0",
+    background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.14)",
+    borderRadius: "6px",
+    padding: "3px 9px",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    transition: "background 120ms ease",
   },
   body: {
     display: "flex",

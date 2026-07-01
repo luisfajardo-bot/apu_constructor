@@ -26,7 +26,12 @@ export default function Layout() {
     { to: "/corridas", label: "Corridas", end: false },
     { to: "/insumos", label: "Insumos", end: true },
     { to: "/apus", label: "APUs", end: true },
-    ...(puede(perfil?.rol, "admin") ? [{ to: "/usuarios", label: "Usuarios", end: true }] : []),
+    ...(puede(perfil?.rol, "admin")
+      ? [
+          { to: "/usuarios", label: "Usuarios", end: true },
+          { to: "/auditoria", label: "Auditoría", end: true },
+        ]
+      : []),
   ];
 
   return (

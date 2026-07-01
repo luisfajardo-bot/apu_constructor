@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.servicio import rutas
+from apu_tool.servicio.limites import LimiteSubida
 from apu_tool.servicio.seguridad_headers import CabecerasSeguridad
 
 logger = logging.getLogger("apu_tool")
@@ -36,6 +37,7 @@ def create_app(almacen: Optional[Almacen] = None) -> FastAPI:
     app.state.almacen = almacen or _crear_almacen()
     app.include_router(rutas.router, prefix="/api")
     app.add_middleware(CabecerasSeguridad)   # cabeceras en TODA respuesta (incl. errores y estáticos)
+    app.add_middleware(LimiteSubida, max_bytes=config.max_upload_mb() * 1024 * 1024)
 
     @app.exception_handler(ValueError)
     async def _manejar_valor(request: Request, exc: ValueError):

@@ -33,7 +33,9 @@ class PerfilesDB:
 
     def reset(self) -> None:
         with self.connect() as conn:
-            conn.execute("DROP TABLE IF EXISTS perfiles")
+            # auditoria comparte este archivo con perfiles: un reset completo la limpia también.
+            for t in ("auditoria", "perfiles"):
+                conn.execute(f"DROP TABLE IF EXISTS {t}")
             conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
 
     def _fila(self, r) -> Perfil:

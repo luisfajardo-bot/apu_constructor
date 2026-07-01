@@ -25,6 +25,7 @@ web/dist/
 # Secretos / entorno
 .env
 .env.*
+!.env.example
 
 # Node en la raíz: NO va aquí (el frontend vive en web/). Evita arrastres accidentales.
 node_modules/

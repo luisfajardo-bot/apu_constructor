@@ -68,6 +68,22 @@ class Perfil:
     creado_en: str = ""
 
 
+@dataclass(frozen=True)
+class EventoAuditoria:
+    """Un evento de auditoría (tabla seguridad.auditoria). SIN dinero directo:
+    los precios viajan dentro de antes/despues como parte del estado, nunca hacia la IA."""
+    ts: str                                  # ISO 8601 UTC
+    rol: str                                 # rol del actor; "sistema" si no hay actor
+    accion: str                              # taxonomía objeto.verbo (p.ej. "precio.editar")
+    entidad_tipo: str                        # insumo | apu | corrida | usuario
+    entidad_id: str
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+    antes: Optional[dict] = None
+    despues: Optional[dict] = None
+    contexto: Optional[dict] = None
+
+
 # ---------------------------------------------------------------------------
 # Vistas SIN dinero — lo único que la IA puede ver
 # ---------------------------------------------------------------------------

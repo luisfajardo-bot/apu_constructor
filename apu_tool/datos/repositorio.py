@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Iterable, Optional, Protocol, runtime_checkable
 
 from apu_tool.nucleo.models import (
-    Apu, ApuComponent, CorridaItemRow, CorridaMeta, DePricedApu, Insumo, Perfil,
+    Apu, ApuComponent, CorridaItemRow, CorridaMeta, DePricedApu, EventoAuditoria, Insumo, Perfil,
 )
 
 
@@ -106,3 +106,19 @@ class RepositorioPerfiles(Protocol):
     def set_rol(self, user_id: str, rol: str) -> None: ...
     def set_estado(self, user_id: str, estado: str) -> None: ...
     def contar_admins_activos(self) -> int: ...
+
+
+@runtime_checkable
+class RepositorioAuditoria(Protocol):
+    def registrar(self, conn, evento: EventoAuditoria) -> None:
+        """Inserta un evento SOBRE la conexión dada (transaccional con la mutación).
+        NUNCA abre su propia conexión."""
+        ...
+
+    def listar(self, *, user_id: Optional[str] = None, accion: Optional[str] = None,
+               entidad_tipo: Optional[str] = None, desde: Optional[str] = None,
+               hasta: Optional[str] = None, lote_id: Optional[str] = None,
+               limit: int = 100, offset: int = 0) -> tuple[list[dict], int]:
+        """Lectura paginada (abre su propia conexión). antes/despues/contexto ya
+        parseados a objetos Python (dict/None). Orden ts desc."""
+        ...

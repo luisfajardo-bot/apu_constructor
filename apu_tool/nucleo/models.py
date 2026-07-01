@@ -57,6 +57,17 @@ class Apu:
     grupo: str = ""
 
 
+@dataclass(frozen=True)
+class Perfil:
+    """Identidad + rol de un usuario (tabla seguridad.perfiles)."""
+    user_id: str                  # UUID de Supabase Auth
+    email: str
+    rol: str                      # admin | editor | consulta
+    estado: str                   # activo | inactivo
+    nombre: str = ""
+    creado_en: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Vistas SIN dinero — lo único que la IA puede ver
 # ---------------------------------------------------------------------------

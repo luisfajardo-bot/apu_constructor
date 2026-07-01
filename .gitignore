@@ -25,3 +25,15 @@ web/dist/
 # Secretos / entorno
 .env
 .env.*
+
+# Node en la raíz: NO va aquí (el frontend vive en web/). Evita arrastres accidentales.
+node_modules/
+/package.json
+/package-lock.json
+
+# Config local de servidores MCP
+.mcp.json
+
+# Archivos de trabajo del usuario en ejemplos (plantillas y locks de Excel)
+ejemplos/plantilla*.xlsx
+ejemplos/~$*.xlsx

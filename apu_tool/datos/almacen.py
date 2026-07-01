@@ -1,4 +1,4 @@
-"""Fachada de persistencia. Agrupa los tres repositorios y elige backend.
+"""Fachada de persistencia. Agrupa los repositorios SQLite/Postgres (precios, apus, corridas, perfiles).
 
 Backend por config: 'sqlite' (local/dev/tests, por defecto) o 'postgres'
 (Supabase, cuando hay DATABASE_URL). Los repos Postgres comparten una Conexion.
@@ -44,10 +44,11 @@ class Almacen:
         self.perfiles.init_schema()
 
     def reset(self) -> None:
-        """Reseteo COMPLETO de las tres áreas (uso explícito; borra también corridas)."""
+        """Reseteo COMPLETO de todas las áreas (precios, apus, corridas, perfiles); uso explícito."""
         self.precios.reset()
         self.apus.reset()
         self.corridas.reset()
+        self.perfiles.reset()
 
     def reset_catalogo(self) -> None:
         """Resetea solo el catálogo (precios + apus), preservando las corridas."""

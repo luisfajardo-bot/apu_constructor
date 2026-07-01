@@ -40,7 +40,9 @@ class PerfilesPg:
                 "INSERT INTO seguridad.perfiles (user_id,email,rol,estado,nombre,creado_en) "
                 "VALUES (%s,%s,%s,%s,%s,%s) "
                 "ON CONFLICT (user_id) DO UPDATE SET email=EXCLUDED.email, rol=EXCLUDED.rol, "
-                "estado=EXCLUDED.estado, nombre=EXCLUDED.nombre",
+                "estado=EXCLUDED.estado, nombre=EXCLUDED.nombre "
+                # creado_en es inmutable: marca de creación
+                "",
                 (p.user_id, p.email, p.rol, p.estado, p.nombre, p.creado_en))
 
     def listar(self) -> list[Perfil]:

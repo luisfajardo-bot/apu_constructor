@@ -127,3 +127,27 @@ def supabase_service_role_key() -> str | None:
 def admin_emails() -> set[str]:
     raw = os.environ.get("APU_ADMIN_EMAILS", "")
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+# ---------------------------------------------------------------------------
+# Endurecimiento (Plan 4). Todo por variables de entorno con defaults seguros.
+# ---------------------------------------------------------------------------
+def max_upload_mb() -> int:
+    """Tamaño máximo de subida en MB (rechazo temprano por Content-Length)."""
+    try:
+        return int(os.environ.get("APU_MAX_UPLOAD_MB", "15"))
+    except ValueError:
+        return 15
+
+
+def ratelimit_enabled() -> bool:
+    """Rate limiting activo (default sí). Se apaga en tests para no volverlos flaky."""
+    return os.environ.get("APU_RATELIMIT_ENABLED", "true").strip().lower() not in ("false", "0", "no")
+
+
+def web_concurrency() -> int:
+    """Número de workers de gunicorn en el contenedor."""
+    try:
+        return int(os.environ.get("WEB_CONCURRENCY", "2"))
+    except ValueError:
+        return 2

@@ -159,3 +159,32 @@ python -m pytest tests/ -q
 
 Cubren la frontera de privacidad, el matcher, la ingesta, el motor de precios y el
 orquestador.
+
+---
+
+## Desarrollo local (con login)
+
+Desde los Planes 2a/2b la app exige login por Supabase. Para correrla en local:
+
+1. `web/.env` con `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` (ver `web/.env.example`).
+   **Sin esto la SPA no monta** (supabase-js revienta al importar).
+2. `.env` del backend con `SUPABASE_PROJECT_REF` (o `SUPABASE_URL`) y `APU_ADMIN_EMAILS=<tu-correo>`
+   (ver `.env.example`). Sin `DATABASE_URL` usa SQLite local.
+3. `python run_cli.py seed` — siembra el catálogo y crea las bases locales.
+4. En dos terminales: `python run_web.py` (backend :8000) y, en `web/`, `npm run dev` (Vite :5173,
+   proxya `/api` al backend). Abre http://localhost:5173.
+5. Crea tu usuario en el panel de Supabase Auth (con un correo de `APU_ADMIN_EMAILS`) y entra: al
+   primer login se te bootstrapea como Admin.
+
+## Despliegue (Render + Docker)
+
+- **Imagen:** `Dockerfile` multi-stage (Node compila `web/dist` → Python sirve todo con gunicorn).
+  Las `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` se pasan como **build-args** (se bakean en el bundle).
+- **Render:** servicio web tipo Docker (ver `render.yaml`); `healthCheckPath: /api/health`; secretos
+  (`DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_PROJECT_REF`, `APU_ADMIN_EMAILS`,
+  `ANTHROPIC_API_KEY`) por el dashboard; HTTPS automático.
+- **Migración del catálogo (una vez, ops):** con `DATABASE_URL` de Supabase, correr
+  `python run_cli.py migrate-pg` y verificar conteos (insumos/precios/APUs/componentes) SQLite vs
+  Postgres. El esquema Postgres (`db/pg/*.sql` + auditoría) ya está aplicado.
+- **Post-deploy:** en Supabase añadir `https://<app-url>/definir-clave` al allowlist de redirect URLs;
+  crear el primer usuario Admin en Supabase Auth con un correo de `APU_ADMIN_EMAILS`.

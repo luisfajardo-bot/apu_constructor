@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import (APIRouter, Depends, File, Form, HTTPException, UploadFile)
+from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request, UploadFile)
 from fastapi.responses import FileResponse, StreamingResponse
+from openpyxl.utils.exceptions import InvalidFileException
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
@@ -23,12 +26,15 @@ from apu_tool.servicio import insumos as insumos_svc
 from apu_tool.servicio import usuarios as usuarios_svc
 from apu_tool.servicio.auth import requiere_rol
 from apu_tool.servicio.dependencias import get_almacen
+from apu_tool.servicio import limites
 from apu_tool.servicio.esquemas import (
     ApuNuevoIn, CambiosIn, ConfirmarIn, EstadoIn, InsumoNuevoIn, RolIn, StatusOut,
     TransformarIn, UsuarioInvitarIn)
 from apu_tool.servicio.supabase_admin import AdminSupabase, AdminSupabaseHTTP
 
 router = APIRouter()
+
+logger = logging.getLogger("apu_tool")
 
 
 def get_admin_supabase() -> AdminSupabase:
@@ -38,6 +44,12 @@ def get_admin_supabase() -> AdminSupabase:
 @router.get("/yo")
 def yo(usuario=Depends(requiere_rol("consulta"))):
     return {"email": usuario.email, "rol": usuario.rol, "nombre": usuario.nombre}
+
+
+@router.get("/health")
+def health():
+    """Sonda de salud pública (sin auth) para el health-check del PaaS."""
+    return {"status": "ok"}
 
 
 @router.get("/auditoria")
@@ -92,6 +104,8 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
         items = read_licitacion(tmp_path, default_shift=turno, require_turno=True)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
     finally:
         os.unlink(tmp_path)
     if not items:
@@ -121,12 +135,13 @@ def crear_sample(alm: Almacen = Depends(get_almacen),
 
 
 def _event_stream(gen):
-    """Serializa los eventos del generador como SSE; cualquier fallo a mitad -> event: error."""
+    """Serializa los eventos del generador como SSE; cualquier fallo a mitad -> event: error genérico."""
     try:
         for evento, payload in gen:
             yield f"event: {evento}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-    except Exception as e:  # nunca dejar el stream a medias sin avisar
-        yield f"event: error\ndata: {json.dumps({'detail': str(e)}, ensure_ascii=False)}\n\n"
+    except Exception:  # nunca dejar el stream a medias sin avisar; detalle solo al log
+        logger.exception("Error durante el streaming de la corrida")
+        yield f"event: error\ndata: {json.dumps({'detail': 'Error interno.'}, ensure_ascii=False)}\n\n"
 
 
 @router.post("/corridas/stream")
@@ -145,6 +160,8 @@ async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
         items = read_licitacion(tmp_path, default_shift=turno, require_turno=True)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
     finally:
         os.unlink(tmp_path)
     if not items:
@@ -257,6 +274,8 @@ async def insumos_importar_preview(archivo: UploadFile = File(...),
         return insumos_svc.preview_import(alm, contenido, archivo.filename or "lista.xlsx")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
 @router.post("/insumos/transformar/preview")
@@ -287,6 +306,8 @@ async def insumos_importar_crear_preview(archivo: UploadFile = File(...),
         return autoria.preview_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
 @router.post("/insumos/importar-crear")
@@ -299,6 +320,8 @@ async def insumos_importar_crear(archivo: UploadFile = File(...),
                                                 actor=actor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
 @router.get("/apus")
@@ -327,6 +350,8 @@ async def apus_importar_preview(archivo: UploadFile = File(...),
         return autoria.preview_importar_apus(alm, contenido)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
 @router.post("/apus/importar")
@@ -338,6 +363,8 @@ async def apus_importar(archivo: UploadFile = File(...),
         return autoria.aplicar_importar_apus(alm, contenido, actor=actor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
 @router.get("/apus/{codigo}/{turno}")
@@ -357,7 +384,8 @@ def usuarios_listar(alm: Almacen = Depends(get_almacen),
 
 
 @router.post("/usuarios/invitar")
-def usuarios_invitar(body: UsuarioInvitarIn, alm: Almacen = Depends(get_almacen),
+@limites.limiter.limit("3/minute")
+def usuarios_invitar(request: Request, body: UsuarioInvitarIn, alm: Almacen = Depends(get_almacen),
                      admin=Depends(get_admin_supabase),
                      actor=Depends(requiere_rol("admin"))):
     try:

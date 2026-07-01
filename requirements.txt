@@ -10,3 +10,5 @@ httpx>=0.28.1
 psycopg[binary]>=3.2   # driver Postgres (backend de nube)
 psycopg-pool>=3.2      # pool de conexiones para el backend Postgres
 PyJWT[crypto]>=2.9     # verificación de JWT (Supabase Auth, JWKS asimétrico)
+slowapi>=0.1.9         # rate limiting (endurecimiento)
+gunicorn>=23.0         # servidor de producción (gestiona workers uvicorn en el contenedor)

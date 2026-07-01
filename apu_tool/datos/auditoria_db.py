@@ -16,9 +16,6 @@ from typing import Iterator, Optional
 from apu_tool import config
 from apu_tool.nucleo.models import EventoAuditoria
 
-_CAMPOS = ("id", "ts", "user_id", "user_email", "rol", "accion",
-           "entidad_tipo", "entidad_id", "antes", "despues", "contexto")
-
 
 def _dumps(x) -> Optional[str]:
     return None if x is None else json.dumps(x, ensure_ascii=False)

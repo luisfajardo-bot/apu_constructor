@@ -6,11 +6,14 @@ trabajo (misma transacción que la mutación → sin best-effort). NO ve la IA (
 from __future__ import annotations
 
 import datetime as dt
+import re
 import uuid
 from typing import Optional
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import EventoAuditoria, Perfil
+
+_FECHA_SOLA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def nuevo_lote() -> str:
@@ -35,6 +38,14 @@ def listar(alm: Almacen, *, user_id: Optional[str] = None, accion: Optional[str]
            entidad_tipo: Optional[str] = None, desde: Optional[str] = None,
            hasta: Optional[str] = None, lote_id: Optional[str] = None,
            limit: int = 100, offset: int = 0) -> dict:
+    # `ts` se guarda como timestamp ISO-8601 completo (con hora), pero el visor manda
+    # `hasta` como fecha sola (p.ej. "2026-07-01"). Comparar lexicográficamente una
+    # fecha sola contra un timestamp completo excluye todo el día ("...T10:00:00" no es
+    # <= "2026-07-01"). Por eso, si `hasta` es solo fecha, la extendemos al final del día
+    # (23:59:59.999999) para que el límite superior sea inclusivo de todo el día. Si ya
+    # trae hora, se respeta tal cual.
+    if hasta and _FECHA_SOLA.match(hasta):
+        hasta = f"{hasta}T23:59:59.999999+00:00"
     items, total = alm.auditoria.listar(
         user_id=user_id, accion=accion, entidad_tipo=entidad_tipo, desde=desde,
         hasta=hasta, lote_id=lote_id, limit=limit, offset=offset)

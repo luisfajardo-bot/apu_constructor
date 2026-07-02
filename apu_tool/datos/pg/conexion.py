@@ -8,6 +8,7 @@ se desactivan los prepared statements server-side (prepare_threshold=None).
 """
 from __future__ import annotations
 
+import re
 from contextlib import contextmanager
 from typing import Iterator
 
@@ -42,15 +43,28 @@ class Conexion:
         self._pool.close()
 
 
+def dividir_sentencias(sql: str) -> list[str]:
+    """Parte un script DDL en sentencias individuales por ';'.
+
+    ANTES de partir, elimina los comentarios de línea ('-- ...') para que un
+    ';' dentro de un comentario NO corte una sentencia por la mitad (esto
+    rompió el esquema Postgres una vez: un ';' en un comentario dejaba el
+    CREATE TABLE sin cerrar). Asume que el DDL no contiene ';' ni '--' dentro
+    de literales/identificadores (cierto para nuestros db/pg/*.sql).
+
+    Función pura y sin efectos: testeable localmente sin un Postgres real.
+    """
+    sin_comentarios = re.sub(r"--[^\n]*", "", sql)
+    return [s for s in (frag.strip() for frag in sin_comentarios.split(";")) if s]
+
+
 def ejecutar_script(conn, sql: str) -> None:
     """Ejecuta un script DDL multi-sentencia en Postgres.
 
     psycopg3 usa el protocolo extendido en execute(), que rechaza múltiples
     sentencias en un solo comando ('cannot insert multiple commands into a
-    prepared statement'). Partimos el script por ';' y ejecutamos cada
-    sentencia en la misma transacción. Asume que el DDL no contiene ';' dentro
-    de literales/identificadores (cierto para nuestros db/pg/*.sql).
+    prepared statement'). Partimos el script con dividir_sentencias() y
+    ejecutamos cada sentencia en la misma transacción.
     """
-    for sentencia in sql.split(";"):
-        if sentencia.strip():
-            conn.execute(sentencia)
+    for sentencia in dividir_sentencias(sql):
+        conn.execute(sentencia)

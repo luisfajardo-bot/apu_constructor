@@ -34,7 +34,7 @@ def migrar_catalogo(sqlite_precios: Path, sqlite_apus: Path, cx: Conexion) -> di
                                 "FROM insumos").fetchall():
                 conn.execute(
                     "INSERT INTO precios.insumos (id, codigo, nombre, nombre_norm, unidad, grupo) "
-                    "OVERRIDING SYSTEM VALUE VALUES (%s,%s,%s,%s,%s,%s)",
+                    "OVERRIDING SYSTEM VALUE VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
                     (r["id"], r["codigo"], r["nombre"], r["nombre_norm"], r["unidad"], r["grupo"]))
                 n["insumos"] += 1
             # historial de precios (con creado_por='migración')
@@ -43,7 +43,8 @@ def migrar_catalogo(sqlite_precios: Path, sqlite_apus: Path, cx: Conexion) -> di
                 conn.execute(
                     "INSERT INTO precios.insumo_precios "
                     "(id, insumo_id, precio, fuente, clasificacion, fecha, vigente, creado_por) "
-                    "OVERRIDING SYSTEM VALUE VALUES (%s,%s,%s,%s,%s,%s,%s,'migración')",
+                    "OVERRIDING SYSTEM VALUE VALUES (%s,%s,%s,%s,%s,%s,%s,'migración') "
+                    "ON CONFLICT DO NOTHING",
                     (r["id"], r["insumo_id"], r["precio"], r["fuente"],
                      r["clasificacion"], r["fecha"], r["vigente"]))
                 n["precios"] += 1
@@ -57,7 +58,7 @@ def migrar_catalogo(sqlite_precios: Path, sqlite_apus: Path, cx: Conexion) -> di
             # apus
             for r in sa.execute("SELECT codigo, shift, nombre, unidad, grupo FROM apus").fetchall():
                 conn.execute("INSERT INTO apus.apus (codigo, shift, nombre, unidad, grupo) "
-                             "VALUES (%s,%s,%s,%s,%s)",
+                             "VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
                              (r["codigo"], r["shift"], r["nombre"], r["unidad"], r["grupo"]))
                 n["apus"] += 1
             # componentes
@@ -67,7 +68,7 @@ def migrar_catalogo(sqlite_precios: Path, sqlite_apus: Path, cx: Conexion) -> di
                 conn.execute(
                     "INSERT INTO apus.apu_componentes (apu_codigo, shift, seq, insumo_codigo, "
                     "insumo_nombre, unidad, rendimiento, precio_unitario_hist) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
                     (r["apu_codigo"], r["shift"], r["seq"], r["insumo_codigo"],
                      r["insumo_nombre"], r["unidad"], r["rendimiento"], r["precio_unitario_hist"]))
                 n["componentes"] += 1

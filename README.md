@@ -180,6 +180,13 @@ Desde los Planes 2a/2b la app exige login por Supabase. Para correrla en local:
 
 - **Imagen:** `Dockerfile` multi-stage (Node compila `web/dist` → Python sirve todo con gunicorn).
   Las `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` se pasan como **build-args** (se bakean en el bundle).
+- **Topología de red (XFF):** en Render, el contenedor recibe tráfico SOLO del edge/proxy de Render.
+  `gunicorn` está configurado con `--forwarded-allow-ips="*"` porque confía en el X-Forwarded-For.
+  Si en el futuro el contenedor queda expuesto directo (ej. VM sin proxy), restringir ese flag a los CIDR
+  del proxy real: con `"*"` el header es spoofeable y alguien podría evadir el rate-limit.
+- **Rate-limit:** el limiter es **en memoria por worker**. Con `WEB_CONCURRENCY=N` en Render, el límite
+  efectivo es ×N (mitigación de abuso, no una cuota global exacta). Para una cuota global verdadera hay
+  que usar un storage compartido (Redis, etc.).
 - **Render:** servicio web tipo Docker (ver `render.yaml`); `healthCheckPath: /api/health`; secretos
   (`DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_PROJECT_REF`, `APU_ADMIN_EMAILS`,
   `ANTHROPIC_API_KEY`) por el dashboard; HTTPS automático.

@@ -46,3 +46,34 @@ def test_migracion_traslada_y_verifica(tmp_path):
         assert cand[0].precio == 3700.0
     finally:
         cx.cerrar()
+
+
+def test_migrar_catalogo_es_idempotente(tmp_path):
+    from apu_tool.datos.pg.conexion import Conexion, ejecutar_script
+    from apu_tool.datos import migracion_pg
+    from apu_tool import config
+    sp, sa = _sembrar_sqlite(tmp_path)
+    cx = Conexion(os.environ["TEST_DATABASE_URL"])
+    try:
+        with cx.connection() as conn:
+            conn.execute("DROP SCHEMA IF EXISTS precios CASCADE")
+            conn.execute("DROP SCHEMA IF EXISTS apus CASCADE")
+        with cx.connection() as conn:
+            for f in ("precios.sql", "apus.sql"):
+                ejecutar_script(conn, (config.PROJECT_ROOT / "db" / "pg" / f).read_text("utf-8"))
+        res1 = migracion_pg.migrar_catalogo(sp, sa, cx)
+        res2 = migracion_pg.migrar_catalogo(sp, sa, cx)  # 2ª vez: no debe romper
+        # segundas pasada retorna 0 (ON CONFLICT DO NOTHING silencia los inserts)
+        assert res2["insumos"] == 0
+        assert res2["precios"] == 0
+        assert res2["apus"] == 0
+        assert res2["componentes"] == 0
+        ver = migracion_pg.verificar(sp, sa, cx)
+        assert ver["ok"], ver["detalle"]
+        # counts estables entre corridas
+        assert res1["insumos"] == 1
+        assert res1["precios"] == 2
+        assert res1["apus"] == 1
+        assert res1["componentes"] == 1
+    finally:
+        cx.cerrar()

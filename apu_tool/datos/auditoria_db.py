@@ -41,6 +41,9 @@ class AuditoriaDB:
             conn.close()
 
     def registrar(self, conn: sqlite3.Connection, ev: EventoAuditoria) -> None:
+        # `auditoria` sin calificar: resuelve a seguridad.db (única base con esa tabla),
+        # incluso cuando la UdT ATTACHea seguridad a otra base. Depende de que NINGUNA
+        # tabla de dominio se llame `auditoria`.
         conn.execute(
             "INSERT INTO auditoria "
             "(ts, user_id, user_email, rol, accion, entidad_tipo, entidad_id, antes, despues, contexto) "

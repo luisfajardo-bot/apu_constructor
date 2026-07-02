@@ -127,6 +127,16 @@ def test_descripcion_no_vacia(repos):
     assert isinstance(da, str) and da.strip()
 
 
+def test_busqueda_insensible_a_acentos_y_caso(repos):
+    precios, _ = repos
+    precios.insert_insumos([Insumo("100", "HORMIGÓN 3000 PSI", "M3", "MAT", 1.0, "PRECIO IDU")])
+    for termino in ("hormigon", "HORMIGÓN", "Hormigon"):
+        items, n = precios.list_insumos(q=termino, limit=50, offset=0)
+        assert n == 1 and items[0].codigo == "100", termino
+    assert [i.codigo for i in precios.search_insumos("hormigon")] == ["100"]
+    assert [i.codigo for i in precios.search_insumos_por_palabras(["hormigon"])] == ["100"]
+
+
 def test_componentes_para_integridad(repos):
     _, apus = repos
     apus.crear_apu(Apu("A1", "EXCAVACION", "M3", "DIURNO", "MOV"), [

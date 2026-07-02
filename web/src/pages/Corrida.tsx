@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import TablaItems from "@/components/corrida/TablaItems";
-import { getCorrida, descargarCuadroUrl } from "@/api/corridas";
+import { getCorrida, descargarCuadro } from "@/api/corridas";
 import { cop, pct } from "@/lib/moneda";
 import { fmtDuracion } from "@/lib/tiempo";
 import { useArmadoVivo } from "@/lib/armado";
@@ -116,7 +117,10 @@ export default function Corrida() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => window.open(descargarCuadroUrl(corridaId))}
+            onClick={() =>
+              descargarCuadro(corridaId).catch((e) =>
+                toast.error(e instanceof Error ? e.message : "No se pudo descargar el cuadro."))
+            }
           >
             Descargar cuadro
           </Button>

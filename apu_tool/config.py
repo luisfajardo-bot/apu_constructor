@@ -151,3 +151,8 @@ def web_concurrency() -> int:
         return int(os.environ.get("WEB_CONCURRENCY", "2"))
     except ValueError:
         return 2
+
+
+def docs_enabled() -> bool:
+    """Exponer /docs, /redoc y /openapi.json (default sí; desactivar en prod)."""
+    return os.environ.get("APU_DOCS_ENABLED", "true").strip().lower() not in ("false", "0", "no")

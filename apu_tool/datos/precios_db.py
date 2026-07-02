@@ -208,9 +208,9 @@ class PreciosDB:
                 "ON p.insumo_id = i.id AND p.vigente = 1")
         where, params = [], []
         if q:
-            where.append("(i.nombre LIKE ? OR i.codigo LIKE ?)")
-            like = f"%{q.strip()}%"
-            params += [like, like]
+            where.append("(i.nombre_norm LIKE ? OR UPPER(i.codigo) LIKE ?)")
+            like = f"%{normalizar(q)}%"
+            params += [like, f"%{normalizar(q)}%"]
         if grupo:
             where.append("i.grupo = ?")
             params.append(grupo)
@@ -250,19 +250,19 @@ class PreciosDB:
         return [r["fuente"] for r in rows]
 
     def search_insumos(self, texto: str, limit: int = 20) -> list[Insumo]:
-        like = f"%{texto.strip()}%"
+        like = f"%{normalizar(texto)}%"
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT id FROM insumos WHERE nombre LIKE ? OR codigo LIKE ? LIMIT ?",
+                "SELECT id FROM insumos WHERE nombre_norm LIKE ? OR UPPER(codigo) LIKE ? LIMIT ?",
                 (like, like, limit)).fetchall()
         return [self.get_insumo_por_id(r["id"]) for r in rows]
 
     def search_insumos_por_palabras(self, palabras: list[str], limit: int = 60) -> list[Insumo]:
-        """Insumos cuyo nombre contiene alguna de las `palabras` (ya tokenizadas por el dominio)."""
-        palabras = [p for p in palabras if p]
+        """Insumos cuyo nombre_norm contiene alguna de las `palabras` (ya tokenizadas por el dominio)."""
+        palabras = [normalizar(p) for p in palabras if p]
         if not palabras:
             return []
-        clauses = " OR ".join(["nombre LIKE ?"] * len(palabras))
+        clauses = " OR ".join(["nombre_norm LIKE ?"] * len(palabras))
         params = [f"%{p}%" for p in palabras] + [limit]
         with self.connect() as conn:
             rows = conn.execute(

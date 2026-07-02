@@ -30,3 +30,5 @@ services:
         value: "true"
       - key: WEB_CONCURRENCY
         value: "2"
+      - key: APU_DOCS_ENABLED
+        value: "false"

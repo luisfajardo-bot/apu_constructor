@@ -54,3 +54,23 @@ def test_contar_admins_activos(repo):
     repo.upsert(Perfil("u2", "b@obra.co", "admin", "inactivo"))
     repo.upsert(Perfil("u3", "c@obra.co", "editor", "activo"))
     assert repo.contar_admins_activos() == 1
+
+
+def test_set_rol_protegido_bloquea_ultimo_admin(repo):
+    repo.upsert(Perfil("u1", "a@obra.co", "admin", "activo"))
+    aplicado = repo.set_rol_protegido("u1", "editor")
+    assert aplicado is False
+    assert repo.get("u1").rol == "admin"        # no cambió
+
+
+def test_set_rol_protegido_permite_si_hay_otro_admin(repo):
+    repo.upsert(Perfil("u1", "a@obra.co", "admin", "activo"))
+    repo.upsert(Perfil("u2", "b@obra.co", "admin", "activo"))
+    assert repo.set_rol_protegido("u1", "editor") is True
+    assert repo.get("u1").rol == "editor"
+
+
+def test_set_estado_protegido_bloquea_ultimo_admin(repo):
+    repo.upsert(Perfil("u1", "a@obra.co", "admin", "activo"))
+    assert repo.set_estado_protegido("u1", "inactivo") is False
+    assert repo.get("u1").estado == "activo"

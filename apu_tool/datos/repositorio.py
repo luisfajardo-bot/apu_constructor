@@ -118,6 +118,15 @@ class RepositorioPerfiles(Protocol):
     def set_estado(self, user_id: str, estado: str, conn=None) -> None: ...
     def contar_admins_activos(self) -> int: ...
 
+    def set_rol_protegido(self, user_id: str, rol: str, conn=None) -> bool:
+        """UPDATE atómico del rol que NO deja el sistema sin admin activo.
+        Devuelve True si aplicó, False si lo bloqueó el guard (o el usuario no existe)."""
+        ...
+
+    def set_estado_protegido(self, user_id: str, estado: str, conn=None) -> bool:
+        """UPDATE atómico del estado con el mismo guard de último-admin. Devuelve si aplicó."""
+        ...
+
 
 @runtime_checkable
 class RepositorioAuditoria(Protocol):

@@ -37,7 +37,11 @@ def create_app(almacen: Optional[Almacen] = None) -> FastAPI:
         yield
         app.state.almacen.cerrar()  # cierra el pool Postgres (no-op en SQLite)
 
-    app = FastAPI(title="Armador de APUs", lifespan=lifespan)
+    _docs = config.docs_enabled()
+    app = FastAPI(title="Armador de APUs", lifespan=lifespan,
+                  docs_url="/docs" if _docs else None,
+                  redoc_url="/redoc" if _docs else None,
+                  openapi_url="/openapi.json" if _docs else None)
     app.state.almacen = almacen or _crear_almacen()
     app.include_router(rutas.router, prefix="/api")
     # add_middleware PREPENDE: el último agregado queda MÁS AFUERA. Por eso

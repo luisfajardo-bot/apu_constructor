@@ -22,9 +22,17 @@ class LimiteSubida(BaseHTTPMiddleware):
         super().__init__(app)
         self.max_bytes = max_bytes
 
+    _METODOS_CON_CUERPO = ("POST", "PUT", "PATCH")
+
     async def dispatch(self, request, call_next):
         cl = request.headers.get("content-length")
-        if cl is not None:
+        if cl is None:
+            # Sin Content-Length en un método con cuerpo hacia /api: exigirlo (evita
+            # cuerpos chunked/sin tope que se bufferizarían enteros → OOM).
+            if request.method in self._METODOS_CON_CUERPO and request.url.path.startswith("/api"):
+                return JSONResponse(status_code=411,
+                                    content={"detail": "Falta la cabecera Content-Length."})
+        else:
             try:
                 if int(cl) > self.max_bytes:
                     return JSONResponse(status_code=413,

@@ -37,3 +37,14 @@ def test_detecta_aproximado(tmp_path):
     rep = integridad.revisar(a)
     assert rep["aproximados"] == 1
     assert rep["detalles"][0]["cat_nom"] == "CONCRETO 3000 PSI"
+
+
+def test_revisar_corre_sin_crash(tmp_path):
+    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
+                  corridas_path=tmp_path / "c.db")
+    alm.init_schema()
+    alm.precios.insert_insumos([Insumo("6140", "ACERO", "KG", "MAT", 3500.0, "PRECIO IDU")])
+    alm.apus.crear_apu(Apu("A1", "EXCAVACION", "M3", "DIURNO", "MOV"), [
+        ApuComponent("A1", "DIURNO", "6140", "ACERO", "KG", 0.5, 10.0)])
+    rep = integridad.revisar(alm)
+    assert set(rep) >= {"huerfanos", "aproximados", "ambiguos", "detalles"}

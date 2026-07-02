@@ -185,6 +185,9 @@ Desde los Planes 2a/2b la app exige login por Supabase. Para correrla en local:
   `ANTHROPIC_API_KEY`) por el dashboard; HTTPS automático.
 - **Migración del catálogo (una vez, ops):** con `DATABASE_URL` de Supabase, correr
   `python run_cli.py migrate-pg` y verificar conteos (insumos/precios/APUs/componentes) SQLite vs
-  Postgres. El esquema Postgres (`db/pg/*.sql` + auditoría) ya está aplicado.
+  Postgres. `migrate-pg` aplica los esquemas `db/pg/*.sql` (precios/apus/corridas/seguridad) antes de
+  migrar; el arranque de la app también los autoprovisiona vía `init_schema`. La carpeta
+  `supabase/migrations/` (fuente para `supabase db push`) es consistente: `0002_seguridad.sql` crea
+  `seguridad.perfiles`/`auditoria` antes de que `0003_rls.sql` les aplique RLS.
 - **Post-deploy:** en Supabase añadir `https://<app-url>/definir-clave` al allowlist de redirect URLs;
   crear el primer usuario Admin en Supabase Auth con un correo de `APU_ADMIN_EMAILS`.

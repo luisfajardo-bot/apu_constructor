@@ -25,6 +25,9 @@ from apu_tool.dominio.pipeline import (
     run_pipeline,
 )
 
+# Esquemas Postgres aplicados por `migrate-pg`, en orden de dependencia.
+ESQUEMAS_PG = ("precios.sql", "apus.sql", "corridas.sql", "seguridad.sql")
+
 
 def _progress(i: int, total: int, desc: str) -> None:
     print(f"  [{i}/{total}] {desc[:60]}", flush=True)
@@ -188,7 +191,7 @@ def cmd_migrate_pg(args) -> int:
     try:
         # aplicar esquema destino
         with cx.connection() as conn:
-            for f in ("precios.sql", "apus.sql", "corridas.sql"):
+            for f in ESQUEMAS_PG:
                 ejecutar_script(conn, (config.PROJECT_ROOT / "db" / "pg" / f).read_text("utf-8"))
         n = migracion_pg.migrar_catalogo(config.PRECIOS_DB_PATH, config.APUS_DB_PATH, cx)
         ver = migracion_pg.verificar(config.PRECIOS_DB_PATH, config.APUS_DB_PATH, cx)

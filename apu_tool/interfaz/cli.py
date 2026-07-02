@@ -25,7 +25,8 @@ from apu_tool.dominio.pipeline import (
     run_pipeline,
 )
 
-# Esquemas Postgres aplicados por `migrate-pg`, en orden de dependencia.
+# Esquemas Postgres aplicados por `migrate-pg`, en orden de aplicación
+# (hoy no hay FKs cross-schema entre ellos).
 ESQUEMAS_PG = ("precios.sql", "apus.sql", "corridas.sql", "seguridad.sql")
 
 

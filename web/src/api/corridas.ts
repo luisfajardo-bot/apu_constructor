@@ -49,9 +49,27 @@ export function confirmar(
   });
 }
 
-/** Devuelve la URL para abrir/descargar el cuadro xlsx en una nueva pestaña. */
-export function descargarCuadroUrl(id: number): string {
-  return `/api/corridas/${id}/cuadro`;
+/** Descarga el cuadro xlsx con el token Bearer (una navegación normal no lleva el header). */
+export async function descargarCuadro(id: number): Promise<void> {
+  const r = await fetch(`/api/corridas/${id}/cuadro`, { headers: { ...(await authHeader()) } });
+  if (r.status === 401) {
+    const { supabase } = await import("@/lib/supabase");
+    await supabase.auth.signOut();
+    throw new Error("Sesión expirada.");
+  }
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}) as { detail?: string });
+    throw new Error(err.detail || r.statusText);
+  }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `cuadro_corrida_${id}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function parseSse(block: string): { event: string; data: unknown } | null {

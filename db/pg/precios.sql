@@ -15,6 +15,8 @@ CREATE INDEX IF NOT EXISTS idx_insumo_cod ON precios.insumos(codigo);
 CREATE TABLE IF NOT EXISTS precios.insumo_precios (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     insumo_id     BIGINT NOT NULL REFERENCES precios.insumos(id) ON DELETE CASCADE,
+    -- NOTA (drift vs SQLite): db/precios.sql no tiene ON DELETE CASCADE. Hoy inocuo
+    -- (nadie borra insumos); reconciliar ambos esquemas si se añade borrado de insumos.
     precio        DOUBLE PRECISION NOT NULL,
     fuente        TEXT,
     clasificacion TEXT,

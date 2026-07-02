@@ -26,6 +26,8 @@ def invitar(alm: Almacen, admin: AdminSupabase, email: str, rol: str,
     if rol not in _ROLES:
         raise ValueError(f"Rol inválido: {rol}.")
     user_id = admin.invitar(email)   # efecto externo (HTTP), NO reversible → fuera de la tx
+    # Efecto externo NO transaccional: si el upsert local + auditoría fallan después,
+    # queda un usuario en Supabase Auth sin perfil local (idempotente al re-invitar).
     perfil = Perfil(user_id=user_id, email=email, rol=rol, estado="activo",
                     nombre=nombre, creado_en=dt.date.today().isoformat())
     with alm.transaccion("seguridad") as conn:

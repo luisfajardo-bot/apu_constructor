@@ -112,6 +112,9 @@ class ApusPg:
     def list_apus(self, q: Optional[str] = None, grupo: Optional[str] = None,
                   shift: Optional[str] = None, limit: int = 100,
                   offset: int = 0) -> tuple[list[Apu], int]:
+        # NOTA: la búsqueda por nombre aquí usa ILIKE (Postgres); en apus_db.py usa LIKE (SQLite).
+        # Esto puede divergir en acentos. El insumo_search usa nombre_norm para unificar; APU
+        # seguirá LIKE/ILIKE hasta añadir apus.nombre_norm (mejora futura).
         where, params = [], []
         if q:
             where.append("(nombre ILIKE %s OR codigo ILIKE %s)")

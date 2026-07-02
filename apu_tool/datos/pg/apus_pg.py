@@ -31,8 +31,8 @@ class ApusPg:
     # ---- escritura ----
     def insert_apus(self, apus: Iterable[Apu]) -> int:
         rows = [(a.codigo, a.shift, a.nombre, a.unidad, a.grupo) for a in apus]
-        with self.cx.connection() as conn:
-            conn.executemany(
+        with self.cx.connection() as conn, conn.cursor() as cur:
+            cur.executemany(
                 "INSERT INTO apus.apus (codigo, shift, nombre, unidad, grupo) "
                 "VALUES (%s,%s,%s,%s,%s) "
                 "ON CONFLICT (codigo, shift) DO UPDATE SET "
@@ -56,10 +56,11 @@ class ApusPg:
                 rows.append((c.apu_codigo, c.shift, seq, c.insumo_codigo,
                              c.insumo_nombre, c.unidad, c.rendimiento,
                              c.precio_unitario_hist))
-            conn.executemany(
-                "INSERT INTO apus.apu_componentes "
-                "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
-                " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO apus.apu_componentes "
+                    "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
+                    " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
         return len(rows)
 
     def crear_apu(self, apu: Apu, componentes: list[ApuComponent], conn=None) -> None:
@@ -84,10 +85,11 @@ class ApusPg:
                  c.unidad, c.rendimiento, c.precio_unitario_hist)
                 for seq, c in enumerate(componentes)]
         if rows:
-            conn.executemany(
-                "INSERT INTO apus.apu_componentes "
-                "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
-                " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO apus.apu_componentes "
+                    "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
+                    " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
 
     def set_meta(self, clave: str, valor: str) -> None:
         with self.cx.connection() as conn:

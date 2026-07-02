@@ -57,8 +57,8 @@ class CorridasPg:
 
     def guardar_items(self, corrida_id: int, items: list[CorridaItemRow]) -> int:
         rows = [self._item_tuple(corrida_id, it) for it in items]
-        with self.cx.connection() as conn:
-            conn.executemany(self._INSERT_ITEM_SQL, rows)
+        with self.cx.connection() as conn, conn.cursor() as cur:
+            cur.executemany(self._INSERT_ITEM_SQL, rows)
         return len(rows)
 
     def agregar_item(self, corrida_id: int, fila: CorridaItemRow) -> None:

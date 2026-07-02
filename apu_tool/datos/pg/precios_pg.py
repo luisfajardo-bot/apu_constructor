@@ -181,8 +181,8 @@ class PreciosPg:
                 "ON p.insumo_id = i.id AND p.vigente = 1")
         where, params = [], []
         if q:
-            where.append("(i.nombre ILIKE %s OR i.codigo ILIKE %s)")
-            like = f"%{q.strip()}%"
+            where.append("(i.nombre_norm LIKE %s OR UPPER(i.codigo) LIKE %s)")
+            like = f"%{normalizar(q)}%"
             params += [like, like]
         if grupo:
             where.append("i.grupo = %s")
@@ -223,18 +223,18 @@ class PreciosPg:
         return [r["fuente"] for r in rows]
 
     def search_insumos(self, texto: str, limit: int = 20) -> list[Insumo]:
-        like = f"%{texto.strip()}%"
+        like = f"%{normalizar(texto)}%"
         with self.cx.connection() as conn:
             rows = conn.execute(
-                "SELECT id FROM precios.insumos WHERE nombre ILIKE %s OR codigo ILIKE %s LIMIT %s",
-                (like, like, limit)).fetchall()
+                "SELECT id FROM precios.insumos WHERE nombre_norm LIKE %s OR UPPER(codigo) LIKE %s "
+                "LIMIT %s", (like, like, limit)).fetchall()
         return [self.get_insumo_por_id(r["id"]) for r in rows]
 
     def search_insumos_por_palabras(self, palabras: list[str], limit: int = 60) -> list[Insumo]:
-        palabras = [p for p in palabras if p]
+        palabras = [normalizar(p) for p in palabras if p]
         if not palabras:
             return []
-        clauses = " OR ".join(["nombre ILIKE %s"] * len(palabras))
+        clauses = " OR ".join(["nombre_norm LIKE %s"] * len(palabras))
         params = [f"%{p}%" for p in palabras] + [limit]
         with self.cx.connection() as conn:
             rows = conn.execute(

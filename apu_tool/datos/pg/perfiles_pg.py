@@ -67,3 +67,20 @@ class PerfilesPg:
             return conn.execute(
                 "SELECT COUNT(*) AS n FROM seguridad.perfiles "
                 "WHERE rol='admin' AND estado='activo'").fetchone()["n"]
+
+    _GUARD = ("NOT (rol='admin' AND estado='activo' AND "
+              "(SELECT COUNT(*) FROM seguridad.perfiles WHERE rol='admin' AND estado='activo') <= 1)")
+
+    def set_rol_protegido(self, user_id: str, rol: str, conn=None) -> bool:
+        sql = f"UPDATE seguridad.perfiles SET rol=%s WHERE user_id=%s AND {self._GUARD}"
+        if conn is not None:
+            return conn.execute(sql, (rol, user_id)).rowcount > 0
+        with self.cx.connection() as c:
+            return c.execute(sql, (rol, user_id)).rowcount > 0
+
+    def set_estado_protegido(self, user_id: str, estado: str, conn=None) -> bool:
+        sql = f"UPDATE seguridad.perfiles SET estado=%s WHERE user_id=%s AND {self._GUARD}"
+        if conn is not None:
+            return conn.execute(sql, (estado, user_id)).rowcount > 0
+        with self.cx.connection() as c:
+            return c.execute(sql, (estado, user_id)).rowcount > 0

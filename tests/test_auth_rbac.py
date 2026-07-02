@@ -44,3 +44,12 @@ def test_desconocido_no_admin_deniega(tmp_path, monkeypatch):
 
 def test_jerarquia_rangos():
     assert RANGO["admin"] > RANGO["editor"] > RANGO["consulta"]
+
+
+def test_bootstrap_admin_deja_auditoria(tmp_path, monkeypatch):
+    monkeypatch.setenv("APU_ADMIN_EMAILS", "jefe@obra.co")
+    alm = _alm(tmp_path)
+    p = resolver_perfil(alm, "u-jefe", "jefe@obra.co")
+    assert p.rol == "admin"
+    items, total = alm.auditoria.listar(accion="usuario.bootstrap_admin")
+    assert total == 1 and items[0]["entidad_id"] == "u-jefe" and items[0]["rol"] == "sistema"

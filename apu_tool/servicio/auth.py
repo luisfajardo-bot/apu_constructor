@@ -63,6 +63,7 @@ from fastapi import Depends, Request, HTTPException
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Perfil
+from apu_tool.servicio.auditoria import registrar_auditoria
 from apu_tool.servicio.dependencias import get_almacen
 
 RANGO = {"consulta": 1, "editor": 2, "admin": 3}
@@ -81,7 +82,11 @@ def resolver_perfil(alm: Almacen, user_id: str, email: str) -> Perfil:
     if (email or "").strip().lower() in config.admin_emails():
         nuevo = Perfil(user_id=user_id, email=email, rol="admin", estado="activo",
                        nombre="", creado_en=_dt.date.today().isoformat())
-        alm.perfiles.upsert(nuevo)
+        with alm.transaccion("seguridad") as conn:
+            alm.perfiles.upsert(nuevo, conn=conn)
+            registrar_auditoria(alm, conn, None, "usuario.bootstrap_admin", "usuario", user_id,
+                                antes=None,
+                                despues={"email": email, "rol": "admin", "estado": "activo"})
         return nuevo
     raise ErrorAuth("Usuario no autorizado (no invitado).")
 

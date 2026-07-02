@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { getYo, type Yo } from "@/api/usuarios";
@@ -19,22 +19,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [perfil, setPerfil] = useState<Yo | null>(null);
   const [cargando, setCargando] = useState(true);
   const [noAutorizado, setNoAutorizado] = useState(false);
+  const rechazado = useRef(false);
 
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange(async (_evento, nuevaSesion) => {
       setSesion(nuevaSesion);
-      setNoAutorizado(false);
       if (nuevaSesion) {
+        rechazado.current = false;
+        setNoAutorizado(false);
         try {
           setPerfil(await getYo());
         } catch {
           // Autenticado en Supabase pero sin perfil / inactivo -> 403
           setPerfil(null);
+          rechazado.current = true;
           setNoAutorizado(true);
-          await supabase.auth.signOut();
+          await supabase.auth.signOut();  // re-dispara este listener con sesión null
         }
       } else {
         setPerfil(null);
+        setNoAutorizado(rechazado.current);  // preserva el "no autorizado" si venimos de un 403
       }
       setCargando(false);
     });

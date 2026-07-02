@@ -250,3 +250,6 @@ class PreciosPg:
         with self.cx.connection() as conn:
             return {r["clave"]: r["valor"]
                     for r in conn.execute("SELECT clave, valor FROM precios.meta").fetchall()}
+
+    def descripcion(self) -> str:
+        return "Postgres (schema precios)"

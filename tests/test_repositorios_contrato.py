@@ -118,3 +118,20 @@ def test_apu_crear_duplicado_lanza(repos):
     apus.crear_apu(Apu("A1", "EXCAVACION", "M3", "DIURNO"), [])
     with pytest.raises(ValueError):
         apus.crear_apu(Apu("A1", "OTRA", "M3", "DIURNO"), [])
+
+
+def test_descripcion_no_vacia(repos):
+    precios, apus = repos
+    dp, da = precios.descripcion(), apus.descripcion()
+    assert isinstance(dp, str) and dp.strip()
+    assert isinstance(da, str) and da.strip()
+
+
+def test_componentes_para_integridad(repos):
+    _, apus = repos
+    apus.crear_apu(Apu("A1", "EXCAVACION", "M3", "DIURNO", "MOV"), [
+        ApuComponent("A1", "DIURNO", "6140", "ACERO", "KG", 0.5, 10.0),
+        ApuComponent("A1", "DIURNO", "9", "CEMENTO", "KG", 1.2, 20.0)])
+    comps = apus.componentes_para_integridad()
+    assert ("6140", "ACERO") in comps and ("9", "CEMENTO") in comps
+    assert all(isinstance(c, tuple) and len(c) == 2 for c in comps)

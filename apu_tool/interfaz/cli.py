@@ -25,6 +25,10 @@ from apu_tool.dominio.pipeline import (
     run_pipeline,
 )
 
+# Esquemas Postgres aplicados por `migrate-pg`, en orden de aplicación
+# (hoy no hay FKs cross-schema entre ellos).
+ESQUEMAS_PG = ("precios.sql", "apus.sql", "corridas.sql", "seguridad.sql")
+
 
 def _progress(i: int, total: int, desc: str) -> None:
     print(f"  [{i}/{total}] {desc[:60]}", flush=True)
@@ -62,8 +66,8 @@ def cmd_status(args) -> int:
     meta_precios = alm.precios.get_meta()
     meta_apus = alm.apus.get_meta()
     meta = {**meta_precios, **meta_apus}
-    print(f"Base de precios: {alm.precios.path}")
-    print(f"Base de APUs:    {alm.apus.path}")
+    print(f"Base de precios: {alm.precios.descripcion()}")
+    print(f"Base de APUs:    {alm.apus.descripcion()}")
     print(f"  Insumos:        {c.get('insumos', 0)}")
     print(f"  Precios:        {c.get('insumo_precios', 0)}")
     print(f"  APUs:           {c.get('apus', 0)}")
@@ -188,7 +192,7 @@ def cmd_migrate_pg(args) -> int:
     try:
         # aplicar esquema destino
         with cx.connection() as conn:
-            for f in ("precios.sql", "apus.sql", "corridas.sql"):
+            for f in ESQUEMAS_PG:
                 ejecutar_script(conn, (config.PROJECT_ROOT / "db" / "pg" / f).read_text("utf-8"))
         n = migracion_pg.migrar_catalogo(config.PRECIOS_DB_PATH, config.APUS_DB_PATH, cx)
         ver = migracion_pg.verificar(config.PRECIOS_DB_PATH, config.APUS_DB_PATH, cx)

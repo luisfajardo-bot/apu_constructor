@@ -169,6 +169,15 @@ class ApusPg:
                 DePricedComponent(c.insumo_codigo, c.insumo_nombre, c.unidad, c.rendimiento)
                 for c in comps))
 
+    def componentes_para_integridad(self) -> list[tuple[str, str]]:
+        """(insumo_codigo, insumo_nombre) de cada componente con código no vacío.
+        Para el chequeo de integridad APU→insumo, sin SQL crudo en el dominio."""
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT insumo_codigo, insumo_nombre FROM apus.apu_componentes "
+                "WHERE insumo_codigo IS NOT NULL AND insumo_codigo <> ''").fetchall()
+        return [(r["insumo_codigo"], r["insumo_nombre"]) for r in rows]
+
     def component_counts(self) -> dict[tuple[str, str], int]:
         with self.cx.connection() as conn:
             rows = conn.execute(
@@ -185,3 +194,6 @@ class ApusPg:
         with self.cx.connection() as conn:
             return {r["clave"]: r["valor"]
                     for r in conn.execute("SELECT clave, valor FROM apus.meta").fetchall()}
+
+    def descripcion(self) -> str:
+        return "Postgres (schema apus)"

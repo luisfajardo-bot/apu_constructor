@@ -2,7 +2,7 @@ services:
   - type: web
     name: armador-apus
     runtime: docker
-    plan: starter            # evita el spin-down del free tier
+    plan: free               # free tier: se duerme tras ~15 min de inactividad (arranque en frío al volver)
     healthCheckPath: /api/health
     autoDeploy: true
     branch: master
@@ -29,6 +29,6 @@ services:
       - key: APU_RATELIMIT_ENABLED
         value: "true"
       - key: WEB_CONCURRENCY
-        value: "2"
+        value: "1"
       - key: APU_DOCS_ENABLED
         value: "false"

@@ -63,14 +63,14 @@ def test_migrar_catalogo_es_idempotente(tmp_path):
                 ejecutar_script(conn, (config.PROJECT_ROOT / "db" / "pg" / f).read_text("utf-8"))
         res1 = migracion_pg.migrar_catalogo(sp, sa, cx)
         res2 = migracion_pg.migrar_catalogo(sp, sa, cx)  # 2ª vez: no debe romper
-        # segundas pasada retorna 0 (ON CONFLICT DO NOTHING silencia los inserts)
-        assert res2["insumos"] == 0
-        assert res2["precios"] == 0
-        assert res2["apus"] == 0
-        assert res2["componentes"] == 0
+        # migrar_catalogo cuenta filas de ORIGEN procesadas (no filas realmente
+        # insertadas): con ON CONFLICT DO NOTHING la 2ª pasada procesa lo mismo
+        # (mismos counts) pero NO inserta nada. La idempotencia real —que la BD
+        # no se duplique— se comprueba con verificar(): destino == origen.
+        assert res2 == res1
         ver = migracion_pg.verificar(sp, sa, cx)
-        assert ver["ok"], ver["detalle"]
-        # counts estables entre corridas
+        assert ver["ok"], ver["detalle"]  # sin duplicados tras dos corridas
+        # counts de origen estables
         assert res1["insumos"] == 1
         assert res1["precios"] == 2
         assert res1["apus"] == 1

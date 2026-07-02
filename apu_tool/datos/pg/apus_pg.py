@@ -185,3 +185,6 @@ class ApusPg:
         with self.cx.connection() as conn:
             return {r["clave"]: r["valor"]
                     for r in conn.execute("SELECT clave, valor FROM apus.meta").fetchall()}
+
+    def descripcion(self) -> str:
+        return "Postgres (schema apus)"

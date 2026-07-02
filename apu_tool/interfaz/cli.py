@@ -62,8 +62,8 @@ def cmd_status(args) -> int:
     meta_precios = alm.precios.get_meta()
     meta_apus = alm.apus.get_meta()
     meta = {**meta_precios, **meta_apus}
-    print(f"Base de precios: {alm.precios.path}")
-    print(f"Base de APUs:    {alm.apus.path}")
+    print(f"Base de precios: {alm.precios.descripcion()}")
+    print(f"Base de APUs:    {alm.apus.descripcion()}")
     print(f"  Insumos:        {c.get('insumos', 0)}")
     print(f"  Precios:        {c.get('insumo_precios', 0)}")
     print(f"  APUs:           {c.get('apus', 0)}")

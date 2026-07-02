@@ -118,3 +118,10 @@ def test_apu_crear_duplicado_lanza(repos):
     apus.crear_apu(Apu("A1", "EXCAVACION", "M3", "DIURNO"), [])
     with pytest.raises(ValueError):
         apus.crear_apu(Apu("A1", "OTRA", "M3", "DIURNO"), [])
+
+
+def test_descripcion_no_vacia(repos):
+    precios, apus = repos
+    dp, da = precios.descripcion(), apus.descripcion()
+    assert isinstance(dp, str) and dp.strip()
+    assert isinstance(da, str) and da.strip()

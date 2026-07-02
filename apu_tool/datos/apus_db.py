@@ -206,3 +206,6 @@ class ApusDB:
         with self.connect() as conn:
             return {r["clave"]: r["valor"]
                     for r in conn.execute("SELECT clave, valor FROM meta").fetchall()}
+
+    def descripcion(self) -> str:
+        return f"SQLite: {self.path}"

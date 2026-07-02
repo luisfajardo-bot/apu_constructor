@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ListFilter } from "lucide-react";
 import { listarAuditoria, type EventoAuditoria } from "@/api/auditoria";
@@ -21,7 +21,9 @@ function resumen(v: Record<string, unknown> | null): string {
   return Object.entries(v).map(([k, val]) => `${k}: ${val}`).join(", ");
 }
 
-type Fila = EventoAuditoria & { _loteId: string | null };
+type Bloque =
+  | { tipo: "fila"; ev: EventoAuditoria }
+  | { tipo: "lote"; loteId: string; filas: EventoAuditoria[] };
 
 export default function Auditoria() {
   const [eventos, setEventos] = useState<EventoAuditoria[]>([]);
@@ -53,34 +55,32 @@ export default function Auditoria() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Agrupa por lote_id: un lote con >1 fila se colapsa en una cabecera expandible.
-  const filas = useMemo<Fila[]>(() => {
-    const conteo = new Map<string, number>();
-    eventos.forEach((e) => {
-      const l = (e.contexto?.lote_id as string) || null;
-      if (l) conteo.set(l, (conteo.get(l) ?? 0) + 1);
-    });
-    const out: Fila[] = [];
+  // Agrupa por lote_id en un Map: un lote con >1 fila se colapsa en una cabecera
+  // expandible, con todas sus filas juntas — sin depender de que sean contiguas
+  // en el array (el backend ordena por ts DESC y las filas de un lote pueden
+  // quedar intercaladas con otros eventos en un entorno multiusuario).
+  const bloques = useMemo<Bloque[]>(() => {
+    const porLote = new Map<string, EventoAuditoria[]>();
     for (const e of eventos) {
       const l = (e.contexto?.lote_id as string) || null;
-      const esLote = l !== null && (conteo.get(l) ?? 0) > 1;
-      out.push({ ...e, _loteId: esLote ? (l as string) : null });
+      if (l) (porLote.get(l) ?? porLote.set(l, []).get(l)!).push(e);
+    }
+    const out: Bloque[] = [];
+    const emitidos = new Set<string>();
+    for (const e of eventos) {
+      const l = (e.contexto?.lote_id as string) || null;
+      const grupo = l ? porLote.get(l)! : null;
+      if (grupo && grupo.length > 1) {
+        if (!emitidos.has(l!)) { emitidos.add(l!); out.push({ tipo: "lote", loteId: l!, filas: grupo }); }
+      } else {
+        out.push({ tipo: "fila", ev: e });
+      }
     }
     return out;
   }, [eventos]);
 
   const toggleLote = (l: string) =>
     setLotesAbiertos((s) => ({ ...s, [l]: !s[l] }));
-
-  const conteoPorLote = useMemo(() => {
-    const m = new Map<string, number>();
-    filas.forEach((f) => {
-      if (f._loteId) m.set(f._loteId, (m.get(f._loteId) ?? 0) + 1);
-    });
-    return m;
-  }, [filas]);
-
-  const cabecerasEmitidas = new Set<string>();
 
   return (
     <div className="flex flex-col h-full">
@@ -147,56 +147,70 @@ export default function Auditoria() {
             </tr>
           </thead>
           <tbody>
-            {filas.map((f) => {
-              if (f._loteId) {
-                const primeraDelLote = !cabecerasEmitidas.has(f._loteId);
-                if (primeraDelLote) cabecerasEmitidas.add(f._loteId);
-                const abierto = !!lotesAbiertos[f._loteId];
-                if (primeraDelLote) {
-                  return (
-                    <tr key={`h-${f._loteId}`} className="bg-muted/30">
-                      <td colSpan={5} className="px-2 py-1.5">
-                        <button
-                          type="button"
-                          className="flex items-center gap-2 font-medium hover:text-foreground"
-                          onClick={() => toggleLote(f._loteId as string)}
-                          aria-expanded={abierto}
-                        >
-                          <span className="text-muted-foreground w-3 inline-block text-center">
-                            {abierto ? "▾" : "▸"}
-                          </span>
-                          <span>
-                            {(f.contexto?.origen as string) || "lote"} — {conteoPorLote.get(f._loteId)} eventos
-                          </span>
-                          <Badge variant="outline">{f.accion}</Badge>
-                        </button>
-                        {!abierto && (
-                          <span className="ml-6 text-muted-foreground">
-                            {fmtTs(f.ts)} · {f.user_email ?? "sistema"}
-                          </span>
-                        )}
+            {bloques.map((b) => {
+              if (b.tipo === "fila") {
+                const f = b.ev;
+                return (
+                  <tr key={f.id} className="hover:bg-muted/40 even:bg-muted/10">
+                    <td className="px-2 py-1 whitespace-nowrap text-muted-foreground">{fmtTs(f.ts)}</td>
+                    <td className="px-2 py-1">
+                      <span className="text-foreground">{f.user_email ?? "sistema"}</span>
+                      <span className="text-muted-foreground"> · {f.rol}</span>
+                    </td>
+                    <td className="px-2 py-1"><Badge variant="secondary">{f.accion}</Badge></td>
+                    <td className="px-2 py-1 text-muted-foreground">{f.entidad_tipo} #{f.entidad_id}</td>
+                    <td className="px-2 py-1 text-muted-foreground truncate max-w-0">
+                      {resumen(f.antes)} → {resumen(f.despues)}
+                    </td>
+                  </tr>
+                );
+              }
+              const { loteId, filas: filasLote } = b;
+              const abierto = !!lotesAbiertos[loteId];
+              const primera = filasLote[0];
+              return (
+                <Fragment key={`lote-${loteId}`}>
+                  <tr className="bg-muted/30">
+                    <td colSpan={5} className="px-2 py-1.5">
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 font-medium hover:text-foreground"
+                        onClick={() => toggleLote(loteId)}
+                        aria-expanded={abierto}
+                      >
+                        <span className="text-muted-foreground w-3 inline-block text-center">
+                          {abierto ? "▾" : "▸"}
+                        </span>
+                        <span>
+                          {(primera.contexto?.origen as string) || "lote"} — {filasLote.length} eventos
+                        </span>
+                        <Badge variant="outline">{primera.accion}</Badge>
+                      </button>
+                      {!abierto && (
+                        <span className="ml-6 text-muted-foreground">
+                          {fmtTs(primera.ts)} · {primera.user_email ?? "sistema"}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                  {abierto && filasLote.map((f) => (
+                    <tr key={f.id} className="hover:bg-muted/40 even:bg-muted/10">
+                      <td className="px-2 py-1 whitespace-nowrap text-muted-foreground">{fmtTs(f.ts)}</td>
+                      <td className="px-2 py-1">
+                        <span className="text-foreground">{f.user_email ?? "sistema"}</span>
+                        <span className="text-muted-foreground"> · {f.rol}</span>
+                      </td>
+                      <td className="px-2 py-1"><Badge variant="secondary">{f.accion}</Badge></td>
+                      <td className="px-2 py-1 text-muted-foreground">{f.entidad_tipo} #{f.entidad_id}</td>
+                      <td className="px-2 py-1 text-muted-foreground truncate max-w-0">
+                        {resumen(f.antes)} → {resumen(f.despues)}
                       </td>
                     </tr>
-                  );
-                }
-                if (!abierto) return null;
-              }
-              return (
-                <tr key={f.id} className="hover:bg-muted/40 even:bg-muted/10">
-                  <td className="px-2 py-1 whitespace-nowrap text-muted-foreground">{fmtTs(f.ts)}</td>
-                  <td className="px-2 py-1">
-                    <span className="text-foreground">{f.user_email ?? "sistema"}</span>
-                    <span className="text-muted-foreground"> · {f.rol}</span>
-                  </td>
-                  <td className="px-2 py-1"><Badge variant="secondary">{f.accion}</Badge></td>
-                  <td className="px-2 py-1 text-muted-foreground">{f.entidad_tipo} #{f.entidad_id}</td>
-                  <td className="px-2 py-1 text-muted-foreground truncate max-w-0">
-                    {resumen(f.antes)} → {resumen(f.despues)}
-                  </td>
-                </tr>
+                  ))}
+                </Fragment>
               );
             })}
-            {filas.length === 0 && !cargando && (
+            {bloques.length === 0 && !cargando && (
               <tr>
                 <td colSpan={5} className="px-3 py-10 text-center text-muted-foreground text-sm">
                   Sin eventos de auditoría

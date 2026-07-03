@@ -44,7 +44,10 @@ def test_importar_preview(tmp_path):
     r = cli.post("/api/insumos/importar/preview",
                  files={"archivo": ("l.xlsx", buf.getvalue(),
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
-    assert r.status_code == 200 and len(r.json()["cambios"]) == 1
+    assert r.status_code == 200
+    # "100" existe y es único -> actualizar precio (sin nombre en el archivo)
+    assert len(r.json()["actualizar"]) == 1
+    assert r.json()["actualizar"][0]["precio_nuevo"] == 390000
 
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

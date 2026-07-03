@@ -69,20 +69,14 @@ def plantilla_apus() -> bytes:
     return _a_bytes(wb)
 
 
-def plantilla_insumos_crear() -> bytes:
-    """Tabla codigo, nombre, unidad, grupo, precio, fuente + 1 fila de ejemplo."""
+def plantilla_insumos() -> bytes:
+    """Plantilla del importador unificado. Columnas: codigo, nombre, unidad, grupo,
+    precio, fuente. Con nombre crea o actualiza (por identidad código+nombre); sin
+    nombre solo actualiza precio por código."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.append(["codigo", "nombre", "unidad", "grupo", "precio", "fuente"])
-    ws.append(["EJEMPLO-1", "EJEMPLO — reemplazar por el nombre del insumo",
+    ws.append(["EJEMPLO-1", "EJEMPLO — con nombre se crea o actualiza",
                "KG", "MAT", 1000, "COTIZACIÓN"])
-    return _a_bytes(wb)
-
-
-def plantilla_precios() -> bytes:
-    """Tabla codigo, precio, fuente + 1 fila de ejemplo."""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append(["codigo", "precio", "fuente"])
-    ws.append(["EJEMPLO-1", 1000, "COTIZACIÓN"])
+    ws.append(["EJEMPLO-2", "", "", "", 2000, "COTIZACIÓN"])  # sin nombre = solo actualizar precio
     return _a_bytes(wb)

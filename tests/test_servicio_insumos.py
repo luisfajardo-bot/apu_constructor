@@ -1,9 +1,4 @@
 # tests/test_servicio_insumos.py
-import io
-
-import openpyxl
-import pytest
-
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Insumo
 from apu_tool.servicio import insumos as svc
@@ -48,48 +43,6 @@ def test_aplicar_cambios_ok_y_errores(tmp_path):
     assert alm.precios.get_insumo_por_id(iid).precio == 380000.0
 
 
-def _xlsx_bytes(filas):
-    wb = openpyxl.Workbook(); ws = wb.active
-    ws.append(["CODIGO", "PRECIO", "FUENTE"])
-    for f in filas:
-        ws.append(f)
-    buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
-
-
-def test_preview_import_reconocido_y_no_encontrado(tmp_path):
-    alm = _alm(tmp_path)
-    contenido = _xlsx_bytes([["100", 390000, "COMPRAS"], ["999", 10, "X"]])
-    out = svc.preview_import(alm, contenido, "lista.xlsx")
-    assert len(out["cambios"]) == 1 and out["cambios"][0]["codigo"] == "100"
-    assert out["cambios"][0]["precio_nuevo"] == 390000
-    assert len(out["no_encontrados"]) == 1 and out["no_encontrados"][0]["codigo"] == "999"
-
-
-def _xlsx_bytes_headers(headers, filas):
-    """Construye un xlsx con encabezados arbitrarios."""
-    wb = openpyxl.Workbook(); ws = wb.active
-    ws.append(headers)
-    for f in filas:
-        ws.append(f)
-    buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
-
-
-def test_parse_tabla_sin_codigo_lanza_valueerror(tmp_path):
-    contenido = _xlsx_bytes_headers(["NOMBRE", "PRECIO"], [["Arena", 5000]])
-    with pytest.raises(ValueError):
-        svc._parse_tabla(contenido, "x.xlsx")
-
-
-def test_preview_import_ambiguos(tmp_path):
-    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
-                  corridas_path=tmp_path / "c.db")
-    alm.init_schema()
-    # Dos insumos con el mismo código pero distinto nombre → candidatos ambiguos
-    alm.precios.insert_insumos([
-        Insumo("300", 'Tubería PVC 4"', "ML", "TUBERIAS", 10000.0, "COSTO INTERNO"),
-        Insumo("300", 'Tubería PVC 6"', "ML", "TUBERIAS", 20000.0, "COSTO INTERNO")])
-    contenido = _xlsx_bytes([["300", 15000, "COMPRAS"]])
-    out = svc.preview_import(alm, contenido, "lista.xlsx")
-    assert len(out["ambiguos"]) == 1
-    assert out["ambiguos"][0]["codigo"] == "300"
-    assert len(out["ambiguos"][0]["candidatos"]) == 2
+# Nota: la clasificación reconocido/ambiguo/no-encontrado del import de precios se
+# probó antes aquí (svc.preview_import). Al unificar el importador (upsert), esa
+# cobertura vive ahora en tests/test_servicio_autoria.py (filas sin nombre por código).

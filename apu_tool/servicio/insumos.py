@@ -7,12 +7,8 @@ cada cambio crea historial vía PreciosDB.set_precio_por_id.
 """
 from __future__ import annotations
 
-import csv
-import io
 import unicodedata
 from typing import Optional
-
-import openpyxl
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
@@ -88,61 +84,3 @@ def _to_float(v) -> float:
         return float(s)
     except ValueError:
         return 0.0
-
-
-def _parse_tabla(contenido: bytes, nombre: str) -> list[dict]:
-    if nombre.lower().endswith((".xlsx", ".xlsm")):
-        wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
-        ws = wb.active
-        rows = [list(r) for r in ws.iter_rows(values_only=True)]
-        wb.close()
-    else:
-        text = contenido.decode("utf-8-sig", errors="replace")
-        rows = [r for r in csv.reader(io.StringIO(text))]
-    rows = [r for r in rows if any(c not in (None, "") for c in r)]
-    if not rows:
-        return []
-    headers = [_norm_h(c) for c in rows[0]]
-
-    def col(*keys):
-        for i, h in enumerate(headers):
-            if any(k == h or k in h for k in keys):
-                return i
-        return None
-    c_cod = col("codigo", "cod", "code")
-    c_pre = col("precio", "valor", "price")
-    c_fue = col("fuente", "source")
-    if c_cod is None or c_pre is None:
-        raise ValueError("El archivo debe tener columnas de código y precio.")
-    out = []
-    for r in rows[1:]:
-        def g(i):
-            return r[i] if (i is not None and i < len(r)) else None
-        cod = str(g(c_cod) or "").strip()
-        if not cod:
-            continue
-        out.append({"codigo": cod, "precio": _to_float(g(c_pre)),
-                    "fuente": str(g(c_fue) or "").strip()})
-    return out
-
-
-def _cambio(ins, precio_nuevo: float, fuente_nueva: str) -> dict:
-    return {"insumo_id": ins.id, "codigo": ins.codigo, "nombre": ins.nombre,
-            "precio_actual": ins.precio, "precio_nuevo": precio_nuevo,
-            "fuente_actual": ins.fuente_precio, "fuente_nueva": fuente_nueva}
-
-
-def preview_import(alm: Almacen, contenido: bytes, nombre: str) -> dict:
-    filas = _parse_tabla(contenido, nombre)
-    cambios, ambiguos, no_encontrados = [], [], []
-    for f in filas:
-        cands = alm.precios.get_candidatos(f["codigo"])
-        if len(cands) == 1:
-            ins = cands[0]
-            cambios.append(_cambio(ins, f["precio"], f["fuente"] or ins.fuente_precio))
-        elif len(cands) > 1:
-            ambiguos.append({"codigo": f["codigo"], "precio": f["precio"],
-                             "candidatos": [{"id": c.id, "nombre": c.nombre} for c in cands]})
-        else:
-            no_encontrados.append({"codigo": f["codigo"], "precio": f["precio"]})
-    return {"cambios": cambios, "ambiguos": ambiguos, "no_encontrados": no_encontrados}

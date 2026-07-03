@@ -277,34 +277,6 @@ async def insumos_importar_preview(archivo: UploadFile = File(...),
                                    _: object = Depends(requiere_rol("editor"))):
     contenido = await archivo.read()
     try:
-        return insumos_svc.preview_import(alm, contenido, archivo.filename or "lista.xlsx")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except (zipfile.BadZipFile, InvalidFileException):
-        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
-
-
-@router.get("/insumos/importar/plantilla")
-def insumos_precios_plantilla(_: object = Depends(requiere_rol("editor"))):
-    return _descarga_xlsx(plantillas_svc.plantilla_precios(), "plantilla_precios.xlsx")
-
-
-# ---- autoría: crear / importar insumos y APUs ----
-@router.post("/insumos/crear")
-def crear_insumo(body: InsumoNuevoIn, alm: Almacen = Depends(get_almacen),
-                 actor=Depends(requiere_rol("editor"))):
-    try:
-        return autoria.crear_insumo(alm, body.model_dump(), actor=actor)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post("/insumos/importar-crear/preview")
-async def insumos_importar_crear_preview(archivo: UploadFile = File(...),
-                                         alm: Almacen = Depends(get_almacen),
-                                         _: object = Depends(requiere_rol("editor"))):
-    contenido = await archivo.read()
-    try:
         return autoria.preview_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -312,10 +284,10 @@ async def insumos_importar_crear_preview(archivo: UploadFile = File(...),
         raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
-@router.post("/insumos/importar-crear")
-async def insumos_importar_crear(archivo: UploadFile = File(...),
-                                 alm: Almacen = Depends(get_almacen),
-                                 actor=Depends(requiere_rol("editor"))):
+@router.post("/insumos/importar")
+async def insumos_importar(archivo: UploadFile = File(...),
+                           alm: Almacen = Depends(get_almacen),
+                           actor=Depends(requiere_rol("editor"))):
     contenido = await archivo.read()
     try:
         return autoria.aplicar_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx",
@@ -326,9 +298,19 @@ async def insumos_importar_crear(archivo: UploadFile = File(...),
         raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
-@router.get("/insumos/importar-crear/plantilla")
-def insumos_crear_plantilla(_: object = Depends(requiere_rol("editor"))):
-    return _descarga_xlsx(plantillas_svc.plantilla_insumos_crear(), "plantilla_insumos.xlsx")
+@router.get("/insumos/importar/plantilla")
+def insumos_plantilla(_: object = Depends(requiere_rol("editor"))):
+    return _descarga_xlsx(plantillas_svc.plantilla_insumos(), "plantilla_insumos.xlsx")
+
+
+# ---- autoría: crear / importar insumos y APUs ----
+@router.post("/insumos/crear")
+def crear_insumo(body: InsumoNuevoIn, alm: Almacen = Depends(get_almacen),
+                 actor=Depends(requiere_rol("editor"))):
+    try:
+        return autoria.crear_insumo(alm, body.model_dump(), actor=actor)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/apus")

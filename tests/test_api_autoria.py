@@ -64,13 +64,15 @@ def _xlsx_insumos() -> bytes:
 def test_import_insumos_endpoint(tmp_path):
     cli, _ = _cli(tmp_path)
     data = _xlsx_insumos()
-    pv = cli.post("/api/insumos/importar-crear/preview",
+    pv = cli.post("/api/insumos/importar/preview",
                   files={"archivo": ("insumos.xlsx", data, _XLSX)})
     assert pv.status_code == 200
     assert [c["codigo"] for c in pv.json()["crear"]] == ["300"]
-    ap = cli.post("/api/insumos/importar-crear",
+    assert [c["codigo"] for c in pv.json()["actualizar"]] == ["100"]   # existía -> actualizar
+    ap = cli.post("/api/insumos/importar",
                   files={"archivo": ("insumos.xlsx", data, _XLSX)})
-    assert ap.status_code == 200 and ap.json()["creados"] == 1
+    assert ap.status_code == 200
+    assert ap.json()["creados"] == 1 and ap.json()["actualizados"] == 1
 
 
 def _xlsx_apus() -> bytes:
@@ -114,9 +116,9 @@ def test_plantilla_apus_endpoint(tmp_path):
     assert any(c["codigo"] == "999001" for c in pv.json()["crear"])
 
 
-def test_plantilla_insumos_crear_endpoint(tmp_path):
+def test_plantilla_insumos_endpoint(tmp_path):
     cli, _ = _cli(tmp_path)
-    r = cli.get("/api/insumos/importar-crear/plantilla")
+    r = cli.get("/api/insumos/importar/plantilla")
     assert r.status_code == 200, r.text
     assert r.headers["content-type"] == _XLSX
     assert "attachment" in r.headers["content-disposition"]
@@ -129,5 +131,4 @@ def test_plantillas_requieren_editor(tmp_path):
     alm.init_schema()
     cli = cliente(create_app(almacen=alm), rol="consulta")
     assert cli.get("/api/apus/importar/plantilla").status_code == 403
-    assert cli.get("/api/insumos/importar-crear/plantilla").status_code == 403
     assert cli.get("/api/insumos/importar/plantilla").status_code == 403

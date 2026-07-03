@@ -15,8 +15,7 @@ def _alm(tmp_path):
 
 
 def test_plantillas_abren_como_workbook_valido():
-    for gen in (plantillas.plantilla_apus, plantillas.plantilla_insumos_crear,
-                plantillas.plantilla_precios):
+    for gen in (plantillas.plantilla_apus, plantillas.plantilla_insumos):
         data = gen()
         assert data, f"{gen.__name__} devolvió vacío"
         wb = openpyxl.load_workbook(io.BytesIO(data))
@@ -39,15 +38,7 @@ def test_plantilla_apus_round_trip(tmp_path):
 def test_plantilla_insumos_round_trip(tmp_path):
     from apu_tool.servicio import autoria
     alm = _alm(tmp_path)
-    pv = autoria.preview_importar_insumos(alm, plantillas.plantilla_insumos_crear(),
+    pv = autoria.preview_importar_insumos(alm, plantillas.plantilla_insumos(),
                                           "plantilla_insumos.xlsx")
-    codigos = [f["codigo"] for f in pv["crear"]]
-    assert "EJEMPLO-1" in codigos
-
-
-def test_plantilla_precios_round_trip():
-    from apu_tool.servicio.insumos import _parse_tabla
-    filas = _parse_tabla(plantillas.plantilla_precios(), "plantilla_precios.xlsx")
-    assert len(filas) == 1
-    assert filas[0]["codigo"] == "EJEMPLO-1"
-    assert filas[0]["precio"] == 1000.0
+    # la plantilla trae una fila con nombre (crear) y una sin nombre (actualizar/no encontrada)
+    assert any(f["codigo"] == "EJEMPLO-1" for f in pv["crear"])

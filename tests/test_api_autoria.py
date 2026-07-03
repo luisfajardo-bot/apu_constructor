@@ -132,3 +132,10 @@ def test_plantillas_requieren_editor(tmp_path):
     cli = cliente(create_app(almacen=alm), rol="consulta")
     assert cli.get("/api/apus/importar/plantilla").status_code == 403
     assert cli.get("/api/insumos/importar/plantilla").status_code == 403
+
+
+def test_detalle_apu_incluye_n_corridas(tmp_path):
+    cli, alm = _cli(tmp_path)   # A1 existe por el seed de _cli; sin corridas -> 0
+    r = cli.get("/api/apus/A1/DIURNO")
+    assert r.status_code == 200, r.text
+    assert r.json()["n_corridas"] == 0

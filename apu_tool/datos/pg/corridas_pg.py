@@ -153,3 +153,9 @@ class CorridasPg:
         with self.cx.connection() as conn:
             return {t: conn.execute(f"SELECT COUNT(*) AS n FROM corridas.{t}").fetchone()["n"]
                     for t in ("corrida", "corrida_item")}
+
+    def contar_items_por_apu(self, apu_codigo: str) -> int:
+        with self.cx.connection() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) AS n FROM corridas.corrida_item WHERE apu_codigo = %s",
+                (str(apu_codigo),)).fetchone()["n"]

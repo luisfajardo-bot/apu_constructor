@@ -194,6 +194,13 @@ export interface ApuNuevo {
   componentes: ComponenteNuevo[];
 }
 
+export interface ApuEditar {
+  nombre: string;
+  unidad: string;
+  grupo: string;
+  componentes: ComponenteNuevo[];
+}
+
 export interface ApuResumen {
   codigo: string;
   turno: string;
@@ -211,6 +218,7 @@ export interface ApuDetalle {
   grupo: string;
   costo_unitario: number;
   composicion: LineaComposicion[];
+  n_corridas?: number;
 }
 
 export interface ListaApus {

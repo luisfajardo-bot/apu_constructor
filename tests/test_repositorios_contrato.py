@@ -145,3 +145,38 @@ def test_componentes_para_integridad(repos):
     comps = apus.componentes_para_integridad()
     assert ("6140", "ACERO") in comps and ("9", "CEMENTO") in comps
     assert all(isinstance(c, tuple) and len(c) == 2 for c in comps)
+
+
+def test_apu_editar_reemplaza_cabecera_y_composicion(repos):
+    _, apus = repos
+    apus.crear_apu(Apu("A1", "MURO", "M2", "DIURNO", "ESTR"),
+                   [ApuComponent("A1", "DIURNO", "1", "ARENA", "M3", 0.5, 10.0)])
+    apus.editar_apu(
+        Apu("A1", "MURO REFORZADO", "M2", "DIURNO", "ESTR"),
+        [ApuComponent("A1", "DIURNO", "2", "CEMENTO", "KG", 3.0, 20.0),
+         ApuComponent("A1", "DIURNO", "1", "ARENA", "M3", 0.8, 10.0)])
+    apu = apus.get_apu("A1", "DIURNO")
+    assert apu.nombre == "MURO REFORZADO"
+    comps = apus.get_components("A1", "DIURNO")
+    assert [c.insumo_codigo for c in comps] == ["2", "1"]   # reemplazada, seq 0..n
+    assert comps[1].rendimiento == 0.8
+
+
+def test_apu_editar_inexistente_lanza(repos):
+    _, apus = repos
+    with pytest.raises(ValueError):
+        apus.editar_apu(Apu("NOPE", "X", "M2", "DIURNO"), [])
+
+
+def test_apu_borrar_elimina_cabecera_y_componentes(repos):
+    _, apus = repos
+    apus.crear_apu(Apu("A1", "MURO", "M2", "DIURNO"),
+                   [ApuComponent("A1", "DIURNO", "1", "ARENA", "M3", 0.5, 10.0)])
+    assert apus.borrar_apu("A1", "DIURNO") is True
+    assert apus.get_apu("A1", "DIURNO") is None
+    assert apus.get_components("A1", "DIURNO") == []
+
+
+def test_apu_borrar_inexistente_devuelve_false(repos):
+    _, apus = repos
+    assert apus.borrar_apu("NOPE", "DIURNO") is False

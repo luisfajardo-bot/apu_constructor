@@ -31,6 +31,7 @@ def detalle(alm: Almacen, codigo: str, turno: str) -> Optional[dict]:
     return {
         "codigo": apu.codigo, "turno": apu.shift, "nombre": apu.nombre,
         "unidad": apu.unidad, "grupo": apu.grupo, "costo_unitario": total,
+        "n_corridas": alm.corridas.contar_items_por_apu(codigo),
         "composicion": [{
             "insumo_codigo": c.insumo_codigo, "insumo_nombre": c.insumo_nombre,
             "unidad": c.unidad, "rendimiento": c.rendimiento,

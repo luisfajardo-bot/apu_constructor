@@ -91,6 +91,49 @@ class ApusPg:
                     "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
                     " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
 
+    def editar_apu(self, apu: Apu, componentes: list[ApuComponent], conn=None) -> None:
+        if conn is not None:
+            return self._editar_apu(conn, apu, componentes)
+        with self.cx.connection() as c:
+            return self._editar_apu(c, apu, componentes)
+
+    def _editar_apu(self, conn, apu: Apu, componentes: list[ApuComponent]) -> None:
+        existe = conn.execute("SELECT 1 FROM apus.apus WHERE codigo=%s AND shift=%s",
+                              (str(apu.codigo), apu.shift)).fetchone()
+        if not existe:
+            raise ValueError(
+                f"No existe un APU con código {apu.codigo} en turno {apu.shift}.")
+        conn.execute(
+            "UPDATE apus.apus SET nombre=%s, unidad=%s, grupo=%s WHERE codigo=%s AND shift=%s",
+            (apu.nombre, apu.unidad, apu.grupo, str(apu.codigo), apu.shift))
+        conn.execute("DELETE FROM apus.apu_componentes WHERE apu_codigo=%s AND shift=%s",
+                     (str(apu.codigo), apu.shift))
+        rows = [(str(apu.codigo), apu.shift, seq, c.insumo_codigo, c.insumo_nombre,
+                 c.unidad, c.rendimiento, c.precio_unitario_hist)
+                for seq, c in enumerate(componentes)]
+        if rows:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO apus.apu_componentes "
+                    "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
+                    " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
+
+    def borrar_apu(self, codigo: str, shift: str, conn=None) -> bool:
+        if conn is not None:
+            return self._borrar_apu(conn, codigo, shift)
+        with self.cx.connection() as c:
+            return self._borrar_apu(c, codigo, shift)
+
+    def _borrar_apu(self, conn, codigo: str, shift: str) -> bool:
+        existe = conn.execute("SELECT 1 FROM apus.apus WHERE codigo=%s AND shift=%s",
+                              (str(codigo), shift)).fetchone()
+        if not existe:
+            return False
+        conn.execute("DELETE FROM apus.apu_componentes WHERE apu_codigo=%s AND shift=%s",
+                     (str(codigo), shift))
+        conn.execute("DELETE FROM apus.apus WHERE codigo=%s AND shift=%s", (str(codigo), shift))
+        return True
+
     def set_meta(self, clave: str, valor: str) -> None:
         with self.cx.connection() as conn:
             conn.execute(

@@ -21,6 +21,7 @@ import type { ApuResumen, ApuDetalle } from "@/lib/tipos";
 import { cop } from "@/lib/moneda";
 import { DialogoAgregarApu } from "@/components/autoria/DialogoAgregarApu";
 import { DialogoImportarApus } from "@/components/autoria/DialogoImportarApus";
+import { DialogoBorrarApu } from "@/components/autoria/DialogoBorrarApu";
 import { useAuth } from "@/lib/auth";
 import { puede } from "@/components/rutas";
 
@@ -35,6 +36,7 @@ function clave(a: ApuResumen): string {
 export default function Apus() {
   const { perfil } = useAuth();
   const puedeEditar = puede(perfil?.rol, "editor");
+  const puedeBorrar = puede(perfil?.rol, "admin");
   const [q, setQ] = useState("");
   const [inputQ, setInputQ] = useState("");
   const [turno, setTurno] = useState("");
@@ -48,6 +50,8 @@ export default function Apus() {
   const [expandido, setExpandido] = useState<Record<string, EstadoExpansion | undefined>>({});
   const [agregarOpen, setAgregarOpen] = useState(false);
   const [importarOpen, setImportarOpen] = useState(false);
+  const [editarDetalle, setEditarDetalle] = useState<ApuDetalle | null>(null);
+  const [borrarDetalle, setBorrarDetalle] = useState<ApuDetalle | null>(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -249,7 +253,13 @@ export default function Apus() {
                           </p>
                         )}
                         {estado !== "cargando" && estado !== "error" && (
-                          <DetalleApu detalle={estado} />
+                          <DetalleApu
+                            detalle={estado}
+                            puedeEditar={puedeEditar}
+                            onEditar={() => setEditarDetalle(estado)}
+                            puedeBorrar={puedeBorrar}
+                            onBorrar={() => setBorrarDetalle(estado)}
+                          />
                         )}
                       </TableCell>
                     </TableRow>
@@ -283,13 +293,38 @@ export default function Apus() {
             onOpenChange={setImportarOpen}
             onAplicado={recargar}
           />
+          <DialogoAgregarApu
+            key={editarDetalle ? `${editarDetalle.codigo}@@${editarDetalle.turno}` : "nuevo-edit"}
+            open={editarDetalle !== null}
+            onOpenChange={(v) => { if (!v) setEditarDetalle(null); }}
+            onCreado={recargar}
+            modo="editar"
+            inicial={editarDetalle}
+          />
+          <DialogoBorrarApu
+            apu={borrarDetalle}
+            onOpenChange={(v) => { if (!v) setBorrarDetalle(null); }}
+            onBorrado={recargar}
+          />
         </>
       )}
     </div>
   );
 }
 
-function DetalleApu({ detalle }: { detalle: ApuDetalle }) {
+function DetalleApu({
+  detalle,
+  puedeEditar,
+  onEditar,
+  puedeBorrar,
+  onBorrar,
+}: {
+  detalle: ApuDetalle;
+  puedeEditar: boolean;
+  onEditar: () => void;
+  puedeBorrar: boolean;
+  onBorrar: () => void;
+}) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-3 flex-wrap text-xs">
@@ -297,6 +332,20 @@ function DetalleApu({ detalle }: { detalle: ApuDetalle }) {
           APU: {detalle.codigo} · {detalle.turno}
         </span>
         <span className="text-muted-foreground truncate max-w-md">{detalle.nombre}</span>
+        {(puedeEditar || puedeBorrar) && (
+          <div className="ml-auto flex gap-2">
+            {puedeEditar && (
+              <Button size="xs" variant="outline" onClick={onEditar}>
+                Editar
+              </Button>
+            )}
+            {puedeBorrar && (
+              <Button size="xs" variant="destructive" onClick={onBorrar}>
+                Borrar
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       <section>

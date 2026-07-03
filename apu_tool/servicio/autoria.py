@@ -94,6 +94,52 @@ def crear_apu(alm: Almacen, datos: dict, actor=None) -> dict:
             "unidad": apu.unidad, "grupo": apu.grupo, "n_componentes": len(comps)}
 
 
+def editar_apu(alm: Almacen, codigo: str, shift: str, datos: dict, actor=None) -> dict | None:
+    """Edita cabecera + composición de un APU existente. Identidad (codigo, turno) fija.
+    Devuelve None si no existe (endpoint -> 404); ValueError en validación (-> 400)."""
+    codigo = str(codigo or "").strip()
+    shift = str(shift or "").strip().upper()
+    previo = alm.apus.get_apu(codigo, shift)
+    if previo is None:
+        return None
+    nombre = str(datos.get("nombre", "") or "").strip()
+    if not nombre:
+        raise ValueError("El nombre es obligatorio.")
+    comps = _componentes_de(alm, datos.get("componentes", []) or [], shift)
+    antes = {"nombre": previo.nombre, "unidad": previo.unidad, "grupo": previo.grupo,
+             "n_componentes": len(alm.apus.get_components(codigo, shift))}
+    apu = Apu(codigo=codigo, nombre=nombre, unidad=str(datos.get("unidad", "") or ""),
+              shift=shift, grupo=str(datos.get("grupo", "") or ""))
+    with alm.transaccion("apus") as conn:
+        alm.apus.editar_apu(apu, comps, conn=conn)
+        registrar_auditoria(
+            alm, conn, actor, "apu.editar", "apu", codigo, antes=antes,
+            despues={"nombre": nombre, "unidad": apu.unidad, "grupo": apu.grupo,
+                     "n_componentes": len(comps)})
+    return {"codigo": codigo, "shift": shift, "nombre": nombre,
+            "unidad": apu.unidad, "grupo": apu.grupo, "n_componentes": len(comps)}
+
+
+def borrar_apu(alm: Almacen, codigo: str, shift: str, actor=None) -> dict | None:
+    """Borra un APU (cabecera + composición). Devuelve None si no existe (endpoint -> 404).
+    Las corridas ya armadas conservan su foto; se informa cuántas lo referencian."""
+    codigo = str(codigo or "").strip()
+    shift = str(shift or "").strip().upper()
+    previo = alm.apus.get_apu(codigo, shift)
+    if previo is None:
+        return None
+    n_comps = len(alm.apus.get_components(codigo, shift))
+    n_corridas = alm.corridas.contar_items_por_apu(codigo)
+    antes = {"codigo": codigo, "turno": shift, "nombre": previo.nombre,
+             "unidad": previo.unidad, "grupo": previo.grupo, "n_componentes": n_comps}
+    with alm.transaccion("apus") as conn:
+        alm.apus.borrar_apu(codigo, shift, conn=conn)
+        registrar_auditoria(
+            alm, conn, actor, "apu.borrar", "apu", codigo, antes=antes, despues=None,
+            contexto={"n_corridas": n_corridas})
+    return {"borrado": True, "n_corridas": n_corridas}
+
+
 # ------------------------------------------------------------- import insumos
 def _match_identidad(alm: Almacen, codigo: str, nombre: str):
     """Insumo con (codigo, nombre) exactos (nombre normalizado), o None."""

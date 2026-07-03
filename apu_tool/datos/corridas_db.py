@@ -185,3 +185,9 @@ class CorridasDB:
         with self.connect() as conn:
             return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
                     for t in ("corrida", "corrida_item")}
+
+    def contar_items_por_apu(self, apu_codigo: str) -> int:
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM corrida_item WHERE apu_codigo = ?",
+                (str(apu_codigo),)).fetchone()[0]

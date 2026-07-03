@@ -52,6 +52,13 @@ class ApuNuevoIn(BaseModel):
     componentes: list[ComponenteIn] = []
 
 
+class ApuEditIn(BaseModel):
+    nombre: str
+    unidad: str = ""
+    grupo: str = ""
+    componentes: list[ComponenteIn] = []
+
+
 class UsuarioInvitarIn(BaseModel):
     email: str
     rol: str

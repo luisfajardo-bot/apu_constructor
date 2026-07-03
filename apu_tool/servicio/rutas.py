@@ -29,7 +29,7 @@ from apu_tool.servicio.auth import requiere_rol
 from apu_tool.servicio.dependencias import get_almacen
 from apu_tool.servicio import limites
 from apu_tool.servicio.esquemas import (
-    ApuNuevoIn, CambiosIn, ConfirmarIn, EstadoIn, InsumoNuevoIn, RolIn, StatusOut,
+    ApuEditIn, ApuNuevoIn, CambiosIn, ConfirmarIn, EstadoIn, InsumoNuevoIn, RolIn, StatusOut,
     UsuarioInvitarIn)
 from apu_tool.servicio.supabase_admin import AdminSupabase, AdminSupabaseHTTP
 
@@ -368,6 +368,28 @@ def detalle_apu(codigo: str, turno: str, alm: Almacen = Depends(get_almacen),
     if d is None:
         raise HTTPException(status_code=404, detail="APU no encontrado.")
     return d
+
+
+@router.put("/apus/{codigo}/{turno}")
+def editar_apu(codigo: str, turno: str, body: ApuEditIn,
+               alm: Almacen = Depends(get_almacen),
+               actor=Depends(requiere_rol("editor"))):
+    try:
+        r = autoria.editar_apu(alm, codigo, turno, body.model_dump(), actor=actor)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if r is None:
+        raise HTTPException(status_code=404, detail="APU no encontrado.")
+    return r
+
+
+@router.delete("/apus/{codigo}/{turno}")
+def borrar_apu(codigo: str, turno: str, alm: Almacen = Depends(get_almacen),
+               actor=Depends(requiere_rol("admin"))):
+    r = autoria.borrar_apu(alm, codigo, turno, actor=actor)
+    if r is None:
+        raise HTTPException(status_code=404, detail="APU no encontrado.")
+    return r
 
 
 # ---- usuarios (solo Admin) ----

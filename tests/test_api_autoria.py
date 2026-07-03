@@ -132,3 +132,47 @@ def test_plantillas_requieren_editor(tmp_path):
     cli = cliente(create_app(almacen=alm), rol="consulta")
     assert cli.get("/api/apus/importar/plantilla").status_code == 403
     assert cli.get("/api/insumos/importar/plantilla").status_code == 403
+
+
+def test_detalle_apu_incluye_n_corridas(tmp_path):
+    cli, alm = _cli(tmp_path)   # A1 existe por el seed de _cli; sin corridas -> 0
+    r = cli.get("/api/apus/A1/DIURNO")
+    assert r.status_code == 200, r.text
+    assert r.json()["n_corridas"] == 0
+
+
+def test_editar_apu_endpoint(tmp_path):
+    cli, alm = _cli(tmp_path)   # rol admin
+    cli.post("/api/apus/crear", json={"codigo": "B2", "turno": "DIURNO", "nombre": "PISO",
+        "unidad": "M2", "grupo": "ACAB",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}]})
+    r = cli.put("/api/apus/B2/DIURNO", json={"nombre": "PISO PULIDO", "unidad": "M2",
+        "grupo": "ACAB", "componentes": [{"insumo_codigo": "100", "rendimiento": 3.0}]})
+    assert r.status_code == 200, r.text
+    assert r.json()["nombre"] == "PISO PULIDO"
+    assert cli.put("/api/apus/NOPE/DIURNO", json={"nombre": "X",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 1.0}]}).status_code == 404
+
+
+def test_borrar_apu_endpoint(tmp_path):
+    cli, alm = _cli(tmp_path)   # rol admin
+    cli.post("/api/apus/crear", json={"codigo": "B2", "turno": "DIURNO", "nombre": "PISO",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}]})
+    r = cli.delete("/api/apus/B2/DIURNO")
+    assert r.status_code == 200 and r.json()["borrado"] is True
+    assert cli.delete("/api/apus/NOPE/DIURNO").status_code == 404
+
+
+def test_editar_borrar_gating_por_rol(tmp_path):
+    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
+                  corridas_path=tmp_path / "c.db")
+    alm.init_schema()
+    alm.precios.insert_insumos([Insumo("100", "CEMENTO GRIS", "KG", "MAT", 1000, "PRECIO IDU")])
+    alm.apus.insert_apus([Apu("A1", "MURO", "M2", "DIURNO", "ESTR")])
+    editor = cliente(create_app(almacen=alm), rol="editor")
+    consulta = cliente(create_app(almacen=alm), rol="consulta")
+    body = {"nombre": "MURO 2", "unidad": "M2", "grupo": "ESTR",
+            "componentes": [{"insumo_codigo": "100", "rendimiento": 1.0}]}
+    assert editor.put("/api/apus/A1/DIURNO", json=body).status_code == 200   # editor edita
+    assert editor.delete("/api/apus/A1/DIURNO").status_code == 403           # editor NO borra
+    assert consulta.put("/api/apus/A1/DIURNO", json=body).status_code == 403 # consulta NO edita

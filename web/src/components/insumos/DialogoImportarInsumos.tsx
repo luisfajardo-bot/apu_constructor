@@ -95,7 +95,7 @@ export function DialogoImportarInsumos({ open, onOpenChange, onAplicado }: Props
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-sm">Importar insumos (crear + actualizar precios)</DialogTitle>
         </DialogHeader>
@@ -105,7 +105,7 @@ export function DialogoImportarInsumos({ open, onOpenChange, onAplicado }: Props
           actualiza el precio por código.
         </p>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <input
             ref={fileRef}
             type="file"
@@ -174,12 +174,12 @@ function Seccion({ titulo, children }: { titulo: string; children: React.ReactNo
 function Tabla({ cols, filas }: { cols: string[]; filas: (string | number)[][] }) {
   if (filas.length === 0) return <p className="text-xs text-muted-foreground">Ninguno</p>;
   return (
-    <div className="overflow-auto max-h-40 border rounded">
+    <div className="overflow-x-hidden overflow-y-auto max-h-52 border rounded">
       <table className="w-full text-xs border-collapse">
         <thead className="sticky top-0 bg-muted/80 backdrop-blur z-10">
           <tr>
             {cols.map((c) => (
-              <th key={c} className="px-2 py-1 text-left font-medium text-muted-foreground border-b">{c}</th>
+              <th key={c} className="px-2 py-1 text-left font-medium text-muted-foreground border-b align-bottom">{c}</th>
             ))}
           </tr>
         </thead>
@@ -187,7 +187,7 @@ function Tabla({ cols, filas }: { cols: string[]; filas: (string | number)[][] }
           {filas.map((fila, i) => (
             <tr key={i} className="hover:bg-muted/40 even:bg-muted/10">
               {fila.map((v, j) => (
-                <td key={j} className="px-2 py-0.5">{v}</td>
+                <td key={j} className="px-2 py-0.5 align-top break-words">{v}</td>
               ))}
             </tr>
           ))}

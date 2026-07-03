@@ -115,14 +115,14 @@ export function DialogoImportarApus({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-sm">
             Importar APUs desde Excel (hoja "APUS")
           </DialogTitle>
         </DialogHeader>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <input
             ref={fileRef}
             type="file"
@@ -188,7 +188,7 @@ function SeccionApus({ titulo, filas }: { titulo: string; filas: ApuResumen[] })
         <span className="font-normal text-muted-foreground">({filas.length})</span>
       </p>
       {filas.length > 0 ? (
-        <div className="overflow-auto max-h-44 border rounded">
+        <div className="overflow-x-hidden overflow-y-auto max-h-52 border rounded">
           <table className="w-full text-xs border-collapse">
             <thead className="sticky top-0 bg-muted/80 backdrop-blur z-10">
               <tr>
@@ -220,11 +220,11 @@ function SeccionApus({ titulo, filas }: { titulo: string; filas: ApuResumen[] })
                 >
                   <td className="px-2 py-0.5 font-mono">{f.codigo}</td>
                   <td className="px-2 py-0.5">{f.turno}</td>
-                  <td className="px-2 py-0.5 truncate max-w-xs" title={f.nombre}>
+                  <td className="px-2 py-0.5 align-top break-words" title={f.nombre}>
                     {f.nombre}
                   </td>
                   <td className="px-2 py-0.5">{f.unidad}</td>
-                  <td className="px-2 py-0.5 truncate max-w-[8rem]" title={f.grupo}>
+                  <td className="px-2 py-0.5 align-top break-words" title={f.grupo}>
                     {f.grupo}
                   </td>
                   <td className="px-2 py-0.5 text-right font-mono">{f.n_componentes}</td>

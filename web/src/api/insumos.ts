@@ -3,7 +3,8 @@ import type {
   ListaInsumos,
   InsumoDetalle,
   CambiosAplicados,
-  ImportarPreviewResponse,
+  ImportInsumosUpsertPreview,
+  ImportUpsertResultado,
 } from "@/lib/tipos";
 
 export interface ListarInsumosParams {
@@ -53,10 +54,14 @@ export function aplicarCambios(cambios: CambioInput[]): Promise<CambiosAplicados
   return apiPost<CambiosAplicados>("/insumos/cambios", { cambios });
 }
 
-export function importarPreview(form: FormData): Promise<ImportarPreviewResponse> {
-  return apiPost<ImportarPreviewResponse>("/insumos/importar/preview", form);
+export function previewImportarInsumos(form: FormData): Promise<ImportInsumosUpsertPreview> {
+  return apiPost<ImportInsumosUpsertPreview>("/insumos/importar/preview", form);
 }
 
-export function descargarPlantillaPrecios(): Promise<void> {
-  return descargarArchivo("/insumos/importar/plantilla", "plantilla_precios.xlsx");
+export function aplicarImportarInsumos(form: FormData): Promise<ImportUpsertResultado> {
+  return apiPost<ImportUpsertResultado>("/insumos/importar", form);
+}
+
+export function descargarPlantillaInsumos(): Promise<void> {
+  return descargarArchivo("/insumos/importar/plantilla", "plantilla_insumos.xlsx");
 }

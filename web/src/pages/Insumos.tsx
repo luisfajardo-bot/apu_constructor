@@ -4,9 +4,8 @@ import type { Insumo } from "@/lib/tipos";
 import { BarraFiltros, type FiltrosState } from "@/components/insumos/BarraFiltros";
 import { TablaInsumos } from "@/components/insumos/TablaInsumos";
 import { Button } from "@/components/ui/button";
-import { DialogoImportar } from "@/components/insumos/DialogoImportar";
+import { DialogoImportarInsumos } from "@/components/insumos/DialogoImportarInsumos";
 import { DialogoAgregarInsumo } from "@/components/autoria/DialogoAgregarInsumo";
-import { DialogoImportarCrearInsumos } from "@/components/autoria/DialogoImportarCrearInsumos";
 import { useAuth } from "@/lib/auth";
 import { puede } from "@/components/rutas";
 
@@ -29,7 +28,6 @@ export default function Insumos() {
   const [error, setError] = useState<string | null>(null);
   const [importarOpen, setImportarOpen] = useState(false);
   const [agregarOpen, setAgregarOpen] = useState(false);
-  const [importarCrearOpen, setImportarCrearOpen] = useState(false);
 
   const cargar = useCallback(async (f: FiltrosState) => {
     setCargando(true);
@@ -90,13 +88,6 @@ export default function Insumos() {
             <Button
               size="xs"
               variant="outline"
-              onClick={() => setImportarCrearOpen(true)}
-            >
-              Importar para crear
-            </Button>
-            <Button
-              size="xs"
-              variant="outline"
               onClick={() => setImportarOpen(true)}
             >
               Importar
@@ -127,7 +118,7 @@ export default function Insumos() {
 
       {puedeEditar && (
         <>
-          <DialogoImportar
+          <DialogoImportarInsumos
             open={importarOpen}
             onOpenChange={setImportarOpen}
             onAplicado={recargar}
@@ -137,12 +128,6 @@ export default function Insumos() {
             open={agregarOpen}
             onOpenChange={setAgregarOpen}
             onCreado={recargar}
-          />
-
-          <DialogoImportarCrearInsumos
-            open={importarCrearOpen}
-            onOpenChange={setImportarCrearOpen}
-            onAplicado={recargar}
           />
         </>
       )}

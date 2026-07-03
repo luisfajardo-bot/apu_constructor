@@ -150,19 +150,21 @@ export interface CambiosAplicados {
 
 export interface ImportAmbiguo {
   codigo: string;
-  precio: number;
   candidatos: { id: number; nombre: string }[];
 }
 
-export interface ImportNoEncontrado {
-  codigo: string;
-  precio: number;
+export interface ImportInsumosUpsertPreview {
+  crear: InsumoImportFila[];
+  actualizar: CambioPreview[];
+  ambigua: ImportAmbiguo[];
+  no_encontrada: { codigo: string }[];
+  invalida: InsumoImportFila[];
 }
 
-export interface ImportarPreviewResponse {
-  cambios: CambioPreview[];
-  ambiguos: ImportAmbiguo[];
-  no_encontrados: ImportNoEncontrado[];
+export interface ImportUpsertResultado {
+  creados: number;
+  actualizados: number;
+  errores: { codigo: string; error: string }[];
 }
 
 // ─── Autoría de la base — agregar insumos y APUs ───────────────────────────────
@@ -226,12 +228,6 @@ export interface InsumoImportFila {
   grupo: string;
   precio: number;
   fuente: string;
-}
-
-export interface ImportInsumosPreview {
-  crear: InsumoImportFila[];
-  ya_existe: InsumoImportFila[];
-  invalida: InsumoImportFila[];
 }
 
 export interface ImportApusPreview {

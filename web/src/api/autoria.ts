@@ -6,23 +6,14 @@ import type {
   ApuResumen,
   ApuDetalle,
   ListaApus,
-  ImportInsumosPreview,
   ImportApusPreview,
   ImportResultado,
 } from "@/lib/tipos";
 
-// ─── Insumos: crear individual e importar-crear ────────────────────────────────
+// ─── Insumos: crear individual ─────────────────────────────────────────────────
 
 export function crearInsumo(body: InsumoNuevo): Promise<Insumo> {
   return apiPost<Insumo>("/insumos/crear", body);
-}
-
-export function previewImportarInsumos(form: FormData): Promise<ImportInsumosPreview> {
-  return apiPost<ImportInsumosPreview>("/insumos/importar-crear/preview", form);
-}
-
-export function aplicarImportarInsumos(form: FormData): Promise<ImportResultado> {
-  return apiPost<ImportResultado>("/insumos/importar-crear", form);
 }
 
 // ─── APUs: listar, detalle, crear e importar ───────────────────────────────────
@@ -71,8 +62,4 @@ export function aplicarImportarApus(form: FormData): Promise<ImportResultado> {
 
 export function descargarPlantillaApus(): Promise<void> {
   return descargarArchivo("/apus/importar/plantilla", "plantilla_apus.xlsx");
-}
-
-export function descargarPlantillaInsumos(): Promise<void> {
-  return descargarArchivo("/insumos/importar-crear/plantilla", "plantilla_insumos.xlsx");
 }

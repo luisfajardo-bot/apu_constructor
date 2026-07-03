@@ -139,6 +139,23 @@ class ApusDB:
                 "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
                 " rendimiento, precio_unitario_hist) VALUES (?,?,?,?,?,?,?,?)", rows)
 
+    def borrar_apu(self, codigo: str, shift: str, conn=None) -> bool:
+        """Borra componentes + cabecera de un APU. False si no existía."""
+        if conn is not None:
+            return self._borrar_apu(conn, codigo, shift)
+        with self.connect() as c:
+            return self._borrar_apu(c, codigo, shift)
+
+    def _borrar_apu(self, conn, codigo: str, shift: str) -> bool:
+        existe = conn.execute("SELECT 1 FROM apus WHERE codigo=? AND shift=?",
+                              (str(codigo), shift)).fetchone()
+        if not existe:
+            return False
+        conn.execute("DELETE FROM apu_componentes WHERE apu_codigo=? AND shift=?",
+                     (str(codigo), shift))
+        conn.execute("DELETE FROM apus WHERE codigo=? AND shift=?", (str(codigo), shift))
+        return True
+
     def set_meta(self, clave: str, valor: str) -> None:
         with self.connect() as conn:
             conn.execute("INSERT OR REPLACE INTO meta (clave, valor) VALUES (?,?)",

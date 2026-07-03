@@ -118,6 +118,22 @@ class ApusPg:
                     "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
                     " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
 
+    def borrar_apu(self, codigo: str, shift: str, conn=None) -> bool:
+        if conn is not None:
+            return self._borrar_apu(conn, codigo, shift)
+        with self.cx.connection() as c:
+            return self._borrar_apu(c, codigo, shift)
+
+    def _borrar_apu(self, conn, codigo: str, shift: str) -> bool:
+        existe = conn.execute("SELECT 1 FROM apus.apus WHERE codigo=%s AND shift=%s",
+                              (str(codigo), shift)).fetchone()
+        if not existe:
+            return False
+        conn.execute("DELETE FROM apus.apu_componentes WHERE apu_codigo=%s AND shift=%s",
+                     (str(codigo), shift))
+        conn.execute("DELETE FROM apus.apus WHERE codigo=%s AND shift=%s", (str(codigo), shift))
+        return True
+
     def set_meta(self, clave: str, valor: str) -> None:
         with self.cx.connection() as conn:
             conn.execute(

@@ -64,6 +64,9 @@ class RepositorioApus(Protocol):
         """Edita cabecera (nombre/unidad/grupo) y REEMPLAZA la composición de un APU
         existente. Identidad (codigo, shift) inmutable. ValueError si no existe."""
         ...
+    def borrar_apu(self, codigo: str, shift: str, conn=None) -> bool:
+        """Borra componentes + cabecera de un APU. False si no existía."""
+        ...
     def list_apus(self, q: Optional[str] = None, grupo: Optional[str] = None,
                   shift: Optional[str] = None, limit: int = 100,
                   offset: int = 0) -> tuple[list[Apu], int]: ...

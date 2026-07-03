@@ -166,3 +166,17 @@ def test_apu_editar_inexistente_lanza(repos):
     _, apus = repos
     with pytest.raises(ValueError):
         apus.editar_apu(Apu("NOPE", "X", "M2", "DIURNO"), [])
+
+
+def test_apu_borrar_elimina_cabecera_y_componentes(repos):
+    _, apus = repos
+    apus.crear_apu(Apu("A1", "MURO", "M2", "DIURNO"),
+                   [ApuComponent("A1", "DIURNO", "1", "ARENA", "M3", 0.5, 10.0)])
+    assert apus.borrar_apu("A1", "DIURNO") is True
+    assert apus.get_apu("A1", "DIURNO") is None
+    assert apus.get_components("A1", "DIURNO") == []
+
+
+def test_apu_borrar_inexistente_devuelve_false(repos):
+    _, apus = repos
+    assert apus.borrar_apu("NOPE", "DIURNO") is False

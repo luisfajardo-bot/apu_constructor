@@ -34,7 +34,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setPerfil(null);
           rechazado.current = true;
           setNoAutorizado(true);
-          await supabase.auth.signOut();  // re-dispara este listener con sesión null
+          // En /definir-clave (invitación/recuperación) NO cerramos sesión: hay que
+          // conservar la sesión del enlace para poder definir la contraseña aunque el
+          // usuario todavía no tenga perfil. En el resto de la app sí se cierra.
+          if (window.location.pathname !== "/definir-clave") {
+            await supabase.auth.signOut();  // re-dispara este listener con sesión null
+          }
         }
       } else {
         setPerfil(null);

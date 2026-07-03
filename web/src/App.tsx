@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from "react-router-dom";
+import { Toaster } from "sonner";
 import Layout from "@/components/Layout";
 import { RutaProtegida, RequiereRol } from "@/components/rutas";
 import Login from "@/pages/Login";
@@ -33,6 +34,8 @@ export default function App() {
           </Route>
         </Route>
       </Routes>
+      {/* Toaster global: cubre también /login y /definir-clave (fuera del Layout). */}
+      <Toaster richColors position="top-right" />
     </ArmadoVivoProvider>
   );
 }

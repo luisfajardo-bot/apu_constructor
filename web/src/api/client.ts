@@ -44,6 +44,15 @@ export async function apiPatch<T>(path: string, body?: unknown): Promise<T> {
   return (await manejar(r)).json() as Promise<T>;
 }
 
+export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  const r = await fetch(BASE + path, {
+    method: "PUT",
+    headers: { ...(await authHeader()), "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+  return (await manejar(r)).json() as Promise<T>;
+}
+
 export async function apiDelete(path: string): Promise<void> {
   const r = await fetch(BASE + path, { method: "DELETE", headers: { ...(await authHeader()) } });
   await manejar(r);

@@ -125,6 +125,15 @@ def test_plantilla_insumos_endpoint(tmp_path):
     assert len(r.content) > 0
 
 
+def test_plantilla_licitacion_endpoint(tmp_path):
+    cli, _ = _cli(tmp_path)
+    r = cli.get("/api/corridas/plantilla")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == _XLSX
+    assert "attachment" in r.headers["content-disposition"]
+    assert len(r.content) > 0
+
+
 def test_plantillas_requieren_editor(tmp_path):
     alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
                   corridas_path=tmp_path / "c.db")
@@ -132,6 +141,8 @@ def test_plantillas_requieren_editor(tmp_path):
     cli = cliente(create_app(almacen=alm), rol="consulta")
     assert cli.get("/api/apus/importar/plantilla").status_code == 403
     assert cli.get("/api/insumos/importar/plantilla").status_code == 403
+    # la de licitación es rol consulta (cualquiera que arma corridas puede bajarla)
+    assert cli.get("/api/corridas/plantilla").status_code == 200
 
 
 def test_detalle_apu_incluye_n_corridas(tmp_path):

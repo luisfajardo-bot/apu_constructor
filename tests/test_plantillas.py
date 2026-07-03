@@ -15,7 +15,8 @@ def _alm(tmp_path):
 
 
 def test_plantillas_abren_como_workbook_valido():
-    for gen in (plantillas.plantilla_apus, plantillas.plantilla_insumos):
+    for gen in (plantillas.plantilla_apus, plantillas.plantilla_insumos,
+                plantillas.plantilla_licitacion):
         data = gen()
         assert data, f"{gen.__name__} devolvió vacío"
         wb = openpyxl.load_workbook(io.BytesIO(data))
@@ -42,3 +43,12 @@ def test_plantilla_insumos_round_trip(tmp_path):
                                           "plantilla_insumos.xlsx")
     # la plantilla trae una fila con nombre (crear) y una sin nombre (actualizar/no encontrada)
     assert any(f["codigo"] == "EJEMPLO-1" for f in pv["crear"])
+
+
+def test_plantilla_licitacion_round_trip(tmp_path):
+    from apu_tool.dominio.licitacion import read_licitacion
+    f = tmp_path / "plantilla_licitacion.xlsx"
+    f.write_bytes(plantillas.plantilla_licitacion())
+    items = read_licitacion(f)               # se lee sin errores por el pipeline real
+    assert len(items) >= 1
+    assert items[0].descripcion               # trae descripción (columna requerida)

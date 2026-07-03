@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { listarCorridas, eliminarCorrida } from "@/api/corridas";
+import { listarCorridas, eliminarCorrida, descargarPlantillaLicitacion } from "@/api/corridas";
 import { fmtDuracion } from "@/lib/tiempo";
 import type { CorridaResumen } from "@/lib/tipos";
 
@@ -38,6 +38,14 @@ export default function MisCorridas() {
     cargar();
   }, [cargar]);
 
+  async function bajarPlantilla() {
+    try {
+      await descargarPlantillaLicitacion();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo descargar la plantilla.");
+    }
+  }
+
   async function handleEliminar(e: React.MouseEvent, corrida: CorridaResumen) {
     e.stopPropagation();
     if (!window.confirm(`¿Eliminar la corrida "${corrida.archivo}"?`)) return;
@@ -54,9 +62,14 @@ export default function MisCorridas() {
     <div style={styles.container}>
       <div style={styles.header}>
         <h2 style={styles.titulo}>Mis corridas</h2>
-        <button style={styles.btnNueva} onClick={() => navigate("/corridas/nueva")}>
-          Nueva corrida
-        </button>
+        <div style={styles.acciones}>
+          <button style={styles.btnPlantilla} onClick={bajarPlantilla}>
+            Descargar plantilla
+          </button>
+          <button style={styles.btnNueva} onClick={() => navigate("/corridas/nueva")}>
+            Nueva corrida
+          </button>
+        </div>
       </div>
 
       {cargando && <p style={styles.msg}>Cargando…</p>}
@@ -156,6 +169,21 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "15px",
     fontWeight: 600,
     color: "#1a1a2e",
+  },
+  acciones: {
+    display: "flex",
+    gap: "8px",
+    alignItems: "center",
+  },
+  btnPlantilla: {
+    padding: "5px 14px",
+    fontSize: "12px",
+    fontWeight: 600,
+    background: "#fff",
+    color: "#1a1a2e",
+    border: "1px solid #cbd5e0",
+    borderRadius: "4px",
+    cursor: "pointer",
   },
   btnNueva: {
     padding: "5px 14px",

@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiDelete, authHeader } from "@/api/client";
+import { apiGet, apiPost, apiDelete, authHeader, descargarArchivo } from "@/api/client";
 import type {
   StatusResponse,
   CorridaCreada,
@@ -70,6 +70,10 @@ export async function descargarCuadro(id: number): Promise<void> {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+export function descargarPlantillaLicitacion(): Promise<void> {
+  return descargarArchivo("/corridas/plantilla", "plantilla_licitacion.xlsx");
 }
 
 export function parseSse(block: string): { event: string; data: unknown } | null {

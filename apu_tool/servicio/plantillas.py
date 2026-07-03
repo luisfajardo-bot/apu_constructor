@@ -69,6 +69,22 @@ def plantilla_apus() -> bytes:
     return _a_bytes(wb)
 
 
+def plantilla_licitacion() -> bytes:
+    """Plantilla de la lista de licitación (entrada para armar una corrida).
+
+    Columnas: ITEM, DESCRIPCION, UNIDAD, CANTIDAD, PRECIO CONTRACTUAL, TURNO
+    (mismas que lee `dominio.licitacion.read_licitacion`). El emparejamiento usa
+    la DESCRIPCIÓN; el TURNO debe ser DIURNO o NOCTURNO por ítem.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "LICITACION"
+    ws.append(["ITEM", "DESCRIPCION", "UNIDAD", "CANTIDAD", "PRECIO CONTRACTUAL", "TURNO"])
+    ws.append(["EJEMPLO-1", "EXCAVACIÓN MANUAL EN MATERIAL COMÚN", "M3", 10, 25000, "DIURNO"])
+    ws.append(["EJEMPLO-2", "SUMINISTRO E INSTALACIÓN DE SARDINEL A-10", "ML", 5, 40000, "NOCTURNO"])
+    return _a_bytes(wb)
+
+
 def plantilla_insumos() -> bytes:
     """Plantilla del importador unificado. Columnas: codigo, nombre, unidad, grupo,
     precio, fuente. Con nombre crea o actualiza (por identidad código+nombre); sin

@@ -86,6 +86,12 @@ def listar_corridas(alm: Almacen = Depends(get_almacen),
     return svc.listar_corridas(alm)
 
 
+@router.get("/corridas/plantilla")
+def corridas_plantilla(_: object = Depends(requiere_rol("consulta"))):
+    """Plantilla .xlsx de la lista de licitación (entrada para armar una corrida)."""
+    return _descarga_xlsx(plantillas_svc.plantilla_licitacion(), "plantilla_licitacion.xlsx")
+
+
 @router.delete("/corridas/{cid}")
 def eliminar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
                      actor=Depends(requiere_rol("consulta"))):

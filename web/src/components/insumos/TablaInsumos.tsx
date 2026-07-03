@@ -28,6 +28,7 @@ export function TablaInsumos({ insumos, fuentes = [], onReload, puedeEditar = fa
   const [detalle, setDetalle] = useState<InsumoDetalle | null>(null);
   const [detalleOpen, setDetalleOpen] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const [editPrecio, setEditPrecio] = useState<number | null>(null);
 
   async function abrirDetalle(id: number) {
     try {
@@ -151,20 +152,36 @@ export function TablaInsumos({ insumos, fuentes = [], onReload, puedeEditar = fa
                   >
                     {ins.grupo}
                   </td>
-                  {/* Editable - precio */}
+                  {/* Precio: formateado; clic para editar (conserva edición en lote) */}
                   <td className="px-1 py-0.5 text-right">
-                    <Input
-                      type="number"
-                      className="h-6 w-24 text-xs text-right ml-auto"
-                      value={precioEdit as number}
-                      min={0}
-                      step="any"
-                      disabled={!puedeEditar}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        if (!Number.isNaN(v)) setCampo(ins.id, "precio", v);
-                      }}
-                    />
+                    {puedeEditar && editPrecio === ins.id ? (
+                      <Input
+                        type="number"
+                        autoFocus
+                        className="h-6 w-24 text-xs text-right ml-auto"
+                        value={precioEdit as number}
+                        min={0}
+                        step="any"
+                        onBlur={() => setEditPrecio(null)}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (!Number.isNaN(v)) setCampo(ins.id, "precio", v);
+                        }}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!puedeEditar}
+                        onClick={() => setEditPrecio(ins.id)}
+                        className={
+                          "w-full text-right font-mono tabular-nums " +
+                          (puedeEditar ? "cursor-pointer hover:underline" : "cursor-default")
+                        }
+                        title={puedeEditar ? "Clic para editar" : undefined}
+                      >
+                        {fmtMoneda(precioEdit as number)}
+                      </button>
+                    )}
                   </td>
                   {/* Editable - fuente */}
                   <td className="px-1 py-0.5">

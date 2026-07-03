@@ -29,7 +29,12 @@ class AdminSupabaseHTTP:
             raise RuntimeError("Falta SUPABASE_URL/SERVICE_ROLE_KEY para invitar.")
         headers = {"Authorization": f"Bearer {key}", "apikey": key,
                    "Content-Type": "application/json"}
-        r = httpx.post(f"{base}/auth/v1/invite", headers=headers,
+        # redirect_to explícito -> el correo de invitación aterriza en /definir-clave
+        # (así la Site URL de Supabase puede quedar en la raíz). Debe estar en la lista
+        # de Redirect URLs permitidas del proyecto.
+        pub = config.public_url()
+        params = {"redirect_to": f"{pub}/definir-clave"} if pub else None
+        r = httpx.post(f"{base}/auth/v1/invite", headers=headers, params=params,
                        json={"email": email}, timeout=20.0)
         r.raise_for_status()
         return r.json()["id"]

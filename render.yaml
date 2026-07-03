@@ -32,3 +32,7 @@ services:
         value: "1"
       - key: APU_DOCS_ENABLED
         value: "false"
+      # URL pública del frontend, para el redirect_to de la invitación (aterriza en
+      # /definir-clave). No es secreto; valor fijo.
+      - key: APU_PUBLIC_URL
+        value: https://armador-apus.onrender.com

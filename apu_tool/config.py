@@ -129,6 +129,13 @@ def admin_emails() -> set[str]:
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
 
+def public_url() -> str | None:
+    """URL pública del frontend, para redirecciones de auth (invitación/recuperación).
+    Ej.: https://armador-apus.onrender.com. Sin ella, Supabase usa su Site URL."""
+    u = os.environ.get("APU_PUBLIC_URL", "").strip().rstrip("/")
+    return u or None
+
+
 # ---------------------------------------------------------------------------
 # Endurecimiento (Plan 4). Todo por variables de entorno con defaults seguros.
 # ---------------------------------------------------------------------------

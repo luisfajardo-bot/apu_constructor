@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
+import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { ApuResumen } from "@/lib/tipos";
-import { previewImportarApus, aplicarImportarApus } from "@/api/autoria";
+import { previewImportarApus, aplicarImportarApus, descargarPlantillaApus } from "@/api/autoria";
 
 interface DialogoImportarApusProps {
   open: boolean;
@@ -99,6 +100,14 @@ export function DialogoImportarApus({
     }
   }
 
+  async function bajarPlantilla() {
+    try {
+      await descargarPlantillaApus();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "No se pudo descargar la plantilla.");
+    }
+  }
+
   const enPreview = estado.fase === "preview";
   const enAplicando = estado.fase === "aplicando";
   const crear = enPreview ? estado.crear : [];
@@ -127,6 +136,17 @@ export function DialogoImportarApus({
               procesando…
             </span>
           )}
+          <Button
+            size="sm"
+            variant="outline"
+            type="button"
+            onClick={bajarPlantilla}
+            disabled={enAplicando}
+            className="ml-auto"
+          >
+            <Download className="mr-1 h-3.5 w-3.5" />
+            Descargar plantilla
+          </Button>
         </div>
 
         {errorMsg && <p className="text-xs text-destructive">{errorMsg}</p>}

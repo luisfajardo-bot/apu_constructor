@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
+import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { CambioPreview, ImportAmbiguo, ImportNoEncontrado } from "@/lib/tipos";
-import { aplicarCambios, importarPreview } from "@/api/insumos";
+import { aplicarCambios, importarPreview, descargarPlantillaPrecios } from "@/api/insumos";
 import { cop as fmtMoneda } from "@/lib/moneda";
 
 interface DialogoImportarProps {
@@ -106,6 +107,14 @@ export function DialogoImportar({
     }
   }
 
+  async function bajarPlantilla() {
+    try {
+      await descargarPlantillaPrecios();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "No se pudo descargar la plantilla.");
+    }
+  }
+
   const fase = estado.fase;
   const enPreview = fase === "preview";
   const enAplicando = fase === "aplicando";
@@ -137,6 +146,17 @@ export function DialogoImportar({
               procesando…
             </span>
           )}
+          <Button
+            size="sm"
+            variant="outline"
+            type="button"
+            onClick={bajarPlantilla}
+            disabled={enAplicando}
+            className="ml-auto"
+          >
+            <Download className="mr-1 h-3.5 w-3.5" />
+            Descargar plantilla
+          </Button>
         </div>
 
         {errorMsg && (

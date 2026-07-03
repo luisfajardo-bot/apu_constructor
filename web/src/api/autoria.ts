@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "@/api/client";
+import { apiGet, apiPost, descargarArchivo } from "@/api/client";
 import type {
   Insumo,
   InsumoNuevo,
@@ -67,4 +67,12 @@ export function previewImportarApus(form: FormData): Promise<ImportApusPreview> 
 
 export function aplicarImportarApus(form: FormData): Promise<ImportResultado> {
   return apiPost<ImportResultado>("/apus/importar", form);
+}
+
+export function descargarPlantillaApus(): Promise<void> {
+  return descargarArchivo("/apus/importar/plantilla", "plantilla_apus.xlsx");
+}
+
+export function descargarPlantillaInsumos(): Promise<void> {
+  return descargarArchivo("/insumos/importar-crear/plantilla", "plantilla_insumos.xlsx");
 }

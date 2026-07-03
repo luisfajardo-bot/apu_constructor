@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "@/api/client";
+import { apiGet, apiPost, descargarArchivo } from "@/api/client";
 import type {
   ListaInsumos,
   InsumoDetalle,
@@ -77,4 +77,8 @@ export interface TransformarBody {
 
 export function transformarPreview(body: TransformarBody): Promise<TransformarPreviewResponse> {
   return apiPost<TransformarPreviewResponse>("/insumos/transformar/preview", body);
+}
+
+export function descargarPlantillaPrecios(): Promise<void> {
+  return descargarArchivo("/insumos/importar/plantilla", "plantilla_precios.xlsx");
 }

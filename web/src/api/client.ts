@@ -52,3 +52,25 @@ export async function apiDelete(path: string): Promise<void> {
     try { JSON.parse(text); } catch { /* ignora cuerpo no-JSON */ }
   }
 }
+
+/** Descarga un archivo protegido con el token Bearer (una navegación normal no lleva el header). */
+export async function descargarArchivo(path: string, filename: string): Promise<void> {
+  const r = await fetch(BASE + path, { headers: { ...(await authHeader()) } });
+  if (r.status === 401) {
+    await supabase.auth.signOut();
+    throw new Error("Sesión expirada.");
+  }
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}) as { detail?: string });
+    throw new Error(err.detail || r.statusText);
+  }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

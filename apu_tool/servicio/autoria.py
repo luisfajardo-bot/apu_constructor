@@ -120,6 +120,26 @@ def editar_apu(alm: Almacen, codigo: str, shift: str, datos: dict, actor=None) -
             "unidad": apu.unidad, "grupo": apu.grupo, "n_componentes": len(comps)}
 
 
+def borrar_apu(alm: Almacen, codigo: str, shift: str, actor=None) -> dict | None:
+    """Borra un APU (cabecera + composición). Devuelve None si no existe (endpoint -> 404).
+    Las corridas ya armadas conservan su foto; se informa cuántas lo referencian."""
+    codigo = str(codigo or "").strip()
+    shift = str(shift or "").strip().upper()
+    previo = alm.apus.get_apu(codigo, shift)
+    if previo is None:
+        return None
+    n_comps = len(alm.apus.get_components(codigo, shift))
+    n_corridas = alm.corridas.contar_items_por_apu(codigo)
+    antes = {"codigo": codigo, "turno": shift, "nombre": previo.nombre,
+             "unidad": previo.unidad, "grupo": previo.grupo, "n_componentes": n_comps}
+    with alm.transaccion("apus") as conn:
+        alm.apus.borrar_apu(codigo, shift, conn=conn)
+        registrar_auditoria(
+            alm, conn, actor, "apu.borrar", "apu", codigo, antes=antes, despues=None,
+            contexto={"n_corridas": n_corridas})
+    return {"borrado": True, "n_corridas": n_corridas}
+
+
 # ------------------------------------------------------------- import insumos
 def _match_identidad(alm: Almacen, codigo: str, nombre: str):
     """Insumo con (codigo, nombre) exactos (nombre normalizado), o None."""

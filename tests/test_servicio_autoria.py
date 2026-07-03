@@ -194,3 +194,17 @@ def test_editar_apu_rendimiento_invalido_lanza(tmp_path):
     with pytest.raises(ValueError):
         autoria.editar_apu(alm, "B2", "DIURNO", {"nombre": "PISO",
             "componentes": [{"insumo_codigo": "100", "rendimiento": 0}]})
+
+
+def test_borrar_apu_ok_devuelve_resultado(tmp_path):
+    alm = _alm(tmp_path)
+    autoria.crear_apu(alm, {"codigo": "B2", "turno": "DIURNO", "nombre": "PISO",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}]})
+    out = autoria.borrar_apu(alm, "B2", "DIURNO")
+    assert out == {"borrado": True, "n_corridas": 0}
+    assert alm.apus.get_apu("B2", "DIURNO") is None
+
+
+def test_borrar_apu_inexistente_devuelve_none(tmp_path):
+    alm = _alm(tmp_path)
+    assert autoria.borrar_apu(alm, "NOPE", "DIURNO") is None

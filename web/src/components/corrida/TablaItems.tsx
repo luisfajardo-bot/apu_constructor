@@ -312,6 +312,10 @@ function DetalleExpandido({
         />
       </section>
 
+      {errorConfirm && (
+        <p className="text-xs text-destructive">{errorConfirm}</p>
+      )}
+
       {/* Composition table */}
       {detalle.composicion.length > 0 && (
         <section>
@@ -361,9 +365,6 @@ function DetalleExpandido({
       {/* Confirm current APU (review/new) */}
       {esRevisable && (
         <div className="flex items-center justify-between gap-2 pt-1">
-          {errorConfirm && (
-            <p className="text-xs text-destructive">{errorConfirm}</p>
-          )}
           <div className="ml-auto">
             <Button
               size="sm"

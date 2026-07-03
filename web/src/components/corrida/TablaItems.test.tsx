@@ -43,3 +43,19 @@ test("reasigna un ítem matched vía el buscador (pasa el turno elegido)", async
     expect(confirmar).toHaveBeenCalledWith(1, 0, "33333", "DIURNO"),
   );
 });
+
+test("muestra el error si la reasignación falla en un ítem matched", async () => {
+  const { default: TablaItems } = await import("./TablaItems");
+  const mod = await import("@/api/corridas");
+  vi.mocked(mod.confirmar).mockRejectedValueOnce(new Error("fallo de red"));
+  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} />);
+
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+
+  fireEvent.change(await screen.findByPlaceholderText(/Buscar APU/i), {
+    target: { value: "333" },
+  });
+  fireEvent.click(await screen.findByText("APU NUEVO"));
+
+  expect(await screen.findByText("fallo de red")).toBeTruthy();
+});

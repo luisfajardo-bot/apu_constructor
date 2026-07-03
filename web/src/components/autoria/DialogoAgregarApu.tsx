@@ -8,8 +8,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { ComponenteNuevo, Insumo } from "@/lib/tipos";
-import { crearApu } from "@/api/autoria";
+import type { ComponenteNuevo, Insumo, ApuDetalle } from "@/lib/tipos";
+import { crearApu, editarApu } from "@/api/autoria";
 import { listarInsumos } from "@/api/insumos";
 import {
   rendimientoValido,
@@ -20,6 +20,8 @@ interface DialogoAgregarApuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreado: () => void;
+  modo?: "crear" | "editar";
+  inicial?: ApuDetalle | null;
 }
 
 interface FilaComp {
@@ -65,10 +67,36 @@ export function DialogoAgregarApu({
   open,
   onOpenChange,
   onCreado,
+  modo = "crear",
+  inicial = null,
 }: DialogoAgregarApuProps) {
   const [cab, setCab] = useState<Cabecera>(CABECERA_VACIA);
   const [filas, setFilas] = useState<FilaComp[]>([nuevaFila()]);
   const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    if (modo === "editar" && inicial) {
+      setCab({
+        codigo: inicial.codigo,
+        turno: inicial.turno,
+        nombre: inicial.nombre,
+        unidad: inicial.unidad,
+        grupo: inicial.grupo,
+      });
+      setFilas(
+        inicial.composicion.length === 0
+          ? [nuevaFila()]
+          : inicial.composicion.map((c) => ({
+              uid: uidSeq++,
+              insumo_codigo: c.insumo_codigo,
+              insumo_nombre: c.insumo_nombre,
+              unidad: c.unidad,
+              rendimiento: String(c.rendimiento),
+            })),
+      );
+    }
+  }, [open, modo, inicial]);
 
   function setCabecera<K extends keyof Cabecera>(k: K, v: string) {
     setCab((prev) => ({ ...prev, [k]: v }));
@@ -117,19 +145,23 @@ export function DialogoAgregarApu({
     if (!valido) return;
     setGuardando(true);
     try {
-      await crearApu({
-        codigo: cab.codigo.trim(),
-        turno: cab.turno,
+      const payload = {
         nombre: cab.nombre.trim(),
         unidad: cab.unidad.trim(),
         grupo: cab.grupo.trim(),
         componentes: compValidos,
-      });
-      toast.success(`APU ${cab.codigo.trim()} (${cab.turno}) creado`);
+      };
+      if (modo === "editar") {
+        await editarApu(cab.codigo, cab.turno, payload);
+        toast.success(`APU ${cab.codigo} (${cab.turno}) actualizado`);
+      } else {
+        await crearApu({ codigo: cab.codigo.trim(), turno: cab.turno, ...payload });
+        toast.success(`APU ${cab.codigo.trim()} (${cab.turno}) creado`);
+      }
       handleOpenChange(false);
       onCreado();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Error al crear el APU";
+      const msg = e instanceof Error ? e.message : "Error al guardar el APU";
       toast.error(msg);
       setGuardando(false);
     }
@@ -139,7 +171,9 @@ export function DialogoAgregarApu({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle className="text-sm">Agregar APU</DialogTitle>
+          <DialogTitle className="text-sm">
+            {modo === "editar" ? "Editar APU" : "Agregar APU"}
+          </DialogTitle>
         </DialogHeader>
 
         {/* Cabecera */}
@@ -151,6 +185,7 @@ export function DialogoAgregarApu({
               value={cab.codigo}
               onChange={(e) => setCabecera("codigo", e.target.value)}
               autoFocus
+              disabled={modo === "editar"}
             />
           </label>
           <label className="flex flex-col gap-1 text-xs">
@@ -159,6 +194,7 @@ export function DialogoAgregarApu({
               className={inputCls}
               value={cab.turno}
               onChange={(e) => setCabecera("turno", e.target.value)}
+              disabled={modo === "editar"}
             >
               <option value="DIURNO">DIURNO</option>
               <option value="NOCTURNO">NOCTURNO</option>
@@ -287,7 +323,13 @@ export function DialogoAgregarApu({
             Cancelar
           </Button>
           <Button size="sm" onClick={guardar} disabled={!valido || guardando}>
-            {guardando ? "Creando…" : "Crear APU"}
+            {guardando
+              ? modo === "editar"
+                ? "Guardando…"
+                : "Creando…"
+              : modo === "editar"
+                ? "Guardar cambios"
+                : "Crear APU"}
           </Button>
         </DialogFooter>
       </DialogContent>

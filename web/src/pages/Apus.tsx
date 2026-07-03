@@ -48,6 +48,7 @@ export default function Apus() {
   const [expandido, setExpandido] = useState<Record<string, EstadoExpansion | undefined>>({});
   const [agregarOpen, setAgregarOpen] = useState(false);
   const [importarOpen, setImportarOpen] = useState(false);
+  const [editarDetalle, setEditarDetalle] = useState<ApuDetalle | null>(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -249,7 +250,11 @@ export default function Apus() {
                           </p>
                         )}
                         {estado !== "cargando" && estado !== "error" && (
-                          <DetalleApu detalle={estado} />
+                          <DetalleApu
+                            detalle={estado}
+                            puedeEditar={puedeEditar}
+                            onEditar={() => setEditarDetalle(estado)}
+                          />
                         )}
                       </TableCell>
                     </TableRow>
@@ -283,13 +288,29 @@ export default function Apus() {
             onOpenChange={setImportarOpen}
             onAplicado={recargar}
           />
+          <DialogoAgregarApu
+            key={editarDetalle ? `${editarDetalle.codigo}@@${editarDetalle.turno}` : "nuevo-edit"}
+            open={editarDetalle !== null}
+            onOpenChange={(v) => { if (!v) setEditarDetalle(null); }}
+            onCreado={recargar}
+            modo="editar"
+            inicial={editarDetalle}
+          />
         </>
       )}
     </div>
   );
 }
 
-function DetalleApu({ detalle }: { detalle: ApuDetalle }) {
+function DetalleApu({
+  detalle,
+  puedeEditar,
+  onEditar,
+}: {
+  detalle: ApuDetalle;
+  puedeEditar: boolean;
+  onEditar: () => void;
+}) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-3 flex-wrap text-xs">
@@ -297,6 +318,11 @@ function DetalleApu({ detalle }: { detalle: ApuDetalle }) {
           APU: {detalle.codigo} · {detalle.turno}
         </span>
         <span className="text-muted-foreground truncate max-w-md">{detalle.nombre}</span>
+        {puedeEditar && (
+          <Button size="xs" variant="outline" className="ml-auto" onClick={onEditar}>
+            Editar
+          </Button>
+        )}
       </div>
 
       <section>

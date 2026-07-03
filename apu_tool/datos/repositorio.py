@@ -113,6 +113,10 @@ class RepositorioCorridas(Protocol):
     def eliminar_corrida(self, corrida_id: int, conn=None) -> bool: ...
     def counts(self) -> dict[str, int]: ...
 
+    def contar_items_por_apu(self, apu_codigo: str) -> int:
+        """Nº de ítems de corrida que referencian este apu_codigo (aviso al borrar)."""
+        ...
+
 
 @runtime_checkable
 class RepositorioPerfiles(Protocol):

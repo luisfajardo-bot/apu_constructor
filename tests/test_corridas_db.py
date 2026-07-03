@@ -154,3 +154,13 @@ def test_migracion_agrega_duracion_ms(tmp_path):
     assert len(metas) == 1 and metas[0].duracion_ms is None
     db.set_duracion(metas[0].id, 999)
     assert db.get_corrida(metas[0].id).duracion_ms == 999
+
+
+def test_contar_items_por_apu(tmp_path):
+    alm = _almacen_tmp(tmp_path)
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="x", archivo="a.xlsx", turno_def="DIURNO",
+        use_ai=False, estado="en_revision"))
+    alm.corridas.guardar_items(cid, [_fila(0), _fila(1)])   # ambos con apu_codigo="A1"
+    assert alm.corridas.contar_items_por_apu("A1") == 2
+    assert alm.corridas.contar_items_por_apu("ZZZ") == 0

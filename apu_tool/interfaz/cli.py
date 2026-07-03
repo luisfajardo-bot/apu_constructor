@@ -194,7 +194,8 @@ def cmd_migrate_pg(args) -> int:
         with cx.connection() as conn:
             for f in ESQUEMAS_PG:
                 ejecutar_script(conn, (config.PROJECT_ROOT / "db" / "pg" / f).read_text("utf-8"))
-        n = migracion_pg.migrar_catalogo(config.PRECIOS_DB_PATH, config.APUS_DB_PATH, cx)
+        n = migracion_pg.migrar_catalogo(config.PRECIOS_DB_PATH, config.APUS_DB_PATH, cx,
+                                         reset=getattr(args, "reset", False))
         ver = migracion_pg.verificar(config.PRECIOS_DB_PATH, config.APUS_DB_PATH, cx)
         print(f"Migrado: {n}")
         print(f"Verificación: {'OK' if ver['ok'] else 'DISCREPANCIA'} -> {ver['detalle']}")
@@ -273,6 +274,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     pmg = sub.add_parser("migrate-pg",
                          help="Migrar el catálogo (SQLite) a Postgres/Supabase (DATABASE_URL).")
+    pmg.add_argument("--reset", action="store_true",
+                     help="Refresh completo atómico: vacía y recarga el catálogo "
+                          "(Postgres queda como espejo exacto del local).")
     pmg.set_defaults(func=cmd_migrate_pg)
     return p
 

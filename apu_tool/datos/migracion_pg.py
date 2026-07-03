@@ -23,31 +23,51 @@ def _resync_identity(conn, tabla: str, col: str = "id") -> None:
         f"COALESCE((SELECT MAX({col}) FROM {tabla}), 1))")
 
 
-def migrar_catalogo(sqlite_precios: Path, sqlite_apus: Path, cx: Conexion) -> dict:
+def migrar_catalogo(sqlite_precios: Path, sqlite_apus: Path, cx: Conexion,
+                    reset: bool = False) -> dict:
+    """Migra el catálogo SQLite -> Postgres.
+
+    reset=False (default): inserta con ON CONFLICT DO NOTHING (aditivo/idempotente).
+    reset=True: REFRESH COMPLETO -> vacía las 4 tablas del catálogo (TRUNCATE ...
+    RESTART IDENTITY CASCADE) dentro de la MISMA transacción que la recarga, así
+    Postgres queda como espejo exacto del local. Como TRUNCATE es transaccional en
+    Postgres, si la recarga falla se hace rollback y el catálogo queda intacto
+    (nunca vacío). Las metatablas se mantienen por upsert (no se truncan).
+    """
     sp = _sqlite(sqlite_precios)
     sa = _sqlite(sqlite_apus)
     n = {"insumos": 0, "precios": 0, "apus": 0, "componentes": 0}
     try:
         with cx.connection() as conn:
-            # insumos (id explícito para preservar linkage)
-            for r in sp.execute("SELECT id, codigo, nombre, nombre_norm, unidad, grupo "
-                                "FROM insumos").fetchall():
+            if reset:
+                # Si la conexión se cae a mitad, que Postgres revierta solo en 20s
+                # (evita dejar el lock ACCESS EXCLUSIVE del TRUNCATE pegado).
+                conn.execute("SET idle_in_transaction_session_timeout = '20s'")
                 conn.execute(
+                    "TRUNCATE apus.apu_componentes, apus.apus, "
+                    "precios.insumo_precios, precios.insumos RESTART IDENTITY CASCADE")
+            # insumos (id explícito para preservar linkage) — por lotes (executemany)
+            filas = sp.execute("SELECT id, codigo, nombre, nombre_norm, unidad, grupo "
+                               "FROM insumos").fetchall()
+            ins = [(r["id"], r["codigo"], r["nombre"], r["nombre_norm"], r["unidad"], r["grupo"])
+                   for r in filas]
+            with conn.cursor() as cur:
+                cur.executemany(
                     "INSERT INTO precios.insumos (id, codigo, nombre, nombre_norm, unidad, grupo) "
-                    "OVERRIDING SYSTEM VALUE VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                    (r["id"], r["codigo"], r["nombre"], r["nombre_norm"], r["unidad"], r["grupo"]))
-                n["insumos"] += 1
-            # historial de precios (con creado_por='migración')
-            for r in sp.execute("SELECT id, insumo_id, precio, fuente, clasificacion, fecha, "
-                                "vigente FROM insumo_precios").fetchall():
-                conn.execute(
+                    "OVERRIDING SYSTEM VALUE VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", ins)
+            n["insumos"] = len(ins)
+            # historial de precios (con creado_por='migración') — por lotes
+            filas = sp.execute("SELECT id, insumo_id, precio, fuente, clasificacion, fecha, "
+                               "vigente FROM insumo_precios").fetchall()
+            prc = [(r["id"], r["insumo_id"], r["precio"], r["fuente"],
+                    r["clasificacion"], r["fecha"], r["vigente"]) for r in filas]
+            with conn.cursor() as cur:
+                cur.executemany(
                     "INSERT INTO precios.insumo_precios "
                     "(id, insumo_id, precio, fuente, clasificacion, fecha, vigente, creado_por) "
                     "OVERRIDING SYSTEM VALUE VALUES (%s,%s,%s,%s,%s,%s,%s,'migración') "
-                    "ON CONFLICT DO NOTHING",
-                    (r["id"], r["insumo_id"], r["precio"], r["fuente"],
-                     r["clasificacion"], r["fecha"], r["vigente"]))
-                n["precios"] += 1
+                    "ON CONFLICT DO NOTHING", prc)
+            n["precios"] = len(prc)
             _resync_identity(conn, "precios.insumos")
             _resync_identity(conn, "precios.insumo_precios")
             # meta de precios
@@ -55,23 +75,26 @@ def migrar_catalogo(sqlite_precios: Path, sqlite_apus: Path, cx: Conexion) -> di
                 conn.execute("INSERT INTO precios.meta (clave, valor) VALUES (%s,%s) "
                              "ON CONFLICT (clave) DO UPDATE SET valor=EXCLUDED.valor",
                              (r["clave"], r["valor"]))
-            # apus
-            for r in sa.execute("SELECT codigo, shift, nombre, unidad, grupo FROM apus").fetchall():
-                conn.execute("INSERT INTO apus.apus (codigo, shift, nombre, unidad, grupo) "
-                             "VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                             (r["codigo"], r["shift"], r["nombre"], r["unidad"], r["grupo"]))
-                n["apus"] += 1
-            # componentes
-            for r in sa.execute("SELECT apu_codigo, shift, seq, insumo_codigo, insumo_nombre, "
-                                "unidad, rendimiento, precio_unitario_hist "
-                                "FROM apu_componentes").fetchall():
-                conn.execute(
+            # apus — por lotes
+            filas = sa.execute("SELECT codigo, shift, nombre, unidad, grupo FROM apus").fetchall()
+            aps = [(r["codigo"], r["shift"], r["nombre"], r["unidad"], r["grupo"]) for r in filas]
+            with conn.cursor() as cur:
+                cur.executemany("INSERT INTO apus.apus (codigo, shift, nombre, unidad, grupo) "
+                                "VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", aps)
+            n["apus"] = len(aps)
+            # componentes — por lotes
+            filas = sa.execute("SELECT apu_codigo, shift, seq, insumo_codigo, insumo_nombre, "
+                               "unidad, rendimiento, precio_unitario_hist "
+                               "FROM apu_componentes").fetchall()
+            cmp = [(r["apu_codigo"], r["shift"], r["seq"], r["insumo_codigo"],
+                    r["insumo_nombre"], r["unidad"], r["rendimiento"], r["precio_unitario_hist"])
+                   for r in filas]
+            with conn.cursor() as cur:
+                cur.executemany(
                     "INSERT INTO apus.apu_componentes (apu_codigo, shift, seq, insumo_codigo, "
                     "insumo_nombre, unidad, rendimiento, precio_unitario_hist) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                    (r["apu_codigo"], r["shift"], r["seq"], r["insumo_codigo"],
-                     r["insumo_nombre"], r["unidad"], r["rendimiento"], r["precio_unitario_hist"]))
-                n["componentes"] += 1
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", cmp)
+            n["componentes"] = len(cmp)
             # meta de apus
             for r in sa.execute("SELECT clave, valor FROM meta").fetchall():
                 conn.execute("INSERT INTO apus.meta (clave, valor) VALUES (%s,%s) "

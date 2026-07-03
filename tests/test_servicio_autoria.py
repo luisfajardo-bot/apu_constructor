@@ -166,3 +166,31 @@ def test_import_apus_sin_hoja_apus(tmp_path):
     wb = openpyxl.Workbook(); wb.active.append(["x"]); buf = io.BytesIO(); wb.save(buf)
     with pytest.raises(ValueError):
         autoria.preview_importar_apus(alm, buf.getvalue())
+
+
+def test_editar_apu_reemplaza_y_devuelve_resumen(tmp_path):
+    alm = _alm(tmp_path)
+    autoria.crear_apu(alm, {"codigo": "B2", "turno": "DIURNO", "nombre": "PISO",
+        "unidad": "M2", "grupo": "ACAB",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}]})
+    out = autoria.editar_apu(alm, "B2", "DIURNO", {"nombre": "PISO PULIDO",
+        "unidad": "M2", "grupo": "ACAB",
+        "componentes": [{"insumo_codigo": "200", "rendimiento": 0.5}]})
+    assert out["nombre"] == "PISO PULIDO" and out["n_componentes"] == 1
+    comps = alm.apus.get_components("B2", "DIURNO")
+    assert [c.insumo_codigo for c in comps] == ["200"]
+
+
+def test_editar_apu_inexistente_devuelve_none(tmp_path):
+    alm = _alm(tmp_path)
+    assert autoria.editar_apu(alm, "NOPE", "DIURNO", {"nombre": "X",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 1.0}]}) is None
+
+
+def test_editar_apu_rendimiento_invalido_lanza(tmp_path):
+    alm = _alm(tmp_path)
+    autoria.crear_apu(alm, {"codigo": "B2", "turno": "DIURNO", "nombre": "PISO",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}]})
+    with pytest.raises(ValueError):
+        autoria.editar_apu(alm, "B2", "DIURNO", {"nombre": "PISO",
+            "componentes": [{"insumo_codigo": "100", "rendimiento": 0}]})

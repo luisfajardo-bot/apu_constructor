@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import EstadoBadge from "@/components/corrida/EstadoBadge";
+import BuscadorApu from "@/components/corrida/BuscadorApu";
 import { cop, pct } from "@/lib/moneda";
 import { getItem, confirmar } from "@/api/corridas";
 import type { ItemCuadro, DetalleItem, CorridaDetalle } from "@/lib/tipos";
@@ -58,11 +59,11 @@ export default function TablaItems({
     }
   }
 
-  async function handleConfirmar(seq: number, apuCodigo: string) {
+  async function handleConfirmar(seq: number, apuCodigo: string, shift?: string) {
     setConfirmando(apuCodigo + "@" + seq);
     setErrorConfirm((prev) => ({ ...prev, [seq]: "" }));
     try {
-      const corridaActualizada = await confirmar(corridaId, seq, apuCodigo);
+      const corridaActualizada = await confirmar(corridaId, seq, apuCodigo, shift);
       // Colapsar la fila y refrescar el detalle para mostrar nuevo estado
       setExpandido((prev) => ({ ...prev, [seq]: undefined }));
       onConfirmado(corridaActualizada);
@@ -224,7 +225,7 @@ interface DetalleExpandidoProps {
   seq: number;
   confirmando: string | null;
   errorConfirm: string | undefined;
-  onConfirmar: (seq: number, apuCodigo: string) => void;
+  onConfirmar: (seq: number, apuCodigo: string, shift?: string) => void;
 }
 
 function DetalleExpandido({
@@ -253,7 +254,7 @@ function DetalleExpandido({
       )}
 
       {/* Candidates (review/new only) */}
-      {esRevisable && detalle.candidatos.length > 0 && (
+      {detalle.candidatos.length > 0 && (
         <section>
           <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
             Candidatos
@@ -298,6 +299,21 @@ function DetalleExpandido({
             </TableBody>
           </Table>
         </section>
+      )}
+
+      {/* Reasignar a cualquier APU de la biblioteca (todos los ítems) */}
+      <section>
+        <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+          Cambiar APU
+        </h4>
+        <BuscadorApu
+          disabled={confirmando !== null}
+          onElegir={(apu) => onConfirmar(seq, apu.codigo, apu.turno)}
+        />
+      </section>
+
+      {errorConfirm && (
+        <p className="text-xs text-destructive">{errorConfirm}</p>
       )}
 
       {/* Composition table */}
@@ -349,9 +365,6 @@ function DetalleExpandido({
       {/* Confirm current APU (review/new) */}
       {esRevisable && (
         <div className="flex items-center justify-between gap-2 pt-1">
-          {errorConfirm && (
-            <p className="text-xs text-destructive">{errorConfirm}</p>
-          )}
           <div className="ml-auto">
             <Button
               size="sm"

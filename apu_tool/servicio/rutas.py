@@ -11,7 +11,7 @@ from typing import Optional
 
 import httpx
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request, UploadFile)
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from openpyxl.utils.exceptions import InvalidFileException
 
 from apu_tool import config
@@ -23,6 +23,7 @@ from apu_tool.servicio import auditoria as auditoria_svc
 from apu_tool.servicio import autoria
 from apu_tool.servicio import corridas as svc
 from apu_tool.servicio import insumos as insumos_svc
+from apu_tool.servicio import plantillas as plantillas_svc
 from apu_tool.servicio import usuarios as usuarios_svc
 from apu_tool.servicio.auth import requiere_rol
 from apu_tool.servicio.dependencias import get_almacen
@@ -64,6 +65,11 @@ def auditoria_listar(user_id: Optional[str] = None, accion: Optional[str] = None
                                 limit=limit, offset=offset)
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _descarga_xlsx(data: bytes, filename: str) -> Response:
+    return Response(content=data, media_type=_XLSX,
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.get("/status", response_model=StatusOut)
@@ -278,6 +284,11 @@ async def insumos_importar_preview(archivo: UploadFile = File(...),
         raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
+@router.get("/insumos/importar/plantilla")
+def insumos_precios_plantilla(_: object = Depends(requiere_rol("editor"))):
+    return _descarga_xlsx(plantillas_svc.plantilla_precios(), "plantilla_precios.xlsx")
+
+
 @router.post("/insumos/transformar/preview")
 def insumos_transformar_preview(body: TransformarIn, alm: Almacen = Depends(get_almacen),
                                 _: object = Depends(requiere_rol("editor"))):
@@ -324,6 +335,11 @@ async def insumos_importar_crear(archivo: UploadFile = File(...),
         raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
 
 
+@router.get("/insumos/importar-crear/plantilla")
+def insumos_crear_plantilla(_: object = Depends(requiere_rol("editor"))):
+    return _descarga_xlsx(plantillas_svc.plantilla_insumos_crear(), "plantilla_insumos.xlsx")
+
+
 @router.get("/apus")
 def listar_apus(q: Optional[str] = None, grupo: Optional[str] = None,
                 turno: Optional[str] = None, limit: int = 100, offset: int = 0,
@@ -365,6 +381,11 @@ async def apus_importar(archivo: UploadFile = File(...),
         raise HTTPException(status_code=400, detail=str(e))
     except (zipfile.BadZipFile, InvalidFileException):
         raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
+
+
+@router.get("/apus/importar/plantilla")
+def apus_plantilla(_: object = Depends(requiere_rol("editor"))):
+    return _descarga_xlsx(plantillas_svc.plantilla_apus(), "plantilla_apus.xlsx")
 
 
 @router.get("/apus/{codigo}/{turno}")

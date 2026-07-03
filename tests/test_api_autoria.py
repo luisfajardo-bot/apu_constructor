@@ -98,3 +98,36 @@ def test_import_apus_archivo_malo_400(tmp_path):
     r = cli.post("/api/apus/importar/preview",
                  files={"archivo": ("malo.xlsx", buf.getvalue(), _XLSX)})
     assert r.status_code == 400
+
+
+def test_plantilla_apus_endpoint(tmp_path):
+    cli, _ = _cli(tmp_path)
+    r = cli.get("/api/apus/importar/plantilla")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == _XLSX
+    assert "attachment" in r.headers["content-disposition"]
+    assert len(r.content) > 0
+    # lo descargado es re-importable por su propio endpoint (round-trip end-to-end)
+    pv = cli.post("/api/apus/importar/preview",
+                  files={"archivo": ("plantilla_apus.xlsx", r.content, _XLSX)})
+    assert pv.status_code == 200
+    assert any(c["codigo"] == "999001" for c in pv.json()["crear"])
+
+
+def test_plantilla_insumos_crear_endpoint(tmp_path):
+    cli, _ = _cli(tmp_path)
+    r = cli.get("/api/insumos/importar-crear/plantilla")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == _XLSX
+    assert "attachment" in r.headers["content-disposition"]
+    assert len(r.content) > 0
+
+
+def test_plantillas_requieren_editor(tmp_path):
+    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
+                  corridas_path=tmp_path / "c.db")
+    alm.init_schema()
+    cli = cliente(create_app(almacen=alm), rol="consulta")
+    assert cli.get("/api/apus/importar/plantilla").status_code == 403
+    assert cli.get("/api/insumos/importar-crear/plantilla").status_code == 403
+    assert cli.get("/api/insumos/importar/plantilla").status_code == 403

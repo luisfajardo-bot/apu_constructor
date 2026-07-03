@@ -49,3 +49,15 @@ def test_importar_y_transformar_preview(tmp_path):
                  json={"filtro": {"grupo": "CONCRETOS"},
                        "operacion": {"tipo": "precio_pct", "valor": 10}})
     assert t.status_code == 200 and t.json()["afectados"] == 1
+
+
+_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def test_plantilla_precios_endpoint(tmp_path):
+    cli, _ = _cli(tmp_path)
+    r = cli.get("/api/insumos/importar/plantilla")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == _XLSX
+    assert "attachment" in r.headers["content-disposition"]
+    assert len(r.content) > 0

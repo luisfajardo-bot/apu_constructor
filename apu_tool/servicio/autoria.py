@@ -95,9 +95,21 @@ def crear_apu(alm: Almacen, datos: dict, actor=None) -> dict:
 
 
 # ------------------------------------------------------------- import insumos
-def _existe_identidad(alm: Almacen, codigo: str, nombre: str) -> bool:
+def _match_identidad(alm: Almacen, codigo: str, nombre: str):
+    """Insumo con (codigo, nombre) exactos (nombre normalizado), o None."""
     nn = normalizar(nombre)
-    return any(normalizar(c.nombre) == nn for c in alm.precios.get_candidatos(codigo))
+    for c in alm.precios.get_candidatos(codigo):
+        if normalizar(c.nombre) == nn:
+            return c
+    return None
+
+
+def _cambio_upsert(ins, f: dict) -> dict:
+    precio_nuevo = f["precio"] if f["tiene_precio"] else ins.precio
+    fuente_nueva = f["fuente"] or ins.fuente_precio
+    return {"insumo_id": ins.id, "codigo": ins.codigo, "nombre": ins.nombre,
+            "precio_actual": ins.precio, "precio_nuevo": precio_nuevo,
+            "fuente_actual": ins.fuente_precio, "fuente_nueva": fuente_nueva}
 
 
 def _filas_insumos(contenido: bytes, nombre_archivo: str) -> list[dict]:
@@ -126,44 +138,55 @@ def _filas_insumos(contenido: bytes, nombre_archivo: str) -> list[dict]:
           "grupo": col("grupo", "group"),
           "precio": col("precio", "valor", "price"),
           "fuente": col("fuente", "source")}
-    if ci["codigo"] is None or ci["nombre"] is None:
-        raise ValueError("El archivo debe tener al menos columnas de código y nombre.")
+    if ci["codigo"] is None:
+        raise ValueError("El archivo debe tener al menos una columna de código.")
 
     def g(r, i):
         return r[i] if (i is not None and i < len(r)) else None
 
     out = []
     for r in rows[1:]:
+        raw_precio = g(r, ci["precio"])
         out.append({"codigo": str(g(r, ci["codigo"]) or "").strip(),
                     "nombre": str(g(r, ci["nombre"]) or "").strip(),
                     "unidad": str(g(r, ci["unidad"]) or "").strip(),
                     "grupo": str(g(r, ci["grupo"]) or "").strip(),
-                    "precio": _to_float(g(r, ci["precio"])),
+                    "precio": _to_float(raw_precio),
+                    "tiene_precio": raw_precio not in (None, ""),
                     "fuente": str(g(r, ci["fuente"]) or "").strip()})
     return out
 
 
 def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str) -> dict:
-    crear, ya_existe, invalida = [], [], []
+    """Upsert por fila. Con nombre: identidad código+nombre (crea o actualiza).
+    Sin nombre: actualiza precio por código (único), o marca ambigua/no encontrada."""
+    crear, actualizar, ambigua, no_encontrada, invalida = [], [], [], [], []
     for f in _filas_insumos(contenido, nombre_archivo):
-        if not f["codigo"] or not f["nombre"]:
+        cod, nom = f["codigo"], f["nombre"]
+        if not cod:
             invalida.append(f)
-        elif _existe_identidad(alm, f["codigo"], f["nombre"]):
-            ya_existe.append(f)
+        elif nom:
+            match = _match_identidad(alm, cod, nom)
+            (actualizar.append(_cambio_upsert(match, f)) if match else crear.append(f))
         else:
-            crear.append(f)
-    return {"crear": crear, "ya_existe": ya_existe, "invalida": invalida}
+            cands = alm.precios.get_candidatos(cod)
+            if len(cands) == 1:
+                actualizar.append(_cambio_upsert(cands[0], f))
+            elif len(cands) > 1:
+                ambigua.append({"codigo": cod,
+                                "candidatos": [{"id": c.id, "nombre": c.nombre} for c in cands]})
+            else:
+                no_encontrada.append({"codigo": cod})
+    return {"crear": crear, "actualizar": actualizar, "ambigua": ambigua,
+            "no_encontrada": no_encontrada, "invalida": invalida}
 
 
 def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
                              actor=None) -> dict:
-    creados, errores = 0, []
+    prev = preview_importar_insumos(alm, contenido, nombre_archivo)
+    creados, actualizados, errores = 0, 0, []
     lote = nuevo_lote()
-    for f in _filas_insumos(contenido, nombre_archivo):
-        if not f["codigo"] or not f["nombre"]:
-            continue                                   # inválida: se omite
-        if _existe_identidad(alm, f["codigo"], f["nombre"]):
-            continue                                   # ya existe: no se pisa
+    for f in prev["crear"]:
         try:
             ins = Insumo(codigo=f["codigo"], nombre=f["nombre"], unidad=f["unidad"],
                          grupo=f["grupo"], precio=f["precio"], fuente_precio=f["fuente"])
@@ -178,7 +201,23 @@ def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
             creados += 1
         except ValueError as e:
             errores.append({"codigo": f["codigo"], "error": str(e)})
-    return {"creados": creados, "errores": errores}
+    for c in prev["actualizar"]:
+        if c["precio_nuevo"] == c["precio_actual"] and c["fuente_nueva"] == c["fuente_actual"]:
+            continue                                   # no-op: nada cambió
+        try:
+            with alm.transaccion("precios") as conn:
+                alm.precios.set_precio_por_id(c["insumo_id"], c["precio_nuevo"], c["fuente_nueva"],
+                                              conn=conn,
+                                              creado_por=(actor.user_id if actor else None))
+                registrar_auditoria(
+                    alm, conn, actor, "precio.editar", "insumo", c["insumo_id"],
+                    antes={"precio": c["precio_actual"], "fuente": c["fuente_actual"]},
+                    despues={"precio": c["precio_nuevo"], "fuente": c["fuente_nueva"]},
+                    contexto={"origen": "import", "lote_id": lote, "archivo": nombre_archivo})
+            actualizados += 1
+        except Exception as e:
+            errores.append({"codigo": c["codigo"], "error": str(e)})
+    return {"creados": creados, "actualizados": actualizados, "errores": errores}
 
 
 # ---------------------------------------------------------------- import APUs

@@ -62,25 +62,73 @@ def test_crear_apu_validaciones(tmp_path):
 
 
 # ---------------------------------------------------------------- import insumos
-def _xlsx_insumos() -> bytes:
+def _xlsx_upsert() -> bytes:
     wb = openpyxl.Workbook(); ws = wb.active
     ws.append(["codigo", "nombre", "unidad", "grupo", "precio", "fuente"])
-    ws.append(["300", "GRAVA COMUN", "M3", "MAT", 80000, "PRECIO IDU"])   # crear
-    ws.append(["100", "CEMENTO GRIS", "KG", "MAT", 1200, "PRECIO IDU"])   # ya existe
-    ws.append(["", "SIN CODIGO", "UN", "", 10, ""])                       # inválida
+    ws.append(["300", "GRAVA COMUN", "M3", "MAT", 80000, "PRECIO IDU"])   # con nombre, no existe -> crear
+    ws.append(["100", "CEMENTO GRIS", "KG", "MAT", 1200, "PRECIO IDU"])   # con nombre, existe -> actualizar
+    ws.append(["", "SIN CODIGO", "UN", "", 10, ""])                       # sin codigo -> invalida
     buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
 
 
-def test_import_insumos_preview_y_aplicar(tmp_path):
+def _xlsx_solo_precio(filas) -> bytes:
+    """Archivo estilo lista de precios: codigo, precio (sin nombre)."""
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["codigo", "precio", "fuente"])
+    for f in filas:
+        ws.append(f)
+    buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
+
+
+def test_upsert_preview_con_nombre(tmp_path):
     alm = _alm(tmp_path)
-    data = _xlsx_insumos()
-    prev = autoria.preview_importar_insumos(alm, data, "insumos.xlsx")
+    prev = autoria.preview_importar_insumos(alm, _xlsx_upsert(), "insumos.xlsx")
     assert [c["codigo"] for c in prev["crear"]] == ["300"]
-    assert [c["codigo"] for c in prev["ya_existe"]] == ["100"]
+    assert [c["codigo"] for c in prev["actualizar"]] == ["100"]
+    assert prev["actualizar"][0]["precio_actual"] == 1000 and prev["actualizar"][0]["precio_nuevo"] == 1200
     assert len(prev["invalida"]) == 1
-    res = autoria.aplicar_importar_insumos(alm, data, "insumos.xlsx")
-    assert res["creados"] == 1
+
+
+def test_upsert_aplicar_crea_y_actualiza(tmp_path):
+    alm = _alm(tmp_path)
+    res = autoria.aplicar_importar_insumos(alm, _xlsx_upsert(), "insumos.xlsx")
+    assert res["creados"] == 1 and res["actualizados"] == 1
     assert any(i.codigo == "300" for i in alm.precios.get_candidatos("300"))
+    assert alm.precios.get_candidatos("100")[0].precio == 1200   # precio actualizado
+
+
+def test_upsert_sin_nombre_codigo_unico_actualiza(tmp_path):
+    alm = _alm(tmp_path)
+    prev = autoria.preview_importar_insumos(alm, _xlsx_solo_precio([["100", 1500, "COMPRAS"]]),
+                                            "precios.xlsx")
+    assert len(prev["actualizar"]) == 1 and prev["actualizar"][0]["precio_nuevo"] == 1500
+    assert prev["crear"] == [] and prev["no_encontrada"] == []
+
+
+def test_upsert_sin_nombre_codigo_repetido_ambiguo(tmp_path):
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("100", "CEMENTO BLANCO", "KG", "MAT", 2000, "PRECIO IDU")])
+    prev = autoria.preview_importar_insumos(alm, _xlsx_solo_precio([["100", 1500, "X"]]),
+                                            "precios.xlsx")
+    assert len(prev["ambigua"]) == 1 and prev["ambigua"][0]["codigo"] == "100"
+    assert len(prev["ambigua"][0]["candidatos"]) == 2
+
+
+def test_upsert_sin_nombre_codigo_inexistente_no_encontrada(tmp_path):
+    alm = _alm(tmp_path)
+    prev = autoria.preview_importar_insumos(alm, _xlsx_solo_precio([["999", 1500, "X"]]),
+                                            "precios.xlsx")
+    assert [n["codigo"] for n in prev["no_encontrada"]] == ["999"]
+
+
+def test_upsert_precio_vacio_en_actualizacion_no_cambia(tmp_path):
+    alm = _alm(tmp_path)
+    prev = autoria.preview_importar_insumos(alm, _xlsx_solo_precio([["100", "", "NUEVA FUENTE"]]),
+                                            "precios.xlsx")
+    c = prev["actualizar"][0]
+    assert c["precio_nuevo"] == 1000            # precio actual, no 0
+    assert c["fuente_nueva"] == "NUEVA FUENTE"  # la fuente sí se cambia
 
 
 # ---------------------------------------------------------------- import APUs

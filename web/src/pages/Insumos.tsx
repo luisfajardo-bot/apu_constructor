@@ -4,7 +4,6 @@ import type { Insumo } from "@/lib/tipos";
 import { BarraFiltros, type FiltrosState } from "@/components/insumos/BarraFiltros";
 import { TablaInsumos } from "@/components/insumos/TablaInsumos";
 import { Button } from "@/components/ui/button";
-import { DialogoTransformar } from "@/components/insumos/DialogoTransformar";
 import { DialogoImportar } from "@/components/insumos/DialogoImportar";
 import { DialogoAgregarInsumo } from "@/components/autoria/DialogoAgregarInsumo";
 import { DialogoImportarCrearInsumos } from "@/components/autoria/DialogoImportarCrearInsumos";
@@ -28,7 +27,6 @@ export default function Insumos() {
   const [fuentes, setFuentes] = useState<string[]>([]);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [transformarOpen, setTransformarOpen] = useState(false);
   const [importarOpen, setImportarOpen] = useState(false);
   const [agregarOpen, setAgregarOpen] = useState(false);
   const [importarCrearOpen, setImportarCrearOpen] = useState(false);
@@ -103,13 +101,6 @@ export default function Insumos() {
             >
               Importar
             </Button>
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => setTransformarOpen(true)}
-            >
-              Transformar
-            </Button>
           </div>
         )}
       </div>
@@ -136,18 +127,6 @@ export default function Insumos() {
 
       {puedeEditar && (
         <>
-          <DialogoTransformar
-            open={transformarOpen}
-            onOpenChange={setTransformarOpen}
-            filtro={{
-              q: filtros.q || undefined,
-              grupo: filtros.grupo || undefined,
-              fuente: filtros.fuente || undefined,
-              clasificacion: filtros.clasificacion || undefined,
-            }}
-            onAplicado={recargar}
-          />
-
           <DialogoImportar
             open={importarOpen}
             onOpenChange={setImportarOpen}

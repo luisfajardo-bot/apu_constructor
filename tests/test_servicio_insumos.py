@@ -65,35 +65,6 @@ def test_preview_import_reconocido_y_no_encontrado(tmp_path):
     assert len(out["no_encontrados"]) == 1 and out["no_encontrados"][0]["codigo"] == "999"
 
 
-def test_preview_transformar_operaciones(tmp_path):
-    alm = _alm(tmp_path)
-    out = svc.preview_transformar(alm, {"grupo": "CONCRETOS"},
-                                  {"tipo": "precio_pct", "valor": 10})
-    assert out["afectados"] == 1
-    c = out["cambios"][0]
-    assert c["codigo"] == "100" and c["precio_nuevo"] == 385000.0    # 350000 * 1.10
-
-    out2 = svc.preview_transformar(alm, {"fuente": "PRECIO IDU"},
-                                   {"tipo": "fuente", "valor": "IDU 2026"})
-    assert out2["afectados"] == 1 and out2["cambios"][0]["fuente_nueva"] == "IDU 2026"
-
-
-def test_preview_transformar_precio_factor(tmp_path):
-    alm = _alm(tmp_path)
-    out = svc.preview_transformar(alm, {"grupo": "CONCRETOS"},
-                                  {"tipo": "precio_factor", "valor": 2.0})
-    assert out["afectados"] == 1
-    assert out["cambios"][0]["precio_nuevo"] == 700000.0   # 350000 * 2.0
-
-
-def test_preview_transformar_precio_set(tmp_path):
-    alm = _alm(tmp_path)
-    out = svc.preview_transformar(alm, {"grupo": "CONCRETOS"},
-                                  {"tipo": "precio_set", "valor": 999.0})
-    assert out["afectados"] == 1
-    assert out["cambios"][0]["precio_nuevo"] == 999.0
-
-
 def _xlsx_bytes_headers(headers, filas):
     """Construye un xlsx con encabezados arbitrarios."""
     wb = openpyxl.Workbook(); ws = wb.active
@@ -101,15 +72,6 @@ def _xlsx_bytes_headers(headers, filas):
     for f in filas:
         ws.append(f)
     buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
-
-
-def test_preview_transformar_filtro_clasificacion(tmp_path):
-    alm = _alm(tmp_path)
-    # Solo debería afectar al insumo "200" (PRECIO IDU = publico), no a "100" (COSTO INTERNO)
-    out = svc.preview_transformar(alm, {"clasificacion": "publico"},
-                                  {"tipo": "precio_pct", "valor": 10})
-    assert out["afectados"] == 1
-    assert out["cambios"][0]["codigo"] == "200"
 
 
 def test_parse_tabla_sin_codigo_lanza_valueerror(tmp_path):

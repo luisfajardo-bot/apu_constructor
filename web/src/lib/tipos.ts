@@ -165,11 +165,6 @@ export interface ImportarPreviewResponse {
   no_encontrados: ImportNoEncontrado[];
 }
 
-export interface TransformarPreviewResponse {
-  cambios: CambioPreview[];
-  afectados: number;
-}
-
 // ─── Autoría de la base — agregar insumos y APUs ───────────────────────────────
 
 export interface InsumoNuevo {

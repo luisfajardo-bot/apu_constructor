@@ -4,7 +4,6 @@ import type {
   InsumoDetalle,
   CambiosAplicados,
   ImportarPreviewResponse,
-  TransformarPreviewResponse,
 } from "@/lib/tipos";
 
 export interface ListarInsumosParams {
@@ -56,27 +55,6 @@ export function aplicarCambios(cambios: CambioInput[]): Promise<CambiosAplicados
 
 export function importarPreview(form: FormData): Promise<ImportarPreviewResponse> {
   return apiPost<ImportarPreviewResponse>("/insumos/importar/preview", form);
-}
-
-export interface TransformarFiltro {
-  q?: string;
-  grupo?: string;
-  fuente?: string;
-  clasificacion?: string;
-}
-
-export interface TransformarOperacion {
-  tipo: "fuente" | "precio_factor" | "precio_pct" | "precio_set";
-  valor: string | number;
-}
-
-export interface TransformarBody {
-  filtro: TransformarFiltro;
-  operacion: TransformarOperacion;
-}
-
-export function transformarPreview(body: TransformarBody): Promise<TransformarPreviewResponse> {
-  return apiPost<TransformarPreviewResponse>("/insumos/transformar/preview", body);
 }
 
 export function descargarPlantillaPrecios(): Promise<void> {

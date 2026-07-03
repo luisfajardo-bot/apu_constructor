@@ -30,7 +30,7 @@ from apu_tool.servicio.dependencias import get_almacen
 from apu_tool.servicio import limites
 from apu_tool.servicio.esquemas import (
     ApuNuevoIn, CambiosIn, ConfirmarIn, EstadoIn, InsumoNuevoIn, RolIn, StatusOut,
-    TransformarIn, UsuarioInvitarIn)
+    UsuarioInvitarIn)
 from apu_tool.servicio.supabase_admin import AdminSupabase, AdminSupabaseHTTP
 
 router = APIRouter()
@@ -287,15 +287,6 @@ async def insumos_importar_preview(archivo: UploadFile = File(...),
 @router.get("/insumos/importar/plantilla")
 def insumos_precios_plantilla(_: object = Depends(requiere_rol("editor"))):
     return _descarga_xlsx(plantillas_svc.plantilla_precios(), "plantilla_precios.xlsx")
-
-
-@router.post("/insumos/transformar/preview")
-def insumos_transformar_preview(body: TransformarIn, alm: Almacen = Depends(get_almacen),
-                                _: object = Depends(requiere_rol("editor"))):
-    try:
-        return insumos_svc.preview_transformar(alm, body.filtro, body.operacion)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ---- autoría: crear / importar insumos y APUs ----

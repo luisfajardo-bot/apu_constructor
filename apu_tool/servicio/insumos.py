@@ -146,25 +146,3 @@ def preview_import(alm: Almacen, contenido: bytes, nombre: str) -> dict:
         else:
             no_encontrados.append({"codigo": f["codigo"], "precio": f["precio"]})
     return {"cambios": cambios, "ambiguos": ambiguos, "no_encontrados": no_encontrados}
-
-
-def preview_transformar(alm: Almacen, filtro: dict, operacion: dict) -> dict:
-    items, _ = alm.precios.list_insumos(
-        q=filtro.get("q"), grupo=filtro.get("grupo"), fuente=filtro.get("fuente"),
-        clasificacion=filtro.get("clasificacion"), limit=1_000_000, offset=0)
-    tipo, valor = operacion.get("tipo"), operacion.get("valor")
-    cambios = []
-    for ins in items:
-        nuevo_precio, nueva_fuente = ins.precio, ins.fuente_precio
-        if tipo == "fuente":
-            nueva_fuente = str(valor)
-        elif tipo == "precio_factor":
-            nuevo_precio = round(ins.precio * float(valor), 2)
-        elif tipo == "precio_pct":
-            nuevo_precio = round(ins.precio * (1 + float(valor) / 100), 2)
-        elif tipo == "precio_set":
-            nuevo_precio = float(valor)
-        else:
-            raise ValueError(f"Operación desconocida: {tipo}")
-        cambios.append(_cambio(ins, nuevo_precio, nueva_fuente))
-    return {"cambios": cambios, "afectados": len(cambios)}

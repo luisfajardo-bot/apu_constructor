@@ -27,11 +27,6 @@ class CambiosIn(BaseModel):
     cambios: list[CambioIn]
 
 
-class TransformarIn(BaseModel):
-    filtro: dict
-    operacion: dict
-
-
 class InsumoNuevoIn(BaseModel):
     codigo: str
     nombre: str

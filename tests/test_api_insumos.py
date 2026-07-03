@@ -36,7 +36,7 @@ def test_cambios_y_detalle(tmp_path):
     assert cli.get("/api/insumos/99999").status_code == 404
 
 
-def test_importar_y_transformar_preview(tmp_path):
+def test_importar_preview(tmp_path):
     cli, _ = _cli(tmp_path)
     wb = openpyxl.Workbook(); ws = wb.active
     ws.append(["CODIGO", "PRECIO", "FUENTE"]); ws.append(["100", 390000, "COMPRAS"])
@@ -45,10 +45,6 @@ def test_importar_y_transformar_preview(tmp_path):
                  files={"archivo": ("l.xlsx", buf.getvalue(),
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     assert r.status_code == 200 and len(r.json()["cambios"]) == 1
-    t = cli.post("/api/insumos/transformar/preview",
-                 json={"filtro": {"grupo": "CONCRETOS"},
-                       "operacion": {"tipo": "precio_pct", "valor": 10}})
-    assert t.status_code == 200 and t.json()["afectados"] == 1
 
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

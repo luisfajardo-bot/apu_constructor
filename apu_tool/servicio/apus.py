@@ -17,9 +17,17 @@ def listar(alm: Almacen, q: Optional[str] = None, grupo: Optional[str] = None,
            turno: Optional[str] = None, limit: int = 100, offset: int = 0) -> dict:
     items, total = alm.apus.list_apus(q, grupo, turno, limit, offset)
     counts = alm.apus.component_counts()
-    out = [{"codigo": a.codigo, "turno": a.shift, "nombre": a.nombre,
-            "unidad": a.unidad, "grupo": a.grupo,
-            "n_componentes": counts.get((a.codigo, a.shift), 0)} for a in items]
+    # Costo unitario por APU de la página (para verlo sin desplegar). Un solo
+    # PricingEngine reutiliza el caché de candidatos entre APUs. Ve dinero como el
+    # cuadro, pero NUNCA lo pasa a la IA (Invariante #1).
+    eng = PricingEngine(alm)
+    out = []
+    for a in items:
+        _comp, costo = eng.cost_apu(a.codigo, a.shift)
+        out.append({"codigo": a.codigo, "turno": a.shift, "nombre": a.nombre,
+                    "unidad": a.unidad, "grupo": a.grupo,
+                    "n_componentes": counts.get((a.codigo, a.shift), 0),
+                    "costo_unitario": costo})
     return {"items": out, "total": total, "limit": limit, "offset": offset}
 
 

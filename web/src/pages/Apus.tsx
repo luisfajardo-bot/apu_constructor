@@ -110,7 +110,7 @@ export default function Apus() {
   const hasNext = offset + LIMIT < total;
   const page = Math.floor(offset / LIMIT) + 1;
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
-  const TOTAL_COLS = 7;
+  const TOTAL_COLS = 8;
 
   return (
     <div className="flex flex-col h-full">
@@ -191,6 +191,7 @@ export default function Apus() {
               <TableHead className="text-xs">Nombre</TableHead>
               <TableHead className="text-xs w-14">Und</TableHead>
               <TableHead className="text-xs w-28">Grupo</TableHead>
+              <TableHead className="text-xs w-28 text-right">Costo unit.</TableHead>
               <TableHead className="text-xs w-16 text-right">N° comp.</TableHead>
             </TableRow>
           </TableHeader>
@@ -232,6 +233,9 @@ export default function Apus() {
                     <TableCell className="text-xs">{a.unidad}</TableCell>
                     <TableCell className="text-xs text-muted-foreground truncate max-w-[7rem]" title={a.grupo}>
                       {a.grupo}
+                    </TableCell>
+                    <TableCell className="text-xs text-right font-mono tabular-nums">
+                      {cop(a.costo_unitario)}
                     </TableCell>
                     <TableCell className="text-xs text-right font-mono tabular-nums">
                       {a.n_componentes}

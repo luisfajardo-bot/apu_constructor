@@ -208,6 +208,7 @@ export interface ApuResumen {
   unidad: string;
   grupo: string;
   n_componentes: number;
+  costo_unitario: number;
 }
 
 export interface ApuDetalle {

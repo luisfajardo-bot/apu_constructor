@@ -92,6 +92,7 @@ class ApusPg:
                     " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
 
     def editar_apu(self, apu: Apu, componentes: list[ApuComponent], conn=None) -> None:
+        """Edita cabecera + reemplaza composición de un APU existente. ValueError si no existe."""
         if conn is not None:
             return self._editar_apu(conn, apu, componentes)
         with self.cx.connection() as c:

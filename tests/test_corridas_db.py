@@ -187,3 +187,20 @@ def test_migracion_agrega_modo_y_snapshot(tmp_path):
     assert len(metas) == 1 and metas[0].modo == "activa"      # existente → activa por DEFAULT
     db.set_modo(metas[0].id, "congelada")
     assert db.get_corrida(metas[0].id).modo == "congelada"
+
+
+def test_set_get_snapshots(tmp_path):
+    alm = _almacen_tmp(tmp_path)
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="x", archivo="a.xlsx", turno_def="DIURNO",
+        use_ai=False, estado="en_revision"))
+    alm.corridas.guardar_items(cid, [_fila(0), _fila(1)])
+    alm.corridas.set_snapshot(cid, 0, {
+        "composicion": [{"insumo_codigo": "100", "insumo_nombre": "CEMENTO", "unidad": "KG",
+                         "rendimiento": 2.0, "precio_unitario": 1000.0, "fuente_precio": "PRECIO IDU",
+                         "costo": 2000.0, "calidad_cruce": "exacto"}],
+        "costo_unitario": 2000.0})
+    snaps = alm.corridas.get_snapshots(cid)
+    assert set(snaps.keys()) == {0}                       # solo el ítem con snapshot
+    assert snaps[0]["costo_unitario"] == 2000.0
+    assert snaps[0]["composicion"][0]["insumo_codigo"] == "100"

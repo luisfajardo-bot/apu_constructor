@@ -101,6 +101,19 @@ class CorridasPg:
             conn.execute("UPDATE corridas.corrida SET modo=%s WHERE id=%s",
                          (modo, int(corrida_id)))
 
+    def set_snapshot(self, corrida_id: int, seq: int, payload: dict) -> None:
+        with self.cx.connection() as conn:
+            conn.execute(
+                "UPDATE corridas.corrida_item SET snapshot_json=%s WHERE corrida_id=%s AND seq=%s",
+                (json.dumps(payload, ensure_ascii=False), int(corrida_id), int(seq)))
+
+    def get_snapshots(self, corrida_id: int) -> dict[int, dict]:
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT seq, snapshot_json FROM corridas.corrida_item "
+                "WHERE corrida_id=%s AND snapshot_json IS NOT NULL", (int(corrida_id),)).fetchall()
+        return {r["seq"]: json.loads(r["snapshot_json"]) for r in rows}
+
     # ---- lectura ----
     def _row_to_item(self, r) -> CorridaItemRow:
         return CorridaItemRow(

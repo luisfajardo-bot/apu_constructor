@@ -138,6 +138,19 @@ class CorridasDB:
         with self.connect() as conn:
             conn.execute("UPDATE corrida SET modo=? WHERE id=?", (modo, int(corrida_id)))
 
+    def set_snapshot(self, corrida_id: int, seq: int, payload: dict) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE corrida_item SET snapshot_json=? WHERE corrida_id=? AND seq=?",
+                (json.dumps(payload, ensure_ascii=False), int(corrida_id), int(seq)))
+
+    def get_snapshots(self, corrida_id: int) -> dict[int, dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT seq, snapshot_json FROM corrida_item "
+                "WHERE corrida_id=? AND snapshot_json IS NOT NULL", (int(corrida_id),)).fetchall()
+        return {r["seq"]: json.loads(r["snapshot_json"]) for r in rows}
+
     # ---- lectura ----
     def _row_to_item(self, r: sqlite3.Row) -> CorridaItemRow:
         return CorridaItemRow(

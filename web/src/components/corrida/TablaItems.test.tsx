@@ -1,5 +1,7 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
+import TablaItems from "./TablaItems";
+import { useCorridaTabla } from "@/lib/corridaTabla";
 
 vi.mock("@/api/corridas", () => ({
   getItem: vi.fn(async () => ({
@@ -94,4 +96,69 @@ test("muestra el código de licitación (Ítem) junto al APU", async () => {
   // el código con el que entró (Ítem) y el APU asignado (del fixture: "111"), ambos visibles
   expect(screen.getByText("OBRA-77")).toBeTruthy();
   expect(screen.getByText("111")).toBeTruthy();
+});
+
+function TablaConControl({ items }: { items: typeof ITEM[] }) {
+  const control = useCorridaTabla(items);
+  return (
+    <TablaItems corridaId={1} items={control.filtradas} control={control} onConfirmado={() => {}} />
+  );
+}
+
+test("filtra por Descripción (contiene) ocultando las filas que no coinciden", async () => {
+  await import("./TablaItems");
+  const items = [
+    { ...ITEM, seq: 0, descripcion: "Excavación manual" },
+    { ...ITEM, seq: 1, descripcion: "Concreto clase D" },
+  ];
+  render(<TablaConControl items={items} />);
+  expect(screen.getByText("Excavación manual")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Filtrar Descripción"), { target: { value: "concreto" } });
+  expect(screen.queryByText("Excavación manual")).toBeNull();
+  expect(screen.getByText("Concreto clase D")).toBeTruthy();
+});
+
+test("filtra por el desplegable de Und", async () => {
+  await import("./TablaItems");
+  const items = [
+    { ...ITEM, seq: 0, descripcion: "A", unidad: "M3" },
+    { ...ITEM, seq: 1, descripcion: "B", unidad: "M2" },
+  ];
+  render(<TablaConControl items={items} />);
+  fireEvent.change(screen.getByLabelText("Filtrar Und"), { target: { value: "M2" } });
+  expect(screen.queryByText("A")).toBeNull();
+  expect(screen.getByText("B")).toBeTruthy();
+});
+
+test("ordena por Costo al hacer clic en el encabezado", async () => {
+  await import("./TablaItems");
+  const items = [
+    { ...ITEM, seq: 0, descripcion: "Alfa", costo_total: 300 },
+    { ...ITEM, seq: 1, descripcion: "Beta", costo_total: 100 },
+  ];
+  render(<TablaConControl items={items} />);
+  fireEvent.click(screen.getByLabelText("Ordenar por Costo"));
+  const alfa = screen.getByText("Alfa");
+  const beta = screen.getByText("Beta");
+  // asc: Beta (100) antes que Alfa (300)
+  expect(beta.compareDocumentPosition(alfa) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("'Limpiar filtros' restablece la vista", async () => {
+  await import("./TablaItems");
+  const items = [
+    { ...ITEM, seq: 0, descripcion: "Excavación manual" },
+    { ...ITEM, seq: 1, descripcion: "Concreto clase D" },
+  ];
+  render(<TablaConControl items={items} />);
+  fireEvent.change(screen.getByLabelText("Filtrar Descripción"), { target: { value: "concreto" } });
+  expect(screen.queryByText("Excavación manual")).toBeNull();
+  fireEvent.click(screen.getByText("Limpiar filtros"));
+  expect(screen.getByText("Excavación manual")).toBeTruthy();
+});
+
+test("sin control (modo vivo) no aparece la fila de filtros", async () => {
+  const { default: TablaItems } = await import("./TablaItems");
+  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} />);
+  expect(screen.queryByLabelText("Filtrar Descripción")).toBeNull();
 });

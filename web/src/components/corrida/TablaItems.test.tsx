@@ -85,3 +85,13 @@ test("oculta el buscador 'Cambiar APU' cuando la corrida está en solo lectura",
     screen.getByText(/Corrida congelada \(solo lectura\)/i),
   ).toBeTruthy();
 });
+
+test("muestra el código de licitación (Ítem) junto al APU", async () => {
+  const { default: TablaItems } = await import("./TablaItems");
+  render(
+    <TablaItems corridaId={1} items={[{ ...ITEM, item: "OBRA-77" }]} onConfirmado={() => {}} />,
+  );
+  // el código con el que entró (Ítem) y el APU asignado (del fixture: "111"), ambos visibles
+  expect(screen.getByText("OBRA-77")).toBeTruthy();
+  expect(screen.getByText("111")).toBeTruthy();
+});

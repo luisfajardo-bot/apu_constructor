@@ -90,7 +90,7 @@ def crear_apu(alm: Almacen, datos: dict, actor=None) -> dict:
             despues={"codigo": codigo, "turno": turno, "nombre": nombre,
                      "unidad": apu.unidad, "grupo": apu.grupo, "n_componentes": len(comps)},
             contexto={"origen": "individual"})
-    return {"codigo": codigo, "shift": turno, "nombre": nombre,
+    return {"codigo": codigo, "turno": turno, "nombre": nombre,
             "unidad": apu.unidad, "grupo": apu.grupo, "n_componentes": len(comps)}
 
 
@@ -115,8 +115,9 @@ def editar_apu(alm: Almacen, codigo: str, shift: str, datos: dict, actor=None) -
         registrar_auditoria(
             alm, conn, actor, "apu.editar", "apu", codigo, antes=antes,
             despues={"nombre": nombre, "unidad": apu.unidad, "grupo": apu.grupo,
-                     "n_componentes": len(comps)})
-    return {"codigo": codigo, "shift": shift, "nombre": nombre,
+                     "n_componentes": len(comps)},
+            contexto={"origen": "individual"})
+    return {"codigo": codigo, "turno": shift, "nombre": nombre,
             "unidad": apu.unidad, "grupo": apu.grupo, "n_componentes": len(comps)}
 
 

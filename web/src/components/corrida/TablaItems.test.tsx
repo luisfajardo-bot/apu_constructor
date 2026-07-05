@@ -7,7 +7,7 @@ vi.mock("@/api/corridas", () => ({
     status: "matched", explicacion: "", candidatos: [], composicion: [], costo_unitario: 0,
   })),
   confirmar: vi.fn(async () => ({
-    id: 1, archivo: "x", estado: "en_revision", items: [], duracion_ms: null,
+    id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
     totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
   })),
 }));

@@ -6,7 +6,6 @@ from apu_tool.nucleo.models import (
     Apu, ApuComponent, CorridaItemRow, CorridaMeta, Insumo, LicitacionItem,
 )
 from apu_tool.servicio import corridas
-from apu_tool.servicio import corridas as svc
 
 
 def _almacen_seed(tmp_path):
@@ -25,8 +24,8 @@ def test_construir_y_vista(tmp_path):
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
-    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False)
-    vista = svc.vista_corrida(alm, cid)
+    cid = corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False)
+    vista = corridas.vista_corrida(alm, cid)
     assert vista["totales"]["n_items"] == 1
     fila = vista["items"][0]
     assert fila["apu_codigo"] == "A1"
@@ -38,7 +37,7 @@ def test_construir_y_vista(tmp_path):
 
 def test_vista_corrida_inexistente(tmp_path):
     alm = _almacen_seed(tmp_path)
-    assert svc.vista_corrida(alm, 999) is None
+    assert corridas.vista_corrida(alm, 999) is None
 
 
 def test_detalle_confirmar_y_cuadro(tmp_path):
@@ -49,33 +48,33 @@ def test_detalle_confirmar_y_cuadro(tmp_path):
         ApuComponent("A2", "DIURNO", "100", "Concreto 3000 PSI", "M3", 2.0, 350000.0)])
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
-    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False)
+    cid = corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False)
 
-    det = svc.detalle_item(alm, cid, 0)
+    det = corridas.detalle_item(alm, cid, 0)
     assert det["apu_codigo"] == "A1"
     assert det["composicion"][0]["precio_unitario"] == 350000.0
 
-    vista = svc.confirmar_item(alm, cid, 0, apu_codigo="A2")
+    vista = corridas.confirmar_item(alm, cid, 0, apu_codigo="A2")
     fila = vista["items"][0]
     assert fila["status"] == "confirmed" and fila["apu_codigo"] == "A2"
     assert fila["costo_unitario"] == 2.0 * 350000.0      # recosteado: 700000.0
 
-    out = svc.generar_cuadro(alm, cid)
+    out = corridas.generar_cuadro(alm, cid)
     assert out.exists()
     assert alm.corridas.get_corrida(cid).estado == "finalizada"
 
 
 def test_detalle_item_inexistente(tmp_path):
     alm = _almacen_seed(tmp_path)
-    assert svc.detalle_item(alm, 1, 0) is None
-    assert svc.confirmar_item(alm, 1, 0, "A1") is None
+    assert corridas.detalle_item(alm, 1, 0) is None
+    assert corridas.confirmar_item(alm, 1, 0, "A1") is None
 
 
 def test_construir_corrida_stream_emite_started_progreso_done(tmp_path):
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
-    eventos = list(svc.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False))
+    eventos = list(corridas.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False))
     assert [e[0] for e in eventos] == ["started", "progress", "done"]
     started = eventos[0][1]
     assert isinstance(started["id"], int) and started["total"] == 1
@@ -93,28 +92,28 @@ def test_construir_corrida_sigue_devolviendo_id(tmp_path):
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
-    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False)
+    cid = corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False)
     assert isinstance(cid, int)
-    assert svc.vista_corrida(alm, cid)["totales"]["n_items"] == 1
+    assert corridas.vista_corrida(alm, cid)["totales"]["n_items"] == 1
 
 
 def test_svc_listar_y_eliminar(tmp_path):
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
-    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False)
-    lista = svc.listar_corridas(alm)
+    cid = corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False)
+    lista = corridas.listar_corridas(alm)
     assert lista and lista[0]["id"] == cid
     assert lista[0]["n_items"] == 1 and "creada_en" in lista[0]
-    assert svc.eliminar_corrida(alm, cid) is True
-    assert svc.listar_corridas(alm) == []
+    assert corridas.eliminar_corrida(alm, cid) is True
+    assert corridas.listar_corridas(alm) == []
 
 
 def test_stream_persiste_duracion(tmp_path):
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
-    eventos = list(svc.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False))
+    eventos = list(corridas.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False))
     done = next(p for ev, p in eventos if ev == "done")
     assert isinstance(done["duracion_ms"], int) and done["duracion_ms"] >= 0
     assert alm.corridas.get_corrida(done["id"]).duracion_ms == done["duracion_ms"]
@@ -129,7 +128,7 @@ def test_stream_arma_incremental_y_estado(tmp_path):
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO"),
              LicitacionItem(item="2", descripcion="Concreto clase D", unidad="M3",
                             cantidad=5.0, precio_contractual=200000.0, shift="DIURNO")]
-    gen = svc.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False)
+    gen = corridas.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False)
     ev, payload = next(gen)                              # started
     assert ev == "started"
     cid = payload["id"]
@@ -152,7 +151,7 @@ def test_stream_cancela_si_borran_corrida(tmp_path):
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO"),
              LicitacionItem(item="2", descripcion="Concreto clase D", unidad="M3",
                             cantidad=5.0, precio_contractual=200000.0, shift="DIURNO")]
-    gen = svc.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False)
+    gen = corridas.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False)
     _, payload = next(gen)                               # started
     cid = payload["id"]
     next(gen)                                            # progress 1 (item 0 persistido)
@@ -166,9 +165,9 @@ def test_vista_y_lista_exponen_duracion(tmp_path):
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
-    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False)
-    assert "duracion_ms" in svc.vista_corrida(alm, cid)
-    assert "duracion_ms" in svc.listar_corridas(alm)[0]
+    cid = corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False)
+    assert "duracion_ms" in corridas.vista_corrida(alm, cid)
+    assert "duracion_ms" in corridas.listar_corridas(alm)[0]
 
 
 def _alm_con_apu(tmp_path):

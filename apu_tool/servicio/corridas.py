@@ -19,8 +19,8 @@ from apu_tool.dominio.assemble import Assembler, ApuAdvisor
 from apu_tool.dominio.pricing import PricingEngine
 from apu_tool.dominio.report import write_report
 from apu_tool.nucleo.models import (
-    ApuComponent, AssembledApu, CorridaItemRow, CorridaMeta, LicitacionItem,
-    MatchStatus,
+    ApuComponent, AssembledApu, CostedComponent, CorridaItemRow, CorridaMeta,
+    LicitacionItem, MatchStatus,
 )
 from apu_tool.servicio.auditoria import registrar_auditoria
 
@@ -95,18 +95,41 @@ def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
 
 
 def _costear_row(alm: Almacen, row: CorridaItemRow) -> AssembledApu:
-    """Recostea la estructura guardada con el precio vigente."""
+    """Costeo ACTIVA: re-lee la composición del APU asignado desde la biblioteca y
+    costea con precios vigentes. Si no hay apu_codigo o el APU fue borrado, usa la
+    composición guardada del ítem (respaldo)."""
     pricing = PricingEngine(alm)
-    comps = [ApuComponent(
-        apu_codigo=row.apu_codigo or "", shift=row.shift,
-        insumo_codigo=c["insumo_codigo"], insumo_nombre=c["insumo_nombre"],
-        unidad=c["unidad"], rendimiento=c["rendimiento"],
-        precio_unitario_hist=0.0) for c in row.componentes]
-    costed, total = pricing.cost_components(comps)
+    costed = None
+    if row.apu_codigo:
+        lib = alm.apus.get_components(row.apu_codigo, row.shift)
+        if lib:
+            costed, total = pricing.cost_components(lib)
+    if costed is None:
+        comps = [ApuComponent(
+            apu_codigo=row.apu_codigo or "", shift=row.shift,
+            insumo_codigo=c["insumo_codigo"], insumo_nombre=c["insumo_nombre"],
+            unidad=c["unidad"], rendimiento=c["rendimiento"],
+            precio_unitario_hist=0.0) for c in row.componentes]
+        costed, total = pricing.cost_components(comps)
     return AssembledApu(
         item=row.item, apu_codigo=row.apu_codigo, apu_nombre=row.apu_nombre,
         unidad=row.unidad or row.item.unidad, shift=row.shift, componentes=costed,
         costo_unitario=total, status=MatchStatus(row.status),
+        confianza=row.confianza, explicacion=row.explicacion, origen=row.origen)
+
+
+def _assembled_desde_snapshot(row: CorridaItemRow, snap: dict) -> AssembledApu:
+    """Reconstruye un AssembledApu desde un snapshot congelado (composición + costos fijos)."""
+    comps = [CostedComponent(
+        insumo_codigo=c["insumo_codigo"], insumo_nombre=c["insumo_nombre"],
+        unidad=c["unidad"], rendimiento=c["rendimiento"],
+        precio_unitario=c["precio_unitario"], fuente_precio=c["fuente_precio"],
+        costo=c["costo"], calidad_cruce=c.get("calidad_cruce", "exacto"))
+        for c in snap.get("composicion", [])]
+    return AssembledApu(
+        item=row.item, apu_codigo=row.apu_codigo, apu_nombre=row.apu_nombre,
+        unidad=row.unidad or row.item.unidad, shift=row.shift, componentes=comps,
+        costo_unitario=snap["costo_unitario"], status=MatchStatus(row.status),
         confianza=row.confianza, explicacion=row.explicacion, origen=row.origen)
 
 
@@ -128,12 +151,18 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
     if meta is None:
         return None
     rows = alm.corridas.get_items(corrida_id)
-    items = [_vista_item(_costear_row(alm, r), r.seq, r.status) for r in rows]
+    if meta.modo == "congelada":
+        snaps = alm.corridas.get_snapshots(corrida_id)
+        ensambles = [_assembled_desde_snapshot(r, snaps[r.seq]) if r.seq in snaps
+                     else _costear_row(alm, r) for r in rows]
+    else:
+        ensambles = [_costear_row(alm, r) for r in rows]
+    items = [_vista_item(ens, r.seq, r.status) for ens, r in zip(ensambles, rows)]
     tot_c = sum(i["contractual_total"] for i in items)
     tot_k = sum(i["costo_total"] for i in items)
     n_rev = sum(1 for i in items if i["status"] in ("review", "new"))
     return {
-        "id": meta.id, "archivo": meta.archivo, "estado": meta.estado,
+        "id": meta.id, "archivo": meta.archivo, "estado": meta.estado, "modo": meta.modo,
         "duracion_ms": meta.duracion_ms, "items": items,
         "totales": {"contractual": tot_c, "costo": tot_k, "margen": tot_c - tot_k,
                     "margen_pct": ((tot_c - tot_k) / tot_c) if tot_c else 0.0,
@@ -142,10 +171,17 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
 
 
 def detalle_item(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
     row = alm.corridas.get_item(corrida_id, seq)
     if row is None:
         return None
-    ens = _costear_row(alm, row)
+    if meta.modo == "congelada":
+        snaps = alm.corridas.get_snapshots(corrida_id)
+        ens = _assembled_desde_snapshot(row, snaps[seq]) if seq in snaps else _costear_row(alm, row)
+    else:
+        ens = _costear_row(alm, row)
     return {
         "seq": row.seq, "descripcion": row.item.descripcion,
         "apu_codigo": row.apu_codigo, "apu_nombre": row.apu_nombre,
@@ -182,7 +218,7 @@ def listar_corridas(alm: Almacen) -> list[dict]:
         items = alm.corridas.get_items(meta.id)
         n_rev = sum(1 for it in items if it.status in ("review", "new"))
         out.append({"id": meta.id, "archivo": meta.archivo, "creada_en": meta.creada_en,
-                    "estado": meta.estado, "duracion_ms": meta.duracion_ms,
+                    "estado": meta.estado, "modo": meta.modo, "duracion_ms": meta.duracion_ms,
                     "n_items": len(items), "n_revision": n_rev})
     return out
 

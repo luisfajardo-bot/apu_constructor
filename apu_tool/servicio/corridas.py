@@ -282,9 +282,13 @@ def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:
     if meta is None:
         return None
     config.ensure_dirs()
-    congelar(alm, corrida_id)                     # guarda snapshots + modo='congelada'
-    rows = alm.corridas.get_items(corrida_id)
     snaps = alm.corridas.get_snapshots(corrida_id)
+    # Si ya está congelada y tiene snapshots, respeta la foto emitida (no recongela);
+    # si está activa (o congelada sin snapshots), congela el estado actual.
+    if not (meta.modo == "congelada" and snaps):
+        congelar(alm, corrida_id)
+        snaps = alm.corridas.get_snapshots(corrida_id)
+    rows = alm.corridas.get_items(corrida_id)
     assembled = [_assembled_desde_snapshot(r, snaps[r.seq]) if r.seq in snaps
                  else _costear_row(alm, r) for r in rows]
     stamp = meta.creada_en.replace(":", "").replace("-", "").replace("T", "_")

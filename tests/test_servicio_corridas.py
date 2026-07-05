@@ -234,3 +234,15 @@ def test_generar_cuadro_auto_congela(tmp_path):
     meta = alm.corridas.get_corrida(cid)
     assert meta.modo == "congelada" and meta.estado == "finalizada"
     assert alm.corridas.get_snapshots(cid)                   # hay snapshots
+
+
+def test_generar_cuadro_respeta_snapshot_si_ya_congelada(tmp_path):
+    alm, cid = _alm_con_apu(tmp_path)
+    corridas.congelar(alm, cid)                              # snapshot: costo_unitario 2000.0
+    # editar el APU en la biblioteca DESPUÉS de congelar
+    alm.apus.editar_apu(Apu("A1", "MURO", "M2", "DIURNO", "ESTR"),
+                        [ApuComponent("A1", "DIURNO", "100", "CEMENTO", "KG", 5.0, 0.0)])
+    corridas.generar_cuadro(alm, cid)                        # NO debe recongelar
+    # la vista congelada sigue en 2000 (no 5000): el cuadro respetó el snapshot emitido
+    assert corridas.vista_corrida(alm, cid)["items"][0]["costo_unitario"] == 2000.0
+    assert alm.corridas.get_corrida(cid).estado == "finalizada"

@@ -1,4 +1,6 @@
 # tests/test_servicio_corridas.py
+import pytest
+
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import (
     Apu, ApuComponent, CorridaItemRow, CorridaMeta, Insumo, LicitacionItem,
@@ -200,3 +202,35 @@ def test_activa_relee_composicion_de_biblioteca(tmp_path):
                         [ApuComponent("A1", "DIURNO", "100", "CEMENTO", "KG", 3.0, 0.0)])
     v2 = corridas.vista_corrida(alm, cid)
     assert v2["items"][0]["costo_unitario"] == 3000.0        # activa re-leyó la biblioteca
+
+
+def test_congelar_fija_todo_y_activar_libera(tmp_path):
+    alm, cid = _alm_con_apu(tmp_path)
+    v = corridas.congelar(alm, cid)
+    assert v["modo"] == "congelada"
+    congelado = v["items"][0]["costo_unitario"]              # 2000.0
+    # cambiar el APU y el precio del insumo: la congelada NO debe moverse
+    alm.apus.editar_apu(Apu("A1", "MURO", "M2", "DIURNO", "ESTR"),
+                        [ApuComponent("A1", "DIURNO", "100", "CEMENTO", "KG", 5.0, 0.0)])
+    alm.precios.set_precio("100", 9999.0, "COMPRAS")
+    assert corridas.vista_corrida(alm, cid)["items"][0]["costo_unitario"] == congelado
+    # activar → vuelve a seguir la biblioteca
+    v2 = corridas.activar(alm, cid)
+    assert v2["modo"] == "activa"
+    assert corridas.vista_corrida(alm, cid)["items"][0]["costo_unitario"] == 5.0 * 9999.0
+
+
+def test_confirmar_bloqueado_si_congelada(tmp_path):
+    alm, cid = _alm_con_apu(tmp_path)
+    corridas.congelar(alm, cid)
+    with pytest.raises(corridas.CorridaCongelada):
+        corridas.confirmar_item(alm, cid, 0, "A1", "DIURNO")
+
+
+def test_generar_cuadro_auto_congela(tmp_path):
+    alm, cid = _alm_con_apu(tmp_path)
+    out = corridas.generar_cuadro(alm, cid)
+    assert out is not None
+    meta = alm.corridas.get_corrida(cid)
+    assert meta.modo == "congelada" and meta.estado == "finalizada"
+    assert alm.corridas.get_snapshots(cid)                   # hay snapshots

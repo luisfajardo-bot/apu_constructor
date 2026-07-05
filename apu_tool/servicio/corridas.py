@@ -25,6 +25,13 @@ from apu_tool.nucleo.models import (
 from apu_tool.servicio.auditoria import registrar_auditoria
 
 
+class CorridaCongelada(Exception):
+    """Se intentó modificar (confirmar/reasignar) una corrida en modo congelada."""
+    def __init__(self, corrida_id: int):
+        super().__init__(f"La corrida {corrida_id} está congelada (solo lectura).")
+        self.corrida_id = corrida_id
+
+
 def _estructura(componentes) -> list[dict]:
     """Snapshot SIN dinero de una composición costeada."""
     return [{"insumo_codigo": c.insumo_codigo, "insumo_nombre": c.insumo_nombre,
@@ -197,8 +204,41 @@ def detalle_item(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
     }
 
 
+def congelar(alm: Almacen, corrida_id: int) -> Optional[dict]:
+    """Fija una foto inmutable: costea la vista ACTIVA ahora y guarda el snapshot de
+    cada ítem; luego marca modo='congelada'. Idempotente (recongelar = foto nueva)."""
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    for r in alm.corridas.get_items(corrida_id):
+        ens = _costear_row(alm, r)
+        payload = {"composicion": [{
+            "insumo_codigo": c.insumo_codigo, "insumo_nombre": c.insumo_nombre,
+            "unidad": c.unidad, "rendimiento": c.rendimiento,
+            "precio_unitario": c.precio_unitario, "fuente_precio": c.fuente_precio,
+            "costo": c.costo, "calidad_cruce": c.calidad_cruce} for c in ens.componentes],
+            "costo_unitario": ens.costo_unitario}
+        alm.corridas.set_snapshot(corrida_id, r.seq, payload)
+    alm.corridas.set_modo(corrida_id, "congelada")
+    return vista_corrida(alm, corrida_id)
+
+
+def activar(alm: Almacen, corrida_id: int) -> Optional[dict]:
+    """Vuelve la corrida a seguir la biblioteca. El snapshot queda pero se ignora."""
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    alm.corridas.set_modo(corrida_id, "activa")
+    return vista_corrida(alm, corrida_id)
+
+
 def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
                    shift: Optional[str] = None) -> Optional[dict]:
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    if meta.modo == "congelada":
+        raise CorridaCongelada(corrida_id)
     row = alm.corridas.get_item(corrida_id, seq)
     if row is None:
         return None
@@ -242,8 +282,11 @@ def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:
     if meta is None:
         return None
     config.ensure_dirs()
+    congelar(alm, corrida_id)                     # guarda snapshots + modo='congelada'
     rows = alm.corridas.get_items(corrida_id)
-    assembled = [_costear_row(alm, r) for r in rows]
+    snaps = alm.corridas.get_snapshots(corrida_id)
+    assembled = [_assembled_desde_snapshot(r, snaps[r.seq]) if r.seq in snaps
+                 else _costear_row(alm, r) for r in rows]
     stamp = meta.creada_en.replace(":", "").replace("-", "").replace("T", "_")
     out = config.OUTPUT_DIR / f"cuadro_corrida_{corrida_id}_{stamp}.xlsx"
     write_report(assembled, out)

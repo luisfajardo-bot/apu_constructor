@@ -79,8 +79,8 @@ export default function TablaItems({
     }
   }
 
-  // Total columns = 1 (chevron) + 9 data cols = 10
-  const TOTAL_COLS = 10;
+  // Total columns = 1 (chevron) + 10 data cols = 11
+  const TOTAL_COLS = 11;
 
   return (
     <div className="flex flex-col gap-2">
@@ -110,6 +110,7 @@ export default function TablaItems({
             <TableHead className="text-xs">Descripción</TableHead>
             <TableHead className="text-xs w-12">Und</TableHead>
             <TableHead className="text-xs w-20 text-right">Cantidad</TableHead>
+            <TableHead className="text-xs w-24">Ítem</TableHead>
             <TableHead className="text-xs w-28">APU</TableHead>
             <TableHead className="text-xs w-20">Estado</TableHead>
             <TableHead className="text-xs w-28 text-right">Contractual</TableHead>
@@ -155,6 +156,7 @@ export default function TablaItems({
                   <TableCell className="text-xs text-right font-mono">
                     {it.cantidad.toLocaleString("es-CO")}
                   </TableCell>
+                  <TableCell className="text-xs font-mono">{it.item}</TableCell>
                   <TableCell className="text-xs font-mono text-muted-foreground">
                     {it.apu_codigo}
                   </TableCell>

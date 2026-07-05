@@ -89,6 +89,7 @@ export default function MisCorridas() {
                 <th style={{ ...styles.th, ...styles.thNum }}>Por revisar</th>
                 <th style={{ ...styles.th, ...styles.thNum }}>Tiempo</th>
                 <th style={styles.th}>Estado</th>
+                <th style={styles.th}>Modo</th>
                 <th style={styles.th}></th>
               </tr>
             </thead>
@@ -115,6 +116,13 @@ export default function MisCorridas() {
                   <td style={styles.td}>
                     <span style={{ ...styles.badge, ...estadoBadgeStyle(c.estado) }}>
                       {c.estado}
+                    </span>
+                  </td>
+                  <td style={styles.td}>
+                    <span style={{ ...styles.badge, ...(c.modo === "congelada"
+                      ? { background: "#bee3f8", color: "#2a4365" }
+                      : { background: "#c6f6d5", color: "#276749" }) }}>
+                      {c.modo === "congelada" ? "Congelada" : "Activa"}
                     </span>
                   </td>
                   <td style={{ ...styles.td, ...styles.tdAccion }}>

@@ -18,6 +18,7 @@ interface TablaItemsProps {
   corridaId: number;
   items: ItemCuadro[];
   onConfirmado: (corridaActualizada: CorridaDetalle) => void;
+  readOnly?: boolean;
 }
 
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
@@ -28,6 +29,7 @@ export default function TablaItems({
   corridaId,
   items,
   onConfirmado,
+  readOnly = false,
 }: TablaItemsProps) {
   const [soloRevision, setSoloRevision] = useState(false);
   // Record<seq, EstadoExpansion | undefined>
@@ -194,6 +196,7 @@ export default function TablaItems({
                           confirmando={confirmando}
                           errorConfirm={errorConfirm[it.seq]}
                           onConfirmar={handleConfirmar}
+                          readOnly={readOnly}
                         />
                       )}
                     </TableCell>
@@ -226,6 +229,7 @@ interface DetalleExpandidoProps {
   confirmando: string | null;
   errorConfirm: string | undefined;
   onConfirmar: (seq: number, apuCodigo: string, shift?: string) => void;
+  readOnly: boolean;
 }
 
 function DetalleExpandido({
@@ -234,6 +238,7 @@ function DetalleExpandido({
   confirmando,
   errorConfirm,
   onConfirmar,
+  readOnly,
 }: DetalleExpandidoProps) {
   const esRevisable = REVISABLE.has(detalle.status);
 
@@ -286,7 +291,7 @@ function DetalleExpandido({
                     <Button
                       size="xs"
                       variant={c.apu_codigo === detalle.apu_codigo ? "default" : "outline"}
-                      disabled={confirmando !== null}
+                      disabled={confirmando !== null || readOnly}
                       onClick={() => onConfirmar(seq, c.apu_codigo)}
                     >
                       {confirmando === c.apu_codigo + "@" + seq
@@ -302,12 +307,17 @@ function DetalleExpandido({
       )}
 
       {/* Reasignar a cualquier APU de la biblioteca (todos los ítems) */}
+      {readOnly && (
+        <p className="text-xs text-muted-foreground italic">
+          Corrida congelada (solo lectura). Activá la corrida para modificar.
+        </p>
+      )}
       <section>
         <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
           Cambiar APU
         </h4>
         <BuscadorApu
-          disabled={confirmando !== null}
+          disabled={confirmando !== null || readOnly}
           onElegir={(apu) => onConfirmar(seq, apu.codigo, apu.turno)}
         />
       </section>
@@ -368,7 +378,7 @@ function DetalleExpandido({
           <div className="ml-auto">
             <Button
               size="sm"
-              disabled={confirmando !== null}
+              disabled={confirmando !== null || readOnly}
               onClick={() => onConfirmar(seq, detalle.apu_codigo)}
             >
               {confirmando === detalle.apu_codigo + "@" + seq

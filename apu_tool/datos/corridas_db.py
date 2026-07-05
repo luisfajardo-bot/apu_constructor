@@ -49,6 +49,11 @@ class CorridasDB:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(corrida)").fetchall()}
             if "duracion_ms" not in cols:
                 conn.execute("ALTER TABLE corrida ADD COLUMN duracion_ms INTEGER")
+            if "modo" not in cols:
+                conn.execute("ALTER TABLE corrida ADD COLUMN modo TEXT NOT NULL DEFAULT 'activa'")
+            icols = {r["name"] for r in conn.execute("PRAGMA table_info(corrida_item)").fetchall()}
+            if "snapshot_json" not in icols:
+                conn.execute("ALTER TABLE corrida_item ADD COLUMN snapshot_json TEXT")
 
     def reset(self) -> None:
         with self.connect() as conn:
@@ -74,10 +79,10 @@ class CorridasDB:
     def _insert_corrida(self, conn: sqlite3.Connection, meta: CorridaMeta) -> int:
         cur = conn.execute(
             "INSERT INTO corrida (creada_en, archivo, turno_def, use_ai, estado, "
-            "cuadro_path, duracion_ms) VALUES (?,?,?,?,?,?,?)",
+            "cuadro_path, duracion_ms, modo) VALUES (?,?,?,?,?,?,?,?)",
             (meta.creada_en, meta.archivo, meta.turno_def,
              None if meta.use_ai is None else int(meta.use_ai),
-             meta.estado, meta.cuadro_path, meta.duracion_ms))
+             meta.estado, meta.cuadro_path, meta.duracion_ms, meta.modo))
         return int(cur.lastrowid)
 
     def crear_corrida(self, meta: CorridaMeta) -> int:
@@ -129,6 +134,10 @@ class CorridasDB:
             conn.execute("UPDATE corrida SET duracion_ms=? WHERE id=?",
                          (int(duracion_ms), int(corrida_id)))
 
+    def set_modo(self, corrida_id: int, modo: str) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE corrida SET modo=? WHERE id=?", (modo, int(corrida_id)))
+
     # ---- lectura ----
     def _row_to_item(self, r: sqlite3.Row) -> CorridaItemRow:
         return CorridaItemRow(
@@ -146,7 +155,7 @@ class CorridasDB:
             turno_def=r["turno_def"],
             use_ai=None if r["use_ai"] is None else bool(r["use_ai"]),
             estado=r["estado"], cuadro_path=r["cuadro_path"],
-            duracion_ms=r["duracion_ms"])
+            duracion_ms=r["duracion_ms"], modo=(r["modo"] or "activa"))
 
     def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
         with self.connect() as conn:

@@ -157,3 +157,39 @@ def test_corridas_sin_turno_400(tmp_path):
         r = cli.post("/api/corridas", data={"turno": "DIURNO"},
                      files={"archivo": ("noturno.xlsx", f, "application/octet-stream")})
     assert r.status_code == 400
+
+
+def test_congelar_activar_y_confirmar_409(tmp_path):
+    from apu_tool.datos.almacen import Almacen
+    from apu_tool.nucleo.models import (Apu, ApuComponent, Insumo, CorridaMeta,
+                                        CorridaItemRow, LicitacionItem)
+    from apu_tool.servicio.app import create_app
+    from tests.conftest import cliente
+
+    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
+                  corridas_path=tmp_path / "c.db")
+    alm.init_schema()
+    alm.precios.insert_insumos([Insumo("100", "CEMENTO", "KG", "MAT", 1000.0, "PRECIO IDU")])
+    alm.apus.crear_apu(Apu("A1", "MURO", "M2", "DIURNO", "ESTR"),
+                       [ApuComponent("A1", "DIURNO", "100", "CEMENTO", "KG", 2.0, 0.0)])
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="x", archivo="a.xlsx", turno_def="DIURNO",
+        use_ai=False, estado="en_revision"))
+    item = LicitacionItem(item="1", descripcion="muro", unidad="M2", cantidad=1.0,
+                          precio_contractual=10000.0, shift="DIURNO")
+    alm.corridas.guardar_items(cid, [CorridaItemRow(
+        seq=0, item=item, status="auto", apu_codigo="A1", apu_nombre="MURO", unidad="M2",
+        shift="DIURNO", origen="historico", confianza=1.0, explicacion="",
+        componentes=[{"insumo_codigo": "100", "insumo_nombre": "CEMENTO", "unidad": "KG",
+                      "rendimiento": 2.0}], candidatos=[])])
+    cli = cliente(create_app(almacen=alm), rol="consulta")
+
+    r = cli.post(f"/api/corridas/{cid}/congelar")
+    assert r.status_code == 200 and r.json()["modo"] == "congelada"
+    # confirmar en congelada → 409
+    assert cli.post(f"/api/corridas/{cid}/items/0/confirmar",
+                    json={"apu_codigo": "A1", "shift": "DIURNO"}).status_code == 409
+    # activar → modo activa; ahora confirmar funciona
+    assert cli.post(f"/api/corridas/{cid}/activar").json()["modo"] == "activa"
+    assert cli.post(f"/api/corridas/{cid}/items/0/confirmar",
+                    json={"apu_codigo": "A1", "shift": "DIURNO"}).status_code == 200

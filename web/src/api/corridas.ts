@@ -49,6 +49,14 @@ export function confirmar(
   });
 }
 
+export function congelarCorrida(id: number): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/congelar`);
+}
+
+export function activarCorrida(id: number): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/activar`);
+}
+
 /** Descarga el cuadro xlsx con el token Bearer (una navegación normal no lleva el header). */
 export async function descargarCuadro(id: number): Promise<void> {
   const r = await fetch(`/api/corridas/${id}/cuadro`, { headers: { ...(await authHeader()) } });

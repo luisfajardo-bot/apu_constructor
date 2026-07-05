@@ -109,6 +109,7 @@ export interface CorridaResumen {
   archivo: string;
   creada_en: string;
   estado: string;
+  modo: string;
   n_items: number;
   n_revision: number;
   duracion_ms: number | null;
@@ -131,6 +132,7 @@ export interface CorridaDetalle {
   id: number;
   archivo: string;
   estado: string;
+  modo: string;
   items: ItemCuadro[];
   totales: Totales;
   duracion_ms: number | null;

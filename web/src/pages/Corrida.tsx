@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import TablaItems from "@/components/corrida/TablaItems";
-import { getCorrida, descargarCuadro } from "@/api/corridas";
+import { getCorrida, descargarCuadro, congelarCorrida, activarCorrida } from "@/api/corridas";
 import { cop, pct } from "@/lib/moneda";
 import { fmtDuracion } from "@/lib/tiempo";
 import { useArmadoVivo } from "@/lib/armado";
@@ -34,6 +34,17 @@ export default function Corrida() {
   const [corrida, setCorrida] = useState<CorridaDetalle | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  async function cambiarModo(accion: "congelar" | "activar") {
+    try {
+      const fn = accion === "congelar" ? congelarCorrida : activarCorrida;
+      const actualizada = await fn(corridaId);
+      setCorrida(actualizada);
+      toast.success(accion === "congelar" ? "Corrida congelada" : "Corrida activada");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo cambiar el modo.");
+    }
+  }
 
   useEffect(() => {
     if (live) {
@@ -77,6 +88,7 @@ export default function Corrida() {
         items: vivo.filas,
         totales: totalesDe(vivo.filas),
         duracion_ms: null,
+        modo: "activa",
       }
     : corrida;
 
@@ -114,16 +126,21 @@ export default function Corrida() {
           </p>
         </div>
         {!live && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              descargarCuadro(corridaId).catch((e) =>
-                toast.error(e instanceof Error ? e.message : "No se pudo descargar el cuadro."))
-            }
-          >
-            Descargar cuadro
-          </Button>
+          <div className="flex items-center gap-2">
+            <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${
+              data.modo === "congelada" ? "bg-blue-100 text-blue-800" : "bg-green-100 text-green-800"}`}>
+              {data.modo === "congelada" ? "Congelada" : "Activa"}
+            </span>
+            <Button size="sm" variant="outline"
+              onClick={() => cambiarModo(data.modo === "congelada" ? "activar" : "congelar")}>
+              {data.modo === "congelada" ? "Activar" : "Congelar"}
+            </Button>
+            <Button size="sm" variant="outline"
+              onClick={() => descargarCuadro(corridaId).catch((e) =>
+                toast.error(e instanceof Error ? e.message : "No se pudo descargar el cuadro."))}>
+              Descargar cuadro
+            </Button>
+          </div>
         )}
       </div>
 
@@ -169,6 +186,7 @@ export default function Corrida() {
         corridaId={corridaId}
         items={data.items}
         onConfirmado={(c) => setCorrida(c)}
+        readOnly={data.modo === "congelada"}
       />
     </div>
   );

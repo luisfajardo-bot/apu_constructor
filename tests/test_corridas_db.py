@@ -164,3 +164,43 @@ def test_contar_items_por_apu(tmp_path):
     alm.corridas.guardar_items(cid, [_fila(0), _fila(1)])   # ambos con apu_codigo="A1"
     assert alm.corridas.contar_items_por_apu("A1") == 2
     assert alm.corridas.contar_items_por_apu("ZZZ") == 0
+
+
+def test_migracion_agrega_modo_y_snapshot(tmp_path):
+    # Base "vieja" sin modo/snapshot_json: init_schema debe agregarlas sin perder la corrida.
+    p = tmp_path / "old.db"
+    conn = sqlite3.connect(p)
+    conn.executescript(
+        "CREATE TABLE corrida (id INTEGER PRIMARY KEY AUTOINCREMENT, creada_en TEXT, "
+        "archivo TEXT, turno_def TEXT, use_ai INTEGER, estado TEXT, cuadro_path TEXT, duracion_ms INTEGER);"
+        "CREATE TABLE corrida_item (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "corrida_id INTEGER NOT NULL REFERENCES corrida(id) ON DELETE CASCADE, seq INTEGER, "
+        "item_json TEXT, status TEXT, apu_codigo TEXT, apu_nombre TEXT, unidad TEXT, shift TEXT, "
+        "origen TEXT, confianza REAL, explicacion TEXT, componentes_json TEXT, candidatos_json TEXT);")
+    conn.execute("INSERT INTO corrida (creada_en, archivo, turno_def, use_ai, estado) "
+                 "VALUES ('x','a.xlsx','DIURNO',0,'en_revision')")
+    conn.commit(); conn.close()
+    db = CorridasDB(p)
+    db.init_schema()   # agrega modo + snapshot_json (idempotente)
+    db.init_schema()   # 2ª vez: no falla
+    metas = db.listar_corridas()
+    assert len(metas) == 1 and metas[0].modo == "activa"      # existente → activa por DEFAULT
+    db.set_modo(metas[0].id, "congelada")
+    assert db.get_corrida(metas[0].id).modo == "congelada"
+
+
+def test_set_get_snapshots(tmp_path):
+    alm = _almacen_tmp(tmp_path)
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="x", archivo="a.xlsx", turno_def="DIURNO",
+        use_ai=False, estado="en_revision"))
+    alm.corridas.guardar_items(cid, [_fila(0), _fila(1)])
+    alm.corridas.set_snapshot(cid, 0, {
+        "composicion": [{"insumo_codigo": "100", "insumo_nombre": "CEMENTO", "unidad": "KG",
+                         "rendimiento": 2.0, "precio_unitario": 1000.0, "fuente_precio": "PRECIO IDU",
+                         "costo": 2000.0, "calidad_cruce": "exacto"}],
+        "costo_unitario": 2000.0})
+    snaps = alm.corridas.get_snapshots(cid)
+    assert set(snaps.keys()) == {0}                       # solo el ítem con snapshot
+    assert snaps[0]["costo_unitario"] == 2000.0
+    assert snaps[0]["composicion"][0]["insumo_codigo"] == "100"

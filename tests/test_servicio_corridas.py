@@ -1,6 +1,11 @@
 # tests/test_servicio_corridas.py
+import pytest
+
 from apu_tool.datos.almacen import Almacen
-from apu_tool.nucleo.models import Apu, ApuComponent, Insumo, LicitacionItem
+from apu_tool.nucleo.models import (
+    Apu, ApuComponent, CorridaItemRow, CorridaMeta, Insumo, LicitacionItem,
+)
+from apu_tool.servicio import corridas
 from apu_tool.servicio import corridas as svc
 
 
@@ -164,3 +169,80 @@ def test_vista_y_lista_exponen_duracion(tmp_path):
     cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False)
     assert "duracion_ms" in svc.vista_corrida(alm, cid)
     assert "duracion_ms" in svc.listar_corridas(alm)[0]
+
+
+def _alm_con_apu(tmp_path):
+    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
+                  corridas_path=tmp_path / "c.db")
+    alm.init_schema()
+    alm.precios.insert_insumos([Insumo("100", "CEMENTO", "KG", "MAT", 1000.0, "PRECIO IDU")])
+    alm.apus.crear_apu(Apu("A1", "MURO", "M2", "DIURNO", "ESTR"),
+                       [ApuComponent("A1", "DIURNO", "100", "CEMENTO", "KG", 2.0, 0.0)])
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="x", archivo="a.xlsx", turno_def="DIURNO",
+        use_ai=False, estado="en_revision"))
+    item = LicitacionItem(item="1", descripcion="muro", unidad="M2", cantidad=1.0,
+                          precio_contractual=10000.0, shift="DIURNO")
+    row = CorridaItemRow(
+        seq=0, item=item, status="auto", apu_codigo="A1", apu_nombre="MURO",
+        unidad="M2", shift="DIURNO", origen="historico", confianza=1.0, explicacion="",
+        componentes=[{"insumo_codigo": "100", "insumo_nombre": "CEMENTO", "unidad": "KG",
+                      "rendimiento": 2.0}], candidatos=[])
+    alm.corridas.guardar_items(cid, [row])
+    return alm, cid
+
+
+def test_activa_relee_composicion_de_biblioteca(tmp_path):
+    alm, cid = _alm_con_apu(tmp_path)
+    v1 = corridas.vista_corrida(alm, cid)
+    assert v1["modo"] == "activa"
+    assert v1["items"][0]["costo_unitario"] == 2000.0        # 2.0 * 1000
+    # editar el APU en la biblioteca: rendimiento 2.0 -> 3.0
+    alm.apus.editar_apu(Apu("A1", "MURO", "M2", "DIURNO", "ESTR"),
+                        [ApuComponent("A1", "DIURNO", "100", "CEMENTO", "KG", 3.0, 0.0)])
+    v2 = corridas.vista_corrida(alm, cid)
+    assert v2["items"][0]["costo_unitario"] == 3000.0        # activa re-leyó la biblioteca
+
+
+def test_congelar_fija_todo_y_activar_libera(tmp_path):
+    alm, cid = _alm_con_apu(tmp_path)
+    v = corridas.congelar(alm, cid)
+    assert v["modo"] == "congelada"
+    congelado = v["items"][0]["costo_unitario"]              # 2000.0
+    # cambiar el APU y el precio del insumo: la congelada NO debe moverse
+    alm.apus.editar_apu(Apu("A1", "MURO", "M2", "DIURNO", "ESTR"),
+                        [ApuComponent("A1", "DIURNO", "100", "CEMENTO", "KG", 5.0, 0.0)])
+    alm.precios.set_precio("100", 9999.0, "COMPRAS")
+    assert corridas.vista_corrida(alm, cid)["items"][0]["costo_unitario"] == congelado
+    # activar → vuelve a seguir la biblioteca
+    v2 = corridas.activar(alm, cid)
+    assert v2["modo"] == "activa"
+    assert corridas.vista_corrida(alm, cid)["items"][0]["costo_unitario"] == 5.0 * 9999.0
+
+
+def test_confirmar_bloqueado_si_congelada(tmp_path):
+    alm, cid = _alm_con_apu(tmp_path)
+    corridas.congelar(alm, cid)
+    with pytest.raises(corridas.CorridaCongelada):
+        corridas.confirmar_item(alm, cid, 0, "A1", "DIURNO")
+
+
+def test_generar_cuadro_auto_congela(tmp_path):
+    alm, cid = _alm_con_apu(tmp_path)
+    out = corridas.generar_cuadro(alm, cid)
+    assert out is not None
+    meta = alm.corridas.get_corrida(cid)
+    assert meta.modo == "congelada" and meta.estado == "finalizada"
+    assert alm.corridas.get_snapshots(cid)                   # hay snapshots
+
+
+def test_generar_cuadro_respeta_snapshot_si_ya_congelada(tmp_path):
+    alm, cid = _alm_con_apu(tmp_path)
+    corridas.congelar(alm, cid)                              # snapshot: costo_unitario 2000.0
+    # editar el APU en la biblioteca DESPUÉS de congelar
+    alm.apus.editar_apu(Apu("A1", "MURO", "M2", "DIURNO", "ESTR"),
+                        [ApuComponent("A1", "DIURNO", "100", "CEMENTO", "KG", 5.0, 0.0)])
+    corridas.generar_cuadro(alm, cid)                        # NO debe recongelar
+    # la vista congelada sigue en 2000 (no 5000): el cuadro respetó el snapshot emitido
+    assert corridas.vista_corrida(alm, cid)["items"][0]["costo_unitario"] == 2000.0
+    assert alm.corridas.get_corrida(cid).estado == "finalizada"

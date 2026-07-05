@@ -210,6 +210,7 @@ class CorridaMeta:
     estado: str                   # 'en_revision' | 'finalizada'
     cuadro_path: Optional[str] = None
     duracion_ms: Optional[int] = None
+    modo: str = "activa"
 
 
 @dataclass

@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS corrida (
   use_ai        INTEGER,
   estado        TEXT NOT NULL,
   cuadro_path   TEXT,
-  duracion_ms   INTEGER
+  duracion_ms   INTEGER,
+  modo          TEXT NOT NULL DEFAULT 'activa'
 );
 
 CREATE TABLE IF NOT EXISTS corrida_item (
@@ -23,7 +24,8 @@ CREATE TABLE IF NOT EXISTS corrida_item (
   confianza     REAL,
   explicacion   TEXT,
   componentes_json TEXT,
-  candidatos_json  TEXT
+  candidatos_json  TEXT,
+  snapshot_json    TEXT
 );
 
 CREATE INDEX IF NOT EXISTS ix_corrida_item ON corrida_item(corrida_id, seq);

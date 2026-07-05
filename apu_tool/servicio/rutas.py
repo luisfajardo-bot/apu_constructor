@@ -226,9 +226,31 @@ def get_item(cid: int, seq: int, alm: Almacen = Depends(get_almacen),
 def confirmar(cid: int, seq: int, body: ConfirmarIn,
               alm: Almacen = Depends(get_almacen),
               _: object = Depends(requiere_rol("consulta"))):
-    v = svc.confirmar_item(alm, cid, seq, body.apu_codigo, body.shift)
+    try:
+        v = svc.confirmar_item(alm, cid, seq, body.apu_codigo, body.shift)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para modificar.")
     if v is None:
         raise HTTPException(status_code=404, detail="Ítem no encontrado.")
+    return v
+
+
+@router.post("/corridas/{cid}/congelar")
+def congelar(cid: int, alm: Almacen = Depends(get_almacen),
+             _: object = Depends(requiere_rol("consulta"))):
+    v = svc.congelar(alm, cid)
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return v
+
+
+@router.post("/corridas/{cid}/activar")
+def activar(cid: int, alm: Almacen = Depends(get_almacen),
+            _: object = Depends(requiere_rol("consulta"))):
+    v = svc.activar(alm, cid)
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v
 
 

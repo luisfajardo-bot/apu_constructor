@@ -45,10 +45,10 @@ class CorridasPg:
     def _insert_corrida(self, conn, meta: CorridaMeta) -> int:
         cur = conn.execute(
             "INSERT INTO corridas.corrida (creada_en, archivo, turno_def, use_ai, estado, "
-            "cuadro_path, duracion_ms) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            "cuadro_path, duracion_ms, modo) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
             (meta.creada_en, meta.archivo, meta.turno_def,
              None if meta.use_ai is None else int(meta.use_ai),
-             meta.estado, meta.cuadro_path, meta.duracion_ms))
+             meta.estado, meta.cuadro_path, meta.duracion_ms, meta.modo))
         return int(cur.fetchone()["id"])
 
     def crear_corrida(self, meta: CorridaMeta) -> int:
@@ -96,6 +96,24 @@ class CorridasPg:
             conn.execute("UPDATE corridas.corrida SET duracion_ms=%s WHERE id=%s",
                          (int(duracion_ms), int(corrida_id)))
 
+    def set_modo(self, corrida_id: int, modo: str) -> None:
+        with self.cx.connection() as conn:
+            conn.execute("UPDATE corridas.corrida SET modo=%s WHERE id=%s",
+                         (modo, int(corrida_id)))
+
+    def set_snapshot(self, corrida_id: int, seq: int, payload: dict) -> None:
+        with self.cx.connection() as conn:
+            conn.execute(
+                "UPDATE corridas.corrida_item SET snapshot_json=%s WHERE corrida_id=%s AND seq=%s",
+                (json.dumps(payload, ensure_ascii=False), int(corrida_id), int(seq)))
+
+    def get_snapshots(self, corrida_id: int) -> dict[int, dict]:
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT seq, snapshot_json FROM corridas.corrida_item "
+                "WHERE corrida_id=%s AND snapshot_json IS NOT NULL", (int(corrida_id),)).fetchall()
+        return {r["seq"]: json.loads(r["snapshot_json"]) for r in rows}
+
     # ---- lectura ----
     def _row_to_item(self, r) -> CorridaItemRow:
         return CorridaItemRow(
@@ -113,7 +131,7 @@ class CorridasPg:
             turno_def=r["turno_def"],
             use_ai=None if r["use_ai"] is None else bool(r["use_ai"]),
             estado=r["estado"], cuadro_path=r["cuadro_path"],
-            duracion_ms=r["duracion_ms"])
+            duracion_ms=r["duracion_ms"], modo=(r["modo"] or "activa"))
 
     def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
         with self.cx.connection() as conn:

@@ -37,6 +37,7 @@ export default function BuscadorApu({
   useEffect(() => {
     if (q.trim() === "") {
       setResultados([]);
+      setAbierto(false);
       return;
     }
     let cancelado = false;

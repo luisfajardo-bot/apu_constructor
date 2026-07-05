@@ -7,6 +7,7 @@ import { getCorrida, descargarCuadro, congelarCorrida, activarCorrida } from "@/
 import { cop, pct } from "@/lib/moneda";
 import { fmtDuracion } from "@/lib/tiempo";
 import { useArmadoVivo } from "@/lib/armado";
+import { useCorridaTabla } from "@/lib/corridaTabla";
 import type { CorridaDetalle, ItemCuadro, Totales } from "@/lib/tipos";
 
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
@@ -34,6 +35,7 @@ export default function Corrida() {
   const [corrida, setCorrida] = useState<CorridaDetalle | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const control = useCorridaTabla(corrida?.items ?? []);
 
   async function cambiarModo(accion: "congelar" | "activar") {
     try {
@@ -110,7 +112,9 @@ export default function Corrida() {
 
   if (!data) return null;
 
-  const { totales } = data;
+  const enVivo = live;
+  const filas = enVivo ? data.items : control.filtradas;
+  const totales = enVivo ? data.totales : totalesDe(filas);
   const margenNegativo = totales.margen < 0;
 
   return (
@@ -169,6 +173,8 @@ export default function Corrida() {
           <span className="text-blue-700 font-medium">
             Armando {vivo.filas.length}/{vivo.total}…
           </span>
+        ) : control.hayFiltros ? (
+          <span>{filas.length} de {control.totalItems} ítems</span>
         ) : (
           <span>
             {totales.n_items} APUs · armada en {fmtDuracion(data.duracion_ms)}
@@ -184,9 +190,10 @@ export default function Corrida() {
       {/* Dense table (se llena APU por APU en vivo) */}
       <TablaItems
         corridaId={corridaId}
-        items={data.items}
+        items={filas}
         onConfirmado={(c) => setCorrida(c)}
         readOnly={data.modo === "congelada"}
+        control={enVivo ? undefined : control}
       />
     </div>
   );

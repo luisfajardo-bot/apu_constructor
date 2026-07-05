@@ -59,3 +59,29 @@ test("muestra el error si la reasignación falla en un ítem matched", async () 
 
   expect(await screen.findByText("fallo de red")).toBeTruthy();
 });
+
+test("oculta el buscador 'Cambiar APU' cuando la corrida está en solo lectura", async () => {
+  const { default: TablaItems } = await import("./TablaItems");
+  render(
+    <TablaItems
+      corridaId={1}
+      items={[ITEM]}
+      onConfirmado={() => {}}
+      readOnly={true}
+    />,
+  );
+
+  // Expandir la fila (lazy-fetch del detalle)
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+
+  // Esperar a que el detalle cargue (aparece el header del APU)
+  await screen.findByText(/APU: 111/);
+
+  // El buscador "Cambiar APU" NO debe estar presente en modo solo lectura
+  expect(screen.queryByPlaceholderText(/Buscar APU/i)).toBeNull();
+
+  // El aviso de solo lectura sí debe estar presente
+  expect(
+    screen.getByText(/Corrida congelada \(solo lectura\)/i),
+  ).toBeTruthy();
+});

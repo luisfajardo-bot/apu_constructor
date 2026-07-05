@@ -312,15 +312,17 @@ function DetalleExpandido({
           Corrida congelada (solo lectura). Activá la corrida para modificar.
         </p>
       )}
-      <section>
-        <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-          Cambiar APU
-        </h4>
-        <BuscadorApu
-          disabled={confirmando !== null || readOnly}
-          onElegir={(apu) => onConfirmar(seq, apu.codigo, apu.turno)}
-        />
-      </section>
+      {!readOnly && (
+        <section>
+          <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+            Cambiar APU
+          </h4>
+          <BuscadorApu
+            disabled={confirmando !== null || readOnly}
+            onElegir={(apu) => onConfirmar(seq, apu.codigo, apu.turno)}
+          />
+        </section>
+      )}
 
       {errorConfirm && (
         <p className="text-xs text-destructive">{errorConfirm}</p>

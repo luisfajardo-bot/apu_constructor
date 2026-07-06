@@ -3,6 +3,10 @@
 Auto-marcado con auditoría; idempotente. Regla de turno del sub-APU: hereda el del
 APU padre si existe en ese turno; si no, DIURNO; si no, el único turno disponible.
 NO ve la IA (solo estructura). Persistencia via los repos (sin SQL crudo aquí).
+
+Además provee la detección de sub-APUs en un lote de import: `mapa_codigos_apu`
+(codigo -> turnos, biblioteca ∪ lote), `detectar_subapus_lote` (vínculos padre→sub)
+y `marcar_comps_subapu` (aplica esos vínculos sobre los componentes a insertar).
 """
 from __future__ import annotations
 

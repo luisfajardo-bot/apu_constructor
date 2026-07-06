@@ -24,7 +24,7 @@ def test_mapa_une_biblioteca_y_lote(tmp_path):
 def test_detecta_subapu_de_biblioteca_y_de_lote(tmp_path):
     alm = _alm(tmp_path)
     alm.apus.insert_apus([Apu("B", "SUB-BIBLIO", "M3", "DIURNO")])    # sub-APU ya existe
-    # lote: A usa a B (biblioteca) y a C (viene en el lote); D es insumo normal
+    # lote: A usa a B (biblioteca) y a C (viene en el lote); 100 es insumo normal
     apus_lote = [Apu("A", "PADRE", "M2", "DIURNO"), Apu("C", "SUB-LOTE", "M3", "DIURNO")]
     comps_por = {
         ("A", "DIURNO"): [

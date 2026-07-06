@@ -261,6 +261,7 @@ export function SeccionSubApus({ vinculos }: { vinculos: VinculoSubApu[] }) {
             {vinculos.map((v, i) => (
               <tr key={`${v.apu_codigo}-${v.sub_codigo}-${i}`} className="even:bg-muted/10">
                 <td className="px-2 py-0.5 font-mono">{v.apu_codigo}</td>
+                <td className="px-2 py-0.5 text-muted-foreground">({v.apu_turno})</td>
                 <td className="px-2 py-0.5 text-muted-foreground">→ usa</td>
                 <td className="px-2 py-0.5 font-mono">{v.sub_codigo}</td>
                 <td className="px-2 py-0.5">({v.sub_turno})</td>

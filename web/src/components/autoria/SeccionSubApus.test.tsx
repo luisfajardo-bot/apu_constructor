@@ -25,6 +25,7 @@ test("lista los sub-APUs detectados con su origen", () => {
   );
   expect(screen.getByText(/Sub-APUs detectados/)).toBeTruthy();
   expect(screen.getByText("3010")).toBeTruthy();
+  expect(screen.getAllByText("(DIURNO)").length).toBeGreaterThan(0);
   expect(screen.getByText(/en el lote/)).toBeTruthy();
   expect(screen.getByText(/en biblioteca/)).toBeTruthy();
 });

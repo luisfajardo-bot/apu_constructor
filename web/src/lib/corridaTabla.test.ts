@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { expect, test } from "vitest";
 import {
   filtrar, ordenar, opcionesDe, siguienteOrden, hayFiltrosActivos,
   normalizar, FILTROS_VACIOS,

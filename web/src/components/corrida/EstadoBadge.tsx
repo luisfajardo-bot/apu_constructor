@@ -21,6 +21,10 @@ const CONFIG: Record<string, { label: string; cls: string }> = {
   },
 };
 
+export function etiquetaEstado(status: string): string {
+  return CONFIG[status.toUpperCase()]?.label ?? status.toUpperCase();
+}
+
 interface EstadoBadgeProps {
   status: Estado;
 }

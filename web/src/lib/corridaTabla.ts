@@ -96,7 +96,7 @@ export function ordenar(items: ItemCuadro[], orden: EstadoOrden): ItemCuadro[] {
   const esTexto = CLAVES_TEXTO.includes(clave);
   return [...items].sort((a, b) => {
     const cmp = esTexto
-      ? valorTexto(a, clave).localeCompare(valorTexto(b, clave), "es", { numeric: true })
+      ? valorTexto(a, clave).localeCompare(valorTexto(b, clave), "es-CO", { numeric: true })
       : valorNumero(a, clave) - valorNumero(b, clave);
     return cmp * factor;
   });
@@ -108,7 +108,7 @@ export function opcionesDe(items: ItemCuadro[], clave: "unidad" | "status"): str
     const v = clave === "unidad" ? it.unidad : it.status;
     if (v) set.add(v);
   }
-  return [...set].sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
+  return [...set].sort((a, b) => a.localeCompare(b, "es-CO", { numeric: true }));
 }
 
 export function siguienteOrden(prev: EstadoOrden, clave: ClaveColumna): EstadoOrden {

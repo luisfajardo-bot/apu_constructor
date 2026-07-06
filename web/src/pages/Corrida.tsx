@@ -112,9 +112,8 @@ export default function Corrida() {
 
   if (!data) return null;
 
-  const enVivo = live;
-  const filas = enVivo ? data.items : control.filtradas;
-  const totales = enVivo ? data.totales : totalesDe(filas);
+  const filas = live ? data.items : control.filtradas;
+  const totales = live ? data.totales : totalesDe(filas);
   const margenNegativo = totales.margen < 0;
 
   return (
@@ -193,7 +192,7 @@ export default function Corrida() {
         items={filas}
         onConfirmado={(c) => setCorrida(c)}
         readOnly={data.modo === "congelada"}
-        control={enVivo ? undefined : control}
+        control={live ? undefined : control}
       />
     </div>
   );

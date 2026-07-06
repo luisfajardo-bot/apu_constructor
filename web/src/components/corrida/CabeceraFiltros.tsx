@@ -1,5 +1,6 @@
 import { TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ClaveColumna, ControlCorridaTabla, FiltroRango } from "@/lib/corridaTabla";
+import { etiquetaEstado } from "@/components/corrida/EstadoBadge";
 
 const inputCls =
   "h-6 w-full rounded border border-border bg-transparent px-1 text-[11px] outline-none focus-visible:border-ring";
@@ -9,6 +10,8 @@ const miniCls =
 type Tipo = "texto" | "select" | "num";
 interface Col { clave: ClaveColumna; label: string; tipo: Tipo; ancho: string; derecha?: boolean }
 
+// Cada `clave` está emparejada con su `tipo` correcto, así que los casts
+// `as string`/`as FiltroRango` al leer `control.filtros[clave]` son seguros.
 const COLS: Col[] = [
   { clave: "descripcion", label: "Descripción", tipo: "texto", ancho: "" },
   { clave: "unidad", label: "Und", tipo: "select", ancho: "w-12" },
@@ -81,7 +84,7 @@ export default function CabeceraFiltros({ control }: { control: ControlCorridaTa
               >
                 <option value="">(todas)</option>
                 {(c.clave === "unidad" ? control.opcionesUnidad : control.opcionesStatus).map((o) => (
-                  <option key={o} value={o}>{o}</option>
+                  <option key={o} value={o}>{c.clave === "status" ? etiquetaEstado(o) : o}</option>
                 ))}
               </select>
             )}

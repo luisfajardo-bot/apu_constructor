@@ -23,6 +23,9 @@ from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
 from apu_tool.nucleo.texto import normalizar
 from apu_tool.servicio.auditoria import nuevo_lote, registrar_auditoria
 from apu_tool.servicio.insumos import _insumo_out, _norm_h, _to_float
+from apu_tool.servicio.subapus import (
+    mapa_codigos_apu, detectar_subapus_lote, marcar_comps_subapu,
+)
 
 
 # ----------------------------------------------------------------- individual
@@ -307,32 +310,41 @@ def _parse_apus(contenido: bytes):
 
 def preview_importar_apus(alm: Almacen, contenido: bytes) -> dict:
     apus, comps_por = _parse_apus(contenido)
-    crear, ya_existe = [], []
+    crear, ya_existe, crear_apus = [], [], []
     for a in apus:
         info = {"codigo": a.codigo, "turno": a.shift, "nombre": a.nombre,
                 "unidad": a.unidad, "grupo": a.grupo,
                 "n_componentes": len(comps_por.get((a.codigo, a.shift), []))}
-        (ya_existe if alm.apus.get_apu(a.codigo, a.shift) else crear).append(info)
-    return {"crear": crear, "ya_existe": ya_existe}
+        if alm.apus.get_apu(a.codigo, a.shift):
+            ya_existe.append(info)
+        else:
+            crear.append(info)
+            crear_apus.append(a)
+    subapus = detectar_subapus_lote(alm, apus, comps_por, solo=crear_apus)
+    return {"crear": crear, "ya_existe": ya_existe, "subapus": subapus}
 
 
 def aplicar_importar_apus(alm: Almacen, contenido: bytes, actor=None) -> dict:
     apus, comps_por = _parse_apus(contenido)
-    creados, errores = 0, []
+    mapa = mapa_codigos_apu(alm, apus)
+    creados, subapus_marcados, errores = 0, 0, []
     lote = nuevo_lote()
     for a in apus:
         if alm.apus.get_apu(a.codigo, a.shift):
             continue                                   # ya existe: no se pisa
         try:
             comps = comps_por.get((a.codigo, a.shift), [])
+            comps, n_sub = marcar_comps_subapu(comps, a.shift, mapa)
             with alm.transaccion("apus") as conn:
                 alm.apus.crear_apu(a, comps, conn=conn)
                 registrar_auditoria(
                     alm, conn, actor, "apu.crear", "apu", a.codigo, antes=None,
                     despues={"codigo": a.codigo, "turno": a.shift, "nombre": a.nombre,
-                             "unidad": a.unidad, "grupo": a.grupo, "n_componentes": len(comps)},
+                             "unidad": a.unidad, "grupo": a.grupo,
+                             "n_componentes": len(comps), "n_subapus": n_sub},
                     contexto={"origen": "import", "lote_id": lote})
             creados += 1
+            subapus_marcados += n_sub
         except ValueError as e:
             errores.append({"codigo": a.codigo, "turno": a.shift, "error": str(e)})
-    return {"creados": creados, "errores": errores}
+    return {"creados": creados, "subapus_marcados": subapus_marcados, "errores": errores}

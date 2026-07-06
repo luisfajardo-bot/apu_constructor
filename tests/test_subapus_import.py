@@ -1,5 +1,6 @@
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Apu, ApuComponent
+from apu_tool.servicio import autoria
 from apu_tool.servicio.subapus import (
     mapa_codigos_apu, detectar_subapus_lote, marcar_comps_subapu,
 )
@@ -59,5 +60,42 @@ def test_marcar_comps_subapu(tmp_path):
     assert n == 1
     sub = [c for c in marcados if c.insumo_codigo == "B"][0]
     ins = [c for c in marcados if c.insumo_codigo == "100"][0]
+    assert sub.tipo == "apu" and sub.ref_shift == "DIURNO"
+    assert ins.tipo == "insumo"
+
+
+def _parse_fake(apus_lote, comps_por):
+    def _fake(_contenido):
+        return apus_lote, comps_por
+    return _fake
+
+
+def test_preview_reporta_subapus(tmp_path, monkeypatch):
+    alm = _alm(tmp_path)
+    alm.apus.insert_apus([Apu("B", "SUB-BIBLIO", "M3", "DIURNO")])
+    apus_lote = [Apu("A", "PADRE", "M2", "DIURNO")]
+    comps_por = {("A", "DIURNO"): [
+        ApuComponent("A", "DIURNO", "B", "SUB-BIBLIO", "M3", 1.0, 0.0),
+        ApuComponent("A", "DIURNO", "100", "CEMENTO", "KG", 3.0, 0.0)]}
+    monkeypatch.setattr(autoria, "_parse_apus", _parse_fake(apus_lote, comps_por))
+    res = autoria.preview_importar_apus(alm, b"x")
+    assert len(res["crear"]) == 1
+    assert len(res["subapus"]) == 1
+    assert res["subapus"][0]["sub_codigo"] == "B" and res["subapus"][0]["origen"] == "biblioteca"
+
+
+def test_aplicar_marca_subapus(tmp_path, monkeypatch):
+    alm = _alm(tmp_path)
+    alm.apus.insert_apus([Apu("B", "SUB-BIBLIO", "M3", "DIURNO")])
+    apus_lote = [Apu("A", "PADRE", "M2", "DIURNO")]
+    comps_por = {("A", "DIURNO"): [
+        ApuComponent("A", "DIURNO", "B", "SUB-BIBLIO", "M3", 1.0, 0.0),
+        ApuComponent("A", "DIURNO", "100", "CEMENTO", "KG", 3.0, 0.0)]}
+    monkeypatch.setattr(autoria, "_parse_apus", _parse_fake(apus_lote, comps_por))
+    res = autoria.aplicar_importar_apus(alm, b"x")
+    assert res["creados"] == 1 and res["subapus_marcados"] == 1
+    comps = alm.apus.get_components("A", "DIURNO")
+    sub = [c for c in comps if c.insumo_codigo == "B"][0]
+    ins = [c for c in comps if c.insumo_codigo == "100"][0]
     assert sub.tipo == "apu" and sub.ref_shift == "DIURNO"
     assert ins.tipo == "insumo"

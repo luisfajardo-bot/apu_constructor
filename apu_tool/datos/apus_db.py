@@ -44,6 +44,13 @@ class ApusDB:
     def init_schema(self) -> None:
         with self.connect() as conn:
             conn.executescript(_load_schema())
+            cols = {r["name"] for r in
+                    conn.execute("PRAGMA table_info(apu_componentes)").fetchall()}
+            if "tipo" not in cols:
+                conn.execute("ALTER TABLE apu_componentes "
+                             "ADD COLUMN tipo TEXT NOT NULL DEFAULT 'insumo'")
+            if "ref_shift" not in cols:
+                conn.execute("ALTER TABLE apu_componentes ADD COLUMN ref_shift TEXT")
 
     def reset(self) -> None:
         """Reconstruye el esquema desde cero (descarta y recrea desde db/apus.sql)."""
@@ -77,11 +84,12 @@ class ApusDB:
                 seq_by_key[key] = seq + 1
                 rows.append((c.apu_codigo, c.shift, seq, c.insumo_codigo,
                              c.insumo_nombre, c.unidad, c.rendimiento,
-                             c.precio_unitario_hist))
+                             c.precio_unitario_hist, c.tipo, c.ref_shift))
             conn.executemany(
                 "INSERT INTO apu_componentes "
                 "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
-                " rendimiento, precio_unitario_hist) VALUES (?,?,?,?,?,?,?,?)", rows)
+                " rendimiento, precio_unitario_hist, tipo, ref_shift) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
         return len(rows)
 
     def crear_apu(self, apu: Apu, componentes: list[ApuComponent], conn=None) -> None:
@@ -104,13 +112,14 @@ class ApusDB:
             "INSERT INTO apus (codigo, shift, nombre, unidad, grupo) VALUES (?,?,?,?,?)",
             (str(apu.codigo), apu.shift, apu.nombre, apu.unidad, apu.grupo))
         rows = [(str(apu.codigo), apu.shift, seq, c.insumo_codigo, c.insumo_nombre,
-                 c.unidad, c.rendimiento, c.precio_unitario_hist)
+                 c.unidad, c.rendimiento, c.precio_unitario_hist, c.tipo, c.ref_shift)
                 for seq, c in enumerate(componentes)]
         if rows:
             conn.executemany(
                 "INSERT INTO apu_componentes "
                 "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
-                " rendimiento, precio_unitario_hist) VALUES (?,?,?,?,?,?,?,?)", rows)
+                " rendimiento, precio_unitario_hist, tipo, ref_shift) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
 
     def editar_apu(self, apu: Apu, componentes: list[ApuComponent], conn=None) -> None:
         """Edita cabecera + reemplaza composición de un APU existente. ValueError si no existe."""
@@ -131,13 +140,14 @@ class ApusDB:
         conn.execute("DELETE FROM apu_componentes WHERE apu_codigo=? AND shift=?",
                      (str(apu.codigo), apu.shift))
         rows = [(str(apu.codigo), apu.shift, seq, c.insumo_codigo, c.insumo_nombre,
-                 c.unidad, c.rendimiento, c.precio_unitario_hist)
+                 c.unidad, c.rendimiento, c.precio_unitario_hist, c.tipo, c.ref_shift)
                 for seq, c in enumerate(componentes)]
         if rows:
             conn.executemany(
                 "INSERT INTO apu_componentes "
                 "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
-                " rendimiento, precio_unitario_hist) VALUES (?,?,?,?,?,?,?,?)", rows)
+                " rendimiento, precio_unitario_hist, tipo, ref_shift) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
 
     def borrar_apu(self, codigo: str, shift: str, conn=None) -> bool:
         """Borra componentes + cabecera de un APU. False si no existía."""
@@ -222,7 +232,8 @@ class ApusDB:
             apu_codigo=r["apu_codigo"], shift=r["shift"], insumo_codigo=r["insumo_codigo"],
             insumo_nombre=r["insumo_nombre"], unidad=r["unidad"],
             rendimiento=r["rendimiento"] or 0.0,
-            precio_unitario_hist=r["precio_unitario_hist"] or 0.0) for r in rows]
+            precio_unitario_hist=r["precio_unitario_hist"] or 0.0,
+            tipo=(r["tipo"] or "insumo"), ref_shift=(r["ref_shift"] or "")) for r in rows]
 
     def get_depriced_apu(self, codigo: str, shift: str) -> Optional[DePricedApu]:
         apu = self.get_apu(codigo, shift)
@@ -233,7 +244,8 @@ class ApusDB:
             codigo=apu.codigo, nombre=apu.nombre, unidad=apu.unidad,
             shift=apu.shift, grupo=apu.grupo,
             componentes=tuple(
-                DePricedComponent(c.insumo_codigo, c.insumo_nombre, c.unidad, c.rendimiento)
+                DePricedComponent(c.insumo_codigo, c.insumo_nombre, c.unidad,
+                                  c.rendimiento, c.tipo)
                 for c in comps))
 
     def componentes_para_integridad(self) -> list[tuple[str, str]]:

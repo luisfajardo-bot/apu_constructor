@@ -67,3 +67,25 @@ def test_list_apus_filtra_y_pagina(apus):
     assert total_f == 1 and items_f[0].codigo == "B2"
     _, total_g = apus.list_apus(grupo="ACABADOS")
     assert total_g == 1
+
+
+def test_round_trip_subapu(apus):
+    apus.crear_apu(
+        Apu("C3", "COMPUESTO", "M2", "DIURNO"),
+        [ApuComponent("C3", "DIURNO", "3017", "SUB APU", "M3", 1.0, 0.0,
+                      tipo="apu", ref_shift="DIURNO"),
+         ApuComponent("C3", "DIURNO", "100", "CEMENTO", "KG", 2.0, 900)])
+    comps = apus.get_components("C3", "DIURNO")
+    sub = [c for c in comps if c.insumo_codigo == "3017"][0]
+    ins = [c for c in comps if c.insumo_codigo == "100"][0]
+    assert sub.tipo == "apu" and sub.ref_shift == "DIURNO"
+    assert ins.tipo == "insumo" and ins.ref_shift == ""
+
+
+def test_depriced_propaga_tipo(apus):
+    apus.crear_apu(
+        Apu("C4", "COMP", "M2", "DIURNO"),
+        [ApuComponent("C4", "DIURNO", "3017", "SUB", "M3", 1.0, 0.0,
+                      tipo="apu", ref_shift="DIURNO")])
+    dp = apus.get_depriced_apu("C4", "DIURNO")
+    assert dp.componentes[0].tipo == "apu"

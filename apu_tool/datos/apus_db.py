@@ -269,11 +269,11 @@ class ApusDB:
         """Componentes tipo='insumo' cuyo código es un APU (candidatos a sub-APU)."""
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT apu_codigo, shift, seq, insumo_codigo FROM apu_componentes "
+                "SELECT apu_codigo, shift, seq, insumo_codigo, insumo_nombre FROM apu_componentes "
                 "WHERE tipo = 'insumo' AND insumo_codigo IN (SELECT codigo FROM apus)"
             ).fetchall()
-        return [{"apu_codigo": r["apu_codigo"], "shift": r["shift"],
-                 "seq": r["seq"], "insumo_codigo": r["insumo_codigo"]} for r in rows]
+        return [{"apu_codigo": r["apu_codigo"], "shift": r["shift"], "seq": r["seq"],
+                 "insumo_codigo": r["insumo_codigo"], "insumo_nombre": r["insumo_nombre"]} for r in rows]
 
     def set_componente_subapu(self, apu_codigo: str, shift: str, seq: int,
                               ref_shift: str, conn=None) -> None:

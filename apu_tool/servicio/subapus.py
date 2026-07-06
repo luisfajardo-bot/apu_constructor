@@ -16,6 +16,7 @@ from typing import Optional
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import ApuComponent, Perfil
+from apu_tool.nucleo.texto import normalizar
 from apu_tool.servicio.auditoria import registrar_auditoria
 
 
@@ -38,16 +39,37 @@ def mapa_codigos_apu(alm: Almacen, apus_extra=()) -> dict:
     return m
 
 
+def nombres_apu(alm: Almacen, apus_extra=()) -> dict:
+    """codigo -> {nombres normalizados de los APUs con ese código}, biblioteca ∪ lote.
+    Desambigua sub-APU de insumo cuando comparten código pero difieren en descripción
+    (p.ej. 8044 es APU 'CODO EN ACERO' e insumo 'ANDAMIO TUBULAR')."""
+    m: dict[str, set] = {}
+    for cod, nom, _sh in alm.apus.apu_index():
+        m.setdefault(cod, set()).add(normalizar(nom))
+    for a in apus_extra:
+        m.setdefault(a.codigo, set()).add(normalizar(a.nombre))
+    return m
+
+
+def _es_ref_apu(insumo_codigo: str, insumo_nombre: str, mapa: dict, nombres: dict) -> bool:
+    """Un componente refiere a un sub-APU sólo si su código es un APU Y su nombre
+    coincide (normalizado) con el de ese APU. El match por código solo daba falsos
+    positivos cuando un código existe a la vez como insumo con otra descripción."""
+    return bool(insumo_codigo) and insumo_codigo in mapa \
+        and normalizar(insumo_nombre) in nombres.get(insumo_codigo, set())
+
+
 def detectar_subapus_lote(alm: Almacen, apus_lote, comps_por, solo=None) -> list[dict]:
     """Vínculos sub-APU de los componentes de `solo` (o de todos los del lote).
-    El mapa de códigos-APU cubre biblioteca ∪ apus_lote completo."""
+    El mapa de códigos/nombres-APU cubre biblioteca ∪ apus_lote completo."""
     scan = solo if solo is not None else apus_lote
     lib_codes = {cod for cod, _nom, _sh in alm.apus.apu_index()}
     mapa = mapa_codigos_apu(alm, apus_lote)
+    nombres = nombres_apu(alm, apus_lote)
     vinculos: list[dict] = []
     for a in scan:
         for c in comps_por.get((a.codigo, a.shift), []):
-            if c.insumo_codigo and c.insumo_codigo in mapa:
+            if _es_ref_apu(c.insumo_codigo, c.insumo_nombre, mapa, nombres):
                 vinculos.append({
                     "apu_codigo": a.codigo, "apu_turno": a.shift,
                     "sub_codigo": c.insumo_codigo,
@@ -57,11 +79,12 @@ def detectar_subapus_lote(alm: Almacen, apus_lote, comps_por, solo=None) -> list
     return vinculos
 
 
-def marcar_comps_subapu(comps, apu_shift: str, mapa: dict):
-    """Devuelve (comps con sub-APUs marcados tipo='apu'+ref_shift, nº marcados)."""
+def marcar_comps_subapu(comps, apu_shift: str, mapa: dict, nombres: dict):
+    """Devuelve (comps con sub-APUs marcados tipo='apu'+ref_shift, nº marcados).
+    Marca sólo cuando código Y nombre coinciden con un APU (ver `_es_ref_apu`)."""
     out, n = [], 0
     for c in comps:
-        if c.insumo_codigo and c.insumo_codigo in mapa:
+        if _es_ref_apu(c.insumo_codigo, c.insumo_nombre, mapa, nombres):
             out.append(replace(c, tipo="apu",
                                ref_shift=_ref_shift(c.insumo_codigo, apu_shift, mapa)))
             n += 1
@@ -77,8 +100,17 @@ def marcar_subapus(alm: Almacen, actor: Optional[Perfil] = None) -> dict:
         return {"apus_afectados": 0, "componentes_marcados": 0}
 
     shifts_por_codigo: dict[str, set] = {}
-    for cod, _nom, sh in alm.apus.apu_index():
+    nombres_por_codigo: dict[str, set] = {}
+    for cod, nom, sh in alm.apus.apu_index():
         shifts_por_codigo.setdefault(cod, set()).add(sh)
+        nombres_por_codigo.setdefault(cod, set()).add(normalizar(nom))
+
+    # Desambigua: sólo es sub-APU si el nombre del componente coincide con el del APU
+    # de ese código (evita marcar insumos que comparten código con un APU distinto).
+    candidatos = [c for c in candidatos
+                  if normalizar(c.get("insumo_nombre", "")) in nombres_por_codigo.get(c["insumo_codigo"], set())]
+    if not candidatos:
+        return {"apus_afectados": 0, "componentes_marcados": 0}
 
     por_padre: dict[tuple, list] = {}
     for c in candidatos:

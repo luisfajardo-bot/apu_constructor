@@ -152,6 +152,21 @@ class PreciosPg:
                 "WHERE i.codigo = %s ORDER BY i.id", (str(codigo),)).fetchall()
         return [self._fila_a_insumo(r) for r in rows]
 
+    def get_candidatos_bulk(self, codigos) -> dict:
+        codes = [c for c in dict.fromkeys(str(x) for x in codigos if x)]
+        out: dict[str, list[Insumo]] = {c: [] for c in codes}
+        if not codes:
+            return out
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT i.id, i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente "
+                "FROM precios.insumos i LEFT JOIN precios.insumo_precios p "
+                "  ON p.insumo_id = i.id AND p.vigente = 1 "
+                "WHERE i.codigo = ANY(%s) ORDER BY i.codigo, i.id", (codes,)).fetchall()
+        for r in rows:
+            out[r["codigo"]].append(self._fila_a_insumo(r))
+        return out
+
     def get_insumo_por_id(self, insumo_id: int) -> Optional[Insumo]:
         with self.cx.connection() as conn:
             r = conn.execute(

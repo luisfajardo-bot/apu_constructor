@@ -103,15 +103,22 @@ def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
     return corrida_id
 
 
-def _costear_row(alm: Almacen, row: CorridaItemRow) -> AssembledApu:
+def _costear_row(alm: Almacen, row: CorridaItemRow,
+                 pricing: Optional[PricingEngine] = None) -> AssembledApu:
     """Costeo ACTIVA: re-lee la composición del APU asignado desde la biblioteca y
     costea con precios vigentes. Si no hay apu_codigo o el APU fue borrado, usa la
-    composición guardada del ítem (respaldo)."""
-    pricing = PricingEngine(alm)
+    composición guardada del ítem (respaldo).
+
+    `pricing`: motor opcional COMPARTIDO entre filas (optimización). Sus cachés de
+    precios y de costo de sub-APUs se reusan entre ítems, evitando re-consultar el
+    mismo insumo/sub-APU una vez por fila. Si es None se crea uno por fila (como
+    antes). El caché por (código, precio vigente) da el mismo costo dentro del
+    request, así que compartirlo no cambia resultados."""
+    pricing = pricing or PricingEngine(alm)
     seed = ((row.apu_codigo or "", row.shift),)
     costed = None
     if row.apu_codigo:
-        lib = alm.apus.get_components(row.apu_codigo, row.shift)
+        lib = pricing.components(row.apu_codigo, row.shift)   # usa caché precargado si existe
         if lib:
             costed, total = pricing.cost_components(lib, seed)
     if costed is None:
@@ -163,12 +170,14 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
     if meta is None:
         return None
     rows = alm.corridas.get_items(corrida_id)
+    pricing = PricingEngine(alm)                       # motor COMPARTIDO por toda la corrida
+    pricing.precargar((r.apu_codigo, r.shift) for r in rows if r.apu_codigo)  # lote: pocas queries
     if meta.modo == "congelada":
         snaps = alm.corridas.get_snapshots(corrida_id)
         ensambles = [_assembled_desde_snapshot(r, snaps[r.seq]) if r.seq in snaps
-                     else _costear_row(alm, r) for r in rows]
+                     else _costear_row(alm, r, pricing) for r in rows]
     else:
-        ensambles = [_costear_row(alm, r) for r in rows]
+        ensambles = [_costear_row(alm, r, pricing) for r in rows]
     items = [_vista_item(ens, r.seq, r.status) for ens, r in zip(ensambles, rows)]
     tot_c = sum(i["contractual_total"] for i in items)
     tot_k = sum(i["costo_total"] for i in items)
@@ -215,8 +224,11 @@ def congelar(alm: Almacen, corrida_id: int) -> Optional[dict]:
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:
         return None
-    for r in alm.corridas.get_items(corrida_id):
-        ens = _costear_row(alm, r)
+    pricing = PricingEngine(alm)                       # motor COMPARTIDO al congelar
+    _rows = alm.corridas.get_items(corrida_id)
+    pricing.precargar((r.apu_codigo, r.shift) for r in _rows if r.apu_codigo)
+    for r in _rows:
+        ens = _costear_row(alm, r, pricing)
         payload = {"composicion": [{
             "insumo_codigo": c.insumo_codigo, "insumo_nombre": c.insumo_nombre,
             "unidad": c.unidad, "rendimiento": c.rendimiento,
@@ -294,8 +306,11 @@ def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:
         congelar(alm, corrida_id)
         snaps = alm.corridas.get_snapshots(corrida_id)
     rows = alm.corridas.get_items(corrida_id)
+    pricing = PricingEngine(alm)                       # motor COMPARTIDO al generar el cuadro
+    pricing.precargar((r.apu_codigo, r.shift) for r in rows
+                      if r.apu_codigo and r.seq not in snaps)
     assembled = [_assembled_desde_snapshot(r, snaps[r.seq]) if r.seq in snaps
-                 else _costear_row(alm, r) for r in rows]
+                 else _costear_row(alm, r, pricing) for r in rows]
     stamp = meta.creada_en.replace(":", "").replace("-", "").replace("T", "_")
     out = config.OUTPUT_DIR / f"cuadro_corrida_{corrida_id}_{stamp}.xlsx"
     write_report(assembled, out)

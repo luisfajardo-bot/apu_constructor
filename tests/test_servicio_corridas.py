@@ -5,6 +5,7 @@ from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import (
     Apu, ApuComponent, CostedComponent, CorridaItemRow, CorridaMeta, Insumo, LicitacionItem,
 )
+from apu_tool.dominio.pricing import PricingEngine
 from apu_tool.servicio import corridas
 from apu_tool.servicio.corridas import _estructura, _costear_row
 
@@ -271,6 +272,134 @@ def test_costear_row_respaldo_costea_subapu(tmp_path):
         candidatos=[])
     ens = _costear_row(alm, row)
     assert ens.costo_unitario == pytest.approx(6000)   # 3 * (2 * 1000), recursivo
+
+
+def test_costear_row_motor_compartido_no_reconsulta_precios(tmp_path):
+    """Optimización Fase 1: un PricingEngine compartido entre filas reusa el caché;
+    un insumo compartido por dos ítems se consulta a la base UNA sola vez."""
+    alm = Almacen(tmp_path / "p.db", tmp_path / "a.db", tmp_path / "c.db")
+    alm.reset()
+    alm.precios.insert_insumos([Insumo("100", "CEMENTO", "KG", "MAT", 1000, "PRECIO IDU")])
+    alm.apus.insert_apus([Apu("A", "APU A", "M2", "DIURNO"), Apu("B", "APU B", "M2", "DIURNO")])
+    alm.apus.insert_components([
+        ApuComponent("A", "DIURNO", "100", "CEMENTO", "KG", 1.0, 0.0),
+        ApuComponent("B", "DIURNO", "100", "CEMENTO", "KG", 2.0, 0.0)])
+
+    llamadas: list[str] = []
+    orig = alm.precios.get_candidatos
+    alm.precios.get_candidatos = lambda cod: (llamadas.append(cod), orig(cod))[1]
+
+    def _row(seq, cod):
+        return CorridaItemRow(
+            seq=seq, item=LicitacionItem(str(seq), "act", "M2", 1.0, 0.0, "DIURNO"),
+            status="auto", apu_codigo=cod, apu_nombre=cod, unidad="M2", shift="DIURNO",
+            origen="historico", confianza=1.0, explicacion="", componentes=[], candidatos=[])
+
+    eng = PricingEngine(alm)
+    ensA = _costear_row(alm, _row(0, "A"), eng)
+    ensB = _costear_row(alm, _row(1, "B"), eng)
+    assert ensA.costo_unitario == pytest.approx(1000) and ensB.costo_unitario == pytest.approx(2000)
+    assert llamadas.count("100") == 1                 # motor compartido: 1 consulta, no 2
+
+
+def _proj_ins(xs):
+    return [(i.codigo, i.nombre, i.precio, i.id) for i in xs]
+
+
+def _proj_comp(xs):
+    return [(c.apu_codigo, c.shift, c.insumo_codigo, c.rendimiento, c.tipo, c.ref_shift) for c in xs]
+
+
+def test_get_candidatos_bulk_igual_a_single(tmp_path):
+    alm = Almacen(tmp_path / "p.db", tmp_path / "a.db", tmp_path / "c.db")
+    alm.reset()
+    alm.precios.insert_insumos([
+        Insumo("100", "CEMENTO A", "KG", "MAT", 10, "F"),
+        Insumo("100", "CEMENTO B", "KG", "MAT", 20, "F"),   # mismo código, otro insumo
+        Insumo("200", "ARENA", "M3", "MAT", 30, "F")])
+    bulk = alm.precios.get_candidatos_bulk(["100", "200", "999", ""])
+    assert _proj_ins(bulk["100"]) == _proj_ins(alm.precios.get_candidatos("100"))
+    assert _proj_ins(bulk["200"]) == _proj_ins(alm.precios.get_candidatos("200"))
+    assert bulk["999"] == []                                # inexistente -> vacío
+    assert "" not in bulk                                   # códigos vacíos se ignoran
+
+
+def test_get_components_bulk_igual_a_single(tmp_path):
+    alm = Almacen(tmp_path / "p.db", tmp_path / "a.db", tmp_path / "c.db")
+    alm.reset()
+    alm.apus.insert_apus([Apu("A", "AA", "M2", "DIURNO"), Apu("A", "AAN", "M2", "NOCTURNO"),
+                          Apu("B", "BB", "M2", "DIURNO")])
+    alm.apus.insert_components([
+        ApuComponent("A", "DIURNO", "1", "x", "u", 1.0, 0.0),
+        ApuComponent("A", "DIURNO", "2", "y", "u", 2.0, 0.0),
+        ApuComponent("A", "NOCTURNO", "1", "x", "u", 5.0, 0.0),
+        ApuComponent("B", "DIURNO", "3", "z", "u", 1.0, 0.0)])
+    bulk = alm.apus.get_components_bulk([("A", "DIURNO"), ("A", "NOCTURNO"), ("B", "DIURNO"), ("Z", "DIURNO")])
+    assert _proj_comp(bulk[("A", "DIURNO")]) == _proj_comp(alm.apus.get_components("A", "DIURNO"))
+    assert _proj_comp(bulk[("A", "NOCTURNO")]) == _proj_comp(alm.apus.get_components("A", "NOCTURNO"))
+    assert _proj_comp(bulk[("B", "DIURNO")]) == _proj_comp(alm.apus.get_components("B", "DIURNO"))
+    assert ("Z", "DIURNO") not in bulk                      # inexistente no aparece
+
+
+def test_precargar_costos_identicos_y_cero_consultas_individuales(tmp_path):
+    """Fase 2: precargar en lote no cambia los costos y elimina las consultas 1x1
+    (incluye sub-APU: el árbol se precarga con BFS)."""
+    alm = Almacen(tmp_path / "p.db", tmp_path / "a.db", tmp_path / "c.db")
+    alm.reset()
+    alm.precios.insert_insumos([Insumo("100", "CEMENTO", "KG", "MAT", 1000, "PRECIO IDU"),
+                                Insumo("200", "ARENA", "M3", "MAT", 500, "PRECIO IDU")])
+    alm.apus.insert_apus([Apu("P", "PADRE", "M2", "DIURNO"), Apu("S", "SUB", "M3", "DIURNO")])
+    alm.apus.insert_components([
+        ApuComponent("P", "DIURNO", "100", "CEMENTO", "KG", 2.0, 0.0),
+        ApuComponent("P", "DIURNO", "S", "SUB", "M3", 1.0, 0.0, tipo="apu", ref_shift="DIURNO"),
+        ApuComponent("S", "DIURNO", "200", "ARENA", "M3", 3.0, 0.0)])
+
+    def _row(seq):
+        return CorridaItemRow(
+            seq=seq, item=LicitacionItem(str(seq), "act", "M2", 1.0, 0.0, "DIURNO"),
+            status="auto", apu_codigo="P", apu_nombre="PADRE", unidad="M2", shift="DIURNO",
+            origen="historico", confianza=1.0, explicacion="", componentes=[], candidatos=[])
+    rows = [_row(k) for k in range(3)]
+
+    eng1 = PricingEngine(alm)                               # sin precarga
+    costos1 = [_costear_row(alm, r, eng1).costo_unitario for r in rows]
+
+    single = {"n": 0}                                       # contar consultas individuales
+    for repo, meth in [(alm.precios, "get_candidatos"), (alm.apus, "get_components")]:
+        orig = getattr(repo, meth)
+        setattr(repo, meth,
+                (lambda o: (lambda *a, **k: (single.__setitem__("n", single["n"] + 1), o(*a, **k))[1]))(orig))
+
+    eng2 = PricingEngine(alm)
+    eng2.precargar((r.apu_codigo, r.shift) for r in rows)   # BFS en lote
+    costos2 = [_costear_row(alm, r, eng2).costo_unitario for r in rows]
+
+    assert costos2[0] == pytest.approx(2 * 1000 + 1 * (3 * 500))   # 2000 + sub(1500) = 3500
+    assert costos1 == costos2                               # idéntico con/sin precarga
+    assert single["n"] == 0                                 # tras precargar: cero consultas 1x1
+
+
+def test_precargar_falla_cae_a_individual_sin_romper(tmp_path):
+    """Fase 2 fail-safe: si el batch revienta, precargar no rompe y el costeo sigue
+    dando el costo correcto vía consultas individuales."""
+    alm = Almacen(tmp_path / "p.db", tmp_path / "a.db", tmp_path / "c.db")
+    alm.reset()
+    alm.precios.insert_insumos([Insumo("100", "CEMENTO", "KG", "MAT", 1000, "PRECIO IDU")])
+    alm.apus.insert_apus([Apu("A", "APU A", "M2", "DIURNO")])
+    alm.apus.insert_components([ApuComponent("A", "DIURNO", "100", "CEMENTO", "KG", 2.0, 0.0)])
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("batch no soportado")
+    alm.apus.get_components_bulk = _boom          # simula fallo del batch
+
+    row = CorridaItemRow(
+        seq=0, item=LicitacionItem("1", "act", "M2", 1.0, 0.0, "DIURNO"),
+        status="auto", apu_codigo="A", apu_nombre="A", unidad="M2", shift="DIURNO",
+        origen="historico", confianza=1.0, explicacion="", componentes=[], candidatos=[])
+    eng = PricingEngine(alm)
+    eng.precargar([("A", "DIURNO")])              # no debe propagar la excepción
+    ens = _costear_row(alm, row, eng)
+    assert ens.costo_unitario == pytest.approx(2000)   # costo correcto vía individual
 
 
 def test_costear_row_activa_no_duplica_rendimiento_en_autoreferencia(tmp_path):

@@ -35,11 +35,33 @@ ProgressCb = Optional[Callable[[int, int, str], None]]
 class Assembler:
     def __init__(self, almacen: Almacen, advisor: Optional[ApuAdvisor] = None):
         self.alm = almacen
-        self.matcher = Matcher(almacen.apus.apu_index())
         self.pricing = PricingEngine(almacen)
         self.advisor = advisor or ApuAdvisor()
-        self.retriever = InsumoRetriever(almacen, self.matcher)
-        self._codigos_apu = {cod for cod, _, _ in almacen.apus.apu_index()}
+        # Matcher / retriever / índice de códigos son PEREZOSOS: construirlos lee el
+        # catálogo completo de APUs (2 consultas) y arma un índice invertido en CPU.
+        # El camino de confirmar/reasignar (reassemble_with_choice -> _build) NO los
+        # usa, así que no se deben pagar ahí. Se materializan al primer acceso (armado).
+        self._matcher: Optional[Matcher] = None
+        self._retriever: Optional[InsumoRetriever] = None
+        self._codigos_apu_cache: Optional[set] = None
+
+    @property
+    def matcher(self) -> Matcher:
+        if self._matcher is None:
+            self._matcher = Matcher(self.alm.apus.apu_index())
+        return self._matcher
+
+    @property
+    def retriever(self) -> InsumoRetriever:
+        if self._retriever is None:
+            self._retriever = InsumoRetriever(self.alm, self.matcher)
+        return self._retriever
+
+    @property
+    def _codigos_apu(self) -> set:
+        if self._codigos_apu_cache is None:
+            self._codigos_apu_cache = {cod for cod, _, _ in self.alm.apus.apu_index()}
+        return self._codigos_apu_cache
 
     # ------------------------------------------------------------------ items
     def assemble_item(self, item: LicitacionItem,

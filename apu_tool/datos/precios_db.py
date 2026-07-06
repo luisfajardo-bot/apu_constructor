@@ -179,6 +179,24 @@ class PreciosDB:
                 "WHERE i.codigo = ? ORDER BY i.id", (str(codigo),)).fetchall()
         return [self._fila_a_insumo(r) for r in rows]
 
+    def get_candidatos_bulk(self, codigos) -> dict:
+        codes = [c for c in dict.fromkeys(str(x) for x in codigos if x)]
+        out: dict[str, list[Insumo]] = {c: [] for c in codes}
+        if not codes:
+            return out
+        with self.connect() as conn:
+            for i in range(0, len(codes), 800):          # límite de placeholders de SQLite
+                chunk = codes[i:i + 800]
+                ph = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    "SELECT i.id, i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente "
+                    "FROM insumos i LEFT JOIN insumo_precios p "
+                    "  ON p.insumo_id = i.id AND p.vigente = 1 "
+                    f"WHERE i.codigo IN ({ph}) ORDER BY i.codigo, i.id", chunk).fetchall()
+                for r in rows:
+                    out[r["codigo"]].append(self._fila_a_insumo(r))
+        return out
+
     def get_insumo_por_id(self, insumo_id: int) -> Optional[Insumo]:
         with self.connect() as conn:
             r = conn.execute(

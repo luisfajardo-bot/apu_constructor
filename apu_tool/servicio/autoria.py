@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import io
+from dataclasses import replace
 
 import openpyxl
 
@@ -291,9 +292,22 @@ def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
 
 
 # ---------------------------------------------------------------- import APUs
+def _codigo_con_turno(codigo: str, shift: str) -> str:
+    """Convención de la empresa: el APU nocturno lleva el código con sufijo ' N'
+    (p.ej. '3010' -> '3010 N'), igual que el histórico. La lista de licitación /
+    plantilla suele traer el código PELADO y marcar lo nocturno solo en la columna
+    de turno; aquí lo normalizamos para que el APU importado quede con la misma
+    identidad que en la biblioteca. Idempotente: no re-sufija si ya termina en 'N'.
+    (El remapeo de insumos a tarifa nocturna '4278 N' es aparte, fuera de alcance.)"""
+    if shift == config.SHIFT_NOCTURNO and codigo and not codigo.rstrip().upper().endswith("N"):
+        return f"{codigo.rstrip()} N"
+    return codigo
+
+
 def _parse_apus(contenido: bytes):
     """Parsea un Excel con hoja 'APUS' (formato del histórico) reusando el parser
-    del seed. Devuelve (apus, comps_por_clave[(codigo, shift)])."""
+    del seed. Devuelve (apus, comps_por_clave[(codigo, shift)]). Aplica la
+    convención de turno al código (ver `_codigo_con_turno`)."""
     wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
     try:
         if "APUS" not in wb.sheetnames:
@@ -302,9 +316,12 @@ def _parse_apus(contenido: bytes):
         apus, comps = _read_apus(wb)
     finally:
         wb.close()
+    apus = [replace(a, codigo=_codigo_con_turno(a.codigo, a.shift)) for a in apus]
     comps_por: dict[tuple[str, str], list[ApuComponent]] = {}
     for c in comps:
-        comps_por.setdefault((c.apu_codigo, c.shift), []).append(c)
+        cod = _codigo_con_turno(c.apu_codigo, c.shift)
+        comp = c if cod == c.apu_codigo else replace(c, apu_codigo=cod)
+        comps_por.setdefault((cod, comp.shift), []).append(comp)
     return apus, comps_por
 
 

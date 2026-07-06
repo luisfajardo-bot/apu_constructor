@@ -265,6 +265,27 @@ class ApusDB:
                 "GROUP BY apu_codigo, shift").fetchall()
         return {(r["apu_codigo"], r["shift"]): r["n"] for r in rows}
 
+    def componentes_subapu_candidatos(self) -> list[dict]:
+        """Componentes tipo='insumo' cuyo código es un APU (candidatos a sub-APU)."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT apu_codigo, shift, seq, insumo_codigo FROM apu_componentes "
+                "WHERE tipo = 'insumo' AND insumo_codigo IN (SELECT codigo FROM apus)"
+            ).fetchall()
+        return [{"apu_codigo": r["apu_codigo"], "shift": r["shift"],
+                 "seq": r["seq"], "insumo_codigo": r["insumo_codigo"]} for r in rows]
+
+    def set_componente_subapu(self, apu_codigo: str, shift: str, seq: int,
+                              ref_shift: str, conn=None) -> None:
+        sql = ("UPDATE apu_componentes SET tipo='apu', ref_shift=? "
+               "WHERE apu_codigo=? AND shift=? AND seq=?")
+        args = (ref_shift, str(apu_codigo), shift, int(seq))
+        if conn is not None:
+            conn.execute(sql, args)
+            return
+        with self.connect() as c:
+            c.execute(sql, args)
+
     def counts(self) -> dict[str, int]:
         with self.connect() as conn:
             return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]

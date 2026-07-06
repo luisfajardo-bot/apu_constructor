@@ -161,6 +161,41 @@ def test_import_apus_preview_y_aplicar(tmp_path):
     assert len(alm.apus.get_components("7777", "DIURNO")) == 2
 
 
+def _xlsx_apus_nocturno() -> bytes:
+    """Plantilla con nocturnos de código PELADO (la N va solo en la columna turno),
+    como en la lista de licitación real que rompió en prod."""
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.title = "APUS"
+    ws.append(["ACTIVIDAD","COD IDU","UN","INSUMO","COD","UND","RENDIMIENTO","INV","PRECIO","COSTO","TURNO"])
+    ws.append(["EXCAVACION NOCTURNA","8888","M3","","","","","","","","NOCTURNO"])   # pelado -> debe quedar "8888 N"
+    ws.append(["","","","CEMENTO","100","KG",1.5,"",900,"",""])
+    ws.append(["DEMOLICION DIURNA","9999","M2","","","","","","","","DIURNO"])       # diurno -> intacto
+    ws.append(["","","","ARENA","200","M3",1.0,"",50,"",""])
+    ws.append(["YA CON N","7000 N","M3","","","","","","","","NOCTURNO"])            # ya trae N -> idempotente
+    ws.append(["","","","CEMENTO","100","KG",1.0,"",900,"",""])
+    buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
+
+
+def test_import_apus_nocturno_agrega_sufijo_n(tmp_path):
+    alm = _alm(tmp_path)
+    data = _xlsx_apus_nocturno()
+    prev = autoria.preview_importar_apus(alm, data)
+    codigos = {(c["codigo"], c["turno"]) for c in prev["crear"]}
+    assert ("8888 N", "NOCTURNO") in codigos       # nocturno pelado -> con sufijo
+    assert ("8888", "NOCTURNO") not in codigos     # no se crea el pelado
+    assert ("9999", "DIURNO") in codigos           # diurno intacto
+    assert ("7000 N", "NOCTURNO") in codigos       # ya tenía N -> sin doble sufijo
+    assert ("7000 N N", "NOCTURNO") not in codigos
+
+    res = autoria.aplicar_importar_apus(alm, data)
+    assert res["creados"] == 3
+    assert alm.apus.get_apu("8888 N", "NOCTURNO") is not None
+    assert alm.apus.get_apu("8888", "NOCTURNO") is None
+    assert len(alm.apus.get_components("8888 N", "NOCTURNO")) == 1   # el componente cuelga del código con N
+    assert alm.apus.get_apu("7000 N", "NOCTURNO") is not None
+    assert alm.apus.get_apu("9999", "DIURNO") is not None
+
+
 def test_import_apus_sin_hoja_apus(tmp_path):
     alm = _alm(tmp_path)
     wb = openpyxl.Workbook(); wb.active.append(["x"]); buf = io.BytesIO(); wb.save(buf)

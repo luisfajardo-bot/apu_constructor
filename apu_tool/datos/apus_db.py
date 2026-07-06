@@ -223,17 +223,37 @@ class ApusDB:
                              (str(codigo), shift)).fetchone()
         return Apu(r["codigo"], r["nombre"], r["unidad"], r["shift"], r["grupo"]) if r else None
 
+    def _fila_a_componente(self, r) -> ApuComponent:
+        return ApuComponent(
+            apu_codigo=r["apu_codigo"], shift=r["shift"], insumo_codigo=r["insumo_codigo"],
+            insumo_nombre=r["insumo_nombre"], unidad=r["unidad"],
+            rendimiento=r["rendimiento"] or 0.0,
+            precio_unitario_hist=r["precio_unitario_hist"] or 0.0,
+            tipo=(r["tipo"] or "insumo"), ref_shift=(r["ref_shift"] or ""))
+
     def get_components(self, apu_codigo: str, shift: str) -> list[ApuComponent]:
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM apu_componentes WHERE apu_codigo=? AND shift=? ORDER BY seq",
                 (str(apu_codigo), shift)).fetchall()
-        return [ApuComponent(
-            apu_codigo=r["apu_codigo"], shift=r["shift"], insumo_codigo=r["insumo_codigo"],
-            insumo_nombre=r["insumo_nombre"], unidad=r["unidad"],
-            rendimiento=r["rendimiento"] or 0.0,
-            precio_unitario_hist=r["precio_unitario_hist"] or 0.0,
-            tipo=(r["tipo"] or "insumo"), ref_shift=(r["ref_shift"] or "")) for r in rows]
+        return [self._fila_a_componente(r) for r in rows]
+
+    def get_components_bulk(self, claves) -> dict:
+        codes = list({str(c) for c, _s in claves if c})
+        out: dict[tuple, list[ApuComponent]] = {}
+        if not codes:
+            return out
+        with self.connect() as conn:
+            for i in range(0, len(codes), 800):          # límite de placeholders de SQLite
+                chunk = codes[i:i + 800]
+                ph = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    f"SELECT * FROM apu_componentes WHERE apu_codigo IN ({ph}) "
+                    "ORDER BY apu_codigo, shift, seq", chunk).fetchall()
+                for r in rows:
+                    out.setdefault((r["apu_codigo"], r["shift"]), []).append(
+                        self._fila_a_componente(r))
+        return out
 
     def get_depriced_apu(self, codigo: str, shift: str) -> Optional[DePricedApu]:
         apu = self.get_apu(codigo, shift)

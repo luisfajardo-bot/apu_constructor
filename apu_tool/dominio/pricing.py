@@ -20,6 +20,7 @@ class PricingEngine:
     def __init__(self, almacen: Almacen):
         self.alm = almacen
         self._cache: dict[str, list] = {}          # codigo -> list[Insumo] candidatos
+        self._comp_cache: dict[tuple, list] = {}   # (codigo, shift) -> list[ApuComponent]
         # Memo (codigo, shift) -> costo_unitario, POR INSTANCIA (no global).
         # Supone grafo de sub-APUs ACÍCLICO (los datos reales no tienen ciclos):
         # con un ciclo, el valor cacheado depende del camino de la primera pasada
@@ -33,6 +34,38 @@ class PricingEngine:
         if codigo not in self._cache:
             self._cache[codigo] = self.alm.precios.get_candidatos(codigo)
         return self._cache[codigo]
+
+    def components(self, codigo: str, shift: str) -> list:
+        """Composición de un APU, cacheada por (codigo, shift). Si `precargar` la
+        trajo en lote, no toca la base; si no, cae a la consulta individual."""
+        clave = (codigo, shift)
+        if clave not in self._comp_cache:
+            self._comp_cache[clave] = self.alm.apus.get_components(codigo, shift)
+        return self._comp_cache[clave]
+
+    def precargar(self, claves_top) -> None:
+        """Precarga en LOTE la composición del árbol de APUs (claves_top + cierre de
+        sub-APUs) y los precios de todos sus insumos, en pocas consultas. Es puramente
+        una optimización de I/O: llena los cachés que `components`/`_candidatos` ya usan,
+        así el costeo posterior no cambia de resultado, solo evita el N+1 de round-trips."""
+        pendientes = {(str(c), s) for c, s in claves_top if c}
+        while pendientes:
+            cargados = self.alm.apus.get_components_bulk(list(pendientes))
+            siguientes: set = set()
+            for clave in pendientes:
+                comps = cargados.get(clave, [])
+                self._comp_cache[clave] = comps
+                for comp in comps:
+                    if (comp.tipo or "insumo") == "apu" and comp.insumo_codigo:
+                        sub = (comp.insumo_codigo, comp.ref_shift or comp.shift)
+                        if sub not in self._comp_cache:
+                            siguientes.add(sub)
+            pendientes = siguientes
+        codigos_ins = {comp.insumo_codigo for comps in self._comp_cache.values()
+                       for comp in comps
+                       if (comp.tipo or "insumo") != "apu" and comp.insumo_codigo}
+        for cod, cands in self.alm.precios.get_candidatos_bulk(codigos_ins).items():
+            self._cache.setdefault(cod, cands)
 
     def cost_component(self, comp: ApuComponent, _visitando: tuple = ()) -> CostedComponent:
         if (comp.tipo or "insumo") == "apu":
@@ -72,7 +105,7 @@ class PricingEngine:
         clave = (codigo, shift)
         if clave in self._apu_cost_cache:                       # memoización por pasada
             return self._apu_cost_cache[clave]
-        comps = self.alm.apus.get_components(codigo, shift)
+        comps = self.components(codigo, shift)
         total = sum(self.cost_component(c, visitando).costo for c in comps)
         self._apu_cost_cache[clave] = total
         return total
@@ -84,7 +117,7 @@ class PricingEngine:
         return costed, total
 
     def cost_apu(self, apu_codigo: str, shift: str) -> tuple[list[CostedComponent], float]:
-        comps = self.alm.apus.get_components(apu_codigo, shift)
+        comps = self.components(apu_codigo, shift)
         seed = ((apu_codigo, shift),)                           # detecta auto-referencia nivel 1
         costed = [self.cost_component(c, seed) for c in comps]
         return costed, sum(c.costo for c in costed)

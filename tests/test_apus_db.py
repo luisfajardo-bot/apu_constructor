@@ -89,3 +89,35 @@ def test_depriced_propaga_tipo(apus):
                       tipo="apu", ref_shift="DIURNO")])
     dp = apus.get_depriced_apu("C4", "DIURNO")
     assert dp.componentes[0].tipo == "apu"
+
+
+def test_migracion_agrega_tipo_y_ref_shift(tmp_path):
+    # Base "vieja" sin tipo/ref_shift (8 columnas): init_schema debe agregarlas
+    # sin perder el componente existente.
+    p = tmp_path / "viejo.db"
+    conn = sqlite3.connect(p)
+    conn.executescript(
+        "CREATE TABLE apus (codigo TEXT NOT NULL, shift TEXT NOT NULL, "
+        "nombre TEXT NOT NULL, unidad TEXT, grupo TEXT, PRIMARY KEY (codigo, shift));"
+        "CREATE TABLE apu_componentes (apu_codigo TEXT NOT NULL, shift TEXT NOT NULL, "
+        "seq INTEGER NOT NULL, insumo_codigo TEXT, insumo_nombre TEXT, unidad TEXT, "
+        "rendimiento REAL, precio_unitario_hist REAL, "
+        "PRIMARY KEY (apu_codigo, shift, seq), "
+        "FOREIGN KEY (apu_codigo, shift) REFERENCES apus(codigo, shift));")
+    conn.execute("INSERT INTO apus (codigo, shift, nombre, unidad, grupo) "
+                 "VALUES ('A1', 'DIURNO', 'MURO', 'M2', NULL)")
+    conn.execute("INSERT INTO apu_componentes (apu_codigo, shift, seq, insumo_codigo, "
+                 "insumo_nombre, unidad, rendimiento, precio_unitario_hist) "
+                 "VALUES ('A1', 'DIURNO', 0, '100', 'CEMENTO', 'KG', 3.0, 900)")
+    conn.commit(); conn.close()
+
+    d = ApusDB(p)
+    d.init_schema()  # agrega tipo/ref_shift (idempotente) sin perder el componente
+    comps = d.get_components("A1", "DIURNO")
+    assert len(comps) == 1
+    assert comps[0].tipo == "insumo" and comps[0].ref_shift == ""
+    assert comps[0].insumo_codigo == "100"
+
+    d.init_schema()  # 2ª vez: no falla
+    comps = d.get_components("A1", "DIURNO")
+    assert len(comps) == 1 and comps[0].tipo == "insumo"

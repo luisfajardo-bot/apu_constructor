@@ -208,3 +208,31 @@ def test_borrar_apu_ok_devuelve_resultado(tmp_path):
 def test_borrar_apu_inexistente_devuelve_none(tmp_path):
     alm = _alm(tmp_path)
     assert autoria.borrar_apu(alm, "NOPE", "DIURNO") is None
+
+
+# --------------------------------------------------- FIX 1: preservar tipo/ref_shift
+def test_editar_apu_preserva_marca_subapu_si_no_viene_tipo(tmp_path):
+    alm = _alm(tmp_path)
+    autoria.crear_apu(alm, {"codigo": "B2", "turno": "DIURNO", "nombre": "PISO",
+        "unidad": "M2", "grupo": "ACAB",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}]})
+    alm.apus.set_componente_subapu("B2", "DIURNO", 0, "DIURNO")
+    comps = alm.apus.get_components("B2", "DIURNO")
+    assert comps[0].tipo == "apu" and comps[0].ref_shift == "DIURNO"
+
+    autoria.editar_apu(alm, "B2", "DIURNO", {"nombre": "PISO PULIDO",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}]})  # sin 'tipo'
+    comps = alm.apus.get_components("B2", "DIURNO")
+    assert comps[0].tipo == "apu" and comps[0].ref_shift == "DIURNO"    # preservado
+
+
+def test_editar_apu_tipo_explicito_gana_sobre_marca_previa(tmp_path):
+    alm = _alm(tmp_path)
+    autoria.crear_apu(alm, {"codigo": "B2", "turno": "DIURNO", "nombre": "PISO",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}]})
+    alm.apus.set_componente_subapu("B2", "DIURNO", 0, "DIURNO")
+
+    autoria.editar_apu(alm, "B2", "DIURNO", {"nombre": "PISO PULIDO",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0, "tipo": "insumo"}]})
+    comps = alm.apus.get_components("B2", "DIURNO")
+    assert comps[0].tipo == "insumo" and comps[0].ref_shift == ""      # explícito gana

@@ -161,7 +161,7 @@ class CostedComponent:
     precio_unitario: float        # precio usado (catálogo actual o histórico)
     fuente_precio: str
     costo: float                  # rendimiento * precio_unitario
-    calidad_cruce: str = "exacto" # exacto | aproximado | ambiguo | huerfano (aviso del cruce)
+    calidad_cruce: str = "exacto" # exacto | aproximado | ambiguo | huerfano | apu | ciclo
     tipo: str = "insumo"          # "insumo" | "apu"
     ref_shift: str = ""           # turno del sub-APU cuando tipo == "apu"
 

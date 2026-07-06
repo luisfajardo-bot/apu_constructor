@@ -49,7 +49,14 @@ def crear_insumo(alm: Almacen, datos: dict, actor=None) -> dict:
     return _insumo_out(alm.precios.get_insumo_por_id(iid))
 
 
-def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str) -> list[ApuComponent]:
+def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str,
+                    previos: dict | None = None) -> list[ApuComponent]:
+    """Arma los ApuComponent a partir de los dicts del contrato HTTP.
+
+    `previos` (opcional): marcas existentes por código -> (tipo, ref_shift), para
+    preservarlas al editar cuando el componente entrante no trae `tipo` explícito
+    (invariante de FIX 1: editar un APU no debe borrar las marcas de sub-APU)."""
+    previos = previos or {}
     comps: list[ApuComponent] = []
     for c in comp_dicts:
         cod = str(c.get("insumo_codigo", "") or "").strip()
@@ -66,9 +73,17 @@ def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str) -> list[Ap
         else:
             nombre = str(c.get("insumo_nombre", "") or "")
             unidad = str(c.get("unidad", "") or "")
+        tipo_in = c.get("tipo")
+        if tipo_in:
+            tipo, ref_shift = str(tipo_in), str(c.get("ref_shift", "") or "")
+        elif cod in previos:
+            tipo, ref_shift = previos[cod]
+        else:
+            tipo, ref_shift = "insumo", ""
         comps.append(ApuComponent(
             apu_codigo="", shift=shift, insumo_codigo=cod, insumo_nombre=nombre,
-            unidad=unidad, rendimiento=rend, precio_unitario_hist=0.0))
+            unidad=unidad, rendimiento=rend, precio_unitario_hist=0.0,
+            tipo=tipo, ref_shift=ref_shift))
     return comps
 
 
@@ -105,9 +120,14 @@ def editar_apu(alm: Almacen, codigo: str, shift: str, datos: dict, actor=None) -
     nombre = str(datos.get("nombre", "") or "").strip()
     if not nombre:
         raise ValueError("El nombre es obligatorio.")
-    comps = _componentes_de(alm, datos.get("componentes", []) or [], shift)
+    existentes = alm.apus.get_components(codigo, shift)
+    previos: dict[str, tuple[str, str]] = {}
+    for e in existentes:
+        if e.insumo_codigo not in previos or e.tipo == "apu":
+            previos[e.insumo_codigo] = (e.tipo, e.ref_shift)
+    comps = _componentes_de(alm, datos.get("componentes", []) or [], shift, previos=previos)
     antes = {"nombre": previo.nombre, "unidad": previo.unidad, "grupo": previo.grupo,
-             "n_componentes": len(alm.apus.get_components(codigo, shift))}
+             "n_componentes": len(existentes)}
     apu = Apu(codigo=codigo, nombre=nombre, unidad=str(datos.get("unidad", "") or ""),
               shift=shift, grupo=str(datos.get("grupo", "") or ""))
     with alm.transaccion("apus") as conn:

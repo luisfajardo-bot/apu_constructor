@@ -41,6 +41,8 @@ class ComponenteIn(BaseModel):
     rendimiento: float
     insumo_nombre: str = ""
     unidad: str = ""
+    tipo: str | None = None      # 'insumo' | 'apu'; None = preservar el existente al editar
+    ref_shift: str = ""          # turno del sub-APU si tipo == 'apu'
 
 
 class ApuNuevoIn(BaseModel):

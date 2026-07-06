@@ -34,6 +34,8 @@ def migrar_catalogo(sqlite_precios: Path, sqlite_apus: Path, cx: Conexion,
     Postgres, si la recarga falla se hace rollback y el catálogo queda intacto
     (nunca vacío). Las metatablas se mantienen por upsert (no se truncan).
     """
+    from apu_tool.datos.apus_db import ApusDB
+    ApusDB(sqlite_apus).init_schema()   # aditivo/idempotente: garantiza tipo/ref_shift
     sp = _sqlite(sqlite_precios)
     sa = _sqlite(sqlite_apus)
     n = {"insumos": 0, "precios": 0, "apus": 0, "componentes": 0}

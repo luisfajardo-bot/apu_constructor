@@ -77,8 +77,9 @@ class PricingEngine:
         self._apu_cost_cache[clave] = total
         return total
 
-    def cost_components(self, comps: list[ApuComponent]) -> tuple[list[CostedComponent], float]:
-        costed = [self.cost_component(c) for c in comps]
+    def cost_components(self, comps: list[ApuComponent],
+                        _visitando: tuple = ()) -> tuple[list[CostedComponent], float]:
+        costed = [self.cost_component(c, _visitando) for c in comps]
         total = sum(c.costo for c in costed)
         return costed, total
 

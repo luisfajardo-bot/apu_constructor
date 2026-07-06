@@ -271,3 +271,23 @@ def test_costear_row_respaldo_costea_subapu(tmp_path):
         candidatos=[])
     ens = _costear_row(alm, row)
     assert ens.costo_unitario == pytest.approx(6000)   # 3 * (2 * 1000), recursivo
+
+
+def test_costear_row_activa_no_duplica_rendimiento_en_autoreferencia(tmp_path):
+    # FIX 2 (regresión): la rama ACTIVA de _costear_row debe sembrar la identidad de
+    # la fila en pricing.cost_components; si no, un componente auto-referenciado
+    # (dato inválido, pero posible) cuenta el rendimiento dos veces (2000 en vez de
+    # 1000) porque el ciclo no se detecta hasta el segundo nivel de recursión.
+    alm = Almacen(tmp_path / "p.db", tmp_path / "a.db", tmp_path / "c.db")
+    alm.reset()
+    alm.apus.insert_apus([Apu("Y", "AUTORREF", "M2", "DIURNO")])
+    alm.apus.insert_components([ApuComponent(
+        "Y", "DIURNO", "Y", "AUTORREF", "M2", 2.0, 500.0, tipo="apu", ref_shift="DIURNO")])
+    item = LicitacionItem("1", "act", "M2", 1.0, 0.0, "DIURNO")
+    row = CorridaItemRow(
+        seq=0, item=item, status="auto", apu_codigo="Y", apu_nombre="AUTORREF",
+        unidad="M2", shift="DIURNO", origen="historico", confianza=1.0, explicacion="",
+        componentes=[], candidatos=[])
+    ens = _costear_row(alm, row)
+    assert ens.costo_unitario == pytest.approx(1000.0)   # 2 * 500 (histórico), guardado
+    assert ens.componentes[0].calidad_cruce == "ciclo"

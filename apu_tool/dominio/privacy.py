@@ -35,6 +35,7 @@ def depriced_component_to_dict(c: DePricedComponent) -> dict[str, Any]:
         "insumo_nombre": c.insumo_nombre,
         "unidad": c.unidad,
         "rendimiento": round(c.rendimiento, 6),
+        "tipo": c.tipo,
     }
 
 

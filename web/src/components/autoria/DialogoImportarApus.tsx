@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { ApuResumen } from "@/lib/tipos";
+import type { ApuResumen, VinculoSubApu } from "@/lib/tipos";
 import { previewImportarApus, aplicarImportarApus, descargarPlantillaApus } from "@/api/autoria";
 
 interface DialogoImportarApusProps {
@@ -21,7 +21,7 @@ interface DialogoImportarApusProps {
 type EstadoDial =
   | { fase: "idle" }
   | { fase: "cargando" }
-  | { fase: "preview"; crear: ApuResumen[]; ya_existe: ApuResumen[] }
+  | { fase: "preview"; crear: ApuResumen[]; ya_existe: ApuResumen[]; subapus: VinculoSubApu[] }
   | { fase: "aplicando" };
 
 export function DialogoImportarApus({
@@ -62,6 +62,7 @@ export function DialogoImportarApus({
         fase: "preview",
         crear: res.crear ?? [],
         ya_existe: res.ya_existe ?? [],
+        subapus: res.subapus ?? [],
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Error al procesar el archivo";
@@ -82,7 +83,8 @@ export function DialogoImportarApus({
       const res = await aplicarImportarApus(form);
       const errCount = res.errores?.length ?? 0;
       if (errCount === 0) {
-        toast.success(`${res.creados} APU(s) creados`);
+        const nSub = res.subapus_marcados ?? 0;
+        toast.success(`${res.creados} APU(s) creados` + (nSub ? ` · ${nSub} sub-APU(s) enlazados` : ""));
       } else {
         toast.warning(
           `${res.creados} creado(s), ${errCount} error(es): ` +
@@ -112,6 +114,7 @@ export function DialogoImportarApus({
   const enAplicando = estado.fase === "aplicando";
   const crear = enPreview ? estado.crear : [];
   const yaExiste = enPreview ? estado.ya_existe : [];
+  const subapus = enPreview ? estado.subapus : [];
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -153,6 +156,7 @@ export function DialogoImportarApus({
 
         {enPreview && (
           <div className="space-y-3">
+            <SeccionSubApus vinculos={subapus} />
             <SeccionApus titulo="A crear" filas={crear} />
             <SeccionApus titulo="Ya existen" filas={yaExiste} />
           </div>
@@ -236,6 +240,41 @@ function SeccionApus({ titulo, filas }: { titulo: string; filas: ApuResumen[] })
       ) : (
         <p className="text-xs text-muted-foreground">Ninguno</p>
       )}
+    </div>
+  );
+}
+
+export function SeccionSubApus({ vinculos }: { vinculos: VinculoSubApu[] }) {
+  if (vinculos.length === 0) return null;
+  return (
+    <div>
+      <p className="text-xs font-semibold mb-1">
+        Sub-APUs detectados{" "}
+        <span className="font-normal text-muted-foreground">({vinculos.length})</span>
+        <span className="ml-2 font-normal text-muted-foreground">
+          — al crear, estas líneas se marcan como sub-APU
+        </span>
+      </p>
+      <div className="overflow-x-hidden overflow-y-auto max-h-40 border rounded">
+        <table className="w-full text-xs border-collapse">
+          <tbody>
+            {vinculos.map((v, i) => (
+              <tr key={`${v.apu_codigo}-${v.sub_codigo}-${i}`} className="even:bg-muted/10">
+                <td className="px-2 py-0.5 font-mono">{v.apu_codigo}</td>
+                <td className="px-2 py-0.5 text-muted-foreground">→ usa</td>
+                <td className="px-2 py-0.5 font-mono">{v.sub_codigo}</td>
+                <td className="px-2 py-0.5">({v.sub_turno})</td>
+                <td className="px-2 py-0.5 align-top break-words" title={v.sub_nombre}>
+                  {v.sub_nombre}
+                </td>
+                <td className="px-2 py-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
+                  {v.origen === "lote" ? "en el lote" : "en biblioteca"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

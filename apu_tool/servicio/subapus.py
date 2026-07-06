@@ -6,11 +6,12 @@ NO ve la IA (solo estructura). Persistencia via los repos (sin SQL crudo aquí).
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Optional
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
-from apu_tool.nucleo.models import Perfil
+from apu_tool.nucleo.models import ApuComponent, Perfil
 from apu_tool.servicio.auditoria import registrar_auditoria
 
 
@@ -21,6 +22,48 @@ def _ref_shift(sub_cod: str, parent_shift: str, shifts_por_codigo: dict) -> str:
     if config.SHIFT_DIURNO in disponibles:
         return config.SHIFT_DIURNO
     return next(iter(disponibles)) if disponibles else parent_shift
+
+
+def mapa_codigos_apu(alm: Almacen, apus_extra=()) -> dict:
+    """codigo -> {turnos}, uniendo la biblioteca con los APUs `apus_extra` del lote."""
+    m: dict[str, set] = {}
+    for cod, _nom, sh in alm.apus.apu_index():
+        m.setdefault(cod, set()).add(sh)
+    for a in apus_extra:
+        m.setdefault(a.codigo, set()).add(a.shift)
+    return m
+
+
+def detectar_subapus_lote(alm: Almacen, apus_lote, comps_por, solo=None) -> list[dict]:
+    """Vínculos sub-APU de los componentes de `solo` (o de todos los del lote).
+    El mapa de códigos-APU cubre biblioteca ∪ apus_lote completo."""
+    scan = solo if solo is not None else apus_lote
+    lib_codes = {cod for cod, _nom, _sh in alm.apus.apu_index()}
+    mapa = mapa_codigos_apu(alm, apus_lote)
+    vinculos: list[dict] = []
+    for a in scan:
+        for c in comps_por.get((a.codigo, a.shift), []):
+            if c.insumo_codigo and c.insumo_codigo in mapa:
+                vinculos.append({
+                    "apu_codigo": a.codigo, "apu_turno": a.shift,
+                    "sub_codigo": c.insumo_codigo,
+                    "sub_turno": _ref_shift(c.insumo_codigo, a.shift, mapa),
+                    "sub_nombre": c.insumo_nombre,
+                    "origen": "biblioteca" if c.insumo_codigo in lib_codes else "lote"})
+    return vinculos
+
+
+def marcar_comps_subapu(comps, apu_shift: str, mapa: dict):
+    """Devuelve (comps con sub-APUs marcados tipo='apu'+ref_shift, nº marcados)."""
+    out, n = [], 0
+    for c in comps:
+        if c.insumo_codigo and c.insumo_codigo in mapa:
+            out.append(replace(c, tipo="apu",
+                               ref_shift=_ref_shift(c.insumo_codigo, apu_shift, mapa)))
+            n += 1
+        else:
+            out.append(c)
+    return out, n
 
 
 def marcar_subapus(alm: Almacen, actor: Optional[Perfil] = None) -> dict:

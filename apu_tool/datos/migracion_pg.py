@@ -34,6 +34,8 @@ def migrar_catalogo(sqlite_precios: Path, sqlite_apus: Path, cx: Conexion,
     Postgres, si la recarga falla se hace rollback y el catálogo queda intacto
     (nunca vacío). Las metatablas se mantienen por upsert (no se truncan).
     """
+    from apu_tool.datos.apus_db import ApusDB
+    ApusDB(sqlite_apus).init_schema()   # aditivo/idempotente: garantiza tipo/ref_shift
     sp = _sqlite(sqlite_precios)
     sa = _sqlite(sqlite_apus)
     n = {"insumos": 0, "precios": 0, "apus": 0, "componentes": 0}
@@ -84,16 +86,17 @@ def migrar_catalogo(sqlite_precios: Path, sqlite_apus: Path, cx: Conexion,
             n["apus"] = len(aps)
             # componentes — por lotes
             filas = sa.execute("SELECT apu_codigo, shift, seq, insumo_codigo, insumo_nombre, "
-                               "unidad, rendimiento, precio_unitario_hist "
+                               "unidad, rendimiento, precio_unitario_hist, tipo, ref_shift "
                                "FROM apu_componentes").fetchall()
             cmp = [(r["apu_codigo"], r["shift"], r["seq"], r["insumo_codigo"],
-                    r["insumo_nombre"], r["unidad"], r["rendimiento"], r["precio_unitario_hist"])
+                    r["insumo_nombre"], r["unidad"], r["rendimiento"], r["precio_unitario_hist"],
+                    r["tipo"], r["ref_shift"])
                    for r in filas]
             with conn.cursor() as cur:
                 cur.executemany(
                     "INSERT INTO apus.apu_componentes (apu_codigo, shift, seq, insumo_codigo, "
-                    "insumo_nombre, unidad, rendimiento, precio_unitario_hist) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", cmp)
+                    "insumo_nombre, unidad, rendimiento, precio_unitario_hist, tipo, ref_shift) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", cmp)
             n["componentes"] = len(cmp)
             # meta de apus
             for r in sa.execute("SELECT clave, valor FROM meta").fetchall():

@@ -56,6 +56,8 @@ export interface LineaComposicion {
   fuente_precio: string;
   costo: number;
   calidad_cruce: string;
+  tipo?: string;
+  ref_shift?: string;
 }
 
 export interface DetalleItem {
@@ -185,6 +187,8 @@ export interface ComponenteNuevo {
   rendimiento: number;
   insumo_nombre?: string;
   unidad?: string;
+  tipo?: string;
+  ref_shift?: string;
 }
 
 export interface ApuNuevo {
@@ -241,12 +245,23 @@ export interface InsumoImportFila {
   fuente: string;
 }
 
+export interface VinculoSubApu {
+  apu_codigo: string;
+  apu_turno: string;
+  sub_codigo: string;
+  sub_turno: string;
+  sub_nombre: string;
+  origen: "lote" | "biblioteca";
+}
+
 export interface ImportApusPreview {
   crear: ApuResumen[];
   ya_existe: ApuResumen[];
+  subapus: VinculoSubApu[];
 }
 
 export interface ImportResultado {
   creados: number;
+  subapus_marcados?: number;
   errores: { codigo: string; turno?: string; error: string }[];
 }

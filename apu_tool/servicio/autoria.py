@@ -23,6 +23,9 @@ from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
 from apu_tool.nucleo.texto import normalizar
 from apu_tool.servicio.auditoria import nuevo_lote, registrar_auditoria
 from apu_tool.servicio.insumos import _insumo_out, _norm_h, _to_float
+from apu_tool.servicio.subapus import (
+    mapa_codigos_apu, detectar_subapus_lote, marcar_comps_subapu,
+)
 
 
 # ----------------------------------------------------------------- individual
@@ -49,7 +52,14 @@ def crear_insumo(alm: Almacen, datos: dict, actor=None) -> dict:
     return _insumo_out(alm.precios.get_insumo_por_id(iid))
 
 
-def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str) -> list[ApuComponent]:
+def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str,
+                    previos: dict | None = None) -> list[ApuComponent]:
+    """Arma los ApuComponent a partir de los dicts del contrato HTTP.
+
+    `previos` (opcional): marcas existentes por código -> (tipo, ref_shift), para
+    preservarlas al editar cuando el componente entrante no trae `tipo` explícito
+    (invariante de FIX 1: editar un APU no debe borrar las marcas de sub-APU)."""
+    previos = previos or {}
     comps: list[ApuComponent] = []
     for c in comp_dicts:
         cod = str(c.get("insumo_codigo", "") or "").strip()
@@ -66,9 +76,17 @@ def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str) -> list[Ap
         else:
             nombre = str(c.get("insumo_nombre", "") or "")
             unidad = str(c.get("unidad", "") or "")
+        tipo_in = c.get("tipo")
+        if tipo_in:
+            tipo, ref_shift = str(tipo_in), str(c.get("ref_shift", "") or "")
+        elif cod in previos:
+            tipo, ref_shift = previos[cod]
+        else:
+            tipo, ref_shift = "insumo", ""
         comps.append(ApuComponent(
             apu_codigo="", shift=shift, insumo_codigo=cod, insumo_nombre=nombre,
-            unidad=unidad, rendimiento=rend, precio_unitario_hist=0.0))
+            unidad=unidad, rendimiento=rend, precio_unitario_hist=0.0,
+            tipo=tipo, ref_shift=ref_shift))
     return comps
 
 
@@ -105,9 +123,14 @@ def editar_apu(alm: Almacen, codigo: str, shift: str, datos: dict, actor=None) -
     nombre = str(datos.get("nombre", "") or "").strip()
     if not nombre:
         raise ValueError("El nombre es obligatorio.")
-    comps = _componentes_de(alm, datos.get("componentes", []) or [], shift)
+    existentes = alm.apus.get_components(codigo, shift)
+    previos: dict[str, tuple[str, str]] = {}
+    for e in existentes:
+        if e.insumo_codigo not in previos or e.tipo == "apu":
+            previos[e.insumo_codigo] = (e.tipo, e.ref_shift)
+    comps = _componentes_de(alm, datos.get("componentes", []) or [], shift, previos=previos)
     antes = {"nombre": previo.nombre, "unidad": previo.unidad, "grupo": previo.grupo,
-             "n_componentes": len(alm.apus.get_components(codigo, shift))}
+             "n_componentes": len(existentes)}
     apu = Apu(codigo=codigo, nombre=nombre, unidad=str(datos.get("unidad", "") or ""),
               shift=shift, grupo=str(datos.get("grupo", "") or ""))
     with alm.transaccion("apus") as conn:
@@ -287,32 +310,41 @@ def _parse_apus(contenido: bytes):
 
 def preview_importar_apus(alm: Almacen, contenido: bytes) -> dict:
     apus, comps_por = _parse_apus(contenido)
-    crear, ya_existe = [], []
+    crear, ya_existe, crear_apus = [], [], []
     for a in apus:
         info = {"codigo": a.codigo, "turno": a.shift, "nombre": a.nombre,
                 "unidad": a.unidad, "grupo": a.grupo,
                 "n_componentes": len(comps_por.get((a.codigo, a.shift), []))}
-        (ya_existe if alm.apus.get_apu(a.codigo, a.shift) else crear).append(info)
-    return {"crear": crear, "ya_existe": ya_existe}
+        if alm.apus.get_apu(a.codigo, a.shift):
+            ya_existe.append(info)
+        else:
+            crear.append(info)
+            crear_apus.append(a)
+    subapus = detectar_subapus_lote(alm, apus, comps_por, solo=crear_apus)
+    return {"crear": crear, "ya_existe": ya_existe, "subapus": subapus}
 
 
 def aplicar_importar_apus(alm: Almacen, contenido: bytes, actor=None) -> dict:
     apus, comps_por = _parse_apus(contenido)
-    creados, errores = 0, []
+    mapa = mapa_codigos_apu(alm, apus)
+    creados, subapus_marcados, errores = 0, 0, []
     lote = nuevo_lote()
     for a in apus:
         if alm.apus.get_apu(a.codigo, a.shift):
             continue                                   # ya existe: no se pisa
         try:
             comps = comps_por.get((a.codigo, a.shift), [])
+            comps, n_sub = marcar_comps_subapu(comps, a.shift, mapa)
             with alm.transaccion("apus") as conn:
                 alm.apus.crear_apu(a, comps, conn=conn)
                 registrar_auditoria(
                     alm, conn, actor, "apu.crear", "apu", a.codigo, antes=None,
                     despues={"codigo": a.codigo, "turno": a.shift, "nombre": a.nombre,
-                             "unidad": a.unidad, "grupo": a.grupo, "n_componentes": len(comps)},
+                             "unidad": a.unidad, "grupo": a.grupo,
+                             "n_componentes": len(comps), "n_subapus": n_sub},
                     contexto={"origen": "import", "lote_id": lote})
             creados += 1
+            subapus_marcados += n_sub
         except ValueError as e:
             errores.append({"codigo": a.codigo, "turno": a.shift, "error": str(e)})
-    return {"creados": creados, "errores": errores}
+    return {"creados": creados, "subapus_marcados": subapus_marcados, "errores": errores}

@@ -180,3 +180,16 @@ def test_apu_borrar_elimina_cabecera_y_componentes(repos):
 def test_apu_borrar_inexistente_devuelve_false(repos):
     _, apus = repos
     assert apus.borrar_apu("NOPE", "DIURNO") is False
+
+
+def test_apu_componente_tipo_y_ref_shift_round_trip(repos):
+    # FIX 4: paridad de contrato dual-backend para las marcas de sub-APU.
+    _, apus = repos
+    apus.crear_apu(Apu("B", "SUBAPU", "M3", "DIURNO"), [])
+    apus.crear_apu(Apu("A1", "COMPUESTO", "M2", "DIURNO", "ESTR"), [
+        ApuComponent("A1", "DIURNO", "1", "ARENA", "M3", 0.5, 10.0),
+        ApuComponent("A1", "DIURNO", "B", "SUBAPU", "M3", 2.0, 0.0,
+                     tipo="apu", ref_shift="DIURNO")])
+    comps = apus.get_components("A1", "DIURNO")
+    assert comps[0].tipo == "insumo" and comps[0].ref_shift == ""
+    assert comps[1].tipo == "apu" and comps[1].ref_shift == "DIURNO"

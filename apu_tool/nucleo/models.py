@@ -46,6 +46,8 @@ class ApuComponent:
     unidad: str
     rendimiento: float
     precio_unitario_hist: float   # costo histórico embebido (NO se expone a la IA)
+    tipo: str = "insumo"          # "insumo" | "apu" (sub-APU)
+    ref_shift: str = ""           # turno del sub-APU cuando tipo == "apu"
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,7 @@ class DePricedComponent:
     insumo_nombre: str
     unidad: str
     rendimiento: float            # cantidad, no es dinero
+    tipo: str = "insumo"          # estructura: "insumo" | "apu" (sin dinero)
 
 
 @dataclass(frozen=True)
@@ -158,7 +161,9 @@ class CostedComponent:
     precio_unitario: float        # precio usado (catálogo actual o histórico)
     fuente_precio: str
     costo: float                  # rendimiento * precio_unitario
-    calidad_cruce: str = "exacto" # exacto | aproximado | ambiguo | huerfano (aviso del cruce)
+    calidad_cruce: str = "exacto" # exacto | aproximado | ambiguo | huerfano | apu | ciclo
+    tipo: str = "insumo"          # "insumo" | "apu"
+    ref_shift: str = ""           # turno del sub-APU cuando tipo == "apu"
 
 
 @dataclass

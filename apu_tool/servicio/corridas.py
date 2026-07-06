@@ -33,9 +33,11 @@ class CorridaCongelada(Exception):
 
 
 def _estructura(componentes) -> list[dict]:
-    """Snapshot SIN dinero de una composición costeada."""
+    """Snapshot SIN dinero de una composición costeada (incluye tipo/ref_shift del componente)."""
     return [{"insumo_codigo": c.insumo_codigo, "insumo_nombre": c.insumo_nombre,
-             "unidad": c.unidad, "rendimiento": c.rendimiento} for c in componentes]
+             "unidad": c.unidad, "rendimiento": c.rendimiento,
+             "tipo": getattr(c, "tipo", "insumo"), "ref_shift": getattr(c, "ref_shift", "")}
+            for c in componentes]
 
 
 def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
@@ -106,18 +108,21 @@ def _costear_row(alm: Almacen, row: CorridaItemRow) -> AssembledApu:
     costea con precios vigentes. Si no hay apu_codigo o el APU fue borrado, usa la
     composición guardada del ítem (respaldo)."""
     pricing = PricingEngine(alm)
+    seed = ((row.apu_codigo or "", row.shift),)
     costed = None
     if row.apu_codigo:
         lib = alm.apus.get_components(row.apu_codigo, row.shift)
         if lib:
-            costed, total = pricing.cost_components(lib)
+            costed, total = pricing.cost_components(lib, seed)
     if costed is None:
         comps = [ApuComponent(
             apu_codigo=row.apu_codigo or "", shift=row.shift,
             insumo_codigo=c["insumo_codigo"], insumo_nombre=c["insumo_nombre"],
             unidad=c["unidad"], rendimiento=c["rendimiento"],
-            precio_unitario_hist=0.0) for c in row.componentes]
-        costed, total = pricing.cost_components(comps)
+            precio_unitario_hist=0.0,
+            tipo=c.get("tipo", "insumo"), ref_shift=c.get("ref_shift", ""))
+            for c in row.componentes]
+        costed, total = pricing.cost_components(comps, seed)
     return AssembledApu(
         item=row.item, apu_codigo=row.apu_codigo, apu_nombre=row.apu_nombre,
         unidad=row.unidad or row.item.unidad, shift=row.shift, componentes=costed,

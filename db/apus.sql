@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS apu_componentes (
     unidad                TEXT,
     rendimiento           REAL,
     precio_unitario_hist  REAL,
+    tipo                  TEXT NOT NULL DEFAULT 'insumo',   -- 'insumo' | 'apu' (sub-APU)
+    ref_shift             TEXT,                             -- turno del sub-APU si tipo='apu'
     PRIMARY KEY (apu_codigo, shift, seq),
     FOREIGN KEY (apu_codigo, shift) REFERENCES apus(codigo, shift)
 );

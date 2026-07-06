@@ -55,12 +55,13 @@ class ApusPg:
                 seq_by_key[key] = seq + 1
                 rows.append((c.apu_codigo, c.shift, seq, c.insumo_codigo,
                              c.insumo_nombre, c.unidad, c.rendimiento,
-                             c.precio_unitario_hist))
+                             c.precio_unitario_hist, c.tipo, c.ref_shift))
             with conn.cursor() as cur:
                 cur.executemany(
                     "INSERT INTO apus.apu_componentes "
                     "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
-                    " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
+                    " rendimiento, precio_unitario_hist, tipo, ref_shift) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", rows)
         return len(rows)
 
     def crear_apu(self, apu: Apu, componentes: list[ApuComponent], conn=None) -> None:
@@ -82,14 +83,15 @@ class ApusPg:
             "VALUES (%s,%s,%s,%s,%s)",
             (str(apu.codigo), apu.shift, apu.nombre, apu.unidad, apu.grupo))
         rows = [(str(apu.codigo), apu.shift, seq, c.insumo_codigo, c.insumo_nombre,
-                 c.unidad, c.rendimiento, c.precio_unitario_hist)
+                 c.unidad, c.rendimiento, c.precio_unitario_hist, c.tipo, c.ref_shift)
                 for seq, c in enumerate(componentes)]
         if rows:
             with conn.cursor() as cur:
                 cur.executemany(
                     "INSERT INTO apus.apu_componentes "
                     "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
-                    " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
+                    " rendimiento, precio_unitario_hist, tipo, ref_shift) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", rows)
 
     def editar_apu(self, apu: Apu, componentes: list[ApuComponent], conn=None) -> None:
         """Edita cabecera + reemplaza composición de un APU existente. ValueError si no existe."""
@@ -110,14 +112,15 @@ class ApusPg:
         conn.execute("DELETE FROM apus.apu_componentes WHERE apu_codigo=%s AND shift=%s",
                      (str(apu.codigo), apu.shift))
         rows = [(str(apu.codigo), apu.shift, seq, c.insumo_codigo, c.insumo_nombre,
-                 c.unidad, c.rendimiento, c.precio_unitario_hist)
+                 c.unidad, c.rendimiento, c.precio_unitario_hist, c.tipo, c.ref_shift)
                 for seq, c in enumerate(componentes)]
         if rows:
             with conn.cursor() as cur:
                 cur.executemany(
                     "INSERT INTO apus.apu_componentes "
                     "(apu_codigo, shift, seq, insumo_codigo, insumo_nombre, unidad, "
-                    " rendimiento, precio_unitario_hist) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", rows)
+                    " rendimiento, precio_unitario_hist, tipo, ref_shift) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", rows)
 
     def borrar_apu(self, codigo: str, shift: str, conn=None) -> bool:
         if conn is not None:
@@ -204,7 +207,8 @@ class ApusPg:
             apu_codigo=r["apu_codigo"], shift=r["shift"], insumo_codigo=r["insumo_codigo"],
             insumo_nombre=r["insumo_nombre"], unidad=r["unidad"],
             rendimiento=r["rendimiento"] or 0.0,
-            precio_unitario_hist=r["precio_unitario_hist"] or 0.0) for r in rows]
+            precio_unitario_hist=r["precio_unitario_hist"] or 0.0,
+            tipo=(r["tipo"] or "insumo"), ref_shift=(r["ref_shift"] or "")) for r in rows]
 
     def get_depriced_apu(self, codigo: str, shift: str) -> Optional[DePricedApu]:
         apu = self.get_apu(codigo, shift)
@@ -215,7 +219,8 @@ class ApusPg:
             codigo=apu.codigo, nombre=apu.nombre, unidad=apu.unidad,
             shift=apu.shift, grupo=apu.grupo,
             componentes=tuple(
-                DePricedComponent(c.insumo_codigo, c.insumo_nombre, c.unidad, c.rendimiento)
+                DePricedComponent(c.insumo_codigo, c.insumo_nombre, c.unidad,
+                                  c.rendimiento, c.tipo)
                 for c in comps))
 
     def componentes_para_integridad(self) -> list[tuple[str, str]]:
@@ -233,6 +238,26 @@ class ApusPg:
                 "SELECT apu_codigo, shift, COUNT(*) AS n FROM apus.apu_componentes "
                 "GROUP BY apu_codigo, shift").fetchall()
         return {(r["apu_codigo"], r["shift"]): r["n"] for r in rows}
+
+    def componentes_subapu_candidatos(self) -> list[dict]:
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT apu_codigo, shift, seq, insumo_codigo FROM apus.apu_componentes "
+                "WHERE tipo = 'insumo' AND insumo_codigo IN (SELECT codigo FROM apus.apus)"
+            ).fetchall()
+        return [{"apu_codigo": r["apu_codigo"], "shift": r["shift"],
+                 "seq": r["seq"], "insumo_codigo": r["insumo_codigo"]} for r in rows]
+
+    def set_componente_subapu(self, apu_codigo: str, shift: str, seq: int,
+                              ref_shift: str, conn=None) -> None:
+        sql = ("UPDATE apus.apu_componentes SET tipo='apu', ref_shift=%s "
+               "WHERE apu_codigo=%s AND shift=%s AND seq=%s")
+        args = (ref_shift, str(apu_codigo), shift, int(seq))
+        if conn is not None:
+            conn.execute(sql, args)
+            return
+        with self.cx.connection() as c:
+            c.execute(sql, args)
 
     def counts(self) -> dict[str, int]:
         with self.cx.connection() as conn:

@@ -204,6 +204,15 @@ def cmd_migrate_pg(args) -> int:
         cx.cerrar()
 
 
+def cmd_marcar_subapus(args) -> int:
+    from apu_tool.servicio.subapus import marcar_subapus
+    alm = get_almacen()
+    res = marcar_subapus(alm)
+    print(f"Sub-APUs marcados: {res['componentes_marcados']} componentes "
+          f"en {res['apus_afectados']} APUs.")
+    return 0
+
+
 def cmd_demo(args) -> int:
     print("1) Semillado del histórico…")
     print("  ", ensure_seeded())
@@ -278,6 +287,11 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Refresh completo atómico: vacía y recarga el catálogo "
                           "(Postgres queda como espejo exacto del local).")
     pmg.set_defaults(func=cmd_migrate_pg)
+
+    pms = sub.add_parser(
+        "marcar-subapus",
+        help="Marcar como sub-APU los componentes cuyo código es un APU (idempotente, auditado).")
+    pms.set_defaults(func=cmd_marcar_subapus)
     return p
 
 

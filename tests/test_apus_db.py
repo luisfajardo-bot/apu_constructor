@@ -67,3 +67,57 @@ def test_list_apus_filtra_y_pagina(apus):
     assert total_f == 1 and items_f[0].codigo == "B2"
     _, total_g = apus.list_apus(grupo="ACABADOS")
     assert total_g == 1
+
+
+def test_round_trip_subapu(apus):
+    apus.crear_apu(
+        Apu("C3", "COMPUESTO", "M2", "DIURNO"),
+        [ApuComponent("C3", "DIURNO", "3017", "SUB APU", "M3", 1.0, 0.0,
+                      tipo="apu", ref_shift="DIURNO"),
+         ApuComponent("C3", "DIURNO", "100", "CEMENTO", "KG", 2.0, 900)])
+    comps = apus.get_components("C3", "DIURNO")
+    sub = [c for c in comps if c.insumo_codigo == "3017"][0]
+    ins = [c for c in comps if c.insumo_codigo == "100"][0]
+    assert sub.tipo == "apu" and sub.ref_shift == "DIURNO"
+    assert ins.tipo == "insumo" and ins.ref_shift == ""
+
+
+def test_depriced_propaga_tipo(apus):
+    apus.crear_apu(
+        Apu("C4", "COMP", "M2", "DIURNO"),
+        [ApuComponent("C4", "DIURNO", "3017", "SUB", "M3", 1.0, 0.0,
+                      tipo="apu", ref_shift="DIURNO")])
+    dp = apus.get_depriced_apu("C4", "DIURNO")
+    assert dp.componentes[0].tipo == "apu"
+
+
+def test_migracion_agrega_tipo_y_ref_shift(tmp_path):
+    # Base "vieja" sin tipo/ref_shift (8 columnas): init_schema debe agregarlas
+    # sin perder el componente existente.
+    p = tmp_path / "viejo.db"
+    conn = sqlite3.connect(p)
+    conn.executescript(
+        "CREATE TABLE apus (codigo TEXT NOT NULL, shift TEXT NOT NULL, "
+        "nombre TEXT NOT NULL, unidad TEXT, grupo TEXT, PRIMARY KEY (codigo, shift));"
+        "CREATE TABLE apu_componentes (apu_codigo TEXT NOT NULL, shift TEXT NOT NULL, "
+        "seq INTEGER NOT NULL, insumo_codigo TEXT, insumo_nombre TEXT, unidad TEXT, "
+        "rendimiento REAL, precio_unitario_hist REAL, "
+        "PRIMARY KEY (apu_codigo, shift, seq), "
+        "FOREIGN KEY (apu_codigo, shift) REFERENCES apus(codigo, shift));")
+    conn.execute("INSERT INTO apus (codigo, shift, nombre, unidad, grupo) "
+                 "VALUES ('A1', 'DIURNO', 'MURO', 'M2', NULL)")
+    conn.execute("INSERT INTO apu_componentes (apu_codigo, shift, seq, insumo_codigo, "
+                 "insumo_nombre, unidad, rendimiento, precio_unitario_hist) "
+                 "VALUES ('A1', 'DIURNO', 0, '100', 'CEMENTO', 'KG', 3.0, 900)")
+    conn.commit(); conn.close()
+
+    d = ApusDB(p)
+    d.init_schema()  # agrega tipo/ref_shift (idempotente) sin perder el componente
+    comps = d.get_components("A1", "DIURNO")
+    assert len(comps) == 1
+    assert comps[0].tipo == "insumo" and comps[0].ref_shift == ""
+    assert comps[0].insumo_codigo == "100"
+
+    d.init_schema()  # 2ª vez: no falla
+    comps = d.get_components("A1", "DIURNO")
+    assert len(comps) == 1 and comps[0].tipo == "insumo"

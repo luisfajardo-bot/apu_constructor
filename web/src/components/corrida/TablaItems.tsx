@@ -10,15 +10,18 @@ import {
 import { Button } from "@/components/ui/button";
 import EstadoBadge from "@/components/corrida/EstadoBadge";
 import BuscadorApu from "@/components/corrida/BuscadorApu";
+import CabeceraFiltros from "@/components/corrida/CabeceraFiltros";
 import { cop, pct } from "@/lib/moneda";
 import { getItem, confirmar } from "@/api/corridas";
 import type { ItemCuadro, DetalleItem, CorridaDetalle } from "@/lib/tipos";
+import type { ControlCorridaTabla } from "@/lib/corridaTabla";
 
 interface TablaItemsProps {
   corridaId: number;
   items: ItemCuadro[];
   onConfirmado: (corridaActualizada: CorridaDetalle) => void;
   readOnly?: boolean;
+  control?: ControlCorridaTabla;
 }
 
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
@@ -30,17 +33,23 @@ export default function TablaItems({
   items,
   onConfirmado,
   readOnly = false,
+  control,
 }: TablaItemsProps) {
-  const [soloRevision, setSoloRevision] = useState(false);
-  // Record<seq, EstadoExpansion | undefined>
+  // Con `control`, el padre ya entrega las filas filtradas/ordenadas y controla
+  // "Solo revisión". Sin `control` (modo vivo), se mantiene el filtro local de hoy.
+  const [soloRevisionLocal, setSoloRevisionLocal] = useState(false);
+  const soloRevision = control ? control.soloRevision : soloRevisionLocal;
+  const setSoloRevision = control ? control.setSoloRevision : setSoloRevisionLocal;
   const [expandido, setExpandido] = useState<Record<number, EstadoExpansion | undefined>>({});
   const [confirmando, setConfirmando] = useState<string | null>(null);
   const [errorConfirm, setErrorConfirm] = useState<Record<number, string>>({});
 
   const nPorRevisar = items.filter((it) => REVISABLE.has(it.status)).length;
-  const visible = soloRevision
-    ? items.filter((it) => REVISABLE.has(it.status))
-    : items;
+  const visible = control
+    ? items
+    : soloRevision
+      ? items.filter((it) => REVISABLE.has(it.status))
+      : items;
 
   async function toggleExpand(seq: number) {
     const actual = expandido[seq];
@@ -100,25 +109,38 @@ export default function TablaItems({
             {nPorRevisar} por revisar
           </span>
         )}
+        {control?.hayFiltros && (
+          <button
+            type="button"
+            onClick={control.limpiar}
+            className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            Limpiar filtros
+          </button>
+        )}
       </div>
 
       {/* Dense table */}
       <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-6 px-1" />
-            <TableHead className="text-xs">Descripción</TableHead>
-            <TableHead className="text-xs w-12">Und</TableHead>
-            <TableHead className="text-xs w-20 text-right">Cantidad</TableHead>
-            <TableHead className="text-xs w-24">Ítem</TableHead>
-            <TableHead className="text-xs w-28">APU</TableHead>
-            <TableHead className="text-xs w-20">Estado</TableHead>
-            <TableHead className="text-xs w-28 text-right">Contractual</TableHead>
-            <TableHead className="text-xs w-28 text-right">Costo</TableHead>
-            <TableHead className="text-xs w-28 text-right">Margen</TableHead>
-            <TableHead className="text-xs w-16 text-right">%</TableHead>
-          </TableRow>
-        </TableHeader>
+        {control ? (
+          <CabeceraFiltros control={control} />
+        ) : (
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-6 px-1" />
+              <TableHead className="text-xs">Descripción</TableHead>
+              <TableHead className="text-xs w-12">Und</TableHead>
+              <TableHead className="text-xs w-20 text-right">Cantidad</TableHead>
+              <TableHead className="text-xs w-24">Ítem</TableHead>
+              <TableHead className="text-xs w-28">APU</TableHead>
+              <TableHead className="text-xs w-20">Estado</TableHead>
+              <TableHead className="text-xs w-28 text-right">Contractual</TableHead>
+              <TableHead className="text-xs w-28 text-right">Costo</TableHead>
+              <TableHead className="text-xs w-28 text-right">Margen</TableHead>
+              <TableHead className="text-xs w-16 text-right">%</TableHead>
+            </TableRow>
+          </TableHeader>
+        )}
         <TableBody>
           {visible.map((it) => {
             const estado = expandido[it.seq];

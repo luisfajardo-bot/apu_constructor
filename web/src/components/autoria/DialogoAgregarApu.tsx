@@ -8,13 +8,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { ComponenteNuevo, Insumo, ApuDetalle } from "@/lib/tipos";
+import type {
+  ComponenteNuevo,
+  Insumo,
+  ApuDetalle,
+  LineaComposicion,
+  ApuResumen,
+} from "@/lib/tipos";
 import { crearApu, editarApu } from "@/api/autoria";
 import { listarInsumos } from "@/api/insumos";
 import {
   rendimientoValido,
   hayRendimientoInvalido,
 } from "@/lib/validacionApu";
+import BuscadorApu from "@/components/corrida/BuscadorApu";
+import SubApuBadge from "@/components/SubApuBadge";
 
 interface DialogoAgregarApuProps {
   open: boolean;
@@ -27,6 +35,8 @@ interface DialogoAgregarApuProps {
 interface FilaComp {
   // id local para keys estables
   uid: number;
+  tipo: "insumo" | "apu";
+  ref_shift: string;
   insumo_codigo: string;
   insumo_nombre: string;
   unidad: string;
@@ -53,14 +63,36 @@ const inputCls =
   "h-8 w-full rounded border border-border bg-transparent px-2 py-1 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40";
 
 let uidSeq = 1;
-function nuevaFila(): FilaComp {
+function nuevaFila(tipo: "insumo" | "apu" = "insumo"): FilaComp {
   return {
     uid: uidSeq++,
+    tipo,
+    ref_shift: "",
     insumo_codigo: "",
     insumo_nombre: "",
     unidad: "",
     rendimiento: "",
   };
+}
+
+// ─── Helpers puros (testeados sin montar la UI) ────────────────────────────────
+
+export function tipoRefDeLinea(
+  linea: Pick<LineaComposicion, "tipo" | "ref_shift" | "calidad_cruce">,
+): { tipo: "insumo" | "apu"; ref_shift: string } {
+  const esApu = linea.tipo === "apu" || linea.calidad_cruce === "apu";
+  return { tipo: esApu ? "apu" : "insumo", ref_shift: linea.ref_shift || "" };
+}
+
+export function componenteDeFila(f: FilaComp): ComponenteNuevo | null {
+  if (f.insumo_codigo.trim() === "" || !rendimientoValido(f.rendimiento)) return null;
+  const base: ComponenteNuevo = {
+    insumo_codigo: f.insumo_codigo,
+    rendimiento: Number(f.rendimiento),
+    insumo_nombre: f.insumo_nombre || undefined,
+    unidad: f.unidad || undefined,
+  };
+  return f.tipo === "apu" ? { ...base, tipo: "apu", ref_shift: f.ref_shift } : base;
 }
 
 export function DialogoAgregarApu({
@@ -87,13 +119,18 @@ export function DialogoAgregarApu({
       setFilas(
         inicial.composicion.length === 0
           ? [nuevaFila()]
-          : inicial.composicion.map((c) => ({
-              uid: uidSeq++,
-              insumo_codigo: c.insumo_codigo,
-              insumo_nombre: c.insumo_nombre,
-              unidad: c.unidad,
-              rendimiento: String(c.rendimiento),
-            })),
+          : inicial.composicion.map((c) => {
+              const { tipo, ref_shift } = tipoRefDeLinea(c);
+              return {
+                uid: uidSeq++,
+                tipo,
+                ref_shift,
+                insumo_codigo: c.insumo_codigo,
+                insumo_nombre: c.insumo_nombre,
+                unidad: c.unidad,
+                rendimiento: String(c.rendimiento),
+              };
+            }),
       );
     }
   }, [open, modo, inicial]);
@@ -121,13 +158,8 @@ export function DialogoAgregarApu({
 
   // Componentes válidos: con insumo elegido y rendimiento > 0
   const compValidos: ComponenteNuevo[] = filas
-    .filter((f) => f.insumo_codigo.trim() !== "" && rendimientoValido(f.rendimiento))
-    .map((f) => ({
-      insumo_codigo: f.insumo_codigo,
-      rendimiento: Number(f.rendimiento),
-      insumo_nombre: f.insumo_nombre || undefined,
-      unidad: f.unidad || undefined,
-    }));
+    .map(componenteDeFila)
+    .filter((c): c is ComponenteNuevo => c !== null);
 
   // Hay filas con insumo pero rendimiento inválido → bloquea y avisa
   const hayRendInvalido = hayRendimientoInvalido(filas);
@@ -230,13 +262,22 @@ export function DialogoAgregarApu({
         <div>
           <div className="flex items-center justify-between mb-1">
             <p className="text-xs font-semibold">Composición</p>
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => setFilas((prev) => [...prev, nuevaFila()])}
-            >
-              + Agregar fila
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setFilas((prev) => [...prev, nuevaFila("insumo")])}
+              >
+                + Insumo
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setFilas((prev) => [...prev, nuevaFila("apu")])}
+              >
+                + Sub-APU
+              </Button>
+            </div>
           </div>
           <div className="border rounded overflow-visible">
             <table className="w-full text-xs border-collapse">
@@ -261,17 +302,31 @@ export function DialogoAgregarApu({
                   return (
                     <tr key={f.uid} className="align-top">
                       <td className="px-2 py-1 border-b">
-                        <BuscadorInsumo
-                          codigo={f.insumo_codigo}
-                          nombre={f.insumo_nombre}
-                          onElegir={(ins) =>
-                            setFila(f.uid, {
-                              insumo_codigo: ins.codigo,
-                              insumo_nombre: ins.nombre,
-                              unidad: ins.unidad,
-                            })
-                          }
-                        />
+                        {f.tipo === "apu" ? (
+                          <SubApuFila
+                            fila={f}
+                            onElegir={(apu) =>
+                              setFila(f.uid, {
+                                insumo_codigo: apu.codigo,
+                                insumo_nombre: apu.nombre,
+                                unidad: apu.unidad,
+                                ref_shift: apu.turno,
+                              })
+                            }
+                          />
+                        ) : (
+                          <BuscadorInsumo
+                            codigo={f.insumo_codigo}
+                            nombre={f.insumo_nombre}
+                            onElegir={(ins) =>
+                              setFila(f.uid, {
+                                insumo_codigo: ins.codigo,
+                                insumo_nombre: ins.nombre,
+                                unidad: ins.unidad,
+                              })
+                            }
+                          />
+                        )}
                       </td>
                       <td className="px-2 py-1 border-b text-muted-foreground">
                         {f.unidad || "—"}
@@ -459,5 +514,46 @@ function BuscadorInsumo({ codigo, nombre, onElegir }: BuscadorInsumoProps) {
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Buscador de sub-APU (fila cuya composición referencia otro APU) ───────────
+
+function SubApuFila({
+  fila,
+  onElegir,
+}: {
+  fila: FilaComp;
+  onElegir: (apu: ApuResumen) => void;
+}) {
+  const [reeligiendo, setReeligiendo] = useState(false);
+  if (fila.insumo_codigo && !reeligiendo) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <SubApuBadge />
+        <span className="font-mono text-[11px] rounded bg-muted px-1.5 py-0.5">
+          {fila.insumo_codigo}
+        </span>
+        <span className="truncate max-w-[14rem]" title={fila.insumo_nombre}>
+          {fila.insumo_nombre}
+        </span>
+        <button
+          type="button"
+          className="ml-auto text-[11px] text-muted-foreground hover:text-foreground underline"
+          onClick={() => setReeligiendo(true)}
+        >
+          cambiar
+        </button>
+      </div>
+    );
+  }
+  return (
+    <BuscadorApu
+      placeholder="Buscar APU por código / nombre…"
+      onElegir={(apu) => {
+        onElegir(apu);
+        setReeligiendo(false);
+      }}
+    />
   );
 }

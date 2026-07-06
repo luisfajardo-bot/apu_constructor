@@ -187,6 +187,8 @@ export interface ComponenteNuevo {
   rendimiento: number;
   insumo_nombre?: string;
   unidad?: string;
+  tipo?: string;
+  ref_shift?: string;
 }
 
 export interface ApuNuevo {

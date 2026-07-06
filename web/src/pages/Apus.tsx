@@ -19,6 +19,7 @@ import {
 import { listarApus, getApuDetalle, type ListarApusParams } from "@/api/autoria";
 import type { ApuResumen, ApuDetalle } from "@/lib/tipos";
 import { cop } from "@/lib/moneda";
+import SubApuBadge from "@/components/SubApuBadge";
 import { DialogoAgregarApu } from "@/components/autoria/DialogoAgregarApu";
 import { DialogoImportarApus } from "@/components/autoria/DialogoImportarApus";
 import { DialogoBorrarApu } from "@/components/autoria/DialogoBorrarApu";
@@ -385,7 +386,9 @@ function DetalleApu({
                   {cop(lin.costo)}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
-                  {lin.calidad_cruce}
+                  {lin.calidad_cruce === "apu"
+                    ? <SubApuBadge />
+                    : lin.calidad_cruce}
                 </TableCell>
               </TableRow>
             ))}

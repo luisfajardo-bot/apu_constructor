@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import EstadoBadge from "@/components/corrida/EstadoBadge";
+import SubApuBadge from "@/components/SubApuBadge";
 import BuscadorApu from "@/components/corrida/BuscadorApu";
 import CabeceraFiltros from "@/components/corrida/CabeceraFiltros";
 import { cop, pct } from "@/lib/moneda";
@@ -389,7 +390,9 @@ function DetalleExpandido({
                     {cop(lin.costo)}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {lin.calidad_cruce}
+                    {lin.calidad_cruce === "apu"
+                      ? <SubApuBadge />
+                      : lin.calidad_cruce}
                   </TableCell>
                 </TableRow>
               ))}

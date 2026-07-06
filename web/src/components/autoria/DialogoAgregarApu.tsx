@@ -405,6 +405,7 @@ function BuscadorInsumo({ codigo, nombre, onElegir }: BuscadorInsumoProps) {
   const [resultados, setResultados] = useState<Insumo[]>([]);
   const [abierto, setAbierto] = useState(false);
   const [buscando, setBuscando] = useState(false);
+  const [reeligiendo, setReeligiendo] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
 
   // Cerrar al hacer clic fuera
@@ -450,11 +451,12 @@ function BuscadorInsumo({ codigo, nombre, onElegir }: BuscadorInsumoProps) {
     setQ("");
     setResultados([]);
     setAbierto(false);
+    setReeligiendo(false);
   }
 
   return (
     <div ref={boxRef} className="relative">
-      {codigo ? (
+      {codigo && !reeligiendo ? (
         <div className="flex items-center gap-1.5">
           <span className="font-mono text-[11px] rounded bg-muted px-1.5 py-0.5">
             {codigo}
@@ -466,8 +468,8 @@ function BuscadorInsumo({ codigo, nombre, onElegir }: BuscadorInsumoProps) {
             type="button"
             className="ml-auto text-[11px] text-muted-foreground hover:text-foreground underline"
             onClick={() => {
+              setReeligiendo(true);
               setQ("");
-              setAbierto(true);
             }}
           >
             cambiar
@@ -485,7 +487,7 @@ function BuscadorInsumo({ codigo, nombre, onElegir }: BuscadorInsumoProps) {
         />
       )}
 
-      {abierto && !codigo && (
+      {abierto && (!codigo || reeligiendo) && (
         <div className="absolute z-20 mt-1 w-full max-h-52 overflow-auto rounded border bg-popover shadow-md">
           {buscando && (
             <p className="px-2 py-1.5 text-[11px] text-muted-foreground">buscando…</p>
@@ -534,7 +536,7 @@ function SubApuFila({
         <span className="font-mono text-[11px] rounded bg-muted px-1.5 py-0.5">
           {fila.insumo_codigo}
         </span>
-        <span className="truncate max-w-[14rem]" title={fila.insumo_nombre}>
+        <span className="truncate max-w-[16rem]" title={fila.insumo_nombre}>
           {fila.insumo_nombre}
         </span>
         <button

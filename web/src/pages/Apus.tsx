@@ -386,6 +386,7 @@ function DetalleApu({
                   {cop(lin.costo)}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
+                  {/* usa calidad_cruce (no tipo): tipo no viaja en la corrida ni sobrevive el snapshot congelado */}
                   {lin.calidad_cruce === "apu"
                     ? <SubApuBadge />
                     : lin.calidad_cruce}

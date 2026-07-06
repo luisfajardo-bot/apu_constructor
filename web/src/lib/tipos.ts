@@ -56,8 +56,8 @@ export interface LineaComposicion {
   fuente_precio: string;
   costo: number;
   calidad_cruce: string;
-  tipo: string;
-  ref_shift: string;
+  tipo?: string;
+  ref_shift?: string;
 }
 
 export interface DetalleItem {

@@ -3,9 +3,10 @@ import pytest
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import (
-    Apu, ApuComponent, CorridaItemRow, CorridaMeta, Insumo, LicitacionItem,
+    Apu, ApuComponent, CostedComponent, CorridaItemRow, CorridaMeta, Insumo, LicitacionItem,
 )
 from apu_tool.servicio import corridas
+from apu_tool.servicio.corridas import _estructura, _costear_row
 
 
 def _almacen_seed(tmp_path):
@@ -245,3 +246,28 @@ def test_generar_cuadro_respeta_snapshot_si_ya_congelada(tmp_path):
     # la vista congelada sigue en 2000 (no 5000): el cuadro respetó el snapshot emitido
     assert corridas.vista_corrida(alm, cid)["items"][0]["costo_unitario"] == 2000.0
     assert alm.corridas.get_corrida(cid).estado == "finalizada"
+
+
+def test_estructura_incluye_tipo_y_ref_shift():
+    cc = CostedComponent("B", "SUBAPU", "M3", 3.0, 2000, "APU", 6000, "apu",
+                         tipo="apu", ref_shift="DIURNO")
+    d = _estructura([cc])[0]
+    assert d["tipo"] == "apu" and d["ref_shift"] == "DIURNO"
+
+
+def test_costear_row_respaldo_costea_subapu(tmp_path):
+    alm = Almacen(tmp_path / "p.db", tmp_path / "a.db", tmp_path / "c.db")
+    alm.reset()
+    alm.precios.insert_insumos([Insumo("100", "CEMENTO", "KG", "MAT", 1000, "PRECIO IDU")])
+    alm.apus.insert_apus([Apu("B", "SUBAPU", "M3", "DIURNO")])
+    alm.apus.insert_components([ApuComponent("B", "DIURNO", "100", "CEMENTO", "KG", 2.0, 0.0)])
+    # El APU padre "GONE" NO existe -> el respaldo usa row.componentes (con tipo='apu')
+    row = CorridaItemRow(
+        seq=0, item=LicitacionItem("1", "act", "M2", 1.0, 0.0, "DIURNO"),
+        status="auto", apu_codigo="GONE", apu_nombre="X", unidad="M2", shift="DIURNO",
+        origen="historico", confianza=1.0, explicacion="",
+        componentes=[{"insumo_codigo": "B", "insumo_nombre": "SUBAPU", "unidad": "M3",
+                      "rendimiento": 3.0, "tipo": "apu", "ref_shift": "DIURNO"}],
+        candidatos=[])
+    ens = _costear_row(alm, row)
+    assert ens.costo_unitario == pytest.approx(6000)   # 3 * (2 * 1000), recursivo

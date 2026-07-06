@@ -33,9 +33,11 @@ class CorridaCongelada(Exception):
 
 
 def _estructura(componentes) -> list[dict]:
-    """Snapshot SIN dinero de una composición costeada."""
+    """Snapshot SIN dinero de una composición costeada (incluye tipo/ref_shift del componente)."""
     return [{"insumo_codigo": c.insumo_codigo, "insumo_nombre": c.insumo_nombre,
-             "unidad": c.unidad, "rendimiento": c.rendimiento} for c in componentes]
+             "unidad": c.unidad, "rendimiento": c.rendimiento,
+             "tipo": getattr(c, "tipo", "insumo"), "ref_shift": getattr(c, "ref_shift", "")}
+            for c in componentes]
 
 
 def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
@@ -116,7 +118,9 @@ def _costear_row(alm: Almacen, row: CorridaItemRow) -> AssembledApu:
             apu_codigo=row.apu_codigo or "", shift=row.shift,
             insumo_codigo=c["insumo_codigo"], insumo_nombre=c["insumo_nombre"],
             unidad=c["unidad"], rendimiento=c["rendimiento"],
-            precio_unitario_hist=0.0) for c in row.componentes]
+            precio_unitario_hist=0.0,
+            tipo=c.get("tipo", "insumo"), ref_shift=c.get("ref_shift", ""))
+            for c in row.componentes]
         costed, total = pricing.cost_components(comps)
     return AssembledApu(
         item=row.item, apu_codigo=row.apu_codigo, apu_nombre=row.apu_nombre,

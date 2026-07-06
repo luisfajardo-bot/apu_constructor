@@ -47,7 +47,18 @@ class PricingEngine:
         """Precarga en LOTE la composición del árbol de APUs (claves_top + cierre de
         sub-APUs) y los precios de todos sus insumos, en pocas consultas. Es puramente
         una optimización de I/O: llena los cachés que `components`/`_candidatos` ya usan,
-        así el costeo posterior no cambia de resultado, solo evita el N+1 de round-trips."""
+        así el costeo posterior no cambia de resultado, solo evita el N+1 de round-trips.
+
+        FAIL-SAFE: si el prefetch en lote falla por lo que sea (p.ej. un backend sin
+        soporte batch), se descartan las cargas parciales y el costeo sigue con las
+        consultas individuales (camino probado). Nunca rompe ni cambia el costo."""
+        try:
+            self._precargar_lote(claves_top)
+        except Exception:
+            self._comp_cache.clear()
+            self._cache.clear()
+
+    def _precargar_lote(self, claves_top) -> None:
         pendientes = {(str(c), s) for c, s in claves_top if c}
         while pendientes:
             cargados = self.alm.apus.get_components_bulk(list(pendientes))

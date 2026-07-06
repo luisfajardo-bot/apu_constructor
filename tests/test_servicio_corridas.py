@@ -379,6 +379,29 @@ def test_precargar_costos_identicos_y_cero_consultas_individuales(tmp_path):
     assert single["n"] == 0                                 # tras precargar: cero consultas 1x1
 
 
+def test_precargar_falla_cae_a_individual_sin_romper(tmp_path):
+    """Fase 2 fail-safe: si el batch revienta, precargar no rompe y el costeo sigue
+    dando el costo correcto vía consultas individuales."""
+    alm = Almacen(tmp_path / "p.db", tmp_path / "a.db", tmp_path / "c.db")
+    alm.reset()
+    alm.precios.insert_insumos([Insumo("100", "CEMENTO", "KG", "MAT", 1000, "PRECIO IDU")])
+    alm.apus.insert_apus([Apu("A", "APU A", "M2", "DIURNO")])
+    alm.apus.insert_components([ApuComponent("A", "DIURNO", "100", "CEMENTO", "KG", 2.0, 0.0)])
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("batch no soportado")
+    alm.apus.get_components_bulk = _boom          # simula fallo del batch
+
+    row = CorridaItemRow(
+        seq=0, item=LicitacionItem("1", "act", "M2", 1.0, 0.0, "DIURNO"),
+        status="auto", apu_codigo="A", apu_nombre="A", unidad="M2", shift="DIURNO",
+        origen="historico", confianza=1.0, explicacion="", componentes=[], candidatos=[])
+    eng = PricingEngine(alm)
+    eng.precargar([("A", "DIURNO")])              # no debe propagar la excepción
+    ens = _costear_row(alm, row, eng)
+    assert ens.costo_unitario == pytest.approx(2000)   # costo correcto vía individual
+
+
 def test_costear_row_activa_no_duplica_rendimiento_en_autoreferencia(tmp_path):
     # FIX 2 (regresión): la rama ACTIVA de _costear_row debe sembrar la identidad de
     # la fila en pricing.cost_components; si no, un componente auto-referenciado

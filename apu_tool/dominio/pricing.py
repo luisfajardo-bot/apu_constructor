@@ -20,7 +20,12 @@ class PricingEngine:
     def __init__(self, almacen: Almacen):
         self.alm = almacen
         self._cache: dict[str, list] = {}          # codigo -> list[Insumo] candidatos
-        self._apu_cost_cache: dict[tuple, float] = {}  # (codigo, shift) -> costo_unitario
+        # Memo (codigo, shift) -> costo_unitario, POR INSTANCIA (no global).
+        # Supone grafo de sub-APUs ACÍCLICO (los datos reales no tienen ciclos):
+        # con un ciclo, el valor cacheado depende del camino de la primera pasada
+        # (el borde que cerró el ciclo cayó a histórico). Aceptable porque un ciclo
+        # es un error de datos; la guarda de ciclos garantiza terminación igual.
+        self._apu_cost_cache: dict[tuple, float] = {}
 
     def _candidatos(self, codigo: str) -> list:
         if not codigo:

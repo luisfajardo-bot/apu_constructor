@@ -41,8 +41,12 @@ def test_anidamiento_dos_niveles(alm):
     alm.apus.insert_components([ApuComponent(
         "C", "DIURNO", "A", "COMP", "M2", 1.0, 0.0, tipo="apu", ref_shift="DIURNO")])
     eng = PricingEngine(alm)
-    _, total = eng.cost_apu("C", "DIURNO")
+    costed, total = eng.cost_apu("C", "DIURNO")
     assert total == pytest.approx(6000)
+    assert costed[0].tipo == "apu"
+    assert costed[0].fuente_precio == "APU"
+    assert costed[0].calidad_cruce == "apu"
+    assert costed[0].ref_shift == "DIURNO"
 
 
 def test_ciclo_self_ref_no_cuelga(alm):

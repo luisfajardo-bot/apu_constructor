@@ -44,5 +44,6 @@ def detalle(alm: Almacen, codigo: str, turno: str) -> Optional[dict]:
             "insumo_codigo": c.insumo_codigo, "insumo_nombre": c.insumo_nombre,
             "unidad": c.unidad, "rendimiento": c.rendimiento,
             "precio_unitario": c.precio_unitario, "fuente_precio": c.fuente_precio,
-            "costo": c.costo, "calidad_cruce": c.calidad_cruce} for c in costed],
+            "costo": c.costo, "calidad_cruce": c.calidad_cruce,
+            "tipo": c.tipo, "ref_shift": c.ref_shift} for c in costed],
     }

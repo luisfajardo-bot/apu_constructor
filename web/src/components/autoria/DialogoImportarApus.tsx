@@ -118,7 +118,7 @@ export function DialogoImportarApus({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle className="text-sm">
             Importar APUs desde Excel (hoja "APUS")
@@ -192,7 +192,7 @@ function SeccionApus({ titulo, filas }: { titulo: string; filas: ApuResumen[] })
         <span className="font-normal text-muted-foreground">({filas.length})</span>
       </p>
       {filas.length > 0 ? (
-        <div className="overflow-x-hidden overflow-y-auto max-h-52 border rounded">
+        <div className="overflow-x-auto overflow-y-auto max-h-52 border rounded">
           <table className="w-full text-xs border-collapse">
             <thead className="sticky top-0 bg-muted/80 backdrop-blur z-10">
               <tr>
@@ -255,7 +255,7 @@ export function SeccionSubApus({ vinculos }: { vinculos: VinculoSubApu[] }) {
           — al crear, estas líneas se marcan como sub-APU
         </span>
       </p>
-      <div className="overflow-x-hidden overflow-y-auto max-h-40 border rounded">
+      <div className="overflow-x-auto overflow-y-auto max-h-40 border rounded">
         <table className="w-full text-xs border-collapse">
           <tbody>
             {vinculos.map((v, i) => (

@@ -5,6 +5,7 @@ from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import (
     Apu, ApuComponent, CostedComponent, CorridaItemRow, CorridaMeta, Insumo, LicitacionItem,
 )
+from apu_tool.dominio.pricing import PricingEngine
 from apu_tool.servicio import corridas
 from apu_tool.servicio.corridas import _estructura, _costear_row
 
@@ -271,6 +272,34 @@ def test_costear_row_respaldo_costea_subapu(tmp_path):
         candidatos=[])
     ens = _costear_row(alm, row)
     assert ens.costo_unitario == pytest.approx(6000)   # 3 * (2 * 1000), recursivo
+
+
+def test_costear_row_motor_compartido_no_reconsulta_precios(tmp_path):
+    """Optimización Fase 1: un PricingEngine compartido entre filas reusa el caché;
+    un insumo compartido por dos ítems se consulta a la base UNA sola vez."""
+    alm = Almacen(tmp_path / "p.db", tmp_path / "a.db", tmp_path / "c.db")
+    alm.reset()
+    alm.precios.insert_insumos([Insumo("100", "CEMENTO", "KG", "MAT", 1000, "PRECIO IDU")])
+    alm.apus.insert_apus([Apu("A", "APU A", "M2", "DIURNO"), Apu("B", "APU B", "M2", "DIURNO")])
+    alm.apus.insert_components([
+        ApuComponent("A", "DIURNO", "100", "CEMENTO", "KG", 1.0, 0.0),
+        ApuComponent("B", "DIURNO", "100", "CEMENTO", "KG", 2.0, 0.0)])
+
+    llamadas: list[str] = []
+    orig = alm.precios.get_candidatos
+    alm.precios.get_candidatos = lambda cod: (llamadas.append(cod), orig(cod))[1]
+
+    def _row(seq, cod):
+        return CorridaItemRow(
+            seq=seq, item=LicitacionItem(str(seq), "act", "M2", 1.0, 0.0, "DIURNO"),
+            status="auto", apu_codigo=cod, apu_nombre=cod, unidad="M2", shift="DIURNO",
+            origen="historico", confianza=1.0, explicacion="", componentes=[], candidatos=[])
+
+    eng = PricingEngine(alm)
+    ensA = _costear_row(alm, _row(0, "A"), eng)
+    ensB = _costear_row(alm, _row(1, "B"), eng)
+    assert ensA.costo_unitario == pytest.approx(1000) and ensB.costo_unitario == pytest.approx(2000)
+    assert llamadas.count("100") == 1                 # motor compartido: 1 consulta, no 2
 
 
 def test_costear_row_activa_no_duplica_rendimiento_en_autoreferencia(tmp_path):

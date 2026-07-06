@@ -25,7 +25,7 @@ from apu_tool.nucleo.texto import normalizar
 from apu_tool.servicio.auditoria import nuevo_lote, registrar_auditoria
 from apu_tool.servicio.insumos import _insumo_out, _norm_h, _to_float
 from apu_tool.servicio.subapus import (
-    mapa_codigos_apu, detectar_subapus_lote, marcar_comps_subapu,
+    mapa_codigos_apu, nombres_apu, detectar_subapus_lote, marcar_comps_subapu,
 )
 
 
@@ -344,6 +344,7 @@ def preview_importar_apus(alm: Almacen, contenido: bytes) -> dict:
 def aplicar_importar_apus(alm: Almacen, contenido: bytes, actor=None) -> dict:
     apus, comps_por = _parse_apus(contenido)
     mapa = mapa_codigos_apu(alm, apus)
+    nombres = nombres_apu(alm, apus)
     creados, subapus_marcados, errores = 0, 0, []
     lote = nuevo_lote()
     for a in apus:
@@ -351,7 +352,7 @@ def aplicar_importar_apus(alm: Almacen, contenido: bytes, actor=None) -> dict:
             continue                                   # ya existe: no se pisa
         try:
             comps = comps_por.get((a.codigo, a.shift), [])
-            comps, n_sub = marcar_comps_subapu(comps, a.shift, mapa)
+            comps, n_sub = marcar_comps_subapu(comps, a.shift, mapa, nombres)
             with alm.transaccion("apus") as conn:
                 alm.apus.crear_apu(a, comps, conn=conn)
                 registrar_auditoria(

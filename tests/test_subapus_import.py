@@ -2,7 +2,7 @@ from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Apu, ApuComponent
 from apu_tool.servicio import autoria
 from apu_tool.servicio.subapus import (
-    mapa_codigos_apu, detectar_subapus_lote, marcar_comps_subapu,
+    mapa_codigos_apu, nombres_apu, detectar_subapus_lote, marcar_comps_subapu,
 )
 
 
@@ -41,6 +41,28 @@ def test_detecta_subapu_de_biblioteca_y_de_lote(tmp_path):
     assert porcod["C"]["origen"] == "lote" and porcod["C"]["sub_turno"] == "DIURNO"
 
 
+def test_no_detecta_subapu_si_nombre_no_coincide(tmp_path):
+    """Código compartido APU/insumo con descripción distinta: NO es sub-APU.
+    (Regresión del 6270: 8044 es APU 'CODO EN ACERO' e insumo 'ANDAMIO'.)"""
+    alm = _alm(tmp_path)
+    alm.apus.insert_apus([Apu("8044", "CODO EN ACERO", "UN", "DIURNO")])
+    apus_lote = [Apu("P", "PADRE", "M2", "DIURNO")]
+    comps_por = {("P", "DIURNO"): [
+        ApuComponent("P", "DIURNO", "8044", "ANDAMIO TUBULAR", "UN", 1.0, 0.0)]}  # nombre de insumo
+    vinc = detectar_subapus_lote(alm, apus_lote, comps_por, solo=apus_lote)
+    assert vinc == []                                                  # el nombre no coincide -> no es sub-APU
+
+
+def test_detecta_subapu_si_nombre_coincide(tmp_path):
+    alm = _alm(tmp_path)
+    alm.apus.insert_apus([Apu("8044", "CODO EN ACERO", "UN", "DIURNO")])
+    apus_lote = [Apu("P", "PADRE", "M2", "DIURNO")]
+    comps_por = {("P", "DIURNO"): [
+        ApuComponent("P", "DIURNO", "8044", "CODO EN ACERO", "UN", 1.0, 0.0)]}  # mismo nombre que el APU
+    vinc = detectar_subapus_lote(alm, apus_lote, comps_por, solo=apus_lote)
+    assert len(vinc) == 1 and vinc[0]["sub_codigo"] == "8044"
+
+
 def test_ref_shift_hereda_o_cae_a_diurno(tmp_path):
     alm = _alm(tmp_path)
     alm.apus.insert_apus([Apu("B", "SUB", "M3", "DIURNO")])           # solo DIURNO
@@ -54,14 +76,26 @@ def test_marcar_comps_subapu(tmp_path):
     alm = _alm(tmp_path)
     alm.apus.insert_apus([Apu("B", "SUB", "M3", "DIURNO")])
     mapa = mapa_codigos_apu(alm, [])
+    nombres = nombres_apu(alm, [])
     comps = [ApuComponent("A", "DIURNO", "B", "SUB", "M3", 1.0, 0.0),
              ApuComponent("A", "DIURNO", "100", "CEMENTO", "KG", 3.0, 0.0)]
-    marcados, n = marcar_comps_subapu(comps, "DIURNO", mapa)
+    marcados, n = marcar_comps_subapu(comps, "DIURNO", mapa, nombres)
     assert n == 1
     sub = [c for c in marcados if c.insumo_codigo == "B"][0]
     ins = [c for c in marcados if c.insumo_codigo == "100"][0]
     assert sub.tipo == "apu" and sub.ref_shift == "DIURNO"
     assert ins.tipo == "insumo"
+
+
+def test_marcar_comps_subapu_respeta_nombre(tmp_path):
+    """Mismo código que un APU pero distinto nombre -> queda como insumo."""
+    alm = _alm(tmp_path)
+    alm.apus.insert_apus([Apu("B", "SUB REAL", "M3", "DIURNO")])
+    mapa = mapa_codigos_apu(alm, [])
+    nombres = nombres_apu(alm, [])
+    comps = [ApuComponent("A", "DIURNO", "B", "OTRO INSUMO DISTINTO", "M3", 1.0, 0.0)]
+    marcados, n = marcar_comps_subapu(comps, "DIURNO", mapa, nombres)
+    assert n == 0 and marcados[0].tipo == "insumo"
 
 
 def _parse_fake(apus_lote, comps_por):

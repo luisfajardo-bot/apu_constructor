@@ -111,6 +111,40 @@ def test_svc_listar_y_eliminar(tmp_path):
     assert corridas.listar_corridas(alm) == []
 
 
+def test_listar_corridas_totales_igual_a_vista(tmp_path):
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    cid = corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False)
+
+    tot_v = corridas.vista_corrida(alm, cid)["totales"]
+    fila = next(c for c in corridas.listar_corridas(alm) if c["id"] == cid)
+    for k in ("contractual", "costo", "margen", "margen_pct"):
+        assert fila[k] == pytest.approx(tot_v[k])
+
+    corridas.congelar(alm, cid)                       # congelada: mismo invariante vs snapshot
+    tot_v2 = corridas.vista_corrida(alm, cid)["totales"]
+    fila2 = next(c for c in corridas.listar_corridas(alm) if c["id"] == cid)
+    for k in ("contractual", "costo", "margen", "margen_pct"):
+        assert fila2[k] == pytest.approx(tot_v2[k])
+
+
+def test_listar_corridas_fila_robusta_ante_error_de_costeo(tmp_path, monkeypatch):
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False)
+
+    def _boom(*a, **k):
+        raise RuntimeError("costeo falló")
+    monkeypatch.setattr(corridas, "_ensamblar_corrida", _boom)
+
+    fila = corridas.listar_corridas(alm)[0]
+    assert fila["n_items"] == 1                        # conteos no dependen del costeo
+    assert fila["contractual"] is None and fila["costo"] is None
+    assert fila["margen"] is None and fila["margen_pct"] is None
+
+
 def test_stream_persiste_duracion(tmp_path):
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",

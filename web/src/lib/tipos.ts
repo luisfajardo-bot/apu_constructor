@@ -115,6 +115,10 @@ export interface CorridaResumen {
   n_items: number;
   n_revision: number;
   duracion_ms: number | null;
+  contractual: number | null;
+  costo: number | null;
+  margen: number | null;
+  margen_pct: number | null;
 }
 
 // Wrappers de respuesta

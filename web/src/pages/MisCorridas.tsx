@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { listarCorridas, eliminarCorrida, descargarPlantillaLicitacion } from "@/api/corridas";
 import { fmtDuracion } from "@/lib/tiempo";
+import { cop, pct } from "@/lib/moneda";
 import type { CorridaResumen } from "@/lib/tipos";
 
 function fechaLegible(iso: string): string {
@@ -87,6 +88,10 @@ export default function MisCorridas() {
                 <th style={styles.th}>Nombre</th>
                 <th style={{ ...styles.th, ...styles.thNum }}>Items</th>
                 <th style={{ ...styles.th, ...styles.thNum }}>Por revisar</th>
+                <th style={{ ...styles.th, ...styles.thNum }}>Contractual</th>
+                <th style={{ ...styles.th, ...styles.thNum }}>Costo</th>
+                <th style={{ ...styles.th, ...styles.thNum }}>Dif. $</th>
+                <th style={{ ...styles.th, ...styles.thNum }}>Margen %</th>
                 <th style={{ ...styles.th, ...styles.thNum }}>Tiempo</th>
                 <th style={styles.th}>Estado</th>
                 <th style={styles.th}>Modo</th>
@@ -112,6 +117,18 @@ export default function MisCorridas() {
                   </td>
                   <td style={{ ...styles.td, ...styles.tdNum }}>{c.n_items}</td>
                   <td style={{ ...styles.td, ...styles.tdNum }}>{c.n_revision}</td>
+                  <td style={{ ...styles.td, ...styles.tdNum }}>
+                    {c.contractual === null ? "—" : cop(c.contractual)}
+                  </td>
+                  <td style={{ ...styles.td, ...styles.tdNum }}>
+                    {c.costo === null ? "—" : cop(c.costo)}
+                  </td>
+                  <td style={{ ...styles.td, ...styles.tdNum, color: colorSigno(c.margen) }}>
+                    {c.margen === null ? "—" : cop(c.margen)}
+                  </td>
+                  <td style={{ ...styles.td, ...styles.tdNum, color: colorSigno(c.margen) }}>
+                    {c.margen_pct === null ? "—" : pct(c.margen_pct)}
+                  </td>
                   <td style={{ ...styles.td, ...styles.tdNum }}>{fmtDuracion(c.duracion_ms)}</td>
                   <td style={styles.td}>
                     <span style={{ ...styles.badge, ...estadoBadgeStyle(c.estado) }}>
@@ -142,6 +159,11 @@ export default function MisCorridas() {
       )}
     </div>
   );
+}
+
+export function colorSigno(n: number | null): string | undefined {
+  if (n === null || n === undefined) return undefined;
+  return n >= 0 ? "#276749" : "#c53030";
 }
 
 function estadoBadgeStyle(estado: string): React.CSSProperties {

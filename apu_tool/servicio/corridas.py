@@ -165,29 +165,40 @@ def _vista_item(ens: AssembledApu, seq: int, status: str) -> dict:
     }
 
 
+def _ensamblar_corrida(alm: Almacen, meta, rows, pricing: PricingEngine) -> list[AssembledApu]:
+    """Ensambla los ítems de una corrida respetando el modo: congelada -> snapshot por
+    ítem (con caída a costeo en vivo si falta el snapshot); activa -> costeo en vivo.
+    Camino ÚNICO compartido por vista_corrida y listar_corridas."""
+    if meta.modo == "congelada":
+        snaps = alm.corridas.get_snapshots(meta.id)
+        return [_assembled_desde_snapshot(r, snaps[r.seq]) if r.seq in snaps
+                else _costear_row(alm, r, pricing) for r in rows]
+    return [_costear_row(alm, r, pricing) for r in rows]
+
+
+def _totales(ensambles: list[AssembledApu], rows) -> dict:
+    """Totales de una corrida (fórmula única). margen_pct es AGREGADO."""
+    tot_c = sum(e.contractual_total for e in ensambles)
+    tot_k = sum(e.costo_total for e in ensambles)
+    n_rev = sum(1 for r in rows if r.status in ("review", "new"))
+    return {"contractual": tot_c, "costo": tot_k, "margen": tot_c - tot_k,
+            "margen_pct": ((tot_c - tot_k) / tot_c) if tot_c else 0.0,
+            "n_items": len(rows), "n_revision": n_rev}
+
+
 def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:
         return None
     rows = alm.corridas.get_items(corrida_id)
     pricing = PricingEngine(alm)                       # motor COMPARTIDO por toda la corrida
-    pricing.precargar((r.apu_codigo, r.shift) for r in rows if r.apu_codigo)  # lote: pocas queries
-    if meta.modo == "congelada":
-        snaps = alm.corridas.get_snapshots(corrida_id)
-        ensambles = [_assembled_desde_snapshot(r, snaps[r.seq]) if r.seq in snaps
-                     else _costear_row(alm, r, pricing) for r in rows]
-    else:
-        ensambles = [_costear_row(alm, r, pricing) for r in rows]
+    pricing.precargar((r.apu_codigo, r.shift) for r in rows if r.apu_codigo)  # lote
+    ensambles = _ensamblar_corrida(alm, meta, rows, pricing)
     items = [_vista_item(ens, r.seq, r.status) for ens, r in zip(ensambles, rows)]
-    tot_c = sum(i["contractual_total"] for i in items)
-    tot_k = sum(i["costo_total"] for i in items)
-    n_rev = sum(1 for i in items if i["status"] in ("review", "new"))
     return {
         "id": meta.id, "archivo": meta.archivo, "estado": meta.estado, "modo": meta.modo,
         "duracion_ms": meta.duracion_ms, "items": items,
-        "totales": {"contractual": tot_c, "costo": tot_k, "margen": tot_c - tot_k,
-                    "margen_pct": ((tot_c - tot_k) / tot_c) if tot_c else 0.0,
-                    "n_items": len(items), "n_revision": n_rev},
+        "totales": _totales(ensambles, rows),
     }
 
 
@@ -272,11 +283,21 @@ def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
 def listar_corridas(alm: Almacen) -> list[dict]:
     out: list[dict] = []
     for meta in alm.corridas.listar_corridas():
-        items = alm.corridas.get_items(meta.id)
-        n_rev = sum(1 for it in items if it.status in ("review", "new"))
-        out.append({"id": meta.id, "archivo": meta.archivo, "creada_en": meta.creada_en,
-                    "estado": meta.estado, "modo": meta.modo, "duracion_ms": meta.duracion_ms,
-                    "n_items": len(items), "n_revision": n_rev})
+        rows = alm.corridas.get_items(meta.id)
+        n_rev = sum(1 for it in rows if it.status in ("review", "new"))
+        fila = {"id": meta.id, "archivo": meta.archivo, "creada_en": meta.creada_en,
+                "estado": meta.estado, "modo": meta.modo, "duracion_ms": meta.duracion_ms,
+                "n_items": len(rows), "n_revision": n_rev,
+                "contractual": None, "costo": None, "margen": None, "margen_pct": None}
+        try:                                           # fail-safe: si una corrida no
+            pricing = PricingEngine(alm)               # costea, su fila queda con None
+            pricing.precargar((r.apu_codigo, r.shift) for r in rows if r.apu_codigo)
+            tot = _totales(_ensamblar_corrida(alm, meta, rows, pricing), rows)
+            fila.update(contractual=tot["contractual"], costo=tot["costo"],
+                        margen=tot["margen"], margen_pct=tot["margen_pct"])
+        except Exception:
+            pass
+        out.append(fila)
     return out
 
 

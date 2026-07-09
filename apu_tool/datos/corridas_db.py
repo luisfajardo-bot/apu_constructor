@@ -51,13 +51,16 @@ class CorridasDB:
                 conn.execute("ALTER TABLE corrida ADD COLUMN duracion_ms INTEGER")
             if "modo" not in cols:
                 conn.execute("ALTER TABLE corrida ADD COLUMN modo TEXT NOT NULL DEFAULT 'activa'")
+            if "carpeta_id" not in cols:
+                conn.execute("ALTER TABLE corrida ADD COLUMN carpeta_id INTEGER "
+                             "REFERENCES carpeta(id) ON DELETE RESTRICT")
             icols = {r["name"] for r in conn.execute("PRAGMA table_info(corrida_item)").fetchall()}
             if "snapshot_json" not in icols:
                 conn.execute("ALTER TABLE corrida_item ADD COLUMN snapshot_json TEXT")
 
     def reset(self) -> None:
         with self.connect() as conn:
-            for t in ("corrida_item", "corrida"):
+            for t in ("corrida_item", "corrida", "carpeta"):
                 conn.execute(f"DROP TABLE IF EXISTS {t}")
             conn.executescript(_load_schema())
 

@@ -31,9 +31,13 @@ def _dto(c: Carpeta) -> dict:
 
 
 def _es_duplicado(e: Exception) -> bool:
-    """True si la excepción de integridad es por el índice de hermanas."""
-    return isinstance(e, sqlite3.IntegrityError) or "ux_carpeta_hermanas" in str(e) \
-        or "unique" in str(e).lower()
+    """True si la violación de integridad es por el índice de hermanas (nombre duplicado).
+
+    Restringido a violaciones de UNIQUE: una FK/RESTRICT (p.ej. borrado del padre en
+    carrera) NO debe reportarse como nombre duplicado. SQLite dice "UNIQUE constraint
+    failed…"; Postgres nombra el índice "ux_carpeta_hermanas"."""
+    msg = str(e).lower()
+    return "ux_carpeta_hermanas" in msg or "unique" in msg
 
 
 def crear_carpeta(alm: Almacen, nombre: str, parent_id: Optional[int],

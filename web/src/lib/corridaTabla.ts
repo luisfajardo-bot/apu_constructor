@@ -3,6 +3,7 @@ import type { ItemCuadro } from "@/lib/tipos";
 
 export type ClaveColumna =
   | "descripcion" | "unidad" | "cantidad" | "item" | "apu" | "status"
+  | "precio_contractual" | "costo_unitario"
   | "contractual_total" | "costo_total" | "margen_total" | "margen_pct";
 
 export type DireccionOrden = "asc" | "desc";
@@ -17,6 +18,8 @@ export interface FiltrosColumna {
   item: string;
   apu: string;
   status: string;
+  precio_contractual: FiltroRango;
+  costo_unitario: FiltroRango;
   contractual_total: FiltroRango;
   costo_total: FiltroRango;
   margen_total: FiltroRango;
@@ -25,7 +28,9 @@ export interface FiltrosColumna {
 
 export const FILTROS_VACIOS: FiltrosColumna = {
   descripcion: "", unidad: "", cantidad: { min: "", max: "" }, item: "",
-  apu: "", status: "", contractual_total: { min: "", max: "" },
+  apu: "", status: "",
+  precio_contractual: { min: "", max: "" }, costo_unitario: { min: "", max: "" },
+  contractual_total: { min: "", max: "" },
   costo_total: { min: "", max: "" }, margen_total: { min: "", max: "" },
   margen_pct: { min: "", max: "" },
 };
@@ -59,6 +64,8 @@ export function filtrar(items: ItemCuadro[], f: FiltrosColumna, soloRevision: bo
     if (!contiene(it.item, f.item)) return false;
     if (!contiene(`${it.apu_codigo} ${it.apu_nombre}`, f.apu)) return false;
     if (f.status && it.status !== f.status) return false;
+    if (!enRango(it.precio_contractual, f.precio_contractual)) return false;
+    if (!enRango(it.costo_unitario, f.costo_unitario)) return false;
     if (!enRango(it.contractual_total, f.contractual_total)) return false;
     if (!enRango(it.costo_total, f.costo_total)) return false;
     if (!enRango(it.margen_total, f.margen_total)) return false;
@@ -81,6 +88,8 @@ function valorTexto(it: ItemCuadro, clave: ClaveColumna): string {
 function valorNumero(it: ItemCuadro, clave: ClaveColumna): number {
   switch (clave) {
     case "cantidad": return it.cantidad;
+    case "precio_contractual": return it.precio_contractual;
+    case "costo_unitario": return it.costo_unitario;
     case "contractual_total": return it.contractual_total;
     case "costo_total": return it.costo_total;
     case "margen_total": return it.margen_total;

@@ -155,9 +155,8 @@ def mover_corrida(alm: Almacen, corrida_id: int, carpeta_id: int, actor=None) ->
     if alm.carpetas.get(carpeta_id) is None:
         raise CarpetaInvalida("La carpeta destino no existe.")
     with alm.transaccion("corridas") as conn:
-        # set_carpeta abre su propia conexión; para mantener la mutación + auditoría
-        # en la misma transacción, hazlo con SQL directo sobre `conn`:
-        conn.execute("UPDATE corrida SET carpeta_id=? WHERE id=?", (int(carpeta_id), int(corrida_id)))
+        # Mutación + auditoría en la MISMA transacción; el repo es agnóstico de dialecto.
+        alm.corridas.set_carpeta(corrida_id, carpeta_id, conn=conn)
         registrar_auditoria(alm, conn, actor, "corrida.mover", "corrida", corrida_id,
                             antes={"carpeta_id": meta.carpeta_id},
                             despues={"carpeta_id": carpeta_id})

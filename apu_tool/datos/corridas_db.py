@@ -152,10 +152,13 @@ class CorridasDB:
         with self.connect() as conn:
             conn.execute("UPDATE corrida SET modo=? WHERE id=?", (modo, int(corrida_id)))
 
-    def set_carpeta(self, corrida_id: int, carpeta_id: int) -> None:
-        with self.connect() as conn:
-            conn.execute("UPDATE corrida SET carpeta_id=? WHERE id=?",
-                         (int(carpeta_id), int(corrida_id)))
+    def set_carpeta(self, corrida_id: int, carpeta_id: int, conn=None) -> None:
+        sql = "UPDATE corrida SET carpeta_id=? WHERE id=?"
+        params = (int(carpeta_id), int(corrida_id))
+        if conn is not None:
+            conn.execute(sql, params); return
+        with self.connect() as c:
+            c.execute(sql, params)
 
     def set_snapshot(self, corrida_id: int, seq: int, payload: dict) -> None:
         with self.connect() as conn:

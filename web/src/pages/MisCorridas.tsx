@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { listarCorridas, eliminarCorrida, descargarPlantillaLicitacion } from "@/api/corridas";
-import { listarCarpetas, crearCarpeta, renombrarCarpeta, borrarCarpeta } from "@/api/carpetas";
+import { listarCarpetas, crearCarpeta, renombrarCarpeta, borrarCarpeta, moverCorrida, moverCarpeta } from "@/api/carpetas";
 import { useAuth } from "@/lib/auth";
 import { fmtDuracion } from "@/lib/tiempo";
 import { cop, pct } from "@/lib/moneda";
@@ -44,6 +44,20 @@ function ancestros(id: number, mapa: Map<number, CarpetaNodo>): CarpetaNodo[] {
     actual = actual.parent_id != null ? mapa.get(actual.parent_id) : undefined;
   }
   return cadena;
+}
+
+// Devuelve lista plana de carpetas en orden depth-first con etiqueta de ruta
+function listaDestinos(nodos: CarpetaNodo[]): { id: number; etiqueta: string }[] {
+  const resultado: { id: number; etiqueta: string }[] = [];
+  function recorrer(lista: CarpetaNodo[], prefijo: string) {
+    for (const n of lista) {
+      const etiqueta = prefijo ? `${prefijo} › ${n.nombre}` : n.nombre;
+      resultado.push({ id: n.id, etiqueta });
+      if (n.hijas.length > 0) recorrer(n.hijas, etiqueta);
+    }
+  }
+  recorrer(nodos, "");
+  return resultado;
 }
 
 export default function MisCorridas() {
@@ -129,6 +143,52 @@ export default function MisCorridas() {
       cargar();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al eliminar carpeta");
+    }
+  }
+
+  async function handleMoverCorrida(e: React.MouseEvent, corrida: CorridaResumen) {
+    e.stopPropagation();
+    const destinos = listaDestinos(arbol);
+    if (destinos.length === 0) {
+      toast.error("No hay carpetas de destino disponibles.");
+      return;
+    }
+    const opciones = destinos.map((d, i) => `${i + 1}. ${d.etiqueta}`).join("\n");
+    const resp = window.prompt(`Mover "${corrida.archivo}" a:\n${opciones}\n\nEscribe el número:`);
+    if (!resp?.trim()) return;
+    const idx = parseInt(resp.trim(), 10) - 1;
+    if (isNaN(idx) || idx < 0 || idx >= destinos.length) return;
+    try {
+      await moverCorrida(corrida.id, destinos[idx].id);
+      toast.success(`Corrida "${corrida.archivo}" movida a "${destinos[idx].etiqueta}"`);
+      cargar();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Error al mover corrida");
+    }
+  }
+
+  async function handleMoverCarpeta(e: React.MouseEvent, carpeta: CarpetaNodo) {
+    e.stopPropagation();
+    // Excluir la carpeta misma y sus descendientes (hijas directas; max depth 2)
+    const idsExcluidos = new Set<number>([carpeta.id, ...carpeta.hijas.map((h) => h.id)]);
+    const todasLasCarpetas = listaDestinos(arbol).filter((d) => !idsExcluidos.has(d.id));
+    // Opción raíz más las demás carpetas
+    const destinos: { id: number | null; etiqueta: string }[] = [
+      { id: null, etiqueta: "(raíz)" },
+      ...todasLasCarpetas,
+    ];
+    const opciones = destinos.map((d, i) => `${i + 1}. ${d.etiqueta}`).join("\n");
+    const resp = window.prompt(`Mover carpeta "${carpeta.nombre}" a:\n${opciones}\n\nEscribe el número:`);
+    if (!resp?.trim()) return;
+    const idx = parseInt(resp.trim(), 10) - 1;
+    if (isNaN(idx) || idx < 0 || idx >= destinos.length) return;
+    const parentId = destinos[idx].id;
+    try {
+      await moverCarpeta(carpeta.id, parentId);
+      toast.success(`Carpeta "${carpeta.nombre}" movida a "${destinos[idx].etiqueta}"`);
+      cargar();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Error al mover carpeta");
     }
   }
 
@@ -220,6 +280,13 @@ export default function MisCorridas() {
                         Renombrar
                       </button>
                       <button
+                        style={styles.btnCarpetaAccion}
+                        onClick={(e) => handleMoverCarpeta(e, carpeta)}
+                        title="Mover carpeta"
+                      >
+                        Mover
+                      </button>
+                      <button
                         style={{ ...styles.btnCarpetaAccion, ...styles.btnCarpetaEliminar }}
                         onClick={(e) => handleEliminarCarpeta(e, carpeta)}
                         title="Eliminar carpeta"
@@ -301,6 +368,15 @@ export default function MisCorridas() {
                         </span>
                       </td>
                       <td style={{ ...styles.td, ...styles.tdAccion }}>
+                        {puedeEditar && (
+                          <button
+                            style={styles.btnMover}
+                            onClick={(e) => handleMoverCorrida(e, c)}
+                            title="Mover corrida"
+                          >
+                            Mover
+                          </button>
+                        )}
                         <button
                           style={styles.btnEliminar}
                           onClick={(e) => handleEliminar(e, c)}
@@ -504,7 +580,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   tdAccion: {
     textAlign: "right" as const,
-    width: "90px",
+    width: "140px",
+    whiteSpace: "nowrap" as const,
   },
   nombre: {
     fontWeight: 500,
@@ -520,6 +597,16 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "11px",
     fontWeight: 500,
     whiteSpace: "nowrap" as const,
+  },
+  btnMover: {
+    padding: "3px 10px",
+    fontSize: "11px",
+    color: "#2b6cb0",
+    background: "transparent",
+    border: "1px solid #bee3f8",
+    borderRadius: "4px",
+    cursor: "pointer",
+    marginRight: "4px",
   },
   btnEliminar: {
     padding: "3px 10px",

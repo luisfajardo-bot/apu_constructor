@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { listarCorridas, eliminarCorrida, descargarPlantillaLicitacion } from "@/api/corridas";
+import { listarCarpetas, crearCarpeta, renombrarCarpeta, borrarCarpeta } from "@/api/carpetas";
+import { useAuth } from "@/lib/auth";
 import { fmtDuracion } from "@/lib/tiempo";
 import { cop, pct } from "@/lib/moneda";
-import type { CorridaResumen } from "@/lib/tipos";
+import type { CorridaResumen, CarpetaNodo } from "@/lib/tipos";
 
 function fechaLegible(iso: string): string {
   try {
@@ -20,18 +22,55 @@ function fechaLegible(iso: string): string {
   }
 }
 
+// Aplana el árbol de carpetas en un mapa id → nodo
+function aplanarArbol(nodos: CarpetaNodo[]): Map<number, CarpetaNodo> {
+  const mapa = new Map<number, CarpetaNodo>();
+  function recorrer(lista: CarpetaNodo[]) {
+    for (const n of lista) {
+      mapa.set(n.id, n);
+      if (n.hijas.length > 0) recorrer(n.hijas);
+    }
+  }
+  recorrer(nodos);
+  return mapa;
+}
+
+// Construye la cadena de ancestros para el breadcrumb: [raíz..., nodoActual]
+function ancestros(id: number, mapa: Map<number, CarpetaNodo>): CarpetaNodo[] {
+  const cadena: CarpetaNodo[] = [];
+  let actual = mapa.get(id);
+  while (actual) {
+    cadena.unshift(actual);
+    actual = actual.parent_id != null ? mapa.get(actual.parent_id) : undefined;
+  }
+  return cadena;
+}
+
 export default function MisCorridas() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { perfil } = useAuth();
+
   const [corridas, setCorridas] = useState<CorridaResumen[]>([]);
+  const [arbol, setArbol] = useState<CarpetaNodo[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const puedeEditar = perfil?.rol === "admin" || perfil?.rol === "editor";
+
+  // carpetaActual es null en la raíz o el id de la carpeta activa
+  const carpetaParam = searchParams.get("carpeta");
+  const carpetaActual: number | null = carpetaParam ? Number(carpetaParam) : null;
 
   const cargar = useCallback(() => {
     setCargando(true);
     setError(null);
-    listarCorridas()
-      .then(setCorridas)
-      .catch((e) => setError(e instanceof Error ? e.message : "Error al cargar corridas"))
+    Promise.all([listarCorridas(), listarCarpetas()])
+      .then(([c, a]) => {
+        setCorridas(c);
+        setArbol(a);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "Error al cargar"))
       .finally(() => setCargando(false));
   }, []);
 
@@ -59,6 +98,57 @@ export default function MisCorridas() {
     }
   }
 
+  async function handleNuevaCarpeta() {
+    const nombre = window.prompt("Nombre de la carpeta");
+    if (!nombre?.trim()) return;
+    try {
+      await crearCarpeta(nombre.trim(), carpetaActual);
+      cargar();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al crear carpeta");
+    }
+  }
+
+  async function handleRenombrar(e: React.MouseEvent, carpeta: CarpetaNodo) {
+    e.stopPropagation();
+    const nuevo = window.prompt("Nuevo nombre", carpeta.nombre);
+    if (!nuevo?.trim() || nuevo.trim() === carpeta.nombre) return;
+    try {
+      await renombrarCarpeta(carpeta.id, nuevo.trim());
+      cargar();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Error al renombrar");
+    }
+  }
+
+  async function handleEliminarCarpeta(e: React.MouseEvent, carpeta: CarpetaNodo) {
+    e.stopPropagation();
+    if (!window.confirm(`¿Eliminar la carpeta "${carpeta.nombre}"?`)) return;
+    try {
+      await borrarCarpeta(carpeta.id);
+      cargar();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Error al eliminar carpeta");
+    }
+  }
+
+  // Construir información de la carpeta actual a partir del árbol
+  const mapa = aplanarArbol(arbol);
+  const nodoActual = carpetaActual != null ? mapa.get(carpetaActual) : null;
+
+  // Subcarpetas a mostrar: si estamos en raíz, los nodos raíz; si estamos en una carpeta, sus hijas
+  const subcarpetas: CarpetaNodo[] = carpetaActual == null
+    ? arbol
+    : (nodoActual?.hijas ?? []);
+
+  // Breadcrumb: ["Todas", ...ancestros]
+  const migajas: CarpetaNodo[] = carpetaActual != null ? ancestros(carpetaActual, mapa) : [];
+
+  // Corridas filtradas (solo visibles dentro de una carpeta)
+  const corridasFiltradas = carpetaActual != null
+    ? corridas.filter((c) => c.carpeta_id === carpetaActual)
+    : [];
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>
@@ -67,95 +157,165 @@ export default function MisCorridas() {
           <button style={styles.btnPlantilla} onClick={bajarPlantilla}>
             Descargar plantilla
           </button>
+          <button style={styles.btnNuevaCarpeta} onClick={handleNuevaCarpeta}>
+            Nueva carpeta
+          </button>
           <button style={styles.btnNueva} onClick={() => navigate("/corridas/nueva")}>
             Nueva corrida
           </button>
         </div>
       </div>
 
+      {/* Breadcrumb */}
+      <div style={styles.breadcrumb}>
+        <span
+          style={styles.breadcrumbLink}
+          onClick={() => setSearchParams({})}
+        >
+          Todas
+        </span>
+        {migajas.map((m) => (
+          <span key={m.id}>
+            <span style={styles.breadcrumbSep}> › </span>
+            <span
+              style={styles.breadcrumbLink}
+              onClick={() => setSearchParams({ carpeta: String(m.id) })}
+            >
+              {m.nombre}
+            </span>
+          </span>
+        ))}
+      </div>
+
       {cargando && <p style={styles.msg}>Cargando…</p>}
       {error && <p style={styles.msgError}>{error}</p>}
 
-      {!cargando && !error && corridas.length === 0 && (
-        <p style={styles.msgVacio}>No hay corridas; crea una nueva.</p>
-      )}
-
-      {!cargando && !error && corridas.length > 0 && (
-        <div style={styles.tableWrap}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>Nombre</th>
-                <th style={{ ...styles.th, ...styles.thNum }}>Items</th>
-                <th style={{ ...styles.th, ...styles.thNum }}>Por revisar</th>
-                <th style={{ ...styles.th, ...styles.thNum }}>Contractual</th>
-                <th style={{ ...styles.th, ...styles.thNum }}>Costo</th>
-                <th style={{ ...styles.th, ...styles.thNum }}>Dif. $</th>
-                <th style={{ ...styles.th, ...styles.thNum }}>Margen %</th>
-                <th style={{ ...styles.th, ...styles.thNum }}>Tiempo</th>
-                <th style={styles.th}>Estado</th>
-                <th style={styles.th}>Modo</th>
-                <th style={styles.th}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {corridas.map((c) => (
-                <tr
-                  key={c.id}
-                  style={styles.tr}
-                  onClick={() => navigate(`/corridas/${c.id}`)}
+      {!cargando && !error && (
+        <>
+          {/* Filas de subcarpetas */}
+          {subcarpetas.length > 0 && (
+            <div style={styles.carpetasWrap}>
+              {subcarpetas.map((carpeta) => (
+                <div
+                  key={carpeta.id}
+                  style={styles.carpetaFila}
+                  onClick={() => setSearchParams({ carpeta: String(carpeta.id) })}
                   onMouseEnter={(e) =>
-                    ((e.currentTarget as HTMLTableRowElement).style.background = "#f0f4f8")
+                    ((e.currentTarget as HTMLDivElement).style.background = "#f0f4f8")
                   }
                   onMouseLeave={(e) =>
-                    ((e.currentTarget as HTMLTableRowElement).style.background = "")
+                    ((e.currentTarget as HTMLDivElement).style.background = "")
                   }
                 >
-                  <td style={styles.td}>
-                    <span style={styles.nombre}>{c.archivo}</span>
-                    <span style={styles.fecha}> — {fechaLegible(c.creada_en)}</span>
-                  </td>
-                  <td style={{ ...styles.td, ...styles.tdNum }}>{c.n_items}</td>
-                  <td style={{ ...styles.td, ...styles.tdNum }}>{c.n_revision}</td>
-                  <td style={{ ...styles.td, ...styles.tdNum }}>
-                    {c.contractual === null ? "—" : cop(c.contractual)}
-                  </td>
-                  <td style={{ ...styles.td, ...styles.tdNum }}>
-                    {c.costo === null ? "—" : cop(c.costo)}
-                  </td>
-                  <td style={{ ...styles.td, ...styles.tdNum, color: colorSigno(c.margen) }}>
-                    {c.margen === null ? "—" : cop(c.margen)}
-                  </td>
-                  <td style={{ ...styles.td, ...styles.tdNum, color: colorSigno(c.margen) }}>
-                    {c.margen_pct === null ? "—" : pct(c.margen_pct)}
-                  </td>
-                  <td style={{ ...styles.td, ...styles.tdNum }}>{fmtDuracion(c.duracion_ms)}</td>
-                  <td style={styles.td}>
-                    <span style={{ ...styles.badge, ...estadoBadgeStyle(c.estado) }}>
-                      {c.estado}
-                    </span>
-                  </td>
-                  <td style={styles.td}>
-                    <span style={{ ...styles.badge, ...(c.modo === "congelada"
-                      ? { background: "#bee3f8", color: "#2a4365" }
-                      : { background: "#c6f6d5", color: "#276749" }) }}>
-                      {c.modo === "congelada" ? "Congelada" : "Activa"}
-                    </span>
-                  </td>
-                  <td style={{ ...styles.td, ...styles.tdAccion }}>
-                    <button
-                      style={styles.btnEliminar}
-                      onClick={(e) => handleEliminar(e, c)}
-                      title="Eliminar corrida"
-                    >
-                      Eliminar
-                    </button>
-                  </td>
-                </tr>
+                  <span style={styles.carpetaIcono}>📁</span>
+                  <span style={styles.carpetaNombre}>{carpeta.nombre}</span>
+                  <span style={styles.carpetaCount}>{carpeta.n_corridas} corrida{carpeta.n_corridas !== 1 ? "s" : ""}</span>
+                  {puedeEditar && (
+                    <div style={styles.carpetaAcciones}>
+                      <button
+                        style={styles.btnCarpetaAccion}
+                        onClick={(e) => handleRenombrar(e, carpeta)}
+                        title="Renombrar carpeta"
+                      >
+                        Renombrar
+                      </button>
+                      <button
+                        style={{ ...styles.btnCarpetaAccion, ...styles.btnCarpetaEliminar }}
+                        onClick={(e) => handleEliminarCarpeta(e, carpeta)}
+                        title="Eliminar carpeta"
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  )}
+                </div>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          )}
+
+          {/* Tabla de corridas: solo dentro de una carpeta */}
+          {carpetaActual != null && corridasFiltradas.length === 0 && (
+            <p style={styles.msgVacio}>No hay corridas en esta carpeta.</p>
+          )}
+
+          {carpetaActual != null && corridasFiltradas.length > 0 && (
+            <div style={styles.tableWrap}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Nombre</th>
+                    <th style={{ ...styles.th, ...styles.thNum }}>Items</th>
+                    <th style={{ ...styles.th, ...styles.thNum }}>Por revisar</th>
+                    <th style={{ ...styles.th, ...styles.thNum }}>Contractual</th>
+                    <th style={{ ...styles.th, ...styles.thNum }}>Costo</th>
+                    <th style={{ ...styles.th, ...styles.thNum }}>Dif. $</th>
+                    <th style={{ ...styles.th, ...styles.thNum }}>Margen %</th>
+                    <th style={{ ...styles.th, ...styles.thNum }}>Tiempo</th>
+                    <th style={styles.th}>Estado</th>
+                    <th style={styles.th}>Modo</th>
+                    <th style={styles.th}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {corridasFiltradas.map((c) => (
+                    <tr
+                      key={c.id}
+                      style={styles.tr}
+                      onClick={() => navigate(`/corridas/${c.id}`)}
+                      onMouseEnter={(e) =>
+                        ((e.currentTarget as HTMLTableRowElement).style.background = "#f0f4f8")
+                      }
+                      onMouseLeave={(e) =>
+                        ((e.currentTarget as HTMLTableRowElement).style.background = "")
+                      }
+                    >
+                      <td style={styles.td}>
+                        <span style={styles.nombre}>{c.archivo}</span>
+                        <span style={styles.fecha}> — {fechaLegible(c.creada_en)}</span>
+                      </td>
+                      <td style={{ ...styles.td, ...styles.tdNum }}>{c.n_items}</td>
+                      <td style={{ ...styles.td, ...styles.tdNum }}>{c.n_revision}</td>
+                      <td style={{ ...styles.td, ...styles.tdNum }}>
+                        {c.contractual === null ? "—" : cop(c.contractual)}
+                      </td>
+                      <td style={{ ...styles.td, ...styles.tdNum }}>
+                        {c.costo === null ? "—" : cop(c.costo)}
+                      </td>
+                      <td style={{ ...styles.td, ...styles.tdNum, color: colorSigno(c.margen) }}>
+                        {c.margen === null ? "—" : cop(c.margen)}
+                      </td>
+                      <td style={{ ...styles.td, ...styles.tdNum, color: colorSigno(c.margen) }}>
+                        {c.margen_pct === null ? "—" : pct(c.margen_pct)}
+                      </td>
+                      <td style={{ ...styles.td, ...styles.tdNum }}>{fmtDuracion(c.duracion_ms)}</td>
+                      <td style={styles.td}>
+                        <span style={{ ...styles.badge, ...estadoBadgeStyle(c.estado) }}>
+                          {c.estado}
+                        </span>
+                      </td>
+                      <td style={styles.td}>
+                        <span style={{ ...styles.badge, ...(c.modo === "congelada"
+                          ? { background: "#bee3f8", color: "#2a4365" }
+                          : { background: "#c6f6d5", color: "#276749" }) }}>
+                          {c.modo === "congelada" ? "Congelada" : "Activa"}
+                        </span>
+                      </td>
+                      <td style={{ ...styles.td, ...styles.tdAccion }}>
+                        <button
+                          style={styles.btnEliminar}
+                          onClick={(e) => handleEliminar(e, c)}
+                          title="Eliminar corrida"
+                        >
+                          Eliminar
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -215,6 +375,16 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "4px",
     cursor: "pointer",
   },
+  btnNuevaCarpeta: {
+    padding: "5px 14px",
+    fontSize: "12px",
+    fontWeight: 600,
+    background: "#fff",
+    color: "#1a1a2e",
+    border: "1px solid #cbd5e0",
+    borderRadius: "4px",
+    cursor: "pointer",
+  },
   btnNueva: {
     padding: "5px 14px",
     fontSize: "12px",
@@ -224,6 +394,19 @@ const styles: Record<string, React.CSSProperties> = {
     border: "none",
     borderRadius: "4px",
     cursor: "pointer",
+  },
+  breadcrumb: {
+    fontSize: "12px",
+    color: "#718096",
+    marginBottom: "12px",
+  },
+  breadcrumbLink: {
+    cursor: "pointer",
+    color: "#3182ce",
+    textDecoration: "underline",
+  },
+  breadcrumbSep: {
+    color: "#a0aec0",
   },
   msg: {
     fontSize: "12px",
@@ -239,6 +422,51 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "13px",
     color: "#718096",
     margin: "24px 0",
+  },
+  carpetasWrap: {
+    marginBottom: "16px",
+  },
+  carpetaFila: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    padding: "8px 10px",
+    borderBottom: "1px solid #edf2f7",
+    cursor: "pointer",
+    fontSize: "13px",
+    borderRadius: "4px",
+    transition: "background 0.1s",
+  },
+  carpetaIcono: {
+    fontSize: "16px",
+    lineHeight: 1,
+  },
+  carpetaNombre: {
+    fontWeight: 500,
+    color: "#2d3748",
+    flex: 1,
+  },
+  carpetaCount: {
+    fontSize: "11px",
+    color: "#718096",
+    marginRight: "8px",
+  },
+  carpetaAcciones: {
+    display: "flex",
+    gap: "6px",
+  },
+  btnCarpetaAccion: {
+    padding: "2px 8px",
+    fontSize: "11px",
+    background: "transparent",
+    color: "#4a5568",
+    border: "1px solid #cbd5e0",
+    borderRadius: "4px",
+    cursor: "pointer",
+  },
+  btnCarpetaEliminar: {
+    color: "#c53030",
+    border: "1px solid #feb2b2",
   },
   tableWrap: {
     overflowX: "auto",

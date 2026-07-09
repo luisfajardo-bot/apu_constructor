@@ -9,7 +9,8 @@ from __future__ import annotations
 from typing import Iterable, Optional, Protocol, runtime_checkable
 
 from apu_tool.nucleo.models import (
-    Apu, ApuComponent, CorridaItemRow, CorridaMeta, DePricedApu, EventoAuditoria, Insumo, Perfil,
+    Apu, ApuComponent, Carpeta, CorridaItemRow, CorridaMeta, DePricedApu, EventoAuditoria,
+    Insumo, Perfil,
 )
 
 
@@ -135,6 +136,19 @@ class RepositorioCorridas(Protocol):
     def contar_items_por_apu(self, apu_codigo: str) -> int:
         """Nº de ítems de corrida que referencian este apu_codigo (aviso al borrar)."""
         ...
+
+
+@runtime_checkable
+class RepositorioCarpetas(Protocol):
+    def crear(self, nombre: str, parent_id: Optional[int] = None,
+              creado_por: Optional[str] = None, conn=None) -> int: ...
+    def get(self, carpeta_id: int) -> Optional[Carpeta]: ...
+    def listar(self) -> list[Carpeta]: ...
+    def renombrar(self, carpeta_id: int, nombre: str, conn=None) -> None: ...
+    def mover(self, carpeta_id: int, parent_id: Optional[int], conn=None) -> None: ...
+    def eliminar(self, carpeta_id: int, conn=None) -> bool: ...
+    def contar_hijas(self, carpeta_id: int) -> int: ...
+    def contar_corridas(self, carpeta_id: int) -> int: ...
 
 
 @runtime_checkable

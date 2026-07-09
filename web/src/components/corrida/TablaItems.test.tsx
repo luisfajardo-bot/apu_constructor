@@ -137,7 +137,7 @@ test("ordena por Costo al hacer clic en el encabezado", async () => {
     { ...ITEM, seq: 1, descripcion: "Beta", costo_total: 100 },
   ];
   render(<TablaConControl items={items} />);
-  fireEvent.click(screen.getByLabelText("Ordenar por Costo"));
+  fireEvent.click(screen.getByLabelText("Ordenar por Total Costo"));
   const alfa = screen.getByText("Alfa");
   const beta = screen.getByText("Beta");
   // asc: Beta (100) antes que Alfa (300)
@@ -161,4 +161,15 @@ test("sin control (modo vivo) no aparece la fila de filtros", async () => {
   const { default: TablaItems } = await import("./TablaItems");
   render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} />);
   expect(screen.queryByLabelText("Filtrar Descripción")).toBeNull();
+});
+
+test("muestra el unitario contractual y el costo unitario en la fila", async () => {
+  await import("./TablaItems");
+  const items = [
+    { ...ITEM, seq: 0, precio_contractual: 1234, costo_unitario: 567 },
+  ];
+  render(<TablaConControl items={items} />);
+  // cop(): "$" + toLocaleString("es-CO"), sin espacio ni decimales
+  expect(screen.getByText("$1.234")).toBeTruthy();
+  expect(screen.getByText("$567")).toBeTruthy();
 });

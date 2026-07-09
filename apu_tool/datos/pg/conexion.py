@@ -87,9 +87,34 @@ def ejecutar_script(conn, sql: str) -> None:
         conn.execute(sentencia)
 
 
+def liberar_locks_huerfanos(abrir_conexion: Callable, edad_seg: int = 10) -> None:
+    """Best-effort: termina sesiones 'idle in transaction' más viejas que ``edad_seg``
+    que pueden retener locks huérfanos de un arranque anterior que murió a mitad de
+    la migración (Render mata el worker si tarda; su sesión queda idle-in-transaction
+    reteniendo el ACCESS EXCLUSIVE y bloquea todo arranque nuevo).
+
+    Es seguro para esta app: los writers abren transacciones cortas, así que una
+    idle-in-transaction de >10s es casi seguro un orfanato. El guard de edad evita
+    matar la migración de otro worker que arranca al mismo tiempo (su xact es
+    reciente). Silencioso ante falta de permiso (pg_terminate_backend): si no se
+    puede, se cae al reintento normal."""
+    try:
+        with abrir_conexion() as conn:
+            conn.execute("SET LOCAL lock_timeout = '2s'")
+            conn.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE pid <> pg_backend_pid() "
+                "  AND state = 'idle in transaction' "
+                "  AND xact_start < now() - make_interval(secs => %s)",
+                (int(edad_seg),))
+    except Exception:
+        pass
+
+
 def aplicar_migracion(abrir_conexion: Callable, sql: str, *, intentos: int = 6,
                       espera_s: float = 4.0, lock_timeout_ms: int = 4000,
-                      dormir: Callable[[float], None] = time.sleep) -> None:
+                      dormir: Callable[[float], None] = time.sleep,
+                      liberar: Callable[[Callable], None] = liberar_locks_huerfanos) -> None:
     """Aplica un script DDL idempotente acotando el lock y reintentando.
 
     Problema: en un deploy con solape (la instancia vieja sigue sirviendo
@@ -100,9 +125,10 @@ def aplicar_migracion(abrir_conexion: Callable, sql: str, *, intentos: int = 6,
 
     Solución: ``SET LOCAL lock_timeout`` hace que una sentencia bloqueada falle
     rápido (55P03) y la transacción se revierte (sin lock huérfano); reintentamos
-    hasta que el lock quede libre (la instancia vieja drena / el otro worker
-    termina). Cada intento usa una conexión fresca. Idempotente: los reintentos
-    son seguros porque el script usa ``IF NOT EXISTS`` / ``WHERE NOT EXISTS``.
+    hasta que el lock quede libre. Si un intento se bloquea, además liberamos
+    posibles locks huérfanos (``liberar``) antes de reintentar. Cada intento usa
+    una conexión fresca. Idempotente: reintentar es seguro porque el script usa
+    ``IF NOT EXISTS`` / ``WHERE NOT EXISTS``.
 
     ``abrir_conexion`` es un callable que devuelve un context manager de conexión
     (p.ej. ``pool.connection``); inyectable para pruebas sin un Postgres real.
@@ -117,6 +143,7 @@ def aplicar_migracion(abrir_conexion: Callable, sql: str, *, intentos: int = 6,
         except _ERRORES_MIGRACION as e:
             ultimo = e
             if intento < intentos - 1:
+                liberar(abrir_conexion)       # limpia huérfanos que bloquean
                 dormir(espera_s)
     assert ultimo is not None
     raise ultimo

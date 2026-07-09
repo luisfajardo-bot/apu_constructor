@@ -79,12 +79,15 @@ def test_aplicar_migracion_reintenta_ante_lock_y_luego_pasa():
         conns.append(conn)
         return conn
     dormidas = []
+    liberados = []
     aplicar_migracion(abrir, "CREATE TABLE x (id int);", intentos=5,
-                      espera_s=0.0, dormir=lambda s: dormidas.append(s))
+                      espera_s=0.0, dormir=lambda s: dormidas.append(s),
+                      liberar=lambda _abrir: liberados.append(1))
     assert len(conns) == 3                 # reintentó hasta que pasó
     assert conns[-1].ejecutadas[0].lower().startswith("set local lock_timeout")
     assert any(s.startswith("CREATE TABLE x") for s in conns[-1].ejecutadas)
     assert len(dormidas) == 2              # esperó entre los intentos fallidos
+    assert len(liberados) == 2             # intentó liberar huérfanos antes de reintentar
 
 
 def test_aplicar_migracion_relanza_si_agota_intentos():
@@ -95,4 +98,5 @@ def test_aplicar_migracion_relanza_si_agota_intentos():
         return _FakeConn(psycopg.errors.QueryCanceled("statement timeout"))
     with pytest.raises(psycopg.errors.QueryCanceled):
         aplicar_migracion(abrir, "CREATE TABLE x (id int);", intentos=3,
-                          espera_s=0.0, dormir=lambda s: None)
+                          espera_s=0.0, dormir=lambda s: None,
+                          liberar=lambda _abrir: None)

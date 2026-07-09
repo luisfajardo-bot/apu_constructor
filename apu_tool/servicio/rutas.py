@@ -121,9 +121,12 @@ def eliminar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
 @router.post("/corridas")
 async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
                         use_ai: Optional[bool] = Form(None),
+                        carpeta_id: int = Form(...),
                         archivo: UploadFile = File(...),
                         alm: Almacen = Depends(get_almacen),
                         _: object = Depends(requiere_rol("consulta"))):
+    if alm.carpetas.get(carpeta_id) is None:
+        raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
     if alm.counts().get("apus", 0) == 0:
         ensure_seeded()
     suf = Path(archivo.filename or "lic.xlsx").suffix or ".xlsx"
@@ -140,7 +143,8 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
         os.unlink(tmp_path)
     if not items:
         raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
-    cid = svc.construir_corrida(alm, archivo.filename or "licitacion", items, turno, use_ai)
+    cid = svc.construir_corrida(alm, archivo.filename or "licitacion", items, turno, use_ai,
+                                carpeta_id=carpeta_id)
     return {"id": cid, "resumen": svc.vista_corrida(alm, cid)["totales"]}
 
 
@@ -160,7 +164,9 @@ def crear_sample(alm: Almacen = Depends(get_almacen),
         os.unlink(sample_path)
     if not items:
         raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
-    cid = svc.construir_corrida(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False)
+    sc = carpetas_svc.carpeta_sin_clasificar_id(alm)
+    cid = svc.construir_corrida(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False,
+                                carpeta_id=sc)
     return {"id": cid, "resumen": svc.vista_corrida(alm, cid)["totales"]}
 
 
@@ -177,9 +183,12 @@ def _event_stream(gen):
 @router.post("/corridas/stream")
 async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
                                use_ai: Optional[bool] = Form(None),
+                               carpeta_id: int = Form(...),
                                archivo: UploadFile = File(...),
                                alm: Almacen = Depends(get_almacen),
                                _: object = Depends(requiere_rol("consulta"))):
+    if alm.carpetas.get(carpeta_id) is None:
+        raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
     if alm.counts().get("apus", 0) == 0:
         ensure_seeded()
     suf = Path(archivo.filename or "lic.xlsx").suffix or ".xlsx"
@@ -196,7 +205,8 @@ async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
         os.unlink(tmp_path)
     if not items:
         raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
-    gen = svc.construir_corrida_stream(alm, archivo.filename or "licitacion", items, turno, use_ai)
+    gen = svc.construir_corrida_stream(alm, archivo.filename or "licitacion", items, turno, use_ai,
+                                       carpeta_id=carpeta_id)
     return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
 
@@ -217,7 +227,9 @@ def crear_sample_stream(alm: Almacen = Depends(get_almacen),
         os.unlink(sample_path)
     if not items:
         raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
-    gen = svc.construir_corrida_stream(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False)
+    sc = carpetas_svc.carpeta_sin_clasificar_id(alm)
+    gen = svc.construir_corrida_stream(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False,
+                                       carpeta_id=sc)
     return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
 

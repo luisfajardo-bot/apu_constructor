@@ -140,6 +140,14 @@ def eliminar_carpeta(alm: Almacen, carpeta_id: int, actor=None) -> bool:
     return ok
 
 
+def carpeta_sin_clasificar_id(alm: Almacen) -> int:
+    """Id de la carpeta raíz 'Sin clasificar' (la crea init_schema; fallback defensivo)."""
+    for c in alm.carpetas.listar():
+        if c.parent_id is None and c.nombre == "Sin clasificar":
+            return c.id
+    return alm.carpetas.crear("Sin clasificar", parent_id=None)
+
+
 def mover_corrida(alm: Almacen, corrida_id: int, carpeta_id: int, actor=None) -> bool:
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:

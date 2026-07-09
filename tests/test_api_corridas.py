@@ -42,10 +42,11 @@ def _xlsx_lic(tmp_path):
 
 def test_flujo_corrida_completo(tmp_path):
     cli, _ = _cliente(tmp_path)
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
     lic = _xlsx_lic(tmp_path)
     with open(lic, "rb") as f:
         r = cli.post("/api/corridas",
-                     data={"turno": "DIURNO", "use_ai": "false"},
+                     data={"turno": "DIURNO", "use_ai": "false", "carpeta_id": str(obra["id"])},
                      files={"archivo": ("lic.xlsx", f,
                             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     assert r.status_code == 200, r.text
@@ -77,10 +78,11 @@ def test_corrida_inexistente_404(tmp_path):
 
 def test_archivo_ilegible_400(tmp_path):
     cli, _ = _cliente(tmp_path)
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
     mala = tmp_path / "mala.csv"
     mala.write_text("foo,bar\n1,2\n", encoding="utf-8")
     with open(mala, "rb") as f:
-        r = cli.post("/api/corridas", data={"turno": "DIURNO"},
+        r = cli.post("/api/corridas", data={"turno": "DIURNO", "carpeta_id": str(obra["id"])},
                      files={"archivo": ("mala.csv", f, "text/csv")})
     assert r.status_code == 400
     assert r.json()["detail"]
@@ -88,10 +90,11 @@ def test_archivo_ilegible_400(tmp_path):
 
 def test_corridas_stream_emite_started_progreso_done(tmp_path):
     cli, alm = _cli(tmp_path)
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
     lic = _xlsx_lic(tmp_path)
     with open(lic, "rb") as f:
         r = cli.post("/api/corridas/stream",
-                     data={"turno": "DIURNO", "use_ai": "false"},
+                     data={"turno": "DIURNO", "use_ai": "false", "carpeta_id": str(obra["id"])},
                      files={"archivo": ("lic.xlsx", f,
                             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     assert r.status_code == 200
@@ -115,19 +118,23 @@ def test_sample_stream_ok(tmp_path):
 
 def test_corridas_stream_archivo_malo_400(tmp_path):
     cli, _ = _cli(tmp_path)
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
     mala = tmp_path / "mala.csv"
     mala.write_text("foo,bar\n1,2\n", encoding="utf-8")
     with open(mala, "rb") as f:
-        r = cli.post("/api/corridas/stream", data={"turno": "DIURNO"},
+        r = cli.post("/api/corridas/stream",
+                     data={"turno": "DIURNO", "carpeta_id": str(obra["id"])},
                      files={"archivo": ("mala.csv", f, "text/csv")})
     assert r.status_code == 400
 
 
 def test_listar_corridas_endpoint(tmp_path):
     cli, _ = _cli(tmp_path)
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
     lic = _xlsx_lic(tmp_path)
     with open(lic, "rb") as f:
-        cli.post("/api/corridas", data={"turno": "DIURNO", "use_ai": "false"},
+        cli.post("/api/corridas", data={"turno": "DIURNO", "use_ai": "false",
+                                        "carpeta_id": str(obra["id"])},
                  files={"archivo": ("lic.xlsx", f,
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     r = cli.get("/api/corridas")
@@ -138,9 +145,11 @@ def test_listar_corridas_endpoint(tmp_path):
 
 def test_eliminar_corrida_endpoint(tmp_path):
     cli, _ = _cli(tmp_path)
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
     lic = _xlsx_lic(tmp_path)
     with open(lic, "rb") as f:
-        cid = cli.post("/api/corridas", data={"turno": "DIURNO", "use_ai": "false"},
+        cid = cli.post("/api/corridas",
+                       data={"turno": "DIURNO", "use_ai": "false", "carpeta_id": str(obra["id"])},
                        files={"archivo": ("lic.xlsx", f, "application/octet-stream")}).json()["id"]
     assert cli.delete(f"/api/corridas/{cid}").status_code == 200
     assert cli.get(f"/api/corridas/{cid}").status_code == 404
@@ -149,12 +158,13 @@ def test_eliminar_corrida_endpoint(tmp_path):
 
 def test_corridas_sin_turno_400(tmp_path):
     cli, _ = _cli(tmp_path)
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
     p = tmp_path / "noturno.xlsx"
     wb = openpyxl.Workbook(); ws = wb.active
     ws.append(["ITEM", "DESCRIPCION", "UNIDAD", "CANTIDAD", "PRECIO"])
     ws.append(["1", "Concreto clase D", "M3", 10, 400000]); wb.save(p)
     with open(p, "rb") as f:
-        r = cli.post("/api/corridas", data={"turno": "DIURNO"},
+        r = cli.post("/api/corridas", data={"turno": "DIURNO", "carpeta_id": str(obra["id"])},
                      files={"archivo": ("noturno.xlsx", f, "application/octet-stream")})
     assert r.status_code == 400
 

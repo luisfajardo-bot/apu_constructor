@@ -51,13 +51,27 @@ class CorridasDB:
                 conn.execute("ALTER TABLE corrida ADD COLUMN duracion_ms INTEGER")
             if "modo" not in cols:
                 conn.execute("ALTER TABLE corrida ADD COLUMN modo TEXT NOT NULL DEFAULT 'activa'")
+            if "carpeta_id" not in cols:
+                conn.execute("ALTER TABLE corrida ADD COLUMN carpeta_id INTEGER "
+                             "REFERENCES carpeta(id) ON DELETE RESTRICT")
             icols = {r["name"] for r in conn.execute("PRAGMA table_info(corrida_item)").fetchall()}
             if "snapshot_json" not in icols:
                 conn.execute("ALTER TABLE corrida_item ADD COLUMN snapshot_json TEXT")
+            sc = conn.execute("SELECT id FROM carpeta WHERE nombre='Sin clasificar' "
+                              "AND parent_id IS NULL").fetchone()
+            if sc is None:
+                import datetime as _dt
+                cur = conn.execute(
+                    "INSERT INTO carpeta (nombre, parent_id, creada_en) VALUES (?, NULL, ?)",
+                    ("Sin clasificar", _dt.datetime.now().isoformat(timespec="seconds")))
+                sc_id = int(cur.lastrowid)
+            else:
+                sc_id = int(sc["id"])
+            conn.execute("UPDATE corrida SET carpeta_id=? WHERE carpeta_id IS NULL", (sc_id,))
 
     def reset(self) -> None:
         with self.connect() as conn:
-            for t in ("corrida_item", "corrida"):
+            for t in ("corrida_item", "corrida", "carpeta"):
                 conn.execute(f"DROP TABLE IF EXISTS {t}")
             conn.executescript(_load_schema())
 
@@ -79,10 +93,10 @@ class CorridasDB:
     def _insert_corrida(self, conn: sqlite3.Connection, meta: CorridaMeta) -> int:
         cur = conn.execute(
             "INSERT INTO corrida (creada_en, archivo, turno_def, use_ai, estado, "
-            "cuadro_path, duracion_ms, modo) VALUES (?,?,?,?,?,?,?,?)",
+            "cuadro_path, duracion_ms, modo, carpeta_id) VALUES (?,?,?,?,?,?,?,?,?)",
             (meta.creada_en, meta.archivo, meta.turno_def,
              None if meta.use_ai is None else int(meta.use_ai),
-             meta.estado, meta.cuadro_path, meta.duracion_ms, meta.modo))
+             meta.estado, meta.cuadro_path, meta.duracion_ms, meta.modo, meta.carpeta_id))
         return int(cur.lastrowid)
 
     def crear_corrida(self, meta: CorridaMeta) -> int:
@@ -138,6 +152,14 @@ class CorridasDB:
         with self.connect() as conn:
             conn.execute("UPDATE corrida SET modo=? WHERE id=?", (modo, int(corrida_id)))
 
+    def set_carpeta(self, corrida_id: int, carpeta_id: int, conn=None) -> None:
+        sql = "UPDATE corrida SET carpeta_id=? WHERE id=?"
+        params = (int(carpeta_id), int(corrida_id))
+        if conn is not None:
+            conn.execute(sql, params); return
+        with self.connect() as c:
+            c.execute(sql, params)
+
     def set_snapshot(self, corrida_id: int, seq: int, payload: dict) -> None:
         with self.connect() as conn:
             conn.execute(
@@ -168,7 +190,8 @@ class CorridasDB:
             turno_def=r["turno_def"],
             use_ai=None if r["use_ai"] is None else bool(r["use_ai"]),
             estado=r["estado"], cuadro_path=r["cuadro_path"],
-            duracion_ms=r["duracion_ms"], modo=(r["modo"] or "activa"))
+            duracion_ms=r["duracion_ms"], modo=(r["modo"] or "activa"),
+            carpeta_id=(r["carpeta_id"] if "carpeta_id" in r.keys() else None))
 
     def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
         with self.connect() as conn:

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from apu_tool import config
 from apu_tool.datos.apus_db import ApusDB
+from apu_tool.datos.carpetas_db import CarpetasDB
 from apu_tool.datos.corridas_db import CorridasDB
 from apu_tool.datos.precios_db import PreciosDB
 
@@ -27,10 +28,12 @@ class Almacen:
             from apu_tool.datos.pg.corridas_pg import CorridasPg
             from apu_tool.datos.pg.perfiles_pg import PerfilesPg
             from apu_tool.datos.pg.auditoria_pg import AuditoriaPg
+            from apu_tool.datos.pg.carpetas_pg import CarpetasPg
             self._cx = Conexion(config.database_url())
             self.precios = PreciosPg(self._cx)
             self.apus = ApusPg(self._cx)
             self.corridas = CorridasPg(self._cx)
+            self.carpetas = CarpetasPg(self._cx)
             self.perfiles = PerfilesPg(self._cx)
             self.auditoria = AuditoriaPg(self._cx)
             self._paths = None
@@ -43,6 +46,7 @@ class Almacen:
             self.precios = PreciosDB(precios_path)
             self.apus = ApusDB(apus_path)
             self.corridas = CorridasDB(corridas_path)
+            self.carpetas = CarpetasDB(corridas_path)
             self.perfiles = PerfilesDB(self._seg_path)
             self.auditoria = AuditoriaDB(self._seg_path)
             self._paths = {"precios": Path(precios_path), "apus": Path(apus_path),

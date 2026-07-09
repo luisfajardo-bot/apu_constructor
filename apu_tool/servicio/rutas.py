@@ -21,16 +21,34 @@ from apu_tool.dominio.pipeline import ensure_seeded, generate_sample
 from apu_tool.servicio import apus as apus_svc
 from apu_tool.servicio import auditoria as auditoria_svc
 from apu_tool.servicio import autoria
+from apu_tool.servicio import carpetas as carpetas_svc
 from apu_tool.servicio import corridas as svc
+from apu_tool.servicio.carpetas import CarpetaInvalida, CarpetaNoVacia
 from apu_tool.servicio import insumos as insumos_svc
 from apu_tool.servicio import plantillas as plantillas_svc
 from apu_tool.servicio import usuarios as usuarios_svc
 from apu_tool.servicio.auth import requiere_rol
 from apu_tool.servicio.dependencias import get_almacen
 from apu_tool.servicio import limites
+from pydantic import BaseModel
 from apu_tool.servicio.esquemas import (
     ApuEditIn, ApuNuevoIn, CambiosIn, ConfirmarIn, EstadoIn, InsumoNuevoIn, RolIn, StatusOut,
     UsuarioInvitarIn)
+
+
+class CarpetaIn(BaseModel):
+    nombre: str
+    parent_id: Optional[int] = None
+
+
+class CarpetaPatchIn(BaseModel):
+    nombre: Optional[str] = None
+    parent_id: Optional[int] = None
+    mover: bool = False          # True => interpretar parent_id como cambio de padre
+
+
+class MoverCorridaIn(BaseModel):
+    carpeta_id: int
 from apu_tool.servicio.supabase_admin import AdminSupabase, AdminSupabaseHTTP
 
 router = APIRouter()
@@ -103,9 +121,12 @@ def eliminar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
 @router.post("/corridas")
 async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
                         use_ai: Optional[bool] = Form(None),
+                        carpeta_id: int = Form(...),
                         archivo: UploadFile = File(...),
                         alm: Almacen = Depends(get_almacen),
                         _: object = Depends(requiere_rol("consulta"))):
+    if alm.carpetas.get(carpeta_id) is None:
+        raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
     if alm.counts().get("apus", 0) == 0:
         ensure_seeded()
     suf = Path(archivo.filename or "lic.xlsx").suffix or ".xlsx"
@@ -122,7 +143,8 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
         os.unlink(tmp_path)
     if not items:
         raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
-    cid = svc.construir_corrida(alm, archivo.filename or "licitacion", items, turno, use_ai)
+    cid = svc.construir_corrida(alm, archivo.filename or "licitacion", items, turno, use_ai,
+                                carpeta_id=carpeta_id)
     return {"id": cid, "resumen": svc.vista_corrida(alm, cid)["totales"]}
 
 
@@ -142,7 +164,9 @@ def crear_sample(alm: Almacen = Depends(get_almacen),
         os.unlink(sample_path)
     if not items:
         raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
-    cid = svc.construir_corrida(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False)
+    sc = carpetas_svc.carpeta_sin_clasificar_id(alm)
+    cid = svc.construir_corrida(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False,
+                                carpeta_id=sc)
     return {"id": cid, "resumen": svc.vista_corrida(alm, cid)["totales"]}
 
 
@@ -159,9 +183,12 @@ def _event_stream(gen):
 @router.post("/corridas/stream")
 async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
                                use_ai: Optional[bool] = Form(None),
+                               carpeta_id: int = Form(...),
                                archivo: UploadFile = File(...),
                                alm: Almacen = Depends(get_almacen),
                                _: object = Depends(requiere_rol("consulta"))):
+    if alm.carpetas.get(carpeta_id) is None:
+        raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
     if alm.counts().get("apus", 0) == 0:
         ensure_seeded()
     suf = Path(archivo.filename or "lic.xlsx").suffix or ".xlsx"
@@ -178,7 +205,8 @@ async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
         os.unlink(tmp_path)
     if not items:
         raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
-    gen = svc.construir_corrida_stream(alm, archivo.filename or "licitacion", items, turno, use_ai)
+    gen = svc.construir_corrida_stream(alm, archivo.filename or "licitacion", items, turno, use_ai,
+                                       carpeta_id=carpeta_id)
     return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
 
@@ -199,7 +227,9 @@ def crear_sample_stream(alm: Almacen = Depends(get_almacen),
         os.unlink(sample_path)
     if not items:
         raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
-    gen = svc.construir_corrida_stream(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False)
+    sc = carpetas_svc.carpeta_sin_clasificar_id(alm)
+    gen = svc.construir_corrida_stream(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False,
+                                       carpeta_id=sc)
     return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
 
@@ -459,3 +489,57 @@ def usuarios_cambiar_estado(user_id: str, body: EstadoIn,
         return usuarios_svc.cambiar_estado(alm, actor, user_id, body.estado)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ---- carpetas ----
+@router.get("/carpetas")
+def listar_carpetas(alm: Almacen = Depends(get_almacen),
+                    _: object = Depends(requiere_rol("consulta"))):
+    return carpetas_svc.listar_arbol(alm)
+
+
+@router.post("/carpetas")
+def crear_carpeta(body: CarpetaIn, alm: Almacen = Depends(get_almacen),
+                  actor=Depends(requiere_rol("consulta"))):
+    try:
+        return carpetas_svc.crear_carpeta(alm, body.nombre, body.parent_id, actor=actor)
+    except CarpetaInvalida as e:
+        code = 409 if "Ya existe" in str(e) else 400
+        raise HTTPException(status_code=code, detail=str(e))
+
+
+@router.patch("/carpetas/{carpeta_id}")
+def editar_carpeta(carpeta_id: int, body: CarpetaPatchIn,
+                   alm: Almacen = Depends(get_almacen),
+                   actor=Depends(requiere_rol("editor"))):
+    try:
+        if body.mover:
+            return carpetas_svc.mover_carpeta(alm, carpeta_id, body.parent_id, actor=actor)
+        if body.nombre is not None:
+            return carpetas_svc.renombrar_carpeta(alm, carpeta_id, body.nombre, actor=actor)
+        raise HTTPException(status_code=400, detail="Nada que actualizar.")
+    except CarpetaInvalida as e:
+        code = 409 if "Ya existe" in str(e) else 400
+        raise HTTPException(status_code=code, detail=str(e))
+
+
+@router.delete("/carpetas/{carpeta_id}")
+def borrar_carpeta(carpeta_id: int, alm: Almacen = Depends(get_almacen),
+                   actor=Depends(requiere_rol("editor"))):
+    try:
+        if not carpetas_svc.eliminar_carpeta(alm, carpeta_id, actor=actor):
+            raise HTTPException(status_code=404, detail="Carpeta no encontrada.")
+    except CarpetaNoVacia:
+        raise HTTPException(status_code=409, detail="La carpeta no está vacía.")
+    return {"eliminada": carpeta_id}
+
+
+@router.post("/corridas/{cid}/mover")
+def mover_corrida(cid: int, body: MoverCorridaIn, alm: Almacen = Depends(get_almacen),
+                  actor=Depends(requiere_rol("editor"))):
+    try:
+        if not carpetas_svc.mover_corrida(alm, cid, body.carpeta_id, actor=actor):
+            raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    except CarpetaInvalida as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return svc.vista_corrida(alm, cid)

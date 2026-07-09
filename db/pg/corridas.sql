@@ -1,6 +1,16 @@
 -- Esquema Postgres de corridas (Supabase). Equivalente a db/corridas.sql.
 CREATE SCHEMA IF NOT EXISTS corridas;
 
+CREATE TABLE IF NOT EXISTS corridas.carpeta (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nombre        TEXT NOT NULL,
+    parent_id     BIGINT REFERENCES corridas.carpeta(id) ON DELETE RESTRICT,
+    creada_en     TEXT NOT NULL,
+    creado_por    TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_carpeta_hermanas
+    ON corridas.carpeta(COALESCE(parent_id, 0), nombre);
+
 CREATE TABLE IF NOT EXISTS corridas.corrida (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     creada_en     TEXT NOT NULL,
@@ -11,7 +21,8 @@ CREATE TABLE IF NOT EXISTS corridas.corrida (
     cuadro_path   TEXT,
     duracion_ms   INTEGER,
     creado_por    TEXT,
-    modo          TEXT NOT NULL DEFAULT 'activa'
+    modo          TEXT NOT NULL DEFAULT 'activa',
+    carpeta_id    BIGINT REFERENCES corridas.carpeta(id) ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS corridas.corrida_item (
@@ -33,6 +44,17 @@ CREATE TABLE IF NOT EXISTS corridas.corrida_item (
 );
 CREATE INDEX IF NOT EXISTS ix_corrida_item ON corridas.corrida_item(corrida_id, seq);
 
--- Migración idempotente para bases existentes (CorridasPg.init_schema corre este script en cada boot).
+-- Migración idempotente para bases existentes.
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS modo TEXT NOT NULL DEFAULT 'activa';
 ALTER TABLE corridas.corrida_item ADD COLUMN IF NOT EXISTS snapshot_json TEXT;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS carpeta_id BIGINT
+    REFERENCES corridas.carpeta(id) ON DELETE RESTRICT;
+
+-- Bootstrap "Sin clasificar" + backfill de corridas sin carpeta (idempotente).
+INSERT INTO corridas.carpeta (nombre, creada_en)
+    SELECT 'Sin clasificar', to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS')
+    WHERE NOT EXISTS (SELECT 1 FROM corridas.carpeta
+                      WHERE nombre = 'Sin clasificar' AND parent_id IS NULL);
+UPDATE corridas.corrida SET carpeta_id =
+    (SELECT id FROM corridas.carpeta WHERE nombre='Sin clasificar' AND parent_id IS NULL)
+    WHERE carpeta_id IS NULL;

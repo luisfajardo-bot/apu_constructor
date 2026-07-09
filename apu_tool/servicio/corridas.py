@@ -41,7 +41,8 @@ def _estructura(componentes) -> list[dict]:
 
 
 def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
-                             turno_def: str, use_ai: Optional[bool]):
+                             turno_def: str, use_ai: Optional[bool],
+                             carpeta_id: Optional[int] = None):
     """Arma la corrida de forma INCREMENTAL, emitiendo eventos:
       ('started', {'id', 'total'})           — al crear la corrida (estado 'armando').
       ('progress', {'i','total','descripcion','fila'}) — por ítem, con la fila ya
@@ -58,7 +59,7 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
     corrida_id = alm.corridas.crear_corrida(CorridaMeta(
         id=None, creada_en=datetime.now().isoformat(timespec="seconds"),
         archivo=archivo, turno_def=turno_def, use_ai=use_ai,
-        estado="armando", cuadro_path=None))
+        estado="armando", cuadro_path=None, carpeta_id=carpeta_id))
     total = len(items)
     yield ("started", {"id": corrida_id, "total": total})
     t0 = time.monotonic()
@@ -94,10 +95,12 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
 
 
 def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
-                      turno_def: str, use_ai: Optional[bool]) -> int:
+                      turno_def: str, use_ai: Optional[bool],
+                      carpeta_id: Optional[int] = None) -> int:
     """Envoltorio no-stream: drena el generador e ignora el progreso; devuelve el id."""
     corrida_id = -1
-    for evento, payload in construir_corrida_stream(alm, archivo, items, turno_def, use_ai):
+    for evento, payload in construir_corrida_stream(alm, archivo, items, turno_def,
+                                                    use_ai, carpeta_id):
         if evento == "done":
             corrida_id = payload["id"]
     return corrida_id
@@ -197,6 +200,7 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
     items = [_vista_item(ens, r.seq, r.status) for ens, r in zip(ensambles, rows)]
     return {
         "id": meta.id, "archivo": meta.archivo, "estado": meta.estado, "modo": meta.modo,
+        "carpeta_id": meta.carpeta_id,
         "duracion_ms": meta.duracion_ms, "items": items,
         "totales": _totales(ensambles, rows),
     }
@@ -287,6 +291,7 @@ def listar_corridas(alm: Almacen) -> list[dict]:
         n_rev = sum(1 for it in rows if it.status in ("review", "new"))
         fila = {"id": meta.id, "archivo": meta.archivo, "creada_en": meta.creada_en,
                 "estado": meta.estado, "modo": meta.modo, "duracion_ms": meta.duracion_ms,
+                "carpeta_id": meta.carpeta_id,
                 "n_items": len(rows), "n_revision": n_rev,
                 "contractual": None, "costo": None, "margen": None, "margen_pct": None}
         try:                                           # fail-safe: si una corrida no

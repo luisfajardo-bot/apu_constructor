@@ -106,6 +106,20 @@ export interface CambioPreview {
   fuente_nueva: string;
 }
 
+export interface Carpeta {
+  id: number;
+  nombre: string;
+  parent_id: number | null;
+}
+
+export interface CarpetaNodo {
+  id: number;
+  nombre: string;
+  parent_id: number | null;
+  n_corridas: number;
+  hijas: CarpetaNodo[];
+}
+
 export interface CorridaResumen {
   id: number;
   archivo: string;
@@ -119,6 +133,7 @@ export interface CorridaResumen {
   costo: number | null;
   margen: number | null;
   margen_pct: number | null;
+  carpeta_id: number | null;
 }
 
 // Wrappers de respuesta
@@ -142,6 +157,7 @@ export interface CorridaDetalle {
   items: ItemCuadro[];
   totales: Totales;
   duracion_ms: number | null;
+  carpeta_id: number | null;
 }
 
 export interface ListaInsumos {

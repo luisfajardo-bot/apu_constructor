@@ -454,3 +454,17 @@ def test_costear_row_activa_no_duplica_rendimiento_en_autoreferencia(tmp_path):
     ens = _costear_row(alm, row)
     assert ens.costo_unitario == pytest.approx(1000.0)   # 2 * 500 (histórico), guardado
     assert ens.componentes[0].calidad_cruce == "ciclo"
+
+
+def test_construir_corrida_guarda_carpeta(tmp_path):
+    alm = _almacen_seed(tmp_path)
+    from apu_tool.servicio import carpetas as csvc
+    carp = csvc.crear_carpeta(alm, "Obra", parent_id=None, actor=None)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    cid = corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False,
+                                     carpeta_id=carp["id"])
+    assert alm.corridas.get_corrida(cid).carpeta_id == carp["id"]
+    fila = next(f for f in corridas.listar_corridas(alm) if f["id"] == cid)
+    assert fila["carpeta_id"] == carp["id"]
+    assert corridas.vista_corrida(alm, cid)["carpeta_id"] == carp["id"]

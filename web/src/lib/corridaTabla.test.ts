@@ -92,3 +92,37 @@ test("hayFiltrosActivos: falso en vacío, verdadero con algún filtro", () => {
   expect(hayFiltrosActivos(FILTROS_VACIOS, { clave: "item", dir: "asc" }, false)).toBe(true);
   expect(hayFiltrosActivos(FILTROS_VACIOS, null, true)).toBe(true);
 });
+
+test("filtrar: rango por precio_contractual (unitario)", () => {
+  const items = [
+    item({ precio_contractual: 100 }),
+    item({ precio_contractual: 200 }),
+    item({ precio_contractual: 300 }),
+  ];
+  const f = { ...FILTROS_VACIOS, precio_contractual: { min: "200", max: "" } };
+  expect(filtrar(items, f, false).map((i) => i.precio_contractual)).toEqual([200, 300]);
+});
+
+test("filtrar: rango por costo_unitario", () => {
+  const items = [
+    item({ costo_unitario: 50 }),
+    item({ costo_unitario: 150 }),
+  ];
+  const f = { ...FILTROS_VACIOS, costo_unitario: { min: "", max: "100" } };
+  expect(filtrar(items, f, false).map((i) => i.costo_unitario)).toEqual([50]);
+});
+
+test("ordenar: por precio_contractual asc y desc", () => {
+  const items = [
+    item({ precio_contractual: 300 }),
+    item({ precio_contractual: 100 }),
+    item({ precio_contractual: 200 }),
+  ];
+  expect(ordenar(items, { clave: "precio_contractual", dir: "asc" }).map((i) => i.precio_contractual)).toEqual([100, 200, 300]);
+  expect(ordenar(items, { clave: "precio_contractual", dir: "desc" }).map((i) => i.precio_contractual)).toEqual([300, 200, 100]);
+});
+
+test("ordenar: por costo_unitario asc", () => {
+  const items = [item({ costo_unitario: 30 }), item({ costo_unitario: 10 })];
+  expect(ordenar(items, { clave: "costo_unitario", dir: "asc" }).map((i) => i.costo_unitario)).toEqual([10, 30]);
+});

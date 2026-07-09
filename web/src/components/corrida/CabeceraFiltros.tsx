@@ -19,8 +19,10 @@ const COLS: Col[] = [
   { clave: "item", label: "Ítem", tipo: "texto", ancho: "w-24" },
   { clave: "apu", label: "APU", tipo: "texto", ancho: "w-28" },
   { clave: "status", label: "Estado", tipo: "select", ancho: "w-20" },
-  { clave: "contractual_total", label: "Contractual", tipo: "num", ancho: "w-28", derecha: true },
-  { clave: "costo_total", label: "Costo", tipo: "num", ancho: "w-28", derecha: true },
+  { clave: "precio_contractual", label: "Unit. Contractual", tipo: "num", ancho: "w-28", derecha: true },
+  { clave: "costo_unitario", label: "Unit. Costo", tipo: "num", ancho: "w-28", derecha: true },
+  { clave: "contractual_total", label: "Total Contractual", tipo: "num", ancho: "w-28", derecha: true },
+  { clave: "costo_total", label: "Total Costo", tipo: "num", ancho: "w-28", derecha: true },
   { clave: "margen_total", label: "Margen", tipo: "num", ancho: "w-28", derecha: true },
   { clave: "margen_pct", label: "%", tipo: "num", ancho: "w-16", derecha: true },
 ];

@@ -89,8 +89,8 @@ export default function TablaItems({
     }
   }
 
-  // Total columns = 1 (chevron) + 10 data cols = 11
-  const TOTAL_COLS = 11;
+  // Total columns = 1 (chevron) + 12 data cols = 13
+  const TOTAL_COLS = 13;
 
   return (
     <div className="flex flex-col gap-2">
@@ -135,8 +135,10 @@ export default function TablaItems({
               <TableHead className="text-xs w-24">Ítem</TableHead>
               <TableHead className="text-xs w-28">APU</TableHead>
               <TableHead className="text-xs w-20">Estado</TableHead>
-              <TableHead className="text-xs w-28 text-right">Contractual</TableHead>
-              <TableHead className="text-xs w-28 text-right">Costo</TableHead>
+              <TableHead className="text-xs w-28 text-right">Unit. Contractual</TableHead>
+              <TableHead className="text-xs w-28 text-right">Unit. Costo</TableHead>
+              <TableHead className="text-xs w-28 text-right">Total Contractual</TableHead>
+              <TableHead className="text-xs w-28 text-right">Total Costo</TableHead>
               <TableHead className="text-xs w-28 text-right">Margen</TableHead>
               <TableHead className="text-xs w-16 text-right">%</TableHead>
             </TableRow>
@@ -185,6 +187,12 @@ export default function TablaItems({
                   </TableCell>
                   <TableCell className="text-xs">
                     <EstadoBadge status={it.status} />
+                  </TableCell>
+                  <TableCell className="text-xs text-right font-mono tabular-nums">
+                    {cop(it.precio_contractual)}
+                  </TableCell>
+                  <TableCell className="text-xs text-right font-mono tabular-nums">
+                    {cop(it.costo_unitario)}
                   </TableCell>
                   <TableCell className="text-xs text-right font-mono tabular-nums">
                     {cop(it.contractual_total)}

@@ -91,6 +91,7 @@ export default function Corrida() {
         totales: totalesDe(vivo.filas),
         duracion_ms: null,
         modo: "activa",
+        carpeta_id: null,
       }
     : corrida;
 

@@ -9,12 +9,21 @@ se desactivan los prepared statements server-side (prepare_threshold=None).
 from __future__ import annotations
 
 import re
+import time
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Callable, Iterator
 
 import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
+
+# Errores transitorios de una migración: espera de lock (lock_timeout, 55P03),
+# cancelación por statement_timeout (57014) o deadlock. Se reintentan.
+_ERRORES_MIGRACION = (
+    psycopg.errors.LockNotAvailable,
+    psycopg.errors.QueryCanceled,
+    psycopg.errors.DeadlockDetected,
+)
 
 
 class Conexion:
@@ -38,6 +47,14 @@ class Conexion:
         """Unidad de trabajo (mismo comportamiento). Seam para auditoría (Plan 3)."""
         with self._pool.connection() as conn:
             yield conn
+
+    def ejecutar_migracion(self, sql: str, **kwargs) -> None:
+        """Aplica un script DDL idempotente de forma resiliente en el arranque.
+
+        Ver aplicar_migracion(): acota lock_timeout y reintenta ante esperas de
+        lock, para no colgarse hasta statement_timeout durante un deploy con
+        solape (instancia vieja aún sirviendo) o una carrera entre workers."""
+        aplicar_migracion(self._pool.connection, sql, **kwargs)
 
     def cerrar(self) -> None:
         self._pool.close()
@@ -68,3 +85,38 @@ def ejecutar_script(conn, sql: str) -> None:
     """
     for sentencia in dividir_sentencias(sql):
         conn.execute(sentencia)
+
+
+def aplicar_migracion(abrir_conexion: Callable, sql: str, *, intentos: int = 6,
+                      espera_s: float = 4.0, lock_timeout_ms: int = 4000,
+                      dormir: Callable[[float], None] = time.sleep) -> None:
+    """Aplica un script DDL idempotente acotando el lock y reintentando.
+
+    Problema: en un deploy con solape (la instancia vieja sigue sirviendo
+    tráfico) o con varios workers arrancando a la vez, un ``ALTER TABLE`` sobre
+    una tabla caliente puede quedar esperando ``ACCESS EXCLUSIVE`` hasta el
+    ``statement_timeout`` (~2 min) y morir; peor aún, si el worker se reinicia a
+    mitad, deja un lock huérfano que bloquea a los siguientes.
+
+    Solución: ``SET LOCAL lock_timeout`` hace que una sentencia bloqueada falle
+    rápido (55P03) y la transacción se revierte (sin lock huérfano); reintentamos
+    hasta que el lock quede libre (la instancia vieja drena / el otro worker
+    termina). Cada intento usa una conexión fresca. Idempotente: los reintentos
+    son seguros porque el script usa ``IF NOT EXISTS`` / ``WHERE NOT EXISTS``.
+
+    ``abrir_conexion`` es un callable que devuelve un context manager de conexión
+    (p.ej. ``pool.connection``); inyectable para pruebas sin un Postgres real.
+    """
+    ultimo: Exception | None = None
+    for intento in range(max(1, intentos)):
+        try:
+            with abrir_conexion() as conn:
+                conn.execute(f"SET LOCAL lock_timeout = '{int(lock_timeout_ms)}ms'")
+                ejecutar_script(conn, sql)
+            return
+        except _ERRORES_MIGRACION as e:
+            ultimo = e
+            if intento < intentos - 1:
+                dormir(espera_s)
+    assert ultimo is not None
+    raise ultimo

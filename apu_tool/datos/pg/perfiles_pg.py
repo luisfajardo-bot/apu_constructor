@@ -15,8 +15,7 @@ class PerfilesPg:
         self.cx = cx
 
     def init_schema(self) -> None:
-        with self.cx.connection() as conn:
-            ejecutar_script(conn, SCHEMA_PATH.read_text(encoding="utf-8"))
+        self.cx.ejecutar_migracion(SCHEMA_PATH.read_text(encoding="utf-8"))
 
     def reset(self) -> None:
         with self.cx.connection() as conn:

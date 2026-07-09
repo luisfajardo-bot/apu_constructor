@@ -71,6 +71,16 @@ class Perfil:
 
 
 @dataclass(frozen=True)
+class Carpeta:
+    """Carpeta para agrupar corridas. parent_id None = nivel 1; con valor = nivel 2."""
+    id: Optional[int]
+    nombre: str
+    parent_id: Optional[int]
+    creada_en: str                # ISO 8601
+    creado_por: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class EventoAuditoria:
     """Un evento de auditoría (tabla seguridad.auditoria). SIN dinero directo:
     los precios viajan dentro de antes/despues como parte del estado, nunca hacia la IA."""
@@ -216,6 +226,7 @@ class CorridaMeta:
     cuadro_path: Optional[str] = None
     duracion_ms: Optional[int] = None
     modo: str = "activa"
+    carpeta_id: Optional[int] = None
 
 
 @dataclass

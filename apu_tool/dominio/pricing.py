@@ -104,6 +104,14 @@ class PricingEngine:
                 precio_unitario=precio, fuente_precio="histórico",
                 costo=comp.rendimiento * precio, calidad_cruce="ciclo",
                 tipo="apu", ref_shift=sub_shift)
+        if not self.components(comp.insumo_codigo, sub_shift):   # sub-APU SIN composición -> histórico
+            precio = comp.precio_unitario_hist
+            return CostedComponent(
+                insumo_codigo=comp.insumo_codigo, insumo_nombre=comp.insumo_nombre,
+                unidad=comp.unidad, rendimiento=comp.rendimiento,
+                precio_unitario=precio, fuente_precio="histórico",
+                costo=comp.rendimiento * precio, calidad_cruce="apu_vacio",
+                tipo="apu", ref_shift=sub_shift)
         unit = self._costo_unitario_apu(comp.insumo_codigo, sub_shift, visitando + (clave,))
         return CostedComponent(
             insumo_codigo=comp.insumo_codigo, insumo_nombre=comp.insumo_nombre,

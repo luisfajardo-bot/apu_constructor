@@ -17,6 +17,7 @@ import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from apu_tool.dominio.alertas import alertas_costeo
 from apu_tool.nucleo.models import AssembledApu, MatchStatus
 
 _MONEY = '#,##0'
@@ -28,6 +29,7 @@ _HEADER_FONT = Font(bold=True, color="FFFFFF")
 _TOTAL_FILL = PatternFill("solid", fgColor="DDEBF7")
 _BAD_FILL = PatternFill("solid", fgColor="FCE4E4")     # margen negativo
 _WARN_FILL = PatternFill("solid", fgColor="FFF2CC")    # revisar
+_ALERT_FILL = PatternFill("solid", fgColor="F8CBAD")   # naranja: alerta de costeo ($0 / cruce dudoso)
 _THIN = Side(style="thin", color="BFBFBF")
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 
@@ -78,13 +80,18 @@ def _build_resumen(ws, apus: list[AssembledApu]) -> None:
         for col in (5, 6, 7, 9, 10, 11):
             ws.cell(row=r, column=col).number_format = _MONEY
         ws.cell(row=r, column=8).number_format = _PCT
-        # Resaltado por estado / margen.
-        if a.margen_total < 0:
-            for col in range(1, len(headers) + 1):
-                ws.cell(row=r, column=col).fill = _BAD_FILL
+        # Resaltado por prioridad: alerta de costeo > margen negativo > revisar.
+        if alertas_costeo(a):
+            fill = _ALERT_FILL
+        elif a.margen_total < 0:
+            fill = _BAD_FILL
         elif a.status in (MatchStatus.REVIEW, MatchStatus.NEW):
+            fill = _WARN_FILL
+        else:
+            fill = None
+        if fill is not None:
             for col in range(1, len(headers) + 1):
-                ws.cell(row=r, column=col).fill = _WARN_FILL
+                ws.cell(row=r, column=col).fill = fill
         for col in range(1, len(headers) + 1):
             ws.cell(row=r, column=col).border = _BORDER
 
@@ -144,11 +151,16 @@ def _build_alertas(ws, apus: list[AssembledApu]) -> None:
     ws.append(headers)
     _style_header(ws, 1, len(headers))
     ws.freeze_panes = "A2"
-    flagged = [a for a in apus if a.status in (MatchStatus.REVIEW, MatchStatus.NEW)]
-    for a in flagged:
+    filas = [(a, alertas_costeo(a)) for a in apus]
+    flagged = [(a, ac) for a, ac in filas
+               if a.status in (MatchStatus.REVIEW, MatchStatus.NEW) or ac]
+    for a, ac in flagged:
+        motivo = a.explicacion
+        if ac:
+            motivo = (motivo + " | " if motivo else "") + "Costeo: " + "; ".join(ac)
         ws.append([a.item.item, a.item.descripcion,
                    _STATUS_LABEL.get(a.status, a.status), round(a.confianza, 2),
-                   a.apu_codigo or "", a.explicacion])
+                   a.apu_codigo or "", motivo])
         ws.cell(row=ws.max_row, column=4).number_format = '0.00'
     if not flagged:
         ws.append(["", "Sin alertas: todos los ítems se armaron con coincidencia clara.",

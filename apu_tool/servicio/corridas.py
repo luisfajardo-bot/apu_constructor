@@ -15,6 +15,7 @@ from typing import Optional
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.datos.repositorio import CorridaEliminada
+from apu_tool.dominio.alertas import alertas_costeo
 from apu_tool.dominio.assemble import Assembler, ApuAdvisor
 from apu_tool.dominio.pricing import PricingEngine
 from apu_tool.dominio.report import write_report
@@ -165,6 +166,7 @@ def _vista_item(ens: AssembledApu, seq: int, status: str) -> dict:
         "costo_unitario": ens.costo_unitario, "margen_unitario": ens.margen_unitario,
         "margen_pct": ens.margen_pct, "contractual_total": ens.contractual_total,
         "costo_total": ens.costo_total, "margen_total": ens.margen_total,
+        "alertas_costeo": alertas_costeo(ens),
     }
 
 
@@ -186,7 +188,8 @@ def _totales(ensambles: list[AssembledApu], rows) -> dict:
     n_rev = sum(1 for r in rows if r.status in ("review", "new"))
     return {"contractual": tot_c, "costo": tot_k, "margen": tot_c - tot_k,
             "margen_pct": ((tot_c - tot_k) / tot_c) if tot_c else 0.0,
-            "n_items": len(rows), "n_revision": n_rev}
+            "n_items": len(rows), "n_revision": n_rev,
+            "n_alertas_costeo": sum(1 for e in ensambles if alertas_costeo(e))}
 
 
 def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:

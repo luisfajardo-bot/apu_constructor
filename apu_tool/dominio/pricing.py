@@ -93,25 +93,24 @@ class PricingEngine:
             precio_unitario=precio, fuente_precio=fuente, costo=costo,
             calidad_cruce=r.calidad.value, tipo="insumo", ref_shift="")
 
+    def _fallback_historico(self, comp: ApuComponent, sub_shift: str, calidad: str) -> CostedComponent:
+        """Respaldo histórico para un sub-APU que no se puede costear por su árbol
+        (ciclo o sin composición): usa `comp.precio_unitario_hist` tal cual."""
+        precio = comp.precio_unitario_hist
+        return CostedComponent(
+            insumo_codigo=comp.insumo_codigo, insumo_nombre=comp.insumo_nombre,
+            unidad=comp.unidad, rendimiento=comp.rendimiento,
+            precio_unitario=precio, fuente_precio="histórico",
+            costo=comp.rendimiento * precio, calidad_cruce=calidad,
+            tipo="apu", ref_shift=sub_shift)
+
     def _cost_subapu(self, comp: ApuComponent, visitando: tuple) -> CostedComponent:
         sub_shift = comp.ref_shift or comp.shift
         clave = (comp.insumo_codigo, sub_shift)
         if clave in visitando:                                  # ciclo -> respaldo histórico
-            precio = comp.precio_unitario_hist
-            return CostedComponent(
-                insumo_codigo=comp.insumo_codigo, insumo_nombre=comp.insumo_nombre,
-                unidad=comp.unidad, rendimiento=comp.rendimiento,
-                precio_unitario=precio, fuente_precio="histórico",
-                costo=comp.rendimiento * precio, calidad_cruce="ciclo",
-                tipo="apu", ref_shift=sub_shift)
+            return self._fallback_historico(comp, sub_shift, "ciclo")
         if not self.components(comp.insumo_codigo, sub_shift):   # sub-APU SIN composición -> histórico
-            precio = comp.precio_unitario_hist
-            return CostedComponent(
-                insumo_codigo=comp.insumo_codigo, insumo_nombre=comp.insumo_nombre,
-                unidad=comp.unidad, rendimiento=comp.rendimiento,
-                precio_unitario=precio, fuente_precio="histórico",
-                costo=comp.rendimiento * precio, calidad_cruce="apu_vacio",
-                tipo="apu", ref_shift=sub_shift)
+            return self._fallback_historico(comp, sub_shift, "apu_vacio")
         unit = self._costo_unitario_apu(comp.insumo_codigo, sub_shift, visitando + (clave,))
         return CostedComponent(
             insumo_codigo=comp.insumo_codigo, insumo_nombre=comp.insumo_nombre,

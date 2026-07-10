@@ -49,3 +49,8 @@ def test_subapu_vacio_y_ciclo():
 
 def test_item_sin_componentes_en_cero():
     assert alertas_costeo(_ensamble([], 0.0)) == ["APU en $0 (sin composición o sin costo)"]
+
+
+def test_cruce_huerfano_con_precio_positivo():
+    motivos = alertas_costeo(_ensamble([_comp(calidad="huerfano")], 10.0))
+    assert motivos == ["7 Cemento: sin insumo en catálogo"]

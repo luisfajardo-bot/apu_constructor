@@ -17,7 +17,7 @@ import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from apu_tool.dominio.alertas import alertas_costeo
+from apu_tool.dominio.alertas import alertas_costeo, filas_alertadas, motivo_alerta
 from apu_tool.nucleo.models import AssembledApu, MatchStatus
 
 _MONEY = '#,##0'
@@ -151,13 +151,9 @@ def _build_alertas(ws, apus: list[AssembledApu]) -> None:
     ws.append(headers)
     _style_header(ws, 1, len(headers))
     ws.freeze_panes = "A2"
-    filas = [(a, alertas_costeo(a)) for a in apus]
-    flagged = [(a, ac) for a, ac in filas
-               if a.status in (MatchStatus.REVIEW, MatchStatus.NEW) or ac]
+    flagged = filas_alertadas(apus)
     for a, ac in flagged:
-        motivo = a.explicacion
-        if ac:
-            motivo = (motivo + " | " if motivo else "") + "Costeo: " + "; ".join(ac)
+        motivo = motivo_alerta(a, ac)
         ws.append([a.item.item, a.item.descripcion,
                    _STATUS_LABEL.get(a.status, a.status), round(a.confianza, 2),
                    a.apu_codigo or "", motivo])

@@ -125,6 +125,10 @@ def cmd_db_update_price(args) -> int:
         for ins in cands:
             print(f"  - {ins.nombre}")
         return 1
+    if args.precio <= 0:
+        from apu_tool.servicio.insumos import MSG_PRECIO_POSITIVO
+        print(MSG_PRECIO_POSITIVO)
+        return 1
     try:
         alm.precios.set_precio(args.codigo, args.precio,
                                fuente=args.fuente or "ACTUALIZACION MANUAL",

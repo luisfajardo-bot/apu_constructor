@@ -23,7 +23,7 @@ from apu_tool.datos.seed import _read_apus
 from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
 from apu_tool.nucleo.texto import normalizar
 from apu_tool.servicio.auditoria import nuevo_lote, registrar_auditoria
-from apu_tool.servicio.insumos import _insumo_out, _norm_h, _to_float
+from apu_tool.servicio.insumos import _insumo_out, _norm_h, _to_float, MSG_PRECIO_POSITIVO
 from apu_tool.servicio.subapus import (
     mapa_codigos_apu, nombres_apu, detectar_subapus_lote, marcar_comps_subapu,
 )
@@ -36,8 +36,8 @@ def crear_insumo(alm: Almacen, datos: dict, actor=None) -> dict:
     if not codigo or not nombre:
         raise ValueError("Código y nombre son obligatorios.")
     precio = _to_float(datos.get("precio"))
-    if precio < 0:
-        raise ValueError("El precio no puede ser negativo.")
+    if precio <= 0:
+        raise ValueError(MSG_PRECIO_POSITIVO)
     ins = Insumo(codigo=codigo, nombre=nombre,
                  unidad=str(datos.get("unidad", "") or ""),
                  grupo=str(datos.get("grupo", "") or ""),
@@ -259,6 +259,8 @@ def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
     lote = nuevo_lote()
     for f in prev["crear"]:
         try:
+            if f["precio"] <= 0:
+                raise ValueError(MSG_PRECIO_POSITIVO)
             ins = Insumo(codigo=f["codigo"], nombre=f["nombre"], unidad=f["unidad"],
                          grupo=f["grupo"], precio=f["precio"], fuente_precio=f["fuente"])
             with alm.transaccion("precios") as conn:
@@ -276,6 +278,8 @@ def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
         if c["precio_nuevo"] == c["precio_actual"] and c["fuente_nueva"] == c["fuente_actual"]:
             continue                                   # no-op: nada cambió
         try:
+            if c["precio_nuevo"] <= 0:
+                raise ValueError(MSG_PRECIO_POSITIVO)
             with alm.transaccion("precios") as conn:
                 alm.precios.set_precio_por_id(c["insumo_id"], c["precio_nuevo"], c["fuente_nueva"],
                                               conn=conn,

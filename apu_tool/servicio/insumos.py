@@ -14,6 +14,9 @@ from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.servicio.auditoria import nuevo_lote, registrar_auditoria
 
+MSG_PRECIO_POSITIVO = ("El precio debe ser mayor que 0. Usa 1 si el ítem no tiene "
+                       "costo (p. ej. material del cliente).")
+
 
 def _insumo_out(ins) -> dict:
     return {"id": ins.id, "codigo": ins.codigo, "nombre": ins.nombre,
@@ -44,8 +47,8 @@ def aplicar_cambios(alm: Almacen, cambios: list[dict], actor=None) -> dict:
     for c in cambios:
         try:
             precio = float(c["precio"])
-            if precio < 0:
-                raise ValueError("El precio no puede ser negativo.")
+            if precio <= 0:
+                raise ValueError(MSG_PRECIO_POSITIVO)
             iid = int(c["insumo_id"])
             fuente = str(c.get("fuente", "") or "")
             antes_ins = alm.precios.get_insumo_por_id(iid)   # estado previo (lectura)

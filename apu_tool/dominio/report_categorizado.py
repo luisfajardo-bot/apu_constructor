@@ -20,7 +20,8 @@ from openpyxl.styles import Font
 
 from apu_tool.nucleo.models import AssembledApu, MatchStatus
 from apu_tool.dominio.report import (_MONEY, _PCT, _REND, _STATUS_LABEL, _TOTAL_FILL,
-                                     _WARN_FILL, _autosize, _style_header)
+                                     _WARN_FILL, _ALERT_FILL, _autosize, _style_header)
+from apu_tool.dominio.alertas import alertas_costeo, filas_alertadas, motivo_alerta
 
 
 def agrupar_por_capitulo(apus: list[AssembledApu]) -> dict[str, list[AssembledApu]]:
@@ -94,7 +95,10 @@ def _build_detalle(ws, grupos: dict[str, list[AssembledApu]]) -> None:
             for col in (5, 6, 7, 9, 10, 11):
                 ws.cell(row=r, column=col).number_format = _MONEY
             ws.cell(row=r, column=8).number_format = _PCT
-            if a.status in (MatchStatus.REVIEW, MatchStatus.NEW):
+            if alertas_costeo(a):
+                for col in range(1, len(headers) + 1):
+                    ws.cell(row=r, column=col).fill = _ALERT_FILL
+            elif a.status in (MatchStatus.REVIEW, MatchStatus.NEW):
                 for col in range(1, len(headers) + 1):
                     ws.cell(row=r, column=col).fill = _WARN_FILL
 
@@ -153,11 +157,12 @@ def _build_alertas(ws, apus: list[AssembledApu]) -> None:
     ws.append(headers)
     _style_header(ws, 1, len(headers))
     ws.freeze_panes = "A2"
-    flagged = [a for a in apus if a.status in (MatchStatus.REVIEW, MatchStatus.NEW)]
-    for a in flagged:
+    flagged = filas_alertadas(apus)
+    for a, ac in flagged:
+        motivo = motivo_alerta(a, ac)
         ws.append([a.item.item, a.item.descripcion, a.item.categoria,
                    _STATUS_LABEL.get(a.status, a.status), round(a.confianza, 2),
-                   a.apu_codigo or "", a.explicacion])
+                   a.apu_codigo or "", motivo])
         ws.cell(row=ws.max_row, column=5).number_format = '0.00'
     if not flagged:
         ws.append(["", "Sin alertas: todos los ítems se armaron con coincidencia clara."])

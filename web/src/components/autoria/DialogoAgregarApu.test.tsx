@@ -76,3 +76,42 @@ test("modo editar muestra el precio del componente (solo lectura)", async () => 
   );
   expect(screen.getByText("$2.000")).toBeTruthy();   // precio del insumo
 });
+
+test("editar el costo despeja el rendimiento (precio 2000, costo 6000 → rend 3)", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(
+    <DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}}
+      modo="editar" inicial={inicialDemo as never} />,
+  );
+  const costo = screen.getByLabelText("Costo") as HTMLInputElement;
+  expect(costo.value).toBe("4000");                       // 2 × 2000
+  fireEvent.change(costo, { target: { value: "6000" } });
+  const rend = screen.getByLabelText("Rendimiento") as HTMLInputElement;
+  expect(rend.value).toBe("3");                           // 6000 / 2000
+});
+
+test("editar el rendimiento actualiza el costo mostrado (rend 5 → costo 10000)", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(
+    <DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}}
+      modo="editar" inicial={inicialDemo as never} />,
+  );
+  const rend = screen.getByLabelText("Rendimiento") as HTMLInputElement;
+  fireEvent.change(rend, { target: { value: "5" } });
+  const costo = screen.getByLabelText("Costo") as HTMLInputElement;
+  expect(costo.value).toBe("10000");                      // 5 × 2000
+});
+
+test("precio 0: no hay input de costo; el rendimiento sigue editable", async () => {
+  const inicialSinPrecio = {
+    ...inicialDemo,
+    composicion: [{ ...inicialDemo.composicion[0], precio_unitario: 0, costo: 0 }],
+  };
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(
+    <DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}}
+      modo="editar" inicial={inicialSinPrecio as never} />,
+  );
+  expect(screen.queryByLabelText("Costo")).toBeNull();    // sin input de costo
+  expect(screen.getByLabelText("Rendimiento")).toBeTruthy();
+});

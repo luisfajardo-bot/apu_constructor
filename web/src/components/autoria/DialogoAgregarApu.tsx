@@ -18,6 +18,7 @@ import type {
 import { crearApu, editarApu } from "@/api/autoria";
 import { listarInsumos } from "@/api/insumos";
 import { cop } from "@/lib/moneda";
+import { costoDeFila, rendimientoDesdeCosto } from "@/lib/costoApu";
 import {
   rendimientoValido,
   hayRendimientoInvalido,
@@ -299,6 +300,9 @@ export function DialogoAgregarApu({
                   <th className="px-2 py-1 text-right font-medium text-muted-foreground border-b w-24">
                     Precio
                   </th>
+                  <th className="px-2 py-1 text-right font-medium text-muted-foreground border-b w-24">
+                    Costo
+                  </th>
                   <th className="px-2 py-1 border-b w-8" />
                 </tr>
               </thead>
@@ -346,6 +350,7 @@ export function DialogoAgregarApu({
                           type="number"
                           min="0"
                           step="any"
+                          aria-label="Rendimiento"
                           value={f.rendimiento}
                           onChange={(e) =>
                             setFila(f.uid, { rendimiento: e.target.value })
@@ -355,6 +360,38 @@ export function DialogoAgregarApu({
                       </td>
                       <td className="px-2 py-1 border-b text-right font-mono tabular-nums text-muted-foreground">
                         {f.precio > 0 ? cop(f.precio) : "—"}
+                      </td>
+                      <td className="px-2 py-1 border-b">
+                        {f.precio > 0 ? (
+                          <input
+                            className={`${inputCls} text-right`}
+                            type="number"
+                            min="0"
+                            step="any"
+                            aria-label="Costo"
+                            value={
+                              rendimientoValido(f.rendimiento)
+                                ? String(Math.round(costoDeFila(f.rendimiento, f.precio)))
+                                : ""
+                            }
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v.trim() === "") {
+                                setFila(f.uid, { rendimiento: "" });
+                                return;
+                              }
+                              const r = rendimientoDesdeCosto(v, f.precio);
+                              if (r !== null) setFila(f.uid, { rendimiento: String(r) });
+                            }}
+                          />
+                        ) : (
+                          <span
+                            className="block text-right text-muted-foreground"
+                            title="Sin precio; ajusta el rendimiento"
+                          >
+                            —
+                          </span>
+                        )}
                       </td>
                       <td className="px-2 py-1 border-b text-center">
                         <button

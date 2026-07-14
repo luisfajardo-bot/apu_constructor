@@ -14,11 +14,22 @@ vi.mock("@/api/insumos", () => ({
   listarInsumos: vi.fn(async () => ({ items: [], total: 0, limit: 15, offset: 0 })),
 }));
 
+const inicialDemo = {
+  codigo: "100", turno: "DIURNO", nombre: "APU DEMO", unidad: "M3", grupo: "G",
+  costo_unitario: 4000,
+  composicion: [{
+    insumo_codigo: "C1", insumo_nombre: "CEMENTO", unidad: "KG",
+    rendimiento: 2, precio_unitario: 2000, fuente_precio: "PRECIO IDU",
+    costo: 4000, calidad_cruce: "exacto",
+  }],
+};
+
 test("componenteDeFila incluye tipo/ref_shift en una fila sub-APU", async () => {
   const { componenteDeFila } = await import("./DialogoAgregarApu");
   const apu = componenteDeFila({
     uid: 1, tipo: "apu", ref_shift: "DIURNO",
-    insumo_codigo: "9001", insumo_nombre: "SUB APU DEMO", unidad: "M3", rendimiento: "3",
+    insumo_codigo: "9001", insumo_nombre: "SUB APU DEMO", unidad: "M3",
+    rendimiento: "3", precio: 0,
   });
   expect(apu).toEqual({
     insumo_codigo: "9001", rendimiento: 3, insumo_nombre: "SUB APU DEMO",
@@ -26,7 +37,8 @@ test("componenteDeFila incluye tipo/ref_shift en una fila sub-APU", async () => 
   });
   const ins = componenteDeFila({
     uid: 2, tipo: "insumo", ref_shift: "",
-    insumo_codigo: "100", insumo_nombre: "CEMENTO", unidad: "KG", rendimiento: "2",
+    insumo_codigo: "100", insumo_nombre: "CEMENTO", unidad: "KG",
+    rendimiento: "2", precio: 0,
   });
   expect(ins).toEqual({
     insumo_codigo: "100", rendimiento: 2, insumo_nombre: "CEMENTO", unidad: "KG",
@@ -52,4 +64,15 @@ test("'+ Sub-APU' agrega una fila con BuscadorApu y al elegir muestra el chip AP
   fireEvent.click(await screen.findByText("SUB APU DEMO"));
   await waitFor(() => expect(screen.getByText("APU")).toBeTruthy());   // chip
   expect(screen.getByText("9001")).toBeTruthy();                        // código elegido
+});
+
+test("modo editar muestra el precio del componente (solo lectura)", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(
+    <DialogoAgregarApu
+      open onOpenChange={() => {}} onCreado={() => {}}
+      modo="editar" inicial={inicialDemo as never}
+    />,
+  );
+  expect(screen.getByText("$2.000")).toBeTruthy();   // precio del insumo
 });

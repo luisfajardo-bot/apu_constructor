@@ -17,6 +17,7 @@ import type {
 } from "@/lib/tipos";
 import { crearApu, editarApu } from "@/api/autoria";
 import { listarInsumos } from "@/api/insumos";
+import { cop } from "@/lib/moneda";
 import {
   rendimientoValido,
   hayRendimientoInvalido,
@@ -41,6 +42,7 @@ interface FilaComp {
   insumo_nombre: string;
   unidad: string;
   rendimiento: string;
+  precio: number;
 }
 
 interface Cabecera {
@@ -72,6 +74,7 @@ function nuevaFila(tipo: "insumo" | "apu" = "insumo"): FilaComp {
     insumo_nombre: "",
     unidad: "",
     rendimiento: "",
+    precio: 0,
   };
 }
 
@@ -129,6 +132,7 @@ export function DialogoAgregarApu({
                 insumo_nombre: c.insumo_nombre,
                 unidad: c.unidad,
                 rendimiento: String(c.rendimiento),
+                precio: c.precio_unitario,
               };
             }),
       );
@@ -292,6 +296,9 @@ export function DialogoAgregarApu({
                   <th className="px-2 py-1 text-right font-medium text-muted-foreground border-b w-28">
                     Rendimiento
                   </th>
+                  <th className="px-2 py-1 text-right font-medium text-muted-foreground border-b w-24">
+                    Precio
+                  </th>
                   <th className="px-2 py-1 border-b w-8" />
                 </tr>
               </thead>
@@ -311,6 +318,7 @@ export function DialogoAgregarApu({
                                 insumo_nombre: apu.nombre,
                                 unidad: apu.unidad,
                                 ref_shift: apu.turno,
+                                precio: apu.costo_unitario,
                               })
                             }
                           />
@@ -323,6 +331,7 @@ export function DialogoAgregarApu({
                                 insumo_codigo: ins.codigo,
                                 insumo_nombre: ins.nombre,
                                 unidad: ins.unidad,
+                                precio: ins.precio,
                               })
                             }
                           />
@@ -343,6 +352,9 @@ export function DialogoAgregarApu({
                           }
                           aria-invalid={rendMal}
                         />
+                      </td>
+                      <td className="px-2 py-1 border-b text-right font-mono tabular-nums text-muted-foreground">
+                        {f.precio > 0 ? cop(f.precio) : "—"}
                       </td>
                       <td className="px-2 py-1 border-b text-center">
                         <button

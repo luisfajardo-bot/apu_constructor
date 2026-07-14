@@ -30,3 +30,13 @@ test("costoTotalApu: suma solo las filas con insumo elegido", () => {
   ];
   expect(costoTotalApu(filas)).toBe(5000);
 });
+
+test("costoTotalApu: ignora filas con rendimiento inválido (negativo/cero/vacío)", () => {
+  const filas = [
+    { insumo_codigo: "A1", rendimiento: "2", precio: 1000 },    // 2000 (válida)
+    { insumo_codigo: "A2", rendimiento: "-5", precio: 2000 },   // negativa → ignorada
+    { insumo_codigo: "A3", rendimiento: "0", precio: 1000 },    // cero → ignorada
+    { insumo_codigo: "A4", rendimiento: "", precio: 5000 },     // vacía → ignorada
+  ];
+  expect(costoTotalApu(filas)).toBe(2000);
+});

@@ -102,6 +102,19 @@ test("editar el rendimiento actualiza el costo mostrado (rend 5 → costo 10000)
   expect(costo.value).toBe("10000");                      // 5 × 2000
 });
 
+test("el total del APU refleja el costo de las filas y se actualiza al editar", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(
+    <DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}}
+      modo="editar" inicial={inicialDemo as never} />,
+  );
+  expect(screen.getByText("Costo unitario del APU:")).toBeTruthy();
+  expect(screen.getByText("$4.000")).toBeTruthy();        // total inicial: 2 × 2000
+  const rend = screen.getByLabelText("Rendimiento") as HTMLInputElement;
+  fireEvent.change(rend, { target: { value: "5" } });
+  expect(screen.getByText("$10.000")).toBeTruthy();       // 5 × 2000
+});
+
 test("precio 0: no hay input de costo; el rendimiento sigue editable", async () => {
   const inicialSinPrecio = {
     ...inicialDemo,

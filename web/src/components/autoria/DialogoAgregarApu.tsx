@@ -18,7 +18,7 @@ import type {
 import { crearApu, editarApu } from "@/api/autoria";
 import { listarInsumos } from "@/api/insumos";
 import { cop } from "@/lib/moneda";
-import { costoDeFila, rendimientoDesdeCosto } from "@/lib/costoApu";
+import { costoDeFila, rendimientoDesdeCosto, costoTotalApu } from "@/lib/costoApu";
 import {
   rendimientoValido,
   hayRendimientoInvalido,
@@ -415,6 +415,13 @@ export function DialogoAgregarApu({
               El rendimiento de cada insumo elegido debe ser mayor que 0.
             </p>
           )}
+        </div>
+
+        <div className="flex justify-end items-baseline gap-2 text-xs">
+          <span className="text-muted-foreground">Costo unitario del APU:</span>
+          <span className="font-mono tabular-nums font-semibold">
+            {cop(costoTotalApu(filas))}
+          </span>
         </div>
 
         <DialogFooter>

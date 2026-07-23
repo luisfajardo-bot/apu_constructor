@@ -11,6 +11,8 @@ export default function CorridasInicio() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [usarIA, setUsarIA] = useState(true);
   const [cargando, setCargando] = useState(false);
+  const [nombre, setNombre] = useState("");
+  const [nombreTocado, setNombreTocado] = useState(false);
 
   // Carpetas
   const [carpetas, setCarpetas] = useState<CarpetaNodo[]>([]);
@@ -75,6 +77,16 @@ export default function CorridasInicio() {
     }
   }
 
+  function stripExt(name: string): string {
+    const i = name.lastIndexOf(".");
+    return (i > 0 ? name.slice(0, i) : name).trim();
+  }
+
+  function handleArchivoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (f && !nombreTocado) setNombre(stripExt(f.name));
+  }
+
   async function handleArmar(e: React.FormEvent) {
     e.preventDefault();
     if (carpetaDestino == null) {
@@ -90,6 +102,7 @@ export default function CorridasInicio() {
     form.append("archivo", archivo);
     form.append("use_ai", String(usarIA));
     form.append("carpeta_id", String(carpetaDestino));
+    form.append("nombre", nombre.trim());
     setCargando(true);
     try {
       await armarArchivo(form, (id) => navigate(`/corridas/${id}`));
@@ -125,7 +138,24 @@ export default function CorridasInicio() {
               ref={fileRef}
               type="file"
               accept=".xlsx,.csv"
+              onChange={handleArchivoChange}
               style={styles.inputFile}
+              disabled={cargando}
+            />
+          </div>
+
+          {/* Nombre */}
+          <div style={styles.campo}>
+            <label style={styles.label} htmlFor="nombre">
+              Nombre
+            </label>
+            <input
+              id="nombre"
+              type="text"
+              value={nombre}
+              onChange={(e) => { setNombre(e.target.value); setNombreTocado(true); }}
+              placeholder="Nombre de la corrida"
+              style={styles.input}
               disabled={cargando}
             />
           </div>
@@ -244,6 +274,14 @@ const styles: Record<string, React.CSSProperties> = {
   inputFile: {
     fontSize: "12px",
     color: "#2d3748",
+  },
+  input: {
+    fontSize: "12px",
+    color: "#2d3748",
+    padding: "4px 6px",
+    borderRadius: "4px",
+    border: "1px solid #cbd5e0",
+    background: "#fff",
   },
   campoInline: {
     display: "flex",

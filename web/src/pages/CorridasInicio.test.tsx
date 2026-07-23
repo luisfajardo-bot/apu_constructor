@@ -48,3 +48,31 @@ test('"Armar" está deshabilitado hasta elegir carpeta', async () => {
   // Button should now be enabled
   await waitFor(() => expect(btnArmar.hasAttribute("disabled")).toBe(false));
 });
+
+test("al elegir archivo, precarga el Nombre sin extensión", async () => {
+  const { default: CorridasInicio } = await import("./CorridasInicio");
+  render(<MemoryRouter><CorridasInicio /></MemoryRouter>);
+  await screen.findByText("Calle 13");
+
+  const fileInput = document.getElementById("archivo") as HTMLInputElement;
+  const file = new File(["x"], "Licitacion Calle 13.xlsx", { type: "application/octet-stream" });
+  fireEvent.change(fileInput, { target: { files: [file] } });
+
+  const nombreInput = screen.getByLabelText("Nombre") as HTMLInputElement;
+  await waitFor(() => expect(nombreInput.value).toBe("Licitacion Calle 13"));
+});
+
+test("no pisa el Nombre si el usuario ya lo editó", async () => {
+  const { default: CorridasInicio } = await import("./CorridasInicio");
+  render(<MemoryRouter><CorridasInicio /></MemoryRouter>);
+  await screen.findByText("Calle 13");
+
+  const nombreInput = screen.getByLabelText("Nombre") as HTMLInputElement;
+  fireEvent.change(nombreInput, { target: { value: "Mi alias" } });
+
+  const fileInput = document.getElementById("archivo") as HTMLInputElement;
+  const file = new File(["x"], "otra.xlsx", { type: "application/octet-stream" });
+  fireEvent.change(fileInput, { target: { files: [file] } });
+
+  expect(nombreInput.value).toBe("Mi alias");
+});

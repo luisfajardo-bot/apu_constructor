@@ -108,3 +108,19 @@ def test_vista_y_listar_incluyen_nombre(tmp_path):
     assert svc.vista_corrida(alm, cid)["nombre"] == "Mi corrida"
     fila = next(f for f in svc.listar_corridas(alm) if f["id"] == cid)
     assert fila["nombre"] == "Mi corrida"
+
+
+def test_construir_corrida_cap_120(tmp_path):
+    alm, sc = _alm(tmp_path)
+    nombre_largo = "A" * 130
+    cid = svc.construir_corrida(alm, "lic.xlsx", _items(), "DIURNO", False,
+                                carpeta_id=sc, nombre=nombre_largo)
+    assert len(alm.corridas.get_corrida(cid).nombre) == 120
+
+
+def test_renombrar_corrida_cap_120(tmp_path):
+    alm, sc = _alm(tmp_path)
+    cid = svc.construir_corrida(alm, "lic.xlsx", _items(), "DIURNO", False, carpeta_id=sc)
+    nombre_largo = "B" * 130
+    v = svc.renombrar_corrida(alm, cid, nombre_largo)
+    assert len(v["nombre"]) == 120

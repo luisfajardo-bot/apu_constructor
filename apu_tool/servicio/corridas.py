@@ -41,6 +41,14 @@ def _estructura(componentes) -> list[dict]:
             for c in componentes]
 
 
+def nombre_desde_archivo(filename: str) -> str:
+    """Nombre por defecto de una corrida: el archivo subido SIN su última extensión.
+
+    `Licitacion Calle 13.xlsx` -> `Licitacion Calle 13`. Es puro (sin I/O)."""
+    base = (filename or "").strip()
+    return Path(base).stem.strip() if base else ""
+
+
 def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
                              turno_def: str, use_ai: Optional[bool],
                              carpeta_id: Optional[int] = None):

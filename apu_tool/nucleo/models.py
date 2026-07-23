@@ -227,6 +227,7 @@ class CorridaMeta:
     duracion_ms: Optional[int] = None
     modo: str = "activa"
     carpeta_id: Optional[int] = None
+    nombre: str = ""              # alias editable; vacío => se deriva de `archivo`
 
 
 @dataclass

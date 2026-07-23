@@ -51,7 +51,8 @@ def nombre_desde_archivo(filename: str) -> str:
 
 def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
                              turno_def: str, use_ai: Optional[bool],
-                             carpeta_id: Optional[int] = None):
+                             carpeta_id: Optional[int] = None,
+                             nombre: Optional[str] = None):
     """Arma la corrida de forma INCREMENTAL, emitiendo eventos:
       ('started', {'id', 'total'})           — al crear la corrida (estado 'armando').
       ('progress', {'i','total','descripcion','fila'}) — por ítem, con la fila ya
@@ -65,10 +66,12 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
     durante el armado, `agregar_item` lanza CorridaEliminada y se cancela."""
     advisor = ApuAdvisor(enabled=use_ai)
     assembler = Assembler(alm, advisor=advisor)
+    nombre_efectivo = (nombre or "").strip()[:120].strip() or nombre_desde_archivo(archivo)
     corrida_id = alm.corridas.crear_corrida(CorridaMeta(
         id=None, creada_en=datetime.now().isoformat(timespec="seconds"),
         archivo=archivo, turno_def=turno_def, use_ai=use_ai,
-        estado="armando", cuadro_path=None, carpeta_id=carpeta_id))
+        estado="armando", cuadro_path=None, carpeta_id=carpeta_id,
+        nombre=nombre_efectivo))
     total = len(items)
     yield ("started", {"id": corrida_id, "total": total})
     t0 = time.monotonic()
@@ -105,11 +108,12 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
 
 def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
                       turno_def: str, use_ai: Optional[bool],
-                      carpeta_id: Optional[int] = None) -> int:
+                      carpeta_id: Optional[int] = None,
+                      nombre: Optional[str] = None) -> int:
     """Envoltorio no-stream: drena el generador e ignora el progreso; devuelve el id."""
     corrida_id = -1
     for evento, payload in construir_corrida_stream(alm, archivo, items, turno_def,
-                                                    use_ai, carpeta_id):
+                                                    use_ai, carpeta_id, nombre):
         if evento == "done":
             corrida_id = payload["id"]
     return corrida_id
@@ -210,7 +214,8 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
     ensambles = _ensamblar_corrida(alm, meta, rows, pricing)
     items = [_vista_item(ens, r.seq, r.status) for ens, r in zip(ensambles, rows)]
     return {
-        "id": meta.id, "archivo": meta.archivo, "estado": meta.estado, "modo": meta.modo,
+        "id": meta.id, "nombre": meta.nombre, "archivo": meta.archivo,
+        "estado": meta.estado, "modo": meta.modo,
         "carpeta_id": meta.carpeta_id,
         "duracion_ms": meta.duracion_ms, "items": items,
         "totales": _totales(ensambles, rows),
@@ -275,6 +280,20 @@ def activar(alm: Almacen, corrida_id: int) -> Optional[dict]:
     return vista_corrida(alm, corrida_id)
 
 
+def renombrar_corrida(alm: Almacen, corrida_id: int, nombre: str) -> Optional[dict]:
+    """Cambia el alias de una corrida. Devuelve la vista; None si no existe.
+    Lanza ValueError si el nombre queda vacío. Permitido aun si está congelada
+    (el nombre es etiqueta, no forma parte del snapshot)."""
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    limpio = (nombre or "").strip()[:120].strip()
+    if not limpio:
+        raise ValueError("El nombre no puede estar vacío.")
+    alm.corridas.set_nombre(corrida_id, limpio)
+    return vista_corrida(alm, corrida_id)
+
+
 def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
                    shift: Optional[str] = None) -> Optional[dict]:
     meta = alm.corridas.get_corrida(corrida_id)
@@ -300,7 +319,8 @@ def listar_corridas(alm: Almacen) -> list[dict]:
     for meta in alm.corridas.listar_corridas():
         rows = alm.corridas.get_items(meta.id)
         n_rev = sum(1 for it in rows if it.status in ("review", "new"))
-        fila = {"id": meta.id, "archivo": meta.archivo, "creada_en": meta.creada_en,
+        fila = {"id": meta.id, "nombre": meta.nombre, "archivo": meta.archivo,
+                "creada_en": meta.creada_en,
                 "estado": meta.estado, "modo": meta.modo, "duracion_ms": meta.duracion_ms,
                 "carpeta_id": meta.carpeta_id,
                 "n_items": len(rows), "n_revision": n_rev,

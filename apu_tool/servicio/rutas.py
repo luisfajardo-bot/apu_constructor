@@ -49,6 +49,10 @@ class CarpetaPatchIn(BaseModel):
 
 class MoverCorridaIn(BaseModel):
     carpeta_id: int
+
+
+class RenombrarCorridaIn(BaseModel):
+    nombre: str
 from apu_tool.servicio.supabase_admin import AdminSupabase, AdminSupabaseHTTP
 
 router = APIRouter()
@@ -122,6 +126,7 @@ def eliminar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
 async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
                         use_ai: Optional[bool] = Form(None),
                         carpeta_id: int = Form(...),
+                        nombre: Optional[str] = Form(None),
                         archivo: UploadFile = File(...),
                         alm: Almacen = Depends(get_almacen),
                         _: object = Depends(requiere_rol("consulta"))):
@@ -144,7 +149,7 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
     if not items:
         raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
     cid = svc.construir_corrida(alm, archivo.filename or "licitacion", items, turno, use_ai,
-                                carpeta_id=carpeta_id)
+                                carpeta_id=carpeta_id, nombre=nombre)
     return {"id": cid, "resumen": svc.vista_corrida(alm, cid)["totales"]}
 
 
@@ -166,7 +171,7 @@ def crear_sample(alm: Almacen = Depends(get_almacen),
         raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
     sc = carpetas_svc.carpeta_sin_clasificar_id(alm)
     cid = svc.construir_corrida(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False,
-                                carpeta_id=sc)
+                                carpeta_id=sc, nombre="Ejemplo")
     return {"id": cid, "resumen": svc.vista_corrida(alm, cid)["totales"]}
 
 
@@ -184,6 +189,7 @@ def _event_stream(gen):
 async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
                                use_ai: Optional[bool] = Form(None),
                                carpeta_id: int = Form(...),
+                               nombre: Optional[str] = Form(None),
                                archivo: UploadFile = File(...),
                                alm: Almacen = Depends(get_almacen),
                                _: object = Depends(requiere_rol("consulta"))):
@@ -206,7 +212,7 @@ async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
     if not items:
         raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
     gen = svc.construir_corrida_stream(alm, archivo.filename or "licitacion", items, turno, use_ai,
-                                       carpeta_id=carpeta_id)
+                                       carpeta_id=carpeta_id, nombre=nombre)
     return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
 
@@ -229,7 +235,7 @@ def crear_sample_stream(alm: Almacen = Depends(get_almacen),
         raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
     sc = carpetas_svc.carpeta_sin_clasificar_id(alm)
     gen = svc.construir_corrida_stream(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False,
-                                       carpeta_id=sc)
+                                       carpeta_id=sc, nombre="Ejemplo")
     return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
 
@@ -279,6 +285,19 @@ def congelar(cid: int, alm: Almacen = Depends(get_almacen),
 def activar(cid: int, alm: Almacen = Depends(get_almacen),
             _: object = Depends(requiere_rol("consulta"))):
     v = svc.activar(alm, cid)
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return v
+
+
+@router.post("/corridas/{cid}/renombrar")
+def renombrar(cid: int, body: RenombrarCorridaIn,
+              alm: Almacen = Depends(get_almacen),
+              _: object = Depends(requiere_rol("consulta"))):
+    try:
+        v = svc.renombrar_corrida(alm, cid, body.nombre)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v

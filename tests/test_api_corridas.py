@@ -203,3 +203,70 @@ def test_congelar_activar_y_confirmar_409(tmp_path):
     assert cli.post(f"/api/corridas/{cid}/activar").json()["modo"] == "activa"
     assert cli.post(f"/api/corridas/{cid}/items/0/confirmar",
                     json={"apu_codigo": "A1", "shift": "DIURNO"}).status_code == 200
+
+
+def test_crear_corrida_con_nombre(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
+    lic = _xlsx_lic(tmp_path)
+    with open(lic, "rb") as f:
+        cid = cli.post("/api/corridas",
+                       data={"turno": "DIURNO", "use_ai": "false",
+                             "carpeta_id": str(obra["id"]), "nombre": "Presupuesto Norte"},
+                       files={"archivo": ("lic.xlsx", f, "application/octet-stream")}).json()["id"]
+    assert alm.corridas.get_corrida(cid).nombre == "Presupuesto Norte"
+    assert cli.get(f"/api/corridas/{cid}").json()["nombre"] == "Presupuesto Norte"
+
+
+def test_crear_corrida_sin_nombre_usa_archivo_sin_ext(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
+    lic = _xlsx_lic(tmp_path)
+    with open(lic, "rb") as f:
+        cid = cli.post("/api/corridas",
+                       data={"turno": "DIURNO", "use_ai": "false", "carpeta_id": str(obra["id"])},
+                       files={"archivo": ("lic.xlsx", f, "application/octet-stream")}).json()["id"]
+    assert alm.corridas.get_corrida(cid).nombre == "lic"
+
+
+def test_renombrar_corrida_endpoint(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
+    lic = _xlsx_lic(tmp_path)
+    with open(lic, "rb") as f:
+        cid = cli.post("/api/corridas",
+                       data={"turno": "DIURNO", "use_ai": "false", "carpeta_id": str(obra["id"])},
+                       files={"archivo": ("lic.xlsx", f, "application/octet-stream")}).json()["id"]
+    r = cli.post(f"/api/corridas/{cid}/renombrar", json={"nombre": "Obra Renombrada"})
+    assert r.status_code == 200 and r.json()["nombre"] == "Obra Renombrada"
+    assert alm.corridas.get_corrida(cid).nombre == "Obra Renombrada"
+
+
+def test_renombrar_corrida_vacio_400(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
+    lic = _xlsx_lic(tmp_path)
+    with open(lic, "rb") as f:
+        cid = cli.post("/api/corridas",
+                       data={"turno": "DIURNO", "use_ai": "false", "carpeta_id": str(obra["id"])},
+                       files={"archivo": ("lic.xlsx", f, "application/octet-stream")}).json()["id"]
+    assert cli.post(f"/api/corridas/{cid}/renombrar", json={"nombre": "   "}).status_code == 400
+
+
+def test_renombrar_corrida_inexistente_404(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    assert cli.post("/api/corridas/999/renombrar", json={"nombre": "X"}).status_code == 404
+
+
+def test_renombrar_corrida_congelada_200(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
+    lic = _xlsx_lic(tmp_path)
+    with open(lic, "rb") as f:
+        cid = cli.post("/api/corridas",
+                       data={"turno": "DIURNO", "use_ai": "false", "carpeta_id": str(obra["id"])},
+                       files={"archivo": ("lic.xlsx", f, "application/octet-stream")}).json()["id"]
+    r = cli.post(f"/api/corridas/{cid}/congelar")
+    assert r.status_code == 200 and r.json()["modo"] == "congelada"
+    r2 = cli.post(f"/api/corridas/{cid}/renombrar", json={"nombre": "Congelada Renombrada"})
+    assert r2.status_code == 200 and r2.json()["nombre"] == "Congelada Renombrada"

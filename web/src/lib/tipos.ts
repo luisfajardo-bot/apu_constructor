@@ -122,6 +122,7 @@ export interface CarpetaNodo {
 
 export interface CorridaResumen {
   id: number;
+  nombre: string;
   archivo: string;
   creada_en: string;
   estado: string;
@@ -151,6 +152,7 @@ export interface CorridaCreada {
 
 export interface CorridaDetalle {
   id: number;
+  nombre: string;
   archivo: string;
   estado: string;
   modo: string;

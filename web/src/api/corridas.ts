@@ -29,6 +29,10 @@ export function eliminarCorrida(id: number): Promise<void> {
   return apiDelete(`/corridas/${id}`);
 }
 
+export function renombrarCorrida(id: number, nombre: string): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/renombrar`, { nombre });
+}
+
 export function getCorrida(id: number): Promise<CorridaDetalle> {
   return apiGet<CorridaDetalle>(`/corridas/${id}`);
 }

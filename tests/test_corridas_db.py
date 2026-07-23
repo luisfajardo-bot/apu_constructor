@@ -207,6 +207,9 @@ def test_migracion_agrega_nombre(tmp_path):
     conn.commit(); conn.close()
     db = CorridasDB(p)
     db.init_schema()   # agrega nombre + backfill (idempotente)
+    with db.connect() as conn:
+        raw = conn.execute("SELECT nombre FROM corrida WHERE archivo=?", ("a.xlsx",)).fetchone()
+    assert raw["nombre"] == "a.xlsx"   # backfill escribió la columna (no el fallback de lectura)
     db.init_schema()   # 2ª vez: no falla, no rompe el backfill
     metas = db.listar_corridas()
     assert len(metas) == 1 and metas[0].nombre == "a.xlsx"    # legado → nombre = archivo

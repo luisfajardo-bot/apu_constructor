@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { listarCorridas, eliminarCorrida, descargarPlantillaLicitacion } from "@/api/corridas";
+import { listarCorridas, eliminarCorrida, renombrarCorrida, descargarPlantillaLicitacion } from "@/api/corridas";
 import { listarCarpetas, crearCarpeta, renombrarCarpeta, borrarCarpeta, moverCorrida, moverCarpeta } from "@/api/carpetas";
 import { useAuth } from "@/lib/auth";
 import { fmtDuracion } from "@/lib/tiempo";
@@ -102,10 +102,10 @@ export default function MisCorridas() {
 
   async function handleEliminar(e: React.MouseEvent, corrida: CorridaResumen) {
     e.stopPropagation();
-    if (!window.confirm(`¿Eliminar la corrida "${corrida.archivo}"?`)) return;
+    if (!window.confirm(`¿Eliminar la corrida "${corrida.nombre}"?`)) return;
     try {
       await eliminarCorrida(corrida.id);
-      toast.success(`Corrida "${corrida.archivo}" eliminada`);
+      toast.success(`Corrida "${corrida.nombre}" eliminada`);
       cargar();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al eliminar");
@@ -146,6 +146,19 @@ export default function MisCorridas() {
     }
   }
 
+  async function handleRenombrarCorrida(e: React.MouseEvent, corrida: CorridaResumen) {
+    e.stopPropagation();
+    const nuevo = window.prompt("Nuevo nombre", corrida.nombre);
+    if (!nuevo?.trim() || nuevo.trim() === corrida.nombre) return;
+    try {
+      await renombrarCorrida(corrida.id, nuevo.trim());
+      toast.success(`Corrida renombrada a "${nuevo.trim()}"`);
+      cargar();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Error al renombrar");
+    }
+  }
+
   async function handleMoverCorrida(e: React.MouseEvent, corrida: CorridaResumen) {
     e.stopPropagation();
     const destinos = listaDestinos(arbol);
@@ -154,13 +167,13 @@ export default function MisCorridas() {
       return;
     }
     const opciones = destinos.map((d, i) => `${i + 1}. ${d.etiqueta}`).join("\n");
-    const resp = window.prompt(`Mover "${corrida.archivo}" a:\n${opciones}\n\nEscribe el número:`);
+    const resp = window.prompt(`Mover "${corrida.nombre}" a:\n${opciones}\n\nEscribe el número:`);
     if (!resp?.trim()) return;
     const idx = parseInt(resp.trim(), 10) - 1;
     if (isNaN(idx) || idx < 0 || idx >= destinos.length) return;
     try {
       await moverCorrida(corrida.id, destinos[idx].id);
-      toast.success(`Corrida "${corrida.archivo}" movida a "${destinos[idx].etiqueta}"`);
+      toast.success(`Corrida "${corrida.nombre}" movida a "${destinos[idx].etiqueta}"`);
       cargar();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al mover corrida");
@@ -337,7 +350,7 @@ export default function MisCorridas() {
                       }
                     >
                       <td style={styles.td}>
-                        <span style={styles.nombre}>{c.archivo}</span>
+                        <span style={styles.nombre} title={c.archivo}>{c.nombre}</span>
                         <span style={styles.fecha}> — {fechaLegible(c.creada_en)}</span>
                       </td>
                       <td style={{ ...styles.td, ...styles.tdNum }}>{c.n_items}</td>
@@ -368,6 +381,15 @@ export default function MisCorridas() {
                         </span>
                       </td>
                       <td style={{ ...styles.td, ...styles.tdAccion }}>
+                        {puedeEditar && (
+                          <button
+                            style={styles.btnMover}
+                            onClick={(e) => handleRenombrarCorrida(e, c)}
+                            title="Renombrar corrida"
+                          >
+                            Renombrar
+                          </button>
+                        )}
                         {puedeEditar && (
                           <button
                             style={styles.btnMover}

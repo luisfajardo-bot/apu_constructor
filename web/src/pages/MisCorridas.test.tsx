@@ -9,12 +9,13 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/api/corridas", () => ({
   listarCorridas: vi.fn(async () => [{
-    id: 1, archivo: "lic.xlsx", creada_en: "2026-07-08T10:00:00", estado: "en_revision",
-    modo: "activa", n_items: 2, n_revision: 1, duracion_ms: 1000,
+    id: 1, nombre: "lic.xlsx", archivo: "lic.xlsx", creada_en: "2026-07-08T10:00:00",
+    estado: "en_revision", modo: "activa", n_items: 2, n_revision: 1, duracion_ms: 1000,
     contractual: 4000000, costo: 3675000, margen: 325000, margen_pct: 0.08125,
     carpeta_id: 1,
   }]),
   eliminarCorrida: vi.fn(),
+  renombrarCorrida: vi.fn(async () => ({})),
   descargarPlantillaLicitacion: vi.fn(),
 }));
 
@@ -87,6 +88,30 @@ test("Mover corrida: al hacer clic en 'Mover' y elegir opción 1, llama moverCor
 
   await waitFor(() => {
     expect(moverCorrida).toHaveBeenCalledWith(1, expect.any(Number));
+  });
+
+  promptSpy.mockRestore();
+});
+
+test("Renombrar corrida: al hacer clic y confirmar, llama renombrarCorrida(1, nuevo)", async () => {
+  const { default: MisCorridas } = await import("./MisCorridas");
+  const { renombrarCorrida } = await import("@/api/corridas");
+
+  const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Obra Norte");
+
+  render(
+    <MemoryRouter initialEntries={["/corridas?carpeta=1"]}>
+      <MisCorridas />
+    </MemoryRouter>
+  );
+
+  await waitFor(() => expect(screen.getByText("lic.xlsx")).toBeTruthy());
+  const row = screen.getByText("lic.xlsx").closest("tr")!;
+  const btnRenombrar = within(row).getByRole("button", { name: /renombrar/i });
+  fireEvent.click(btnRenombrar);
+
+  await waitFor(() => {
+    expect(renombrarCorrida).toHaveBeenCalledWith(1, "Obra Norte");
   });
 
   promptSpy.mockRestore();

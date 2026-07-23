@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS corridas.corrida (
     duracion_ms   INTEGER,
     creado_por    TEXT,
     modo          TEXT NOT NULL DEFAULT 'activa',
-    carpeta_id    BIGINT REFERENCES corridas.carpeta(id) ON DELETE RESTRICT
+    carpeta_id    BIGINT REFERENCES corridas.carpeta(id) ON DELETE RESTRICT,
+    nombre        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS corridas.corrida_item (
@@ -49,6 +50,8 @@ ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS modo TEXT NOT NULL DEFAULT
 ALTER TABLE corridas.corrida_item ADD COLUMN IF NOT EXISTS snapshot_json TEXT;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS carpeta_id BIGINT
     REFERENCES corridas.carpeta(id) ON DELETE RESTRICT;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS nombre TEXT;
+UPDATE corridas.corrida SET nombre = archivo WHERE nombre IS NULL OR nombre = '';
 
 -- Bootstrap "Sin clasificar" + backfill de corridas sin carpeta (idempotente).
 INSERT INTO corridas.carpeta (nombre, creada_en)

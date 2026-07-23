@@ -189,6 +189,33 @@ def test_migracion_agrega_modo_y_snapshot(tmp_path):
     assert db.get_corrida(metas[0].id).modo == "congelada"
 
 
+def test_migracion_agrega_nombre(tmp_path):
+    # Base "vieja" sin nombre: init_schema debe agregarla, backfillear desde archivo
+    # (idempotente) y no pisar un nombre puesto por el usuario en una corrida posterior.
+    p = tmp_path / "old.db"
+    conn = sqlite3.connect(p)
+    conn.executescript(
+        "CREATE TABLE corrida (id INTEGER PRIMARY KEY AUTOINCREMENT, creada_en TEXT, "
+        "archivo TEXT, turno_def TEXT, use_ai INTEGER, estado TEXT, cuadro_path TEXT, "
+        "duracion_ms INTEGER, modo TEXT NOT NULL DEFAULT 'activa', carpeta_id INTEGER);"
+        "CREATE TABLE corrida_item (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "corrida_id INTEGER NOT NULL REFERENCES corrida(id) ON DELETE CASCADE, seq INTEGER, "
+        "item_json TEXT, status TEXT, apu_codigo TEXT, apu_nombre TEXT, unidad TEXT, shift TEXT, "
+        "origen TEXT, confianza REAL, explicacion TEXT, componentes_json TEXT, candidatos_json TEXT);")
+    conn.execute("INSERT INTO corrida (creada_en, archivo, turno_def, use_ai, estado) "
+                 "VALUES ('x','a.xlsx','DIURNO',0,'en_revision')")
+    conn.commit(); conn.close()
+    db = CorridasDB(p)
+    db.init_schema()   # agrega nombre + backfill (idempotente)
+    db.init_schema()   # 2ª vez: no falla, no rompe el backfill
+    metas = db.listar_corridas()
+    assert len(metas) == 1 and metas[0].nombre == "a.xlsx"    # legado → nombre = archivo
+
+    db.set_nombre(metas[0].id, "Obra Norte")
+    db.init_schema()   # una migración posterior no debe pisar un nombre ya puesto
+    assert db.get_corrida(metas[0].id).nombre == "Obra Norte"
+
+
 def test_set_get_snapshots(tmp_path):
     alm = _almacen_tmp(tmp_path)
     cid = alm.corridas.crear_corrida(CorridaMeta(

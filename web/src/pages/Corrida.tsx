@@ -85,6 +85,7 @@ export default function Corrida() {
   const data: CorridaDetalle | null = live
     ? {
         id: corridaId,
+        nombre: "(armando)",
         archivo: "(armando)",
         estado: "armando",
         items: vivo.filas,

@@ -293,7 +293,7 @@ def activar(cid: int, alm: Almacen = Depends(get_almacen),
 @router.post("/corridas/{cid}/renombrar")
 def renombrar(cid: int, body: RenombrarCorridaIn,
               alm: Almacen = Depends(get_almacen),
-              _: object = Depends(requiere_rol("consulta"))):
+              _: object = Depends(requiere_rol("editor"))):
     try:
         v = svc.renombrar_corrida(alm, cid, body.nombre)
     except ValueError as e:

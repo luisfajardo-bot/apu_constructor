@@ -270,3 +270,22 @@ def test_renombrar_corrida_congelada_200(tmp_path):
     assert r.status_code == 200 and r.json()["modo"] == "congelada"
     r2 = cli.post(f"/api/corridas/{cid}/renombrar", json={"nombre": "Congelada Renombrada"})
     assert r2.status_code == 200 and r2.json()["nombre"] == "Congelada Renombrada"
+
+
+def test_renombrar_corrida_requiere_editor(tmp_path):
+    from apu_tool.nucleo.models import CorridaMeta
+
+    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
+                  corridas_path=tmp_path / "c.db")
+    alm.init_schema()
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="x", archivo="a.xlsx", turno_def="DIURNO",
+        use_ai=False, estado="en_revision"))
+
+    cli_consulta = cliente(create_app(almacen=alm), rol="consulta")
+    r_consulta = cli_consulta.post(f"/api/corridas/{cid}/renombrar", json={"nombre": "Nuevo"})
+    assert r_consulta.status_code == 403
+
+    cli_editor = cliente(create_app(almacen=alm), rol="editor")
+    r_editor = cli_editor.post(f"/api/corridas/{cid}/renombrar", json={"nombre": "Nuevo"})
+    assert r_editor.status_code == 200 and r_editor.json()["nombre"] == "Nuevo"

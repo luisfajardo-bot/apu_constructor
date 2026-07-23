@@ -54,6 +54,11 @@ class CorridasDB:
             if "carpeta_id" not in cols:
                 conn.execute("ALTER TABLE corrida ADD COLUMN carpeta_id INTEGER "
                              "REFERENCES carpeta(id) ON DELETE RESTRICT")
+            if "nombre" not in cols:
+                conn.execute("ALTER TABLE corrida ADD COLUMN nombre TEXT")
+            # Backfill idempotente: corridas viejas muestran su archivo hasta renombrarse.
+            conn.execute("UPDATE corrida SET nombre = archivo "
+                         "WHERE nombre IS NULL OR nombre = ''")
             icols = {r["name"] for r in conn.execute("PRAGMA table_info(corrida_item)").fetchall()}
             if "snapshot_json" not in icols:
                 conn.execute("ALTER TABLE corrida_item ADD COLUMN snapshot_json TEXT")
@@ -93,10 +98,12 @@ class CorridasDB:
     def _insert_corrida(self, conn: sqlite3.Connection, meta: CorridaMeta) -> int:
         cur = conn.execute(
             "INSERT INTO corrida (creada_en, archivo, turno_def, use_ai, estado, "
-            "cuadro_path, duracion_ms, modo, carpeta_id) VALUES (?,?,?,?,?,?,?,?,?)",
+            "cuadro_path, duracion_ms, modo, carpeta_id, nombre) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (meta.creada_en, meta.archivo, meta.turno_def,
              None if meta.use_ai is None else int(meta.use_ai),
-             meta.estado, meta.cuadro_path, meta.duracion_ms, meta.modo, meta.carpeta_id))
+             meta.estado, meta.cuadro_path, meta.duracion_ms, meta.modo,
+             meta.carpeta_id, meta.nombre))
         return int(cur.lastrowid)
 
     def crear_corrida(self, meta: CorridaMeta) -> int:
@@ -152,6 +159,11 @@ class CorridasDB:
         with self.connect() as conn:
             conn.execute("UPDATE corrida SET modo=? WHERE id=?", (modo, int(corrida_id)))
 
+    def set_nombre(self, corrida_id: int, nombre: str) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE corrida SET nombre=? WHERE id=?",
+                         (nombre, int(corrida_id)))
+
     def set_carpeta(self, corrida_id: int, carpeta_id: int, conn=None) -> None:
         sql = "UPDATE corrida SET carpeta_id=? WHERE id=?"
         params = (int(carpeta_id), int(corrida_id))
@@ -191,7 +203,8 @@ class CorridasDB:
             use_ai=None if r["use_ai"] is None else bool(r["use_ai"]),
             estado=r["estado"], cuadro_path=r["cuadro_path"],
             duracion_ms=r["duracion_ms"], modo=(r["modo"] or "activa"),
-            carpeta_id=(r["carpeta_id"] if "carpeta_id" in r.keys() else None))
+            carpeta_id=(r["carpeta_id"] if "carpeta_id" in r.keys() else None),
+            nombre=((r["nombre"] if "nombre" in r.keys() else None) or r["archivo"]))
 
     def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
         with self.connect() as conn:

@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS corrida (
   cuadro_path   TEXT,
   duracion_ms   INTEGER,
   modo          TEXT NOT NULL DEFAULT 'activa',
-  carpeta_id    INTEGER REFERENCES carpeta(id) ON DELETE RESTRICT
+  carpeta_id    INTEGER REFERENCES carpeta(id) ON DELETE RESTRICT,
+  nombre        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS corrida_item (

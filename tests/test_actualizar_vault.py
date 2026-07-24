@@ -2,6 +2,7 @@ from pathlib import Path
 
 from scripts.actualizar_vault import (
     aviso_espejo,
+    clasificar_docs_sueltos,
     escribir_si_cambia,
     espejar_archivo,
     fecha_desde_nombre,
@@ -117,3 +118,31 @@ def test_sincronizar_espejos_con_lista_vacia_deja_carpeta_vacia(tmp_path):
 
     assert destino_dir.exists()
     assert list(destino_dir.glob("*.md")) == []
+
+
+def test_clasificar_docs_sueltos(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "ARQUITECTURA.md").write_text("# Arq\n", encoding="utf-8")
+    (docs / "auditoria-codigo-2026-07-01.md").write_text("# Auditoría\n", encoding="utf-8")
+    (docs / "runbook-correo.md").write_text("# Runbook\n", encoding="utf-8")
+    (docs / "algo-suelto.md").write_text("# Suelto\n", encoding="utf-8")
+
+    categorias = clasificar_docs_sueltos(docs)
+
+    assert [a.name for a in categorias["arquitectura"]] == ["ARQUITECTURA.md"]
+    assert [a.name for a in categorias["auditorias"]] == ["auditoria-codigo-2026-07-01.md"]
+    assert [a.name for a in categorias["runbooks"]] == ["runbook-correo.md"]
+    assert [a.name for a in categorias["otros"]] == ["algo-suelto.md"]
+
+
+def test_clasificar_docs_sueltos_no_recursa_en_subcarpetas(tmp_path):
+    docs = tmp_path / "docs"
+    (docs / "superpowers" / "specs").mkdir(parents=True)
+    (docs / "superpowers" / "specs" / "2026-01-01-x-design.md").write_text(
+        "# X\n", encoding="utf-8"
+    )
+
+    categorias = clasificar_docs_sueltos(docs)
+
+    assert categorias == {"arquitectura": [], "auditorias": [], "runbooks": [], "otros": []}

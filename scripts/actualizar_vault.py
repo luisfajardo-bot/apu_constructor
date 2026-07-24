@@ -63,3 +63,24 @@ def sincronizar_espejos(archivos: list[Path], destino_dir: Path, raiz: Path) -> 
             existente.unlink()
     for archivo in archivos:
         espejar_archivo(archivo, destino_dir / archivo.name, raiz)
+
+
+def clasificar_docs_sueltos(docs: Path) -> dict[str, list[Path]]:
+    """Clasifica los .md directamente en `docs/` (sin recursar) en categorías fijas."""
+    categorias: dict[str, list[Path]] = {
+        "arquitectura": [],
+        "auditorias": [],
+        "runbooks": [],
+        "otros": [],
+    }
+    for archivo in sorted(docs.glob("*.md")):
+        nombre = archivo.name
+        if nombre == "ARQUITECTURA.md":
+            categorias["arquitectura"].append(archivo)
+        elif nombre.startswith("auditoria-"):
+            categorias["auditorias"].append(archivo)
+        elif nombre.startswith("runbook-"):
+            categorias["runbooks"].append(archivo)
+        else:
+            categorias["otros"].append(archivo)
+    return categorias

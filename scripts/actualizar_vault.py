@@ -52,3 +52,14 @@ def espejar_archivo(origen: Path, destino: Path, raiz: Path) -> bool:
     """Copia `origen` a `destino` con un aviso de cabecera antepuesto."""
     contenido = aviso_espejo(origen, raiz) + origen.read_text(encoding="utf-8")
     return escribir_si_cambia(destino, contenido)
+
+
+def sincronizar_espejos(archivos: list[Path], destino_dir: Path, raiz: Path) -> None:
+    """Deja `destino_dir` con exactamente el espejo de `archivos` (borra huérfanos)."""
+    destino_dir.mkdir(parents=True, exist_ok=True)
+    nombres = {a.name for a in archivos}
+    for existente in destino_dir.glob("*.md"):
+        if existente.name not in nombres:
+            existente.unlink()
+    for archivo in archivos:
+        espejar_archivo(archivo, destino_dir / archivo.name, raiz)

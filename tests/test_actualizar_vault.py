@@ -5,6 +5,7 @@ from scripts.actualizar_vault import (
     escribir_si_cambia,
     espejar_archivo,
     fecha_desde_nombre,
+    sincronizar_espejos,
     titulo_desde_markdown,
 )
 
@@ -85,3 +86,34 @@ def test_espejar_archivo_es_idempotente(tmp_path):
     escribio_segunda_vez = espejar_archivo(origen, destino, raiz)
 
     assert escribio_segunda_vez is False
+
+
+def test_sincronizar_espejos_copia_y_limpia_huerfanos(tmp_path):
+    raiz = tmp_path
+    origen_dir = raiz / "docs" / "superpowers" / "plans"
+    origen_dir.mkdir(parents=True)
+    (origen_dir / "2026-01-01-a.md").write_text("# A\n", encoding="utf-8")
+    (origen_dir / "2026-01-02-b.md").write_text("# B\n", encoding="utf-8")
+    destino_dir = raiz / "vault" / "Planes"
+
+    sincronizar_espejos(sorted(origen_dir.glob("*.md")), destino_dir, raiz)
+
+    assert {p.name for p in destino_dir.glob("*.md")} == {
+        "2026-01-01-a.md",
+        "2026-01-02-b.md",
+    }
+
+    (origen_dir / "2026-01-02-b.md").unlink()
+    sincronizar_espejos(sorted(origen_dir.glob("*.md")), destino_dir, raiz)
+
+    assert {p.name for p in destino_dir.glob("*.md")} == {"2026-01-01-a.md"}
+
+
+def test_sincronizar_espejos_con_lista_vacia_deja_carpeta_vacia(tmp_path):
+    raiz = tmp_path
+    destino_dir = raiz / "vault" / "Auditorías"
+
+    sincronizar_espejos([], destino_dir, raiz)
+
+    assert destino_dir.exists()
+    assert list(destino_dir.glob("*.md")) == []

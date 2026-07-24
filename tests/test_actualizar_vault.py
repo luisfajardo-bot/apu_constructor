@@ -1,6 +1,9 @@
 from pathlib import Path
 
 from scripts.actualizar_vault import (
+    aviso_espejo,
+    escribir_si_cambia,
+    espejar_archivo,
     fecha_desde_nombre,
     titulo_desde_markdown,
 )
@@ -24,3 +27,61 @@ def test_fecha_desde_nombre_con_prefijo():
 
 def test_fecha_desde_nombre_sin_prefijo():
     assert fecha_desde_nombre(Path("README.md")) is None
+
+
+def test_escribir_si_cambia_crea_archivo_nuevo(tmp_path):
+    destino = tmp_path / "sub" / "nota.md"
+    escribio = escribir_si_cambia(destino, "hola\n")
+    assert escribio is True
+    assert destino.read_text(encoding="utf-8") == "hola\n"
+
+
+def test_escribir_si_cambia_no_reescribe_si_es_igual(tmp_path):
+    destino = tmp_path / "nota.md"
+    destino.write_text("hola\n", encoding="utf-8")
+    mtime_antes = destino.stat().st_mtime_ns
+
+    escribio = escribir_si_cambia(destino, "hola\n")
+
+    assert escribio is False
+    assert destino.stat().st_mtime_ns == mtime_antes
+
+
+def test_aviso_espejo_incluye_ruta_relativa_y_texto_fijo(tmp_path):
+    origen = tmp_path / "docs" / "ARQUITECTURA.md"
+    origen.parent.mkdir()
+    origen.write_text("# Arq\n", encoding="utf-8")
+
+    aviso = aviso_espejo(origen, tmp_path)
+
+    assert "docs/ARQUITECTURA.md" in aviso
+    assert "no editar aquí" in aviso
+
+
+def test_espejar_archivo_antepone_aviso_y_copia_contenido(tmp_path):
+    raiz = tmp_path
+    origen = raiz / "docs" / "ARQUITECTURA.md"
+    origen.parent.mkdir()
+    origen.write_text("# Arquitectura\n\ncontenido\n", encoding="utf-8")
+    destino = raiz / "vault" / "Arquitectura" / "ARQUITECTURA.md"
+
+    escribio = espejar_archivo(origen, destino, raiz)
+
+    texto = destino.read_text(encoding="utf-8")
+    assert escribio is True
+    assert texto.startswith("> Espejo automático")
+    assert "# Arquitectura" in texto
+    assert "contenido" in texto
+
+
+def test_espejar_archivo_es_idempotente(tmp_path):
+    raiz = tmp_path
+    origen = raiz / "docs" / "ARQUITECTURA.md"
+    origen.parent.mkdir()
+    origen.write_text("# Arquitectura\n", encoding="utf-8")
+    destino = raiz / "vault" / "Arquitectura" / "ARQUITECTURA.md"
+
+    espejar_archivo(origen, destino, raiz)
+    escribio_segunda_vez = espejar_archivo(origen, destino, raiz)
+
+    assert escribio_segunda_vez is False

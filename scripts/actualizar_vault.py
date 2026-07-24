@@ -29,3 +29,26 @@ def fecha_desde_nombre(ruta: Path) -> str | None:
     """Prefijo YYYY-MM-DD del nombre de archivo, o None si no lo tiene."""
     m = _RE_FECHA.match(ruta.name)
     return m.group(1) if m else None
+
+
+def escribir_si_cambia(destino: Path, contenido: str) -> bool:
+    """Escribe `contenido` en `destino` solo si difiere del actual.
+
+    Devuelve si escribió (para que el llamador sepa si hubo cambios reales).
+    """
+    if destino.exists() and destino.read_text(encoding="utf-8") == contenido:
+        return False
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text(contenido, encoding="utf-8")
+    return True
+
+
+def aviso_espejo(origen: Path, raiz: Path) -> str:
+    relativo = origen.relative_to(raiz).as_posix()
+    return f"> Espejo automático — no editar aquí. Fuente: `{relativo}`\n\n"
+
+
+def espejar_archivo(origen: Path, destino: Path, raiz: Path) -> bool:
+    """Copia `origen` a `destino` con un aviso de cabecera antepuesto."""
+    contenido = aviso_espejo(origen, raiz) + origen.read_text(encoding="utf-8")
+    return escribir_si_cambia(destino, contenido)

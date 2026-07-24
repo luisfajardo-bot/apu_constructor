@@ -40,3 +40,8 @@ test("costoTotalApu: ignora filas con rendimiento inválido (negativo/cero/vací
   ];
   expect(costoTotalApu(filas)).toBe(2000);
 });
+
+test("costoDeFila: redondea el producto a la unidad (medio hacia arriba)", () => {
+  expect(costoDeFila("1.0005", 1000)).toBe(1001);  // 1000.5 -> 1001
+  expect(costoDeFila("0.0003", 1000)).toBe(1);     // 0.3 -> 1 (nada en $0)
+});

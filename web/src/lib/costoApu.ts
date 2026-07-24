@@ -4,6 +4,7 @@
 // despeja el rendimiento (Opción A del diseño): el APU guarda estructura, no dinero.
 
 import { rendimientoValido } from "./validacionApu";
+import { mulRedondeado } from "./redondeo";
 
 export interface FilaCosto {
   insumo_codigo: string;
@@ -11,11 +12,11 @@ export interface FilaCosto {
   precio: number;
 }
 
-/** Costo de una fila = rendimiento × precio. 0 si el rendimiento no es número. */
+/** Costo de una fila = rendimiento × precio, redondeado a la unidad. 0 si el rendimiento no es número. */
 export function costoDeFila(rendimiento: string, precio: number): number {
   const r = Number(rendimiento);
   if (!Number.isFinite(r) || rendimiento.trim() === "") return 0;
-  return r * precio;
+  return mulRedondeado(r, precio);
 }
 
 /**

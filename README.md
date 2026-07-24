@@ -48,6 +48,21 @@ set ANTHROPIC_API_KEY=tu-api-key      # Windows (cmd)
 $env:ANTHROPIC_API_KEY="tu-api-key"   # Windows (PowerShell)
 ```
 
+### Vault de Obsidian (opcional)
+
+El repo mantiene una vault de Obsidian en `constructor-apus/` con specs, planes,
+arquitectura y auditorías reorganizados y enlazados (espejo autogenerado; no editar
+las notas ahí, la fuente real sigue siendo `docs/` y la raíz del repo). Se actualiza
+sola en cada commit vía un hook de git versionado en `.githooks/`. Para activarlo en
+un clon nuevo (una sola vez):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Sin este paso los commits funcionan igual — solo que la vault no se regenera sola.
+Abrí `constructor-apus/` como vault en Obsidian para navegarla.
+
 ---
 
 ## Uso rápido

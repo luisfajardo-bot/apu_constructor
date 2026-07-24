@@ -38,3 +38,8 @@ node_modules/
 # Archivos de trabajo del usuario en ejemplos (plantillas y locks de Excel)
 ejemplos/plantilla*.xlsx
 ejemplos/~$*.xlsx
+
+# Vault de Obsidian: estado de UI local (cambia en cada sesión), no se versiona.
+# El resto de constructor-apus/.obsidian/ (plugins, apariencia, grafo) sí se versiona.
+constructor-apus/.obsidian/workspace.json
+constructor-apus/.obsidian/workspace-mobile.json

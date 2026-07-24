@@ -1,0 +1,5 @@
+#!/bin/sh
+# Regenera la vault de Obsidian (constructor-apus/) antes de cada commit.
+# Instalado vía: git config core.hooksPath .githooks
+python scripts/actualizar_vault.py || exit 1
+git add constructor-apus

@@ -25,3 +25,31 @@ def test_cero_genuino_queda_en_cero():
 def test_devuelve_int():
     assert isinstance(mul_redondeado(1.05, 1250), int)
     assert isinstance(mul_redondeado(2.0, 0), int)
+
+
+def test_pricing_redondea_costo_de_componente(tmp_path):
+    from apu_tool.datos.almacen import Almacen
+    from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
+    from apu_tool.dominio.pricing import PricingEngine
+    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
+                  corridas_path=tmp_path / "c.db")
+    alm.init_schema()
+    alm.precios.insert_insumos([Insumo("100", "X", "KG", "MAT", 1000.0, "PRECIO IDU")])
+    alm.apus.crear_apu(Apu("A1", "APU", "M2", "DIURNO"),
+                       [ApuComponent("A1", "DIURNO", "100", "X", "KG", 1.0005, 1000.0)])
+    costed, total = PricingEngine(alm).cost_apu("A1", "DIURNO")
+    assert costed[0].costo == 1001            # 1.0005 * 1000 = 1000.5 -> 1001
+    assert isinstance(costed[0].costo, int)
+    assert total == 1001
+
+
+def test_assembledapu_totales_redondeados():
+    from apu_tool.nucleo.models import AssembledApu, LicitacionItem, MatchStatus
+    item = LicitacionItem(item="1", descripcion="x", unidad="M2", cantidad=3.0,
+                          precio_contractual=1000.5, shift="DIURNO")
+    a = AssembledApu(item=item, apu_codigo="A1", apu_nombre="X", unidad="M2",
+                     shift="DIURNO", componentes=[], costo_unitario=1312,
+                     status=MatchStatus.AUTO, confianza=1.0)
+    assert a.costo_total == 3936              # 1312 * 3 = 3936
+    assert a.contractual_total == 3002        # 1000.5 * 3 = 3001.5 -> 3002
+    assert isinstance(a.contractual_total, int)

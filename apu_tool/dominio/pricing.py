@@ -14,6 +14,7 @@ from __future__ import annotations
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio import cruce
 from apu_tool.nucleo.models import ApuComponent, CostedComponent
+from apu_tool.nucleo.redondeo import mul_redondeado
 
 
 class PricingEngine:
@@ -86,7 +87,7 @@ class PricingEngine:
             precio, fuente = r.insumo.precio, r.insumo.fuente_precio
         else:                                                   # AMBIGUO o HUERFANO
             precio, fuente = comp.precio_unitario_hist, "histórico"
-        costo = comp.rendimiento * precio
+        costo = mul_redondeado(comp.rendimiento, precio)
         return CostedComponent(
             insumo_codigo=comp.insumo_codigo, insumo_nombre=comp.insumo_nombre,
             unidad=comp.unidad, rendimiento=comp.rendimiento,
@@ -101,7 +102,7 @@ class PricingEngine:
             insumo_codigo=comp.insumo_codigo, insumo_nombre=comp.insumo_nombre,
             unidad=comp.unidad, rendimiento=comp.rendimiento,
             precio_unitario=precio, fuente_precio="histórico",
-            costo=comp.rendimiento * precio, calidad_cruce=calidad,
+            costo=mul_redondeado(comp.rendimiento, precio), calidad_cruce=calidad,
             tipo="apu", ref_shift=sub_shift)
 
     def _cost_subapu(self, comp: ApuComponent, visitando: tuple) -> CostedComponent:
@@ -116,7 +117,7 @@ class PricingEngine:
             insumo_codigo=comp.insumo_codigo, insumo_nombre=comp.insumo_nombre,
             unidad=comp.unidad, rendimiento=comp.rendimiento,
             precio_unitario=unit, fuente_precio="APU",
-            costo=comp.rendimiento * unit, calidad_cruce="apu",
+            costo=mul_redondeado(comp.rendimiento, unit), calidad_cruce="apu",
             tipo="apu", ref_shift=sub_shift)
 
     def _costo_unitario_apu(self, codigo: str, shift: str, visitando: tuple) -> float:

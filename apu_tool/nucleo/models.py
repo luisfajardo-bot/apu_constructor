@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+from apu_tool.nucleo.redondeo import mul_redondeado
+
 
 # ---------------------------------------------------------------------------
 # Catálogos (capa de datos)
@@ -191,12 +193,12 @@ class AssembledApu:
     origen: str = "historico"     # "historico" | "generado" | "manual"
 
     @property
-    def costo_total(self) -> float:
-        return self.costo_unitario * self.item.cantidad
+    def costo_total(self) -> int:
+        return mul_redondeado(self.costo_unitario, self.item.cantidad)
 
     @property
-    def contractual_total(self) -> float:
-        return self.item.precio_contractual * self.item.cantidad
+    def contractual_total(self) -> int:
+        return mul_redondeado(self.item.precio_contractual, self.item.cantidad)
 
     @property
     def margen_unitario(self) -> float:

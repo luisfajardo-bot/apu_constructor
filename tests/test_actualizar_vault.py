@@ -2,11 +2,16 @@ from pathlib import Path
 
 from scripts.actualizar_vault import (
     aviso_espejo,
+    bloque_bullets,
     clasificar_docs_sueltos,
+    enlace_bullet,
+    entradas_de_carpeta,
     escribir_si_cambia,
     espejar_archivo,
     fecha_desde_nombre,
+    generar_indice,
     sincronizar_espejos,
+    tabla_markdown,
     titulo_desde_markdown,
 )
 
@@ -146,3 +151,64 @@ def test_clasificar_docs_sueltos_no_recursa_en_subcarpetas(tmp_path):
     categorias = clasificar_docs_sueltos(docs)
 
     assert categorias == {"arquitectura": [], "auditorias": [], "runbooks": [], "otros": []}
+
+
+def test_entradas_de_carpeta_ordena_por_fecha_descendente(tmp_path):
+    carpeta = tmp_path / "specs"
+    carpeta.mkdir()
+    (carpeta / "2026-01-01-vieja-design.md").write_text("# Vieja\n", encoding="utf-8")
+    (carpeta / "2026-06-01-nueva-design.md").write_text("# Nueva\n", encoding="utf-8")
+
+    entradas = entradas_de_carpeta(carpeta)
+
+    assert entradas[0] == ("2026-06-01", "Nueva", "2026-06-01-nueva-design.md")
+    assert entradas[1] == ("2026-01-01", "Vieja", "2026-01-01-vieja-design.md")
+
+
+def test_tabla_markdown_con_entradas():
+    entradas = [("2026-06-01", "Nueva", "2026-06-01-nueva-design.md")]
+
+    tabla = tabla_markdown(entradas, "Specs")
+
+    assert "| 2026-06-01 |" in tabla
+    assert "[[Specs/2026-06-01-nueva-design|Nueva]]" in tabla
+
+
+def test_tabla_markdown_vacia():
+    assert tabla_markdown([], "Specs") == "_(vacío)_\n"
+
+
+def test_bloque_bullets_vacio():
+    assert bloque_bullets("Auditorías", []) == "_(vacío)_\n"
+
+
+def test_enlace_bullet_usa_titulo_y_stem(tmp_path):
+    archivo = tmp_path / "runbook-correo.md"
+    archivo.write_text("# Correo por Resend\n", encoding="utf-8")
+
+    assert enlace_bullet("Runbooks", archivo) == "- [[Runbooks/runbook-correo|Correo por Resend]]\n"
+
+
+def test_generar_indice_incluye_secciones_y_conteos(tmp_path):
+    raiz = tmp_path
+    docs = raiz / "docs"
+    (docs / "superpowers" / "specs").mkdir(parents=True)
+    (docs / "superpowers" / "plans").mkdir(parents=True)
+    (docs / "ARQUITECTURA.md").write_text("# Arquitectura\n", encoding="utf-8")
+    (raiz / "README.md").write_text("# Readme\n", encoding="utf-8")
+    (raiz / "CLAUDE.md").write_text("# Claude\n", encoding="utf-8")
+    (docs / "superpowers" / "specs" / "2026-01-01-x-design.md").write_text(
+        "# X\n", encoding="utf-8"
+    )
+    (docs / "superpowers" / "plans" / "2026-01-01-x.md").write_text(
+        "# X plan\n", encoding="utf-8"
+    )
+
+    indice = generar_indice(docs)
+
+    assert "1 planes, 1 specs" in indice
+    assert "[[Arquitectura/ARQUITECTURA|Arquitectura]]" in indice
+    assert "[[Proyecto/README|Readme]]" in indice
+    assert "[[Proyecto/CLAUDE|Claude]]" in indice
+    assert "[[Specs/2026-01-01-x-design|X]]" in indice
+    assert "[[Planes/2026-01-01-x|X plan]]" in indice

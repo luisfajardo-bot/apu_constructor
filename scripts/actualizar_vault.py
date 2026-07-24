@@ -84,3 +84,68 @@ def clasificar_docs_sueltos(docs: Path) -> dict[str, list[Path]]:
         else:
             categorias["otros"].append(archivo)
     return categorias
+
+
+def entradas_de_carpeta(carpeta: Path) -> list[tuple[str, str, str]]:
+    """(fecha, título, nombre_de_archivo) de cada .md de `carpeta`, fecha descendente."""
+    entradas = []
+    for archivo in carpeta.glob("*.md"):
+        fecha = fecha_desde_nombre(archivo) or "s/f"
+        titulo = titulo_desde_markdown(archivo)
+        entradas.append((fecha, titulo, archivo.name))
+    entradas.sort(key=lambda e: e[0], reverse=True)
+    return entradas
+
+
+def tabla_markdown(entradas: list[tuple[str, str, str]], carpeta_vault: str) -> str:
+    if not entradas:
+        return "_(vacío)_\n"
+    filas = ["| Fecha | Título |", "| --- | --- |"]
+    for fecha, titulo, nombre in entradas:
+        objetivo = f"{carpeta_vault}/{Path(nombre).stem}"
+        filas.append(f"| {fecha} | [[{objetivo}|{titulo}]] |")
+    return "\n".join(filas) + "\n"
+
+
+def enlace_bullet(carpeta_vault: str, archivo: Path) -> str:
+    titulo = titulo_desde_markdown(archivo)
+    return f"- [[{carpeta_vault}/{archivo.stem}|{titulo}]]\n"
+
+
+def bloque_bullets(carpeta_vault: str, archivos: list[Path]) -> str:
+    if not archivos:
+        return "_(vacío)_\n"
+    return "".join(enlace_bullet(carpeta_vault, a) for a in archivos)
+
+
+def generar_indice(docs: Path) -> str:
+    raiz = docs.parent
+    categorias = clasificar_docs_sueltos(docs)
+    specs = entradas_de_carpeta(docs / "superpowers" / "specs")
+    planes = entradas_de_carpeta(docs / "superpowers" / "plans")
+
+    referencia = "".join(
+        enlace_bullet("Arquitectura", a) for a in categorias["arquitectura"]
+    )
+    referencia += enlace_bullet("Proyecto", raiz / "README.md")
+    referencia += enlace_bullet("Proyecto", raiz / "CLAUDE.md")
+
+    partes = [
+        "# Índice\n",
+        f"Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — "
+        f"{len(planes)} planes, {len(specs)} specs. Las notas espejo no se editan "
+        "aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.\n",
+        "## Arquitectura y referencia\n",
+        referencia,
+        "## Auditorías\n",
+        bloque_bullets("Auditorías", categorias["auditorias"]),
+        "## Runbooks\n",
+        bloque_bullets("Runbooks", categorias["runbooks"]),
+        "## Otros\n",
+        bloque_bullets("Otros", categorias["otros"]),
+        "## Specs (diseños)\n",
+        tabla_markdown(specs, "Specs"),
+        "## Planes (implementación)\n",
+        tabla_markdown(planes, "Planes"),
+    ]
+    return "\n".join(partes)

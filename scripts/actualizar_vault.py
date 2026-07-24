@@ -93,7 +93,7 @@ def entradas_de_carpeta(carpeta: Path) -> list[tuple[str, str, str]]:
         fecha = fecha_desde_nombre(archivo) or "s/f"
         titulo = titulo_desde_markdown(archivo)
         entradas.append((fecha, titulo, archivo.name))
-    entradas.sort(key=lambda e: e[0], reverse=True)
+    entradas.sort(key=lambda e: (e[0], e[2]), reverse=True)
     return entradas
 
 

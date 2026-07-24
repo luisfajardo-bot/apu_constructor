@@ -165,6 +165,24 @@ def test_entradas_de_carpeta_ordena_por_fecha_descendente(tmp_path):
     assert entradas[1] == ("2026-01-01", "Vieja", "2026-01-01-vieja-design.md")
 
 
+def test_entradas_de_carpeta_tiebreak_determinisico_por_nombre(tmp_path):
+    carpeta = tmp_path / "specs"
+    carpeta.mkdir()
+    # Crear dos archivos con la misma fecha, en un orden deliberado
+    (carpeta / "2026-07-02-b-design.md").write_text("# B\n", encoding="utf-8")
+    (carpeta / "2026-07-02-a-design.md").write_text("# A\n", encoding="utf-8")
+
+    # Llamar entradas_de_carpeta dos veces para verificar el orden es el mismo
+    entradas1 = entradas_de_carpeta(carpeta)
+    entradas2 = entradas_de_carpeta(carpeta)
+
+    # Ambas llamadas deben devolver el mismo orden (determinístico)
+    assert entradas1 == entradas2
+    # El orden debe ser por nombre descendente (b antes que a)
+    assert entradas1[0][2] == "2026-07-02-b-design.md"
+    assert entradas1[1][2] == "2026-07-02-a-design.md"
+
+
 def test_tabla_markdown_con_entradas():
     entradas = [("2026-06-01", "Nueva", "2026-06-01-nueva-design.md")]
 

@@ -149,3 +149,31 @@ def generar_indice(docs: Path) -> str:
         tabla_markdown(planes, "Planes"),
     ]
     return "\n".join(partes)
+
+
+def main(raiz: Path = RAIZ) -> None:
+    docs = raiz / "docs"
+    vault = raiz / "constructor-apus"
+
+    bienvenida = vault / "Bienvenido.md"
+    if bienvenida.exists():
+        bienvenida.unlink()
+
+    categorias = clasificar_docs_sueltos(docs)
+    sincronizar_espejos(categorias["arquitectura"], vault / "Arquitectura", raiz)
+    sincronizar_espejos([raiz / "README.md", raiz / "CLAUDE.md"], vault / "Proyecto", raiz)
+    sincronizar_espejos(categorias["auditorias"], vault / "Auditorías", raiz)
+    sincronizar_espejos(categorias["runbooks"], vault / "Runbooks", raiz)
+    sincronizar_espejos(categorias["otros"], vault / "Otros", raiz)
+    sincronizar_espejos(
+        sorted((docs / "superpowers" / "specs").glob("*.md")), vault / "Specs", raiz
+    )
+    sincronizar_espejos(
+        sorted((docs / "superpowers" / "plans").glob("*.md")), vault / "Planes", raiz
+    )
+
+    escribir_si_cambia(vault / "Índice.md", generar_indice(docs))
+
+
+if __name__ == "__main__":
+    main()

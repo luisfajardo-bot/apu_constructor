@@ -10,6 +10,7 @@ from scripts.actualizar_vault import (
     espejar_archivo,
     fecha_desde_nombre,
     generar_indice,
+    main,
     sincronizar_espejos,
     tabla_markdown,
     titulo_desde_markdown,
@@ -230,3 +231,52 @@ def test_generar_indice_incluye_secciones_y_conteos(tmp_path):
     assert "[[Proyecto/CLAUDE|Claude]]" in indice
     assert "[[Specs/2026-01-01-x-design|X]]" in indice
     assert "[[Planes/2026-01-01-x|X plan]]" in indice
+
+
+def _armar_repo_fixture(raiz):
+    docs = raiz / "docs"
+    (docs / "superpowers" / "specs").mkdir(parents=True)
+    (docs / "superpowers" / "plans").mkdir(parents=True)
+    (docs / "ARQUITECTURA.md").write_text("# Arquitectura\n", encoding="utf-8")
+    (docs / "auditoria-codigo-2026-07-01.md").write_text("# Auditoría\n", encoding="utf-8")
+    (docs / "runbook-correo.md").write_text("# Runbook\n", encoding="utf-8")
+    (raiz / "README.md").write_text("# Readme\n", encoding="utf-8")
+    (raiz / "CLAUDE.md").write_text("# Claude\n", encoding="utf-8")
+    (docs / "superpowers" / "specs" / "2026-01-01-x-design.md").write_text(
+        "# X\n", encoding="utf-8"
+    )
+    (docs / "superpowers" / "plans" / "2026-01-01-x.md").write_text(
+        "# X plan\n", encoding="utf-8"
+    )
+    vault = raiz / "constructor-apus"
+    vault.mkdir()
+    (vault / "Bienvenido.md").write_text("bienvenida\n", encoding="utf-8")
+    return vault
+
+
+def test_main_puebla_la_vault_y_borra_bienvenido(tmp_path):
+    vault = _armar_repo_fixture(tmp_path)
+
+    main(tmp_path)
+
+    assert not (vault / "Bienvenido.md").exists()
+    assert (vault / "Arquitectura" / "ARQUITECTURA.md").exists()
+    assert (vault / "Auditorías" / "auditoria-codigo-2026-07-01.md").exists()
+    assert (vault / "Runbooks" / "runbook-correo.md").exists()
+    assert (vault / "Proyecto" / "README.md").exists()
+    assert (vault / "Proyecto" / "CLAUDE.md").exists()
+    assert (vault / "Specs" / "2026-01-01-x-design.md").exists()
+    assert (vault / "Planes" / "2026-01-01-x.md").exists()
+    assert (vault / "Índice.md").exists()
+
+
+def test_main_es_idempotente(tmp_path):
+    vault = _armar_repo_fixture(tmp_path)
+
+    main(tmp_path)
+    contenidos_antes = {p: p.read_text(encoding="utf-8") for p in vault.rglob("*.md")}
+
+    main(tmp_path)
+    contenidos_despues = {p: p.read_text(encoding="utf-8") for p in vault.rglob("*.md")}
+
+    assert contenidos_antes == contenidos_despues

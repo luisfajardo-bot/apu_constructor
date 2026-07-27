@@ -161,3 +161,29 @@ def test_get_candidatos_encuentra_ocultos(tmp_path):
 def test_get_insumo_por_id_encuentra_ocultos(tmp_path):
     repo, iid_oculto = _repo_con_uno_oculto(tmp_path)
     assert repo.get_insumo_por_id(iid_oculto) is not None
+
+
+def test_grupos_excluye_ocultos(tmp_path):
+    """Regression test: hidden insumo's grupo should not appear in grupos() list."""
+    from apu_tool.datos.precios_db import PreciosDB
+    from apu_tool.nucleo.models import Insumo
+    repo = PreciosDB(tmp_path / "p.db")
+    repo.init_schema()
+    iid = repo.crear_insumo(Insumo("8044", "CODO EN ACERO", "UND", "GRUPO-UNICO-OCULTO", 100, "PRECIO IDU"))
+    repo.crear_insumo(Insumo("100", "CEMENTO", "KG", "MAT", 1000, "PRECIO IDU"))
+    repo.set_oculto(iid, True)
+    assert "GRUPO-UNICO-OCULTO" not in repo.grupos()
+    assert "MAT" in repo.grupos()
+
+
+def test_fuentes_excluye_ocultos(tmp_path):
+    """Regression test: hidden insumo's fuente should not appear in fuentes() list."""
+    from apu_tool.datos.precios_db import PreciosDB
+    from apu_tool.nucleo.models import Insumo
+    repo = PreciosDB(tmp_path / "p.db")
+    repo.init_schema()
+    iid = repo.crear_insumo(Insumo("8044", "CODO EN ACERO", "UND", "MAT", 100, "FUENTE-UNICA-OCULTA"))
+    repo.crear_insumo(Insumo("100", "CEMENTO", "KG", "MAT", 1000, "PRECIO IDU"))
+    repo.set_oculto(iid, True)
+    assert "FUENTE-UNICA-OCULTA" not in repo.fuentes()
+    assert "PRECIO IDU" in repo.fuentes()

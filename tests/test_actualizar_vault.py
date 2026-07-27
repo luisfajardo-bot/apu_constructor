@@ -17,6 +17,7 @@ from scripts.actualizar_vault import (
     tabla_markdown,
     titulo_desde_markdown,
 )
+from scripts.mapa_arquitectura import generar_mapa_arquitectura
 
 
 def _git(argumentos, cwd):
@@ -294,6 +295,7 @@ def test_generar_indice_incluye_secciones_y_conteos(tmp_path):
     assert "[[Proyecto/CLAUDE|Claude]]" in indice
     assert "[[Specs/2026-01-01-x-design|X]]" in indice
     assert "[[Planes/2026-01-01-x|X plan]]" in indice
+    assert "[[Arquitectura/Mapa de módulos|Mapa de módulos — apu_tool/]]" in indice
 
 
 def _armar_repo_fixture(raiz):
@@ -310,6 +312,10 @@ def _armar_repo_fixture(raiz):
     )
     (docs / "superpowers" / "plans" / "2026-01-01-x.md").write_text(
         "# X plan\n", encoding="utf-8"
+    )
+    (raiz / "apu_tool" / "nucleo").mkdir(parents=True)
+    (raiz / "apu_tool" / "nucleo" / "models.py").write_text(
+        '"""Tipos puros del dominio."""\n', encoding="utf-8"
     )
     vault = raiz / "constructor-apus"
     vault.mkdir()
@@ -332,6 +338,7 @@ def test_main_puebla_la_vault_y_borra_bienvenido(tmp_path):
     assert (vault / "Specs" / "2026-01-01-x-design.md").exists()
     assert (vault / "Planes" / "2026-01-01-x.md").exists()
     assert (vault / "Índice.md").exists()
+    assert (vault / "Arquitectura" / "Mapa de módulos.md").exists()
 
 
 def test_main_es_idempotente(tmp_path):

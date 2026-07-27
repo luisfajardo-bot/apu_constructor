@@ -9,9 +9,15 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
+# Necesario para que "python scripts/actualizar_vault.py" (así lo invoca el hook)
+# pueda importar scripts.mapa_arquitectura — sys.path[0] es scripts/, no la raíz.
+sys.path.insert(0, str(RAIZ))
+
+from scripts.mapa_arquitectura import generar_mapa_arquitectura
 
 _RE_FECHA = re.compile(r"^(\d{4}-\d{2}-\d{2})-")
 
@@ -153,6 +159,7 @@ def generar_indice(docs: Path) -> str:
     )
     referencia += enlace_bullet("Proyecto", raiz / "README.md")
     referencia += enlace_bullet("Proyecto", raiz / "CLAUDE.md")
+    referencia += "- [[Arquitectura/Mapa de módulos|Mapa de módulos — apu_tool/]]\n"
 
     partes = [
         "# Índice\n",
@@ -203,6 +210,10 @@ def main(raiz: Path = RAIZ) -> None:
         vault / "Planes", raiz,
     )
 
+    escribir_si_cambia(
+        vault / "Arquitectura" / "Mapa de módulos.md",
+        generar_mapa_arquitectura(raiz / "apu_tool"),
+    )
     escribir_si_cambia(vault / "Índice.md", generar_indice(docs))
 
 

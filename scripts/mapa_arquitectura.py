@@ -17,7 +17,7 @@ PAQUETES = ("nucleo", "datos", "dominio", "servicio", "interfaz")
 
 def responsabilidad_de_modulo(ruta: Path) -> str:
     """Primera línea del docstring del módulo; fallback al nombre de archivo legible."""
-    arbol = ast.parse(ruta.read_text(encoding="utf-8"))
+    arbol = ast.parse(ruta.read_text(encoding="utf-8-sig"))
     docstring = ast.get_docstring(arbol)
     if docstring:
         primera_linea = docstring.strip().splitlines()[0].strip()
@@ -28,7 +28,7 @@ def responsabilidad_de_modulo(ruta: Path) -> str:
 
 def imports_internos(ruta: Path) -> list[str]:
     """Módulos `apu_tool.*` importados de forma absoluta por este archivo."""
-    arbol = ast.parse(ruta.read_text(encoding="utf-8"))
+    arbol = ast.parse(ruta.read_text(encoding="utf-8-sig"))
     encontrados = []
     for nodo in ast.walk(arbol):
         if isinstance(nodo, ast.ImportFrom) and nodo.level == 0 and nodo.module:

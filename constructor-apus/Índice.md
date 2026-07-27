@@ -7,6 +7,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 32 plane
 - [[Arquitectura/ARQUITECTURA|Arquitectura objetivo — Armador de APUs]]
 - [[Proyecto/README|Armador de APUs — Obra Civil]]
 - [[Proyecto/CLAUDE|CLAUDE.md]]
+- [[Arquitectura/Mapa de módulos|Mapa de módulos — apu_tool/]]
 
 ## Auditorías
 

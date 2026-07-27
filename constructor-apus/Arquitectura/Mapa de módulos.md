@@ -87,6 +87,7 @@ flowchart TD
 | `dependencias.py` | Inyección de dependencias de la API: el Almacen vive en app.state. |
 | `esquemas.py` | DTOs del contrato HTTP. Las respuestas de cuadro/ítems se devuelven como dict. |
 | `insumos.py` | Lógica de servicio para la edición de insumos (precio + fuente). |
+| `insumos_ocultos.py` | Migración: oculta (no borra) del catálogo de insumos los códigos que son un eco |
 | `limites.py` | Endurecimiento de tráfico: límite de tamaño de subida (aquí) y rate limiting (Task 6). |
 | `plantillas.py` | Generación de plantillas .xlsx para los importadores (APUs, insumos, precios). |
 | `rutas.py` | Endpoints de la API. Delgados: validan y delegan en apu_tool.servicio.corridas. |

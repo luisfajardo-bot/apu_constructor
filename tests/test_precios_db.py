@@ -119,3 +119,45 @@ def test_set_oculto_con_conn_no_autocommite(tmp_path):
             raise RuntimeError("aborta")
     no_ocultos = {iid_ for iid_, _c, _n in alm.precios.todos_no_ocultos()}
     assert iid in no_ocultos   # el rollback dejó el insumo NO oculto
+
+
+def _repo_con_uno_oculto(tmp_path):
+    from apu_tool.datos.precios_db import PreciosDB
+    from apu_tool.nucleo.models import Insumo
+    repo = PreciosDB(tmp_path / "p.db")
+    repo.init_schema()
+    iid_oculto = repo.crear_insumo(Insumo("8044", "CODO EN ACERO", "UND", "MAT", 100, "PRECIO IDU"))
+    repo.crear_insumo(Insumo("100", "CEMENTO", "KG", "MAT", 1000, "PRECIO IDU"))
+    repo.set_oculto(iid_oculto, True)
+    return repo, iid_oculto
+
+
+def test_list_insumos_excluye_ocultos(tmp_path):
+    repo, iid_oculto = _repo_con_uno_oculto(tmp_path)
+    items, total = repo.list_insumos()
+    assert iid_oculto not in {i.id for i in items}
+    assert total == 1
+
+
+def test_search_insumos_excluye_ocultos(tmp_path):
+    repo, iid_oculto = _repo_con_uno_oculto(tmp_path)
+    resultados = repo.search_insumos("codo")
+    assert iid_oculto not in {i.id for i in resultados}
+
+
+def test_search_insumos_por_palabras_excluye_ocultos(tmp_path):
+    repo, iid_oculto = _repo_con_uno_oculto(tmp_path)
+    resultados = repo.search_insumos_por_palabras(["acero"])
+    assert iid_oculto not in {i.id for i in resultados}
+
+
+def test_get_candidatos_encuentra_ocultos(tmp_path):
+    """El costeo nunca debe depender de si el insumo está oculto."""
+    repo, iid_oculto = _repo_con_uno_oculto(tmp_path)
+    candidatos = repo.get_candidatos("8044")
+    assert iid_oculto in {i.id for i in candidatos}
+
+
+def test_get_insumo_por_id_encuentra_ocultos(tmp_path):
+    repo, iid_oculto = _repo_con_uno_oculto(tmp_path)
+    assert repo.get_insumo_por_id(iid_oculto) is not None

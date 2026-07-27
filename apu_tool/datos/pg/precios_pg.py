@@ -208,7 +208,7 @@ class PreciosPg:
                      limit: int = 100, offset: int = 0) -> tuple[list[Insumo], int]:
         base = ("FROM precios.insumos i LEFT JOIN precios.insumo_precios p "
                 "ON p.insumo_id = i.id AND p.vigente = 1")
-        where, params = [], []
+        where, params = ["i.oculto = FALSE"], []
         if q:
             where.append("(i.nombre_norm LIKE %s OR UPPER(i.codigo) LIKE %s)")
             like = f"%{normalizar(q)}%"
@@ -240,23 +240,24 @@ class PreciosPg:
         with self.cx.connection() as conn:
             rows = conn.execute(
                 "SELECT DISTINCT grupo FROM precios.insumos "
-                "WHERE grupo IS NOT NULL AND grupo <> '' ORDER BY grupo").fetchall()
+                "WHERE grupo IS NOT NULL AND grupo <> '' AND oculto = FALSE ORDER BY grupo").fetchall()
         return [r["grupo"] for r in rows]
 
     def fuentes(self) -> list[str]:
         with self.cx.connection() as conn:
             rows = conn.execute(
-                "SELECT DISTINCT fuente FROM precios.insumo_precios "
-                "WHERE vigente = 1 AND fuente IS NOT NULL AND fuente <> '' "
-                "ORDER BY fuente").fetchall()
+                "SELECT DISTINCT p.fuente FROM precios.insumo_precios p "
+                "JOIN precios.insumos i ON i.id = p.insumo_id AND i.oculto = FALSE "
+                "WHERE p.vigente = 1 AND p.fuente IS NOT NULL AND p.fuente <> '' "
+                "ORDER BY p.fuente").fetchall()
         return [r["fuente"] for r in rows]
 
     def search_insumos(self, texto: str, limit: int = 20) -> list[Insumo]:
         like = f"%{normalizar(texto)}%"
         with self.cx.connection() as conn:
             rows = conn.execute(
-                "SELECT id FROM precios.insumos WHERE nombre_norm LIKE %s OR UPPER(codigo) LIKE %s "
-                "LIMIT %s", (like, like, limit)).fetchall()
+                "SELECT id FROM precios.insumos WHERE (nombre_norm LIKE %s OR UPPER(codigo) LIKE %s) "
+                "AND oculto = FALSE LIMIT %s", (like, like, limit)).fetchall()
         return [self.get_insumo_por_id(r["id"]) for r in rows]
 
     def search_insumos_por_palabras(self, palabras: list[str], limit: int = 60) -> list[Insumo]:
@@ -267,7 +268,7 @@ class PreciosPg:
         params = [f"%{p}%" for p in palabras] + [limit]
         with self.cx.connection() as conn:
             rows = conn.execute(
-                f"SELECT id FROM precios.insumos WHERE {clauses} LIMIT %s", params).fetchall()
+                f"SELECT id FROM precios.insumos WHERE ({clauses}) AND oculto = FALSE LIMIT %s", params).fetchall()
         return [self.get_insumo_por_id(r["id"]) for r in rows]
 
     def counts(self) -> dict[str, int]:

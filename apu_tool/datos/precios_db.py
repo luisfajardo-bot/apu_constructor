@@ -244,7 +244,7 @@ class PreciosDB:
                      limit: int = 100, offset: int = 0) -> tuple[list[Insumo], int]:
         base = ("FROM insumos i LEFT JOIN insumo_precios p "
                 "ON p.insumo_id = i.id AND p.vigente = 1")
-        where, params = [], []
+        where, params = ["i.oculto = 0"], []
         if q:
             where.append("(i.nombre_norm LIKE ? OR UPPER(i.codigo) LIKE ?)")
             like = f"%{normalizar(q)}%"
@@ -276,22 +276,24 @@ class PreciosDB:
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT DISTINCT grupo FROM insumos "
-                "WHERE grupo IS NOT NULL AND grupo <> '' ORDER BY grupo").fetchall()
+                "WHERE grupo IS NOT NULL AND grupo <> '' AND oculto = 0 ORDER BY grupo").fetchall()
         return [r["grupo"] for r in rows]
 
     def fuentes(self) -> list[str]:
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT DISTINCT fuente FROM insumo_precios "
-                "WHERE vigente = 1 AND fuente IS NOT NULL AND fuente <> '' "
-                "ORDER BY fuente").fetchall()
+                "SELECT DISTINCT p.fuente FROM insumo_precios p "
+                "JOIN insumos i ON i.id = p.insumo_id AND i.oculto = 0 "
+                "WHERE p.vigente = 1 AND p.fuente IS NOT NULL AND p.fuente <> '' "
+                "ORDER BY p.fuente").fetchall()
         return [r["fuente"] for r in rows]
 
     def search_insumos(self, texto: str, limit: int = 20) -> list[Insumo]:
         like = f"%{normalizar(texto)}%"
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT id FROM insumos WHERE nombre_norm LIKE ? OR UPPER(codigo) LIKE ? LIMIT ?",
+                "SELECT id FROM insumos WHERE (nombre_norm LIKE ? OR UPPER(codigo) LIKE ?) "
+                "AND oculto = 0 LIMIT ?",
                 (like, like, limit)).fetchall()
         return [self.get_insumo_por_id(r["id"]) for r in rows]
 
@@ -304,7 +306,7 @@ class PreciosDB:
         params = [f"%{p}%" for p in palabras] + [limit]
         with self.connect() as conn:
             rows = conn.execute(
-                f"SELECT id FROM insumos WHERE {clauses} LIMIT ?", params).fetchall()
+                f"SELECT id FROM insumos WHERE ({clauses}) AND oculto = 0 LIMIT ?", params).fetchall()
         return [self.get_insumo_por_id(r["id"]) for r in rows]
 
     def counts(self) -> dict[str, int]:

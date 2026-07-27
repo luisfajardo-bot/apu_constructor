@@ -4,9 +4,11 @@ from scripts.mapa_arquitectura import (
     dependencias_entre_paquetes,
     diagrama_mermaid,
     escanear_apu_tool,
+    generar_mapa_arquitectura,
     imports_internos,
     paquete_de_modulo,
     responsabilidad_de_modulo,
+    seccion_paquete,
 )
 
 
@@ -133,3 +135,52 @@ def test_diagrama_mermaid_formato():
 
 def test_diagrama_mermaid_vacio():
     assert diagrama_mermaid([]) == "```mermaid\nflowchart TD\n```\n"
+
+
+def test_seccion_paquete_tabla_ordenada_por_archivo():
+    registros = [
+        {"paquete": "dominio", "archivo": "pricing.py", "responsabilidad": "Motor de costos"},
+        {"paquete": "dominio", "archivo": "alertas.py", "responsabilidad": "Alertas de costeo"},
+        {"paquete": "nucleo", "archivo": "models.py", "responsabilidad": "Tipos puros"},
+    ]
+
+    tabla = seccion_paquete("dominio", registros)
+
+    assert tabla == (
+        "| Archivo | Responsabilidad |\n"
+        "| --- | --- |\n"
+        "| `alertas.py` | Alertas de costeo |\n"
+        "| `pricing.py` | Motor de costos |\n"
+    )
+
+
+def test_seccion_paquete_vacia():
+    assert seccion_paquete("interfaz", []) == "_(vacío)_\n"
+
+
+def test_generar_mapa_arquitectura_integracion(tmp_path):
+    raiz = tmp_path / "apu_tool"
+    (raiz / "nucleo").mkdir(parents=True)
+    (raiz / "dominio").mkdir(parents=True)
+    (raiz / "nucleo" / "models.py").write_text('"""Tipos puros."""\n', encoding="utf-8")
+    (raiz / "dominio" / "pricing.py").write_text(
+        '"""Motor de costos."""\nfrom apu_tool.nucleo.models import Insumo\n',
+        encoding="utf-8",
+    )
+
+    mapa = generar_mapa_arquitectura(raiz)
+
+    assert "# Mapa de módulos — apu_tool/" in mapa
+    assert "No editar" in mapa
+    assert "dominio --> nucleo" in mapa
+    assert "`models.py`" in mapa
+    assert "`pricing.py`" in mapa
+    assert "Motor de costos" in mapa
+
+
+def test_generar_mapa_arquitectura_es_idempotente(tmp_path):
+    raiz = tmp_path / "apu_tool"
+    (raiz / "nucleo").mkdir(parents=True)
+    (raiz / "nucleo" / "models.py").write_text('"""Tipos puros."""\n', encoding="utf-8")
+
+    assert generar_mapa_arquitectura(raiz) == generar_mapa_arquitectura(raiz)

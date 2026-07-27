@@ -89,3 +89,39 @@ def diagrama_mermaid(aristas: list[tuple[str, str]]) -> str:
         lineas.append(f"    {origen} --> {destino}")
     lineas.append("```")
     return "\n".join(lineas) + "\n"
+
+
+def seccion_paquete(nombre_paquete: str, registros: list[dict]) -> str:
+    del_paquete = [r for r in registros if r["paquete"] == nombre_paquete]
+    if not del_paquete:
+        return "_(vacío)_\n"
+    filas = ["| Archivo | Responsabilidad |", "| --- | --- |"]
+    for r in sorted(del_paquete, key=lambda r: r["archivo"]):
+        filas.append(f"| `{r['archivo']}` | {r['responsabilidad']} |")
+    return "\n".join(filas) + "\n"
+
+
+def generar_mapa_arquitectura(apu_tool_dir: Path) -> str:
+    registros = escanear_apu_tool(apu_tool_dir)
+    aristas = dependencias_entre_paquetes(registros)
+
+    partes = [
+        "# Mapa de módulos — apu_tool/\n",
+        "> Autogenerado por `scripts/mapa_arquitectura.py` en cada commit, desde los "
+        "imports reales de `apu_tool/`. No editar — se regenera solo.\n",
+        "## Dependencias entre paquetes\n",
+        diagrama_mermaid(aristas),
+        "## nucleo/ — tipos y utilidades puras\n",
+        seccion_paquete("nucleo", registros),
+        "## datos/ — persistencia (incluye datos/pg/, backend Postgres)\n",
+        seccion_paquete("datos", registros),
+        "## dominio/ — motor de negocio\n",
+        seccion_paquete("dominio", registros),
+        "## servicio/ — API web (FastAPI)\n",
+        seccion_paquete("servicio", registros),
+        "## interfaz/ — puntos de entrada (CLI, GUI)\n",
+        seccion_paquete("interfaz", registros),
+        "## raíz — módulos transversales sueltos\n",
+        seccion_paquete("raíz", registros),
+    ]
+    return "\n".join(partes)

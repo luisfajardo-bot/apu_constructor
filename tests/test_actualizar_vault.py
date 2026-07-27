@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 from scripts.actualizar_vault import (
@@ -11,10 +12,27 @@ from scripts.actualizar_vault import (
     fecha_desde_nombre,
     generar_indice,
     main,
+    nombres_trackeados,
     sincronizar_espejos,
     tabla_markdown,
     titulo_desde_markdown,
 )
+
+
+def _git(argumentos, cwd):
+    """Corre git en `cwd` con identidad fija, sin depender de la config global."""
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t.co",
+         "-c", "commit.gpgsign=false", *argumentos],
+        cwd=cwd, check=True, capture_output=True, text=True,
+    )
+
+
+def _git_init_commit_todo(raiz):
+    """Inicializa un repo git en `raiz` y commitea todo lo que haya ahí."""
+    _git(["init", "-q"], raiz)
+    _git(["add", "-A"], raiz)
+    _git(["commit", "-q", "-m", "fixture"], raiz)
 
 
 def test_titulo_desde_markdown_usa_primer_encabezado(tmp_path):
@@ -133,6 +151,7 @@ def test_clasificar_docs_sueltos(tmp_path):
     (docs / "auditoria-codigo-2026-07-01.md").write_text("# Auditoría\n", encoding="utf-8")
     (docs / "runbook-correo.md").write_text("# Runbook\n", encoding="utf-8")
     (docs / "algo-suelto.md").write_text("# Suelto\n", encoding="utf-8")
+    _git_init_commit_todo(tmp_path)
 
     categorias = clasificar_docs_sueltos(docs)
 
@@ -148,10 +167,39 @@ def test_clasificar_docs_sueltos_no_recursa_en_subcarpetas(tmp_path):
     (docs / "superpowers" / "specs" / "2026-01-01-x-design.md").write_text(
         "# X\n", encoding="utf-8"
     )
+    _git_init_commit_todo(tmp_path)
 
     categorias = clasificar_docs_sueltos(docs)
 
     assert categorias == {"arquitectura": [], "auditorias": [], "runbooks": [], "otros": []}
+
+
+def test_clasificar_docs_sueltos_excluye_archivos_sin_commitear(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "ARQUITECTURA.md").write_text("# Arq\n", encoding="utf-8")
+    _git_init_commit_todo(tmp_path)
+    # Se crea DESPUÉS del commit: queda sin trackear (borrador de otra feature,
+    # plan a medio terminar, etc.) y no debe colarse en la vault.
+    (docs / "borrador-suelto.md").write_text("# Borrador\n", encoding="utf-8")
+
+    categorias = clasificar_docs_sueltos(docs)
+
+    assert [a.name for a in categorias["arquitectura"]] == ["ARQUITECTURA.md"]
+    assert categorias["otros"] == []
+
+
+def test_nombres_trackeados_excluye_archivos_sin_commitear(tmp_path):
+    raiz = tmp_path
+    carpeta = raiz / "docs" / "superpowers" / "specs"
+    carpeta.mkdir(parents=True)
+    (carpeta / "2026-01-01-trackeado-design.md").write_text("# T\n", encoding="utf-8")
+    _git(["init", "-q"], raiz)
+    _git(["add", "docs/superpowers/specs/2026-01-01-trackeado-design.md"], raiz)
+    _git(["commit", "-q", "-m", "fixture"], raiz)
+    (carpeta / "2026-01-02-suelto-design.md").write_text("# S\n", encoding="utf-8")
+
+    assert nombres_trackeados(carpeta, raiz) == {"2026-01-01-trackeado-design.md"}
 
 
 def test_entradas_de_carpeta_ordena_por_fecha_descendente(tmp_path):
@@ -159,11 +207,24 @@ def test_entradas_de_carpeta_ordena_por_fecha_descendente(tmp_path):
     carpeta.mkdir()
     (carpeta / "2026-01-01-vieja-design.md").write_text("# Vieja\n", encoding="utf-8")
     (carpeta / "2026-06-01-nueva-design.md").write_text("# Nueva\n", encoding="utf-8")
+    _git_init_commit_todo(tmp_path)
 
-    entradas = entradas_de_carpeta(carpeta)
+    entradas = entradas_de_carpeta(carpeta, tmp_path)
 
     assert entradas[0] == ("2026-06-01", "Nueva", "2026-06-01-nueva-design.md")
     assert entradas[1] == ("2026-01-01", "Vieja", "2026-01-01-vieja-design.md")
+
+
+def test_entradas_de_carpeta_excluye_sin_commitear(tmp_path):
+    carpeta = tmp_path / "specs"
+    carpeta.mkdir()
+    (carpeta / "2026-01-01-vieja-design.md").write_text("# Vieja\n", encoding="utf-8")
+    _git_init_commit_todo(tmp_path)
+    (carpeta / "2026-06-01-suelta-design.md").write_text("# Suelta\n", encoding="utf-8")
+
+    entradas = entradas_de_carpeta(carpeta, tmp_path)
+
+    assert entradas == [("2026-01-01", "Vieja", "2026-01-01-vieja-design.md")]
 
 
 def test_entradas_de_carpeta_tiebreak_determinisico_por_nombre(tmp_path):
@@ -172,10 +233,11 @@ def test_entradas_de_carpeta_tiebreak_determinisico_por_nombre(tmp_path):
     # Crear dos archivos con la misma fecha, en un orden deliberado
     (carpeta / "2026-07-02-b-design.md").write_text("# B\n", encoding="utf-8")
     (carpeta / "2026-07-02-a-design.md").write_text("# A\n", encoding="utf-8")
+    _git_init_commit_todo(tmp_path)
 
     # Llamar entradas_de_carpeta dos veces para verificar el orden es el mismo
-    entradas1 = entradas_de_carpeta(carpeta)
-    entradas2 = entradas_de_carpeta(carpeta)
+    entradas1 = entradas_de_carpeta(carpeta, tmp_path)
+    entradas2 = entradas_de_carpeta(carpeta, tmp_path)
 
     # Ambas llamadas deben devolver el mismo orden (determinístico)
     assert entradas1 == entradas2
@@ -222,6 +284,7 @@ def test_generar_indice_incluye_secciones_y_conteos(tmp_path):
     (docs / "superpowers" / "plans" / "2026-01-01-x.md").write_text(
         "# X plan\n", encoding="utf-8"
     )
+    _git_init_commit_todo(raiz)
 
     indice = generar_indice(docs)
 
@@ -251,6 +314,7 @@ def _armar_repo_fixture(raiz):
     vault = raiz / "constructor-apus"
     vault.mkdir()
     (vault / "Bienvenido.md").write_text("bienvenida\n", encoding="utf-8")
+    _git_init_commit_todo(raiz)
     return vault
 
 
@@ -280,3 +344,26 @@ def test_main_es_idempotente(tmp_path):
     contenidos_despues = {p: p.read_text(encoding="utf-8") for p in vault.rglob("*.md")}
 
     assert contenidos_antes == contenidos_despues
+
+
+def test_main_excluye_specs_y_planes_sin_commitear(tmp_path):
+    """Reproduce el bug real: un archivo suelto (sin git add/commit) en
+    docs/superpowers/{specs,plans} no debe aparecer en la vault, aunque esté
+    físicamente presente en el working tree — si no, reaparece en cada commit
+    mientras el archivo siga sin trackear."""
+    vault = _armar_repo_fixture(tmp_path)  # ya commiteado (git init+add+commit)
+    docs = tmp_path / "docs"
+    (docs / "superpowers" / "specs" / "2026-02-02-suelto-design.md").write_text(
+        "# Suelto\n", encoding="utf-8"
+    )
+    (docs / "superpowers" / "plans" / "2026-02-02-suelto.md").write_text(
+        "# Suelto plan\n", encoding="utf-8"
+    )
+
+    main(tmp_path)
+
+    assert not (vault / "Specs" / "2026-02-02-suelto-design.md").exists()
+    assert not (vault / "Planes" / "2026-02-02-suelto.md").exists()
+    assert (vault / "Specs" / "2026-01-01-x-design.md").exists()  # el trackeado sigue
+    indice = (vault / "Índice.md").read_text(encoding="utf-8")
+    assert "suelto" not in indice.lower()

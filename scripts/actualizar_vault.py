@@ -8,6 +8,7 @@ commit vía .githooks/pre-commit — es determinístico e idempotente.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -65,8 +66,25 @@ def sincronizar_espejos(archivos: list[Path], destino_dir: Path, raiz: Path) -> 
         espejar_archivo(archivo, destino_dir / archivo.name, raiz)
 
 
+def nombres_trackeados(carpeta: Path, raiz: Path) -> set[str]:
+    """Nombres de archivo bajo `carpeta` (no recursivo) que están trackeados en git.
+
+    Evita que un archivo suelto sin commitear (un borrador de otra rama, un plan
+    a medio terminar) se cuele en la vault: el espejo refleja lo que está en el
+    repo, no lo que haya en el working tree en el momento del commit — si no,
+    reaparecería en cada commit mientras el archivo siga sin trackear.
+    """
+    relativo = carpeta.relative_to(raiz).as_posix()
+    resultado = subprocess.run(
+        ["git", "-c", "core.quotepath=false", "-C", str(raiz), "ls-files", "--", relativo],
+        capture_output=True, encoding="utf-8", check=True,
+    )
+    return {Path(linea).name for linea in resultado.stdout.splitlines() if linea}
+
+
 def clasificar_docs_sueltos(docs: Path) -> dict[str, list[Path]]:
-    """Clasifica los .md directamente en `docs/` (sin recursar) en categorías fijas."""
+    """Clasifica los .md trackeados directamente en `docs/` (sin recursar) en categorías fijas."""
+    trackeados = nombres_trackeados(docs, docs.parent)
     categorias: dict[str, list[Path]] = {
         "arquitectura": [],
         "auditorias": [],
@@ -74,6 +92,8 @@ def clasificar_docs_sueltos(docs: Path) -> dict[str, list[Path]]:
         "otros": [],
     }
     for archivo in sorted(docs.glob("*.md")):
+        if archivo.name not in trackeados:
+            continue
         nombre = archivo.name
         if nombre == "ARQUITECTURA.md":
             categorias["arquitectura"].append(archivo)
@@ -86,10 +106,14 @@ def clasificar_docs_sueltos(docs: Path) -> dict[str, list[Path]]:
     return categorias
 
 
-def entradas_de_carpeta(carpeta: Path) -> list[tuple[str, str, str]]:
-    """(fecha, título, nombre_de_archivo) de cada .md de `carpeta`, fecha descendente."""
+def entradas_de_carpeta(carpeta: Path, raiz: Path) -> list[tuple[str, str, str]]:
+    """(fecha, título, nombre_de_archivo) de cada .md trackeado de `carpeta`,
+    fecha descendente. Un archivo sin commitear no aparece (ver `nombres_trackeados`)."""
+    trackeados = nombres_trackeados(carpeta, raiz)
     entradas = []
     for archivo in carpeta.glob("*.md"):
+        if archivo.name not in trackeados:
+            continue
         fecha = fecha_desde_nombre(archivo) or "s/f"
         titulo = titulo_desde_markdown(archivo)
         entradas.append((fecha, titulo, archivo.name))
@@ -121,8 +145,8 @@ def bloque_bullets(carpeta_vault: str, archivos: list[Path]) -> str:
 def generar_indice(docs: Path) -> str:
     raiz = docs.parent
     categorias = clasificar_docs_sueltos(docs)
-    specs = entradas_de_carpeta(docs / "superpowers" / "specs")
-    planes = entradas_de_carpeta(docs / "superpowers" / "plans")
+    specs = entradas_de_carpeta(docs / "superpowers" / "specs", raiz)
+    planes = entradas_de_carpeta(docs / "superpowers" / "plans", raiz)
 
     referencia = "".join(
         enlace_bullet("Arquitectura", a) for a in categorias["arquitectura"]
@@ -165,11 +189,18 @@ def main(raiz: Path = RAIZ) -> None:
     sincronizar_espejos(categorias["auditorias"], vault / "Auditorías", raiz)
     sincronizar_espejos(categorias["runbooks"], vault / "Runbooks", raiz)
     sincronizar_espejos(categorias["otros"], vault / "Otros", raiz)
+
+    specs_dir = docs / "superpowers" / "specs"
+    planes_dir = docs / "superpowers" / "plans"
+    specs_trackeados = nombres_trackeados(specs_dir, raiz)
+    planes_trackeados = nombres_trackeados(planes_dir, raiz)
     sincronizar_espejos(
-        sorted((docs / "superpowers" / "specs").glob("*.md")), vault / "Specs", raiz
+        sorted(p for p in specs_dir.glob("*.md") if p.name in specs_trackeados),
+        vault / "Specs", raiz,
     )
     sincronizar_espejos(
-        sorted((docs / "superpowers" / "plans").glob("*.md")), vault / "Planes", raiz
+        sorted(p for p in planes_dir.glob("*.md") if p.name in planes_trackeados),
+        vault / "Planes", raiz,
     )
 
     escribir_si_cambia(vault / "Índice.md", generar_indice(docs))

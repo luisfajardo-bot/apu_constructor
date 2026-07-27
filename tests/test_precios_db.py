@@ -80,3 +80,11 @@ def test_crear_insumo_mismo_codigo_otro_nombre_ok(precios):
     iid = precios.crear_insumo(Insumo("100", "CAL HIDRATADA", "KG", "MAT", 2000, "PRECIO IDU"))
     assert precios.get_insumo_por_id(iid).nombre == "CAL HIDRATADA"
     assert len(precios.get_candidatos("100")) == 3  # convive con las 2 previas
+
+def test_insumo_nuevo_no_esta_oculto_por_defecto(tmp_path):
+    repo = PreciosDB(tmp_path / "p.db")
+    repo.init_schema()
+    iid = repo.crear_insumo(Insumo("100", "CEMENTO", "KG", "MAT", 1000, "PRECIO IDU"))
+    with repo.connect() as conn:
+        r = conn.execute("SELECT oculto FROM insumos WHERE id=?", (iid,)).fetchone()
+    assert r["oculto"] == 0

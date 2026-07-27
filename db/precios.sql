@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS insumos (
     nombre_norm TEXT NOT NULL,         -- normalizado (apu_tool/nucleo/texto.py)
     unidad      TEXT,
     grupo       TEXT,
+    oculto      INTEGER NOT NULL DEFAULT 0,   -- 1 = eco de un APU sin uso real; se filtra, nunca se borra
     UNIQUE (codigo, nombre_norm)
 );
 CREATE INDEX IF NOT EXISTS idx_insumo_cod ON insumos(codigo);

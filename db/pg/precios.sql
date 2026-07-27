@@ -8,9 +8,12 @@ CREATE TABLE IF NOT EXISTS precios.insumos (
     nombre_norm TEXT NOT NULL,
     unidad      TEXT,
     grupo       TEXT,
+    oculto      BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE (codigo, nombre_norm)
 );
 CREATE INDEX IF NOT EXISTS idx_insumo_cod ON precios.insumos(codigo);
+
+ALTER TABLE precios.insumos ADD COLUMN IF NOT EXISTS oculto BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS precios.insumo_precios (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

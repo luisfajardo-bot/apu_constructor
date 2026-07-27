@@ -48,6 +48,9 @@ class PreciosDB:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(insumo_precios)").fetchall()}
             if "creado_por" not in cols:
                 conn.execute("ALTER TABLE insumo_precios ADD COLUMN creado_por TEXT")
+            insumos_cols = {r["name"] for r in conn.execute("PRAGMA table_info(insumos)").fetchall()}
+            if "oculto" not in insumos_cols:
+                conn.execute("ALTER TABLE insumos ADD COLUMN oculto INTEGER NOT NULL DEFAULT 0")
 
     def reset(self) -> None:
         """Reconstruye el esquema desde cero (descarta y recrea desde db/precios.sql)."""

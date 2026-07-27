@@ -263,6 +263,14 @@ class ApusPg:
         return [{"apu_codigo": r["apu_codigo"], "shift": r["shift"], "seq": r["seq"],
                  "insumo_codigo": r["insumo_codigo"], "insumo_nombre": r["insumo_nombre"]} for r in rows]
 
+    def pares_insumo_en_uso(self) -> list[tuple[str, str]]:
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT insumo_codigo, insumo_nombre FROM apus.apu_componentes "
+                "WHERE tipo = 'insumo'"
+            ).fetchall()
+        return [(r["insumo_codigo"], r["insumo_nombre"]) for r in rows]
+
     def set_componente_subapu(self, apu_codigo: str, shift: str, seq: int,
                               ref_shift: str, conn=None) -> None:
         sql = ("UPDATE apus.apu_componentes SET tipo='apu', ref_shift=%s "

@@ -47,3 +47,15 @@ def test_idempotente(tmp_path):
     assert res2 == {"apus_afectados": 0, "componentes_marcados": 0}
     _, total = alm.auditoria.listar(accion="apu.componente.marcar_subapu")
     assert total == 1   # no re-audita
+
+
+def test_pares_insumo_en_uso(tmp_path):
+    alm = _alm(tmp_path)
+    alm.apus.insert_apus([Apu("A", "COMP", "M2", "DIURNO")])
+    alm.apus.insert_components([
+        ApuComponent("A", "DIURNO", "100", "CEMENTO", "KG", 2.0, 900),
+        ApuComponent("A", "DIURNO", "200", "ARENA", "M3", 1.0, 500),
+    ])
+    pares = set(alm.apus.pares_insumo_en_uso())
+    assert ("100", "CEMENTO") in pares
+    assert ("200", "ARENA") in pares

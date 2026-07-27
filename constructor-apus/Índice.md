@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 32 planes, 37 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 32 planes, 38 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -27,6 +27,7 @@ _(vacío)_
 | Fecha | Título |
 | --- | --- |
 | 2026-07-27 | [[Specs/2026-07-27-ocultar-insumos-duplicados-apu-design|Diseño — Ocultar del catálogo de insumos los códigos que son APU]] |
+| 2026-07-27 | [[Specs/2026-07-27-apus-np-design|Diseño — APUs para NP (No Previstos): listas de precios]] |
 | 2026-07-24 | [[Specs/2026-07-24-vault-obsidian-design|Diseño — Vault de Obsidian auto-mantenida (constructor-apus/)]] |
 | 2026-07-24 | [[Specs/2026-07-24-mapa-arquitectura-design|Diseño — Corrección de docs de arquitectura + mapa auto-generado de módulos]] |
 | 2026-07-14 | [[Specs/2026-07-14-costo-editable-apu-design|Costo editable en el armador de APUs — diseño]] |

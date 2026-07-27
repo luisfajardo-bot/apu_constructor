@@ -1217,11 +1217,17 @@ def test_alerta_dice_sin_precio_en_la_lista(alm, np):
 
 
 def test_alerta_en_cero_genuino_sigue_diciendo_en_0(alm):
-    iid = alm.precios.get_candidatos("9")[0].id
-    alm.precios.set_precio_por_id(iid, 0.0, "PRECIO IDU")   # $0 genuino en Principal
+    # $0 genuino en Principal: el insumo existe con precio 0 Y el histórico embebido
+    # también es 0, así que no hay respaldo que lo tape. La regla dura debe delatarlo
+    # con "en $0" — el mensaje de lista NO aplica aquí.
+    alm.precios.insert_insumos([
+        Insumo("777", "MATERIAL DEL CLIENTE", "UN", "MATERIAL", 0.0, "PRECIO IDU")])
+    alm.apus.insert_components([
+        ApuComponent("NP-3002", "DIURNO", "777", "MATERIAL DEL CLIENTE", "UN", 1.0, 0.0)])
     costed, total = PricingEngine(alm).cost_apu("NP-3002", "DIURNO")
     motivos = alertas_costeo(_ensamblado(costed, total))
-    assert any("en $0" in m for m in motivos)
+    assert any("777" in m and "en $0" in m for m in motivos)
+    assert not any("sin precio en la lista" in m for m in motivos)
 ```
 
 - [ ] **Step 2: Correr el test y verificar que falla**

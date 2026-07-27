@@ -43,3 +43,28 @@ def paquete_de_modulo(modulo_dotted: str) -> str:
     if len(partes) >= 2 and partes[1] in PAQUETES:
         return partes[1]
     return "raíz"
+
+
+def escanear_apu_tool(apu_tool_dir: Path) -> list[dict]:
+    """Escanea todos los .py de apu_tool/ (excepto __init__.py), recursivo."""
+    registros = []
+    for ruta in sorted(apu_tool_dir.rglob("*.py")):
+        if ruta.name == "__init__.py":
+            continue
+        relativo = ruta.relative_to(apu_tool_dir)
+        modulo = "apu_tool." + ".".join(relativo.with_suffix("").parts)
+        paquete = paquete_de_modulo(modulo)
+        if paquete == "raíz":
+            archivo = relativo.as_posix()
+        else:
+            partes_dentro = relativo.with_suffix("").parts[1:]
+            archivo = "/".join(partes_dentro) + ".py"
+        imports = [m for m in imports_internos(ruta) if m != modulo]
+        registros.append({
+            "modulo": modulo,
+            "archivo": archivo,
+            "paquete": paquete,
+            "responsabilidad": responsabilidad_de_modulo(ruta),
+            "imports": imports,
+        })
+    return registros

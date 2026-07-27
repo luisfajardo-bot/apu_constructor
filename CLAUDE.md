@@ -16,12 +16,12 @@ La IA solo decide la **estructura** de los APUs (qué insumos, qué rendimiento)
 - Todo payload que salga hacia la IA pasa por `apu_tool/privacy.py::assert_no_money`,
   que recorre la estructura y **lanza `PrivacyViolation`** si encuentra un campo
   monetario. Preferimos *fallar* a *filtrar*.
-- Lo que la IA recibe son los tipos `DePriced*` de `models.py`, sin campos de precio.
-- Solo `pricing.py` y `report.py` tocan dinero, y jamás se pasan a la IA.
+- Lo que la IA recibe son los tipos `DePriced*` de `apu_tool/nucleo/models.py`, sin campos de precio.
+- Solo `apu_tool/dominio/pricing.py` y `apu_tool/dominio/report.py` tocan dinero, y jamás se pasan a la IA.
 
-Si agregas una llamada a la IA, construye el payload con helpers de `privacy.py` y
+Si agregas una llamada a la IA, construye el payload con helpers de `apu_tool/dominio/privacy.py` y
 serialízalo con `privacy.safe_json(...)`. Si agregas un campo monetario nuevo,
-añádelo a `_FORBIDDEN_KEYS` en `privacy.py`.
+añádelo a `_FORBIDDEN_KEYS` en `apu_tool/dominio/privacy.py`.
 
 ## Comandos
 
@@ -133,14 +133,14 @@ matching, modelo de IA, clasificación de precios.
 
 ## Convenciones
 
-- **Persistencia aislada en `db.py`.** No metas SQL crudo en otros módulos. Esto
+- **Persistencia aislada en `apu_tool/datos/`.** No metas SQL crudo en otros módulos. Esto
   permite migrar a Postgres/nube reemplazando una sola capa (plan: local primero,
   nube después).
 - **Español** en nombres de dominio, comentarios y mensajes de usuario.
 - **Sin dependencias pesadas:** el matcher usa stdlib (`difflib`); `openpyxl` para
   Excel; `anthropic` es opcional.
 - **Determinismo del costo:** el costo de un APU se calcula llamando al precio
-  vigente del insumo (`pricing.py`); el precio histórico embebido es solo respaldo.
+  vigente del insumo (`apu_tool/dominio/pricing.py`); el precio histórico embebido es solo respaldo.
 - **Turno** DIURNO/NOCTURNO es parte de la clave de un APU y de su composición.
 
 ## Datos
@@ -152,7 +152,7 @@ matching, modelo de IA, clasificación de precios.
   `data/apus.db` (biblioteca de APUs y composiciones) — ambas SQLite, generadas con
   `seed`. El precio del insumo vive separado de su identidad: actualizarlo
   (`db update-price`) no toca los APUs, que toman el precio vigente al costear.
-  El contrato de almacenamiento está en `repository.py` (Protocol) para que un
+  El contrato de almacenamiento está en `datos/repositorio.py` (Protocol) para que un
   backend de nube sea un reemplazo limpio.
 - **Salidas:** `salidas/` (cuadros) y `ejemplos/` (licitaciones de ejemplo).
 - Fuentes de precio: `PRECIO IDU` se trata como **público**; el resto

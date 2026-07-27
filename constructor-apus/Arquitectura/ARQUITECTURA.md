@@ -37,7 +37,7 @@ abarata cada migración (local→nube, CLI→web).
 
 ### Transversales (invariantes)
 - **Invariante #1:** la IA **nunca** ve dinero; solo estructura (insumo, unidad, rendimiento).
-  Ley del dominio, garantizada en `privacy.py`.
+  Ley del dominio, garantizada en `apu_tool/dominio/privacy.py`.
 - **Precios confidenciales:** equipo de confianza por ahora (sin roles), pero el diseño no lo
   impide después.
 - **Aislamiento de almacenamiento:** los repositorios son la costura que permite local→nube

@@ -217,6 +217,14 @@ def cmd_marcar_subapus(args) -> int:
     return 0
 
 
+def cmd_ocultar_duplicados(args) -> int:
+    from apu_tool.servicio.insumos_ocultos import ocultar_apus_duplicados
+    alm = get_almacen()
+    res = ocultar_apus_duplicados(alm)
+    print(f"Insumos ocultados: {res['insumos_ocultados']}.")
+    return 0
+
+
 def cmd_demo(args) -> int:
     print("1) Semillado del histórico…")
     print("  ", ensure_seeded())
@@ -296,6 +304,11 @@ def build_parser() -> argparse.ArgumentParser:
         "marcar-subapus",
         help="Marcar como sub-APU los componentes cuyo código es un APU (idempotente, auditado).")
     pms.set_defaults(func=cmd_marcar_subapus)
+
+    poc = sub.add_parser(
+        "ocultar-duplicados",
+        help="Ocultar del catálogo los códigos que son eco de un APU sin uso real (idempotente, auditado).")
+    poc.set_defaults(func=cmd_ocultar_duplicados)
     return p
 
 

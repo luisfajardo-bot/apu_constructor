@@ -47,26 +47,89 @@ determinístico y todo corre igual. Modelo por defecto: `claude-haiku-4-5-202510
 ## Arquitectura (flujo)
 
 ```
-Excel histórico ──seed──► SQLite (data/precios.db + data/apus.db)
+Excel histórico ──seed──► SQLite/Postgres (precios, apus, corridas, perfiles, auditoría)
 lista licitación ──► matching ──► IA acotada (sin dinero) ──► confirma usuario
                                        └─► motor de precios ──► cuadro resumen (Excel)
+
+Interfaces sobre el mismo pipeline (dominio/pipeline.py):
+  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 44 endpoints) + web/ (React) para multiusuario
 ```
+
+`apu_tool/config.py` es transversal, fuera de cualquier paquete: rutas, umbrales de
+matching, modelo de IA, clasificación de precios.
+
+### `apu_tool/nucleo/` — tipos y utilidades puras (sin dependencias de otras capas)
 
 | Módulo | Responsabilidad |
 |--------|-----------------|
-| `config.py`     | rutas, umbrales de matching, modelo de IA, clasificación de precios |
-| `models.py`     | tipos del dominio; vistas `DePriced*` SIN dinero |
-| `db.py`         | acceso SQLite; **toda** la persistencia pasa por aquí |
-| `ingest.py`     | Excel histórico → base |
-| `licitacion.py` | lectura de la lista de entrada + generador de ejemplo |
-| `matching.py`   | matcher determinístico (fuzzy, sin dependencias externas) |
-| `privacy.py`    | frontera de precios para la IA (invariante #1) |
-| `ai_assist.py`  | IA acotada (Anthropic SDK) + fallback determinístico |
-| `pricing.py`    | motor de costos (ÚNICO que ve dinero) |
-| `assemble.py`   | orquestador por ítem |
-| `report.py`     | cuadro resumen en Excel |
-| `pipeline.py`   | orquestación de alto nivel (la usan CLI y GUI) |
-| `gui.py`/`cli.py` | interfaces |
+| `models.py`   | tipos del dominio; vistas `DePriced*` SIN dinero |
+| `redondeo.py` | redondeo a la unidad (peso) en multiplicaciones monetarias |
+| `texto.py`    | normalización de texto compartida |
+
+### `apu_tool/datos/` — persistencia (**toda** la persistencia pasa por aquí)
+
+| Módulo | Responsabilidad |
+|--------|-----------------|
+| `repositorio.py`  | contratos de almacenamiento (`Protocol`), por dominio |
+| `precios_db.py`   | SQLite de `precios.db` (catálogo + precios) |
+| `apus_db.py`      | SQLite de `apus.db` (biblioteca de APUs) |
+| `carpetas_db.py`  | SQLite de carpetas de corridas |
+| `corridas_db.py`  | SQLite de `corridas.db` (estado de corridas en curso) |
+| `auditoria_db.py` | SQLite de auditoría (`seguridad.db`) |
+| `perfiles_db.py`  | SQLite de perfiles (identidad + rol) |
+| `almacen.py`      | fachada que agrupa los repos SQLite/Postgres |
+| `seed.py`         | ingesta Excel histórico → bases |
+| `correcciones.py` | correcciones de código aplicadas al semillar |
+| `migracion_pg.py` | migración SQLite → Postgres (Supabase); corridas NO se migran |
+| `pg/`             | backend Postgres (espejo 1:1 de los `*_db.py`, para la nube) |
+
+### `apu_tool/dominio/` — motor de negocio (`pricing.py` es el **único** que ve dinero)
+
+| Módulo | Responsabilidad |
+|--------|-----------------|
+| `licitacion.py`          | lectura de la lista de entrada + generador de ejemplo |
+| `presupuesto.py`         | lectura del presupuesto oficial por capítulos |
+| `matching.py`            | matcher determinístico (fuzzy, sin dependencias externas) |
+| `cruce.py`               | cruce insumo-de-APU ↔ insumo-de-catálogo por código+nombre |
+| `compose.py`             | candidatos de insumos para composición generativa |
+| `privacy.py`             | frontera de precios para la IA (invariante #1) |
+| `ai_assist.py`           | IA acotada (Anthropic SDK) + fallback determinístico |
+| `assemble.py`            | orquestador por ítem |
+| `pricing.py`             | motor de costos (**ÚNICO** que ve dinero) |
+| `alertas.py`             | alertas de costeo (por qué un ítem necesita revisión) |
+| `report.py`              | cuadro resumen en Excel |
+| `report_categorizado.py` | cuadro resumen agrupado por capítulos de presupuesto |
+| `integridad.py`          | chequeo de integridad del vínculo APU↔insumo |
+| `pipeline.py`            | orquestación de alto nivel (la usan CLI, GUI y el servicio web) |
+
+### `apu_tool/servicio/` — API web (FastAPI)
+
+| Módulo | Responsabilidad |
+|--------|-----------------|
+| `app.py`               | arma la app FastAPI: monta `/api`, sirve `web/dist`, middlewares de seguridad |
+| `rutas.py`             | el único `APIRouter`; todos los endpoints HTTP (delega a los módulos de abajo) |
+| `dependencias.py`      | inyección de dependencias (el `Almacen` vive en `app.state`) |
+| `esquemas.py`          | DTOs del contrato HTTP |
+| `auth.py`              | autenticación (Supabase Auth) + autorización por rol |
+| `limites.py`           | límite de tamaño de subida + rate limiting |
+| `seguridad_headers.py` | middleware de headers de seguridad (HSTS, CSP, etc.) |
+| `corridas.py`          | lógica de servicio de corridas (armado en vivo) |
+| `insumos.py`           | lógica de servicio para editar insumos |
+| `autoria.py`           | alta de insumos/APUs nuevos |
+| `subapus.py`           | migración: marca componentes que son sub-APU |
+| `apus.py`              | lectura de la biblioteca de APUs |
+| `carpetas.py`          | reglas de carpetas de corridas |
+| `usuarios.py`          | gestión de usuarios (solo Admin) |
+| `auditoria.py`         | servicio de auditoría (registro + lectura paginada) |
+| `supabase_admin.py`    | cliente de la Admin API de Supabase Auth |
+| `plantillas.py`        | plantillas `.xlsx` para importadores |
+
+### `apu_tool/interfaz/` — puntos de entrada
+
+| Módulo | Responsabilidad |
+|--------|-----------------|
+| `cli.py` | línea de comandos |
+| `gui.py` | interfaz gráfica (Tkinter) |
 
 ## Convenciones
 

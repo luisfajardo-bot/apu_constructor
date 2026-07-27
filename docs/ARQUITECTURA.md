@@ -28,10 +28,10 @@ abarata cada migración (local→nube, CLI→web).
 
 | Nivel | Capa | Responsabilidad | Estado |
 |------:|------|-----------------|--------|
-| 01 | **Plataforma de datos** | Dos dominios canónicos y separados: **Precios** (catálogo + libro de precios) y **APUs** (biblioteca histórica). Fuente de verdad. SQLite hoy → Postgres/nube después. Acceso por repositorios + fachada `Almacen`. | base |
+| 01 | **Plataforma de datos** | Dos dominios canónicos y separados: **Precios** (catálogo + libro de precios) y **APUs** (biblioteca histórica). Fuente de verdad. SQLite hoy → Postgres/nube después. Acceso por repositorios + fachada `Almacen`. | existe hoy (SQLite + Postgres) |
 | 02 | **Dominio / motor** | Lógica pura y reutilizable, sin UI ni red: lectura de entrada, matching, ensamblado, IA acotada, costeo, reporte, orquestación. Es una **librería con API clara**. | existe hoy |
-| 03 | **Servicio / API** | Expone las operaciones del dominio por HTTP (FastAPI): mantener precios, mantener APUs, armar licitación, generar cuadro, chequeo de integridad. Auth ligera de equipo. | futuro |
-| 04 | **Interfaz** | App web sobre la API (destino); CLI/GUI para operación. | CLI/GUI hoy, web futuro |
+| 03 | **Servicio / API** | Expone las operaciones del dominio por HTTP (FastAPI): mantener precios, mantener APUs, armar licitación, generar cuadro, chequeo de integridad. Auth ligera de equipo. | existe hoy (FastAPI, 44 endpoints) |
+| 04 | **Interfaz** | App web sobre la API (destino); CLI/GUI para operación. | existe hoy (CLI, GUI y web) |
 
 ### Transversales (invariantes)
 - **Invariante #1:** la IA **nunca** ve dinero; solo estructura (insumo, unidad, rendimiento).
@@ -54,49 +54,64 @@ intento_plan/
 ├── apu_tool/
 │   ├── config.py                  # transversal: rutas, umbrales, modelo IA
 │   ├── nucleo/                    ── KERNEL COMPARTIDO
-│   │   └── models.py              #   dataclasses puras (Insumo, Apu, DePriced*); lo importan todas las capas
+│   │   ├── models.py              #   dataclasses puras (Insumo, Apu, DePriced*)
+│   │   ├── redondeo.py            #   redondeo a la unidad en multiplicaciones monetarias
+│   │   └── texto.py               #   normalización de texto compartida
 │   │
 │   ├── datos/                     ── NIVEL 01 · plataforma de datos
-│   │   ├── repositorio.py         #   Protocols: RepositorioPrecios, RepositorioApus
-│   │   ├── precios_db.py          #   PreciosDB  → data/precios.db
-│   │   ├── apus_db.py             #   ApusDB     → data/apus.db
-│   │   ├── almacen.py             #   fachada Almacen(.precios, .apus)
-│   │   ├── seed.py                #   importación semilla desde Excel (guardada)
-│   │   ├── correcciones.py        #   mapeo de códigos (4613 → 3017)
-│   │   └── integridad.py          #   chequeo de huérfanos / descalces
+│   │   ├── repositorio.py         #   Protocols de almacenamiento
+│   │   ├── precios_db.py   apus_db.py   carpetas_db.py   corridas_db.py
+│   │   ├── auditoria_db.py   perfiles_db.py
+│   │   ├── almacen.py             #   fachada Almacen (agrupa SQLite/Postgres)
+│   │   ├── seed.py   correcciones.py
+│   │   ├── migracion_pg.py        #   migración SQLite → Postgres
+│   │   └── pg/                    #   backend Postgres (espejo 1:1 de los *_db.py)
 │   │
 │   ├── dominio/                   ── NIVEL 02 · motor (lógica pura)
-│   │   ├── models.py   licitacion.py   presupuesto.py   matching.py
-│   │   ├── privacy.py  ai_assist.py    compose.py       assemble.py
-│   │   ├── pricing.py  report.py       report_categorizado.py
-│   │   └── pipeline.py             #   orquestación (usa datos + dominio)
+│   │   ├── licitacion.py   presupuesto.py   matching.py   cruce.py   compose.py
+│   │   ├── privacy.py   ai_assist.py   assemble.py
+│   │   ├── pricing.py   alertas.py   report.py   report_categorizado.py
+│   │   ├── integridad.py          #   chequeo de integridad APU↔insumo
+│   │   └── pipeline.py            #   orquestación (usa datos + dominio)
 │   │
-│   ├── servicio/                  ── NIVEL 03 · API (FastAPI)        [se llena en paso 4]
+│   ├── servicio/                  ── NIVEL 03 · API (FastAPI) — 44 endpoints
+│   │   ├── app.py   rutas.py   dependencias.py   esquemas.py
+│   │   ├── auth.py   limites.py   seguridad_headers.py
+│   │   └── corridas.py   insumos.py   autoria.py   subapus.py   apus.py
+│   │       carpetas.py   usuarios.py   auditoria.py   supabase_admin.py   plantillas.py
+│   │
 │   └── interfaz/                  ── NIVEL 04 · interfaces
 │       ├── cli.py   gui.py
 │
-├── db/                            # DDL canónico (SQL): precios.sql, apus.sql
-├── data/                          # bases mantenidas (fuente de verdad): precios.db, apus.db
+├── db/                            # DDL canónico (SQL): precios, apus, corridas, seguridad
+├── data/                          # bases mantenidas: precios.db, apus.db, corridas.db, seguridad.db
 ├── salidas/                       # cuadros generados
 ├── ejemplos/                      # licitaciones de ejemplo
 ├── tests/
-├── web/                           # frontend de la app web           [se llena en paso 5]
+├── web/                           # frontend React ya construido (Vite + TS + Supabase)
+├── constructor-apus/              # vault de Obsidian auto-mantenida (ver su propio spec)
 ├── docs/                          # ARQUITECTURA.md + superpowers/{specs,plans}
-├── run_cli.py   run_gui.py   requirements.txt
+├── run_cli.py   run_gui.py   run_web.py   requirements.txt
 ```
 
 ## Hoja de ruta
 
-1. **Datos canónicos y separados** — `precios.db` + `apus.db` como fuente de verdad, seed
-   guardado, limpieza del código 4613, chequeo de integridad. **Incluye la reorganización
-   completa del proyecto a la estructura por capas de arriba.** ← *paso actual*
-2. **Consolidar el dominio como librería con API clara** — fronteras limpias para que una API
-   pueda llamar al motor sin pasar por CLI/GUI.
-3. **Migrar almacenamiento a Postgres** — implementar los repositorios contra Postgres; el
-   dominio no cambia. Nube.
-4. **Capa de servicio / API (FastAPI)** — exponer operaciones, auth de equipo, concurrencia.
-5. **App web** sobre la API.
-6. **Endurecer multiusuario** — concurrencia, auditoría y, si hace falta, roles sobre precios.
+Los pasos 1 a 5 ya están construidos; el proyecto pasó de roadmap a mantenimiento y
+features incrementales (ver `docs/superpowers/plans/` y `docs/superpowers/specs/` para
+el historial de features desde entonces).
 
-*(La normalización de insumos —skill `apu-civil:apu-normalizar`— se intercala en el paso 1–2
-para limpiar la data canónica.)*
+1. ✅ **Datos canónicos y separados** — reorganización completa a la estructura por capas.
+2. ✅ **Dominio como librería con API clara.**
+3. ✅ **Postgres** — `datos/pg/` implementa los repositorios contra Supabase; `datos/almacen.py`
+   elige el backend. Migración con `datos/migracion_pg.py`.
+4. ✅ **Capa de servicio / API (FastAPI)** — `servicio/`, 44 endpoints, auth Supabase + RBAC,
+   rate limiting, headers de seguridad.
+5. ✅ **App web** — `web/` (React + TypeScript + Vite), consume la API, servida por
+   `servicio/app.py` desde `web/dist`.
+6. **Endurecer multiusuario** — auth/RBAC y auditoría ya en producción; optimización de
+   round-trips a Postgres ya hecha (ver `perf-corrida-optimizacion` en el historial de
+   specs). Concurrencia y roles finos sobre precios se siguen evaluando caso a caso, sin
+   un ítem de trabajo abierto puntual hoy.
+
+*(La normalización de insumos —skill `apu-civil:apu-normalizar`— se usó para limpiar la
+data canónica durante los pasos 1–3.)*

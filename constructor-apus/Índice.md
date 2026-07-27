@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 32 planes, 38 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 33 planes, 38 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -69,6 +69,7 @@ _(vacío)_
 
 | Fecha | Título |
 | --- | --- |
+| 2026-07-27 | [[Planes/2026-07-27-listas-precios-np|Listas de precios para APUs de NP — Implementation Plan]] |
 | 2026-07-14 | [[Planes/2026-07-14-costo-editable-apu|Costo editable en el armador de APUs — Implementation Plan]] |
 | 2026-07-10 | [[Planes/2026-07-10-costeo-cero-alertas|Costeo en $0 nunca mudo + regla "nada en 0" — Plan de implementación]] |
 | 2026-07-09 | [[Planes/2026-07-09-columnas-unitarias-corrida|Columnas unitarias en la tabla de corrida — Implementation Plan]] |

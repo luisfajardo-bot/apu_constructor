@@ -166,6 +166,23 @@ class PreciosDB:
             conn.execute("INSERT OR REPLACE INTO meta (clave, valor) VALUES (?,?)",
                          (clave, str(valor)))
 
+    def set_oculto(self, insumo_id: int, oculto: bool,
+                   conn: Optional[sqlite3.Connection] = None) -> None:
+        sql = "UPDATE insumos SET oculto=? WHERE id=?"
+        args = (1 if oculto else 0, int(insumo_id))
+        if conn is not None:
+            conn.execute(sql, args)
+            return
+        with self.connect() as c:
+            c.execute(sql, args)
+
+    def todos_no_ocultos(self) -> list[tuple[int, str, str]]:
+        """(id, codigo, nombre) de todos los insumos con oculto=0."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id, codigo, nombre FROM insumos WHERE oculto = 0").fetchall()
+        return [(r["id"], r["codigo"], r["nombre"]) for r in rows]
+
     # ---- lectura ----
     def _fila_a_insumo(self, r) -> Insumo:
         return Insumo(codigo=r["codigo"], nombre=r["nombre"], unidad=r["unidad"] or "",

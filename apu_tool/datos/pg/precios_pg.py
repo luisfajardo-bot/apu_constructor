@@ -136,6 +136,21 @@ class PreciosPg:
                 "ON CONFLICT (clave) DO UPDATE SET valor=EXCLUDED.valor",
                 (clave, str(valor)))
 
+    def set_oculto(self, insumo_id: int, oculto: bool, conn=None) -> None:
+        sql = "UPDATE precios.insumos SET oculto=%s WHERE id=%s"
+        args = (bool(oculto), int(insumo_id))
+        if conn is not None:
+            conn.execute(sql, args)
+            return
+        with self.cx.connection() as c:
+            c.execute(sql, args)
+
+    def todos_no_ocultos(self) -> list[tuple[int, str, str]]:
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT id, codigo, nombre FROM precios.insumos WHERE oculto = FALSE").fetchall()
+        return [(r["id"], r["codigo"], r["nombre"]) for r in rows]
+
     # ---- lectura ----
     def _fila_a_insumo(self, r) -> Insumo:
         return Insumo(codigo=r["codigo"], nombre=r["nombre"], unidad=r["unidad"] or "",

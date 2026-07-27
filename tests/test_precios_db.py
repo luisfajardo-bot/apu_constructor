@@ -88,3 +88,34 @@ def test_insumo_nuevo_no_esta_oculto_por_defecto(tmp_path):
     with repo.connect() as conn:
         r = conn.execute("SELECT oculto FROM insumos WHERE id=?", (iid,)).fetchone()
     assert r["oculto"] == 0
+
+
+def test_set_oculto_y_todos_no_ocultos(tmp_path):
+    from apu_tool.datos.precios_db import PreciosDB
+    from apu_tool.nucleo.models import Insumo
+    repo = PreciosDB(tmp_path / "p.db")
+    repo.init_schema()
+    iid1 = repo.crear_insumo(Insumo("100", "CEMENTO", "KG", "MAT", 1000, "PRECIO IDU"))
+    iid2 = repo.crear_insumo(Insumo("200", "ARENA", "M3", "MAT", 500, "PRECIO IDU"))
+
+    repo.set_oculto(iid1, True)
+
+    no_ocultos = {(iid, cod) for iid, cod, _nom in repo.todos_no_ocultos()}
+    assert (iid1, "100") not in no_ocultos
+    assert (iid2, "200") in no_ocultos
+
+
+def test_set_oculto_con_conn_no_autocommite(tmp_path):
+    import pytest
+    from apu_tool.datos.almacen import Almacen
+    from apu_tool.nucleo.models import Insumo
+    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
+                  corridas_path=tmp_path / "c.db")
+    alm.init_schema()
+    iid = alm.precios.crear_insumo(Insumo("100", "CEMENTO", "KG", "MAT", 1000, "PRECIO IDU"))
+    with pytest.raises(RuntimeError):
+        with alm.transaccion("precios") as conn:
+            alm.precios.set_oculto(iid, True, conn=conn)
+            raise RuntimeError("aborta")
+    no_ocultos = {iid_ for iid_, _c, _n in alm.precios.todos_no_ocultos()}
+    assert iid in no_ocultos   # el rollback dejó el insumo NO oculto

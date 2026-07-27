@@ -1,6 +1,8 @@
 from pathlib import Path
 
 from scripts.mapa_arquitectura import (
+    dependencias_entre_paquetes,
+    diagrama_mermaid,
     escanear_apu_tool,
     imports_internos,
     paquete_de_modulo,
@@ -103,3 +105,31 @@ def test_escanear_apu_tool_excluye_init(tmp_path):
     (raiz / "nucleo" / "__init__.py").write_text("", encoding="utf-8")
 
     assert escanear_apu_tool(raiz) == []
+
+
+def test_dependencias_entre_paquetes_deduplica_y_excluye_autoreferencias():
+    registros = [
+        {"paquete": "dominio", "imports": ["apu_tool.nucleo.models"]},
+        {"paquete": "dominio", "imports": ["apu_tool.nucleo.models", "apu_tool.dominio.otro"]},
+        {"paquete": "servicio", "imports": ["apu_tool.dominio.pricing"]},
+    ]
+
+    aristas = dependencias_entre_paquetes(registros)
+
+    assert aristas == [("dominio", "nucleo"), ("servicio", "dominio")]
+
+
+def test_diagrama_mermaid_formato():
+    diagrama = diagrama_mermaid([("dominio", "nucleo"), ("servicio", "dominio")])
+
+    assert diagrama == (
+        "```mermaid\n"
+        "flowchart TD\n"
+        "    dominio --> nucleo\n"
+        "    servicio --> dominio\n"
+        "```\n"
+    )
+
+
+def test_diagrama_mermaid_vacio():
+    assert diagrama_mermaid([]) == "```mermaid\nflowchart TD\n```\n"

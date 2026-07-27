@@ -68,3 +68,24 @@ def escanear_apu_tool(apu_tool_dir: Path) -> list[dict]:
             "imports": imports,
         })
     return registros
+
+
+def dependencias_entre_paquetes(registros: list[dict]) -> list[tuple[str, str]]:
+    """Aristas (paquete_origen, paquete_destino) deduplicadas y ordenadas,
+    sin aristas de un paquete hacia sí mismo."""
+    aristas = set()
+    for registro in registros:
+        origen = registro["paquete"]
+        for modulo_importado in registro["imports"]:
+            destino = paquete_de_modulo(modulo_importado)
+            if destino != origen:
+                aristas.add((origen, destino))
+    return sorted(aristas)
+
+
+def diagrama_mermaid(aristas: list[tuple[str, str]]) -> str:
+    lineas = ["```mermaid", "flowchart TD"]
+    for origen, destino in aristas:
+        lineas.append(f"    {origen} --> {destino}")
+    lineas.append("```")
+    return "\n".join(lineas) + "\n"

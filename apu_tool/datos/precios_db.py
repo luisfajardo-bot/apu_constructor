@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
 from apu_tool import config
-from apu_tool.nucleo.models import Insumo
+from apu_tool.nucleo.models import Insumo, ListaPrecios
 from apu_tool.nucleo.texto import normalizar
 
 SCHEMA_PATH = config.PROJECT_ROOT / "db" / "precios.sql"
@@ -44,6 +44,24 @@ class PreciosDB:
 
     def init_schema(self) -> None:
         with self.connect() as conn:
+            # Migración PREVIA al executescript: en una base anterior a esta migración,
+            # insumo_precios ya existe sin lista_id. db/precios.sql crea, sin condicionar,
+            # el índice idx_precio_ins_lista sobre esa columna — y SQLite no puede indexar
+            # una columna que todavía no existe. Por eso la columna se añade ANTES de
+            # correr el script (a diferencia de creado_por/oculto, que no tienen ningún
+            # índice del script colgando de ellas y sí pueden migrarse después).
+            # PRAGMA table_info de una tabla que no existe aún devuelve 0 filas (no
+            # lanza), así que en una base nueva "cols_previas" queda vacío y no se
+            # intenta alterar una tabla inexistente: el CREATE TABLE del script la crea
+            # con lista_id incluida desde el principio.
+            cols_previas = {r["name"] for r in
+                           conn.execute("PRAGMA table_info(insumo_precios)").fetchall()}
+            if cols_previas and "lista_id" not in cols_previas:
+                # Sin REFERENCES: SQLite no lo admite junto con NOT NULL DEFAULT (drift
+                # declarado en db/precios.sql). El DEFAULT deja todo lo existente en
+                # Principal, así que no hay backfill que escribir.
+                conn.execute(
+                    "ALTER TABLE insumo_precios ADD COLUMN lista_id INTEGER NOT NULL DEFAULT 1")
             conn.executescript(_load_schema())
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(insumo_precios)").fetchall()}
             if "creado_por" not in cols:
@@ -51,13 +69,25 @@ class PreciosDB:
             insumos_cols = {r["name"] for r in conn.execute("PRAGMA table_info(insumos)").fetchall()}
             if "oculto" not in insumos_cols:
                 conn.execute("ALTER TABLE insumos ADD COLUMN oculto INTEGER NOT NULL DEFAULT 0")
+            self._asegurar_principal(conn)
 
     def reset(self) -> None:
         """Reconstruye el esquema desde cero (descarta y recrea desde db/precios.sql)."""
         with self.connect() as conn:
-            for t in ("insumo_precios", "insumos", "meta"):
+            for t in ("insumo_precios", "insumos", "lista_precios", "meta"):
                 conn.execute(f"DROP TABLE IF EXISTS {t}")
             conn.executescript(_load_schema())
+            self._asegurar_principal(conn)
+
+    def _asegurar_principal(self, conn) -> None:
+        """Siembra la lista Principal (id 1) si falta. Idempotente."""
+        r = conn.execute("SELECT id FROM lista_precios WHERE id=?",
+                         (config.LISTA_PRINCIPAL_ID,)).fetchone()
+        if r is None:
+            conn.execute(
+                "INSERT INTO lista_precios (id, nombre, creada_en, creado_por) "
+                "VALUES (?, 'Principal', ?, NULL)",
+                (config.LISTA_PRINCIPAL_ID, date.today().isoformat()))
 
     # ---- escritura ----
     def insert_insumos(self, insumos: Iterable[Insumo]) -> int:
@@ -182,6 +212,67 @@ class PreciosDB:
             rows = conn.execute(
                 "SELECT id, codigo, nombre FROM insumos WHERE oculto = 0").fetchall()
         return [(r["id"], r["codigo"], r["nombre"]) for r in rows]
+
+    # ---- listas de precios ----
+    @staticmethod
+    def _limpiar_nombre_lista(nombre: str) -> str:
+        limpio = (nombre or "").strip()[:80].strip()
+        if not limpio:
+            raise ValueError("El nombre de la lista no puede estar vacío.")
+        return limpio
+
+    @staticmethod
+    def _fila_a_lista(r) -> ListaPrecios:
+        return ListaPrecios(id=r["id"], nombre=r["nombre"], creada_en=r["creada_en"],
+                            creado_por=r["creado_por"])
+
+    def listar_listas(self) -> list[ListaPrecios]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id, nombre, creada_en, creado_por FROM lista_precios "
+                "ORDER BY id").fetchall()
+        return [self._fila_a_lista(r) for r in rows]
+
+    def get_lista(self, lista_id: int) -> Optional[ListaPrecios]:
+        with self.connect() as conn:
+            r = conn.execute(
+                "SELECT id, nombre, creada_en, creado_por FROM lista_precios WHERE id=?",
+                (int(lista_id),)).fetchone()
+        return self._fila_a_lista(r) if r else None
+
+    def crear_lista(self, nombre: str, creado_por: Optional[str] = None, conn=None) -> int:
+        limpio = self._limpiar_nombre_lista(nombre)
+        if conn is not None:
+            return self._crear_lista(conn, limpio, creado_por)
+        with self.connect() as c:
+            return self._crear_lista(c, limpio, creado_por)
+
+    def _crear_lista(self, conn, nombre: str, creado_por: Optional[str]) -> int:
+        if conn.execute("SELECT 1 FROM lista_precios WHERE UPPER(nombre)=UPPER(?)",
+                        (nombre,)).fetchone():
+            raise ValueError(f"Ya existe una lista de precios llamada «{nombre}».")
+        cur = conn.execute(
+            "INSERT INTO lista_precios (nombre, creada_en, creado_por) VALUES (?,?,?)",
+            (nombre, date.today().isoformat(), creado_por))
+        return int(cur.lastrowid)
+
+    def renombrar_lista(self, lista_id: int, nombre: str, conn=None) -> None:
+        if int(lista_id) == config.LISTA_PRINCIPAL_ID:
+            raise ValueError("La lista Principal no se puede renombrar.")
+        limpio = self._limpiar_nombre_lista(nombre)
+        if conn is not None:
+            self._renombrar_lista(conn, int(lista_id), limpio)
+            return
+        with self.connect() as c:
+            self._renombrar_lista(c, int(lista_id), limpio)
+
+    def _renombrar_lista(self, conn, lista_id: int, nombre: str) -> None:
+        if conn.execute("SELECT 1 FROM lista_precios WHERE id=?", (lista_id,)).fetchone() is None:
+            raise ValueError(f"No existe la lista de precios id={lista_id}.")
+        if conn.execute("SELECT 1 FROM lista_precios WHERE UPPER(nombre)=UPPER(?) AND id<>?",
+                        (nombre, lista_id)).fetchone():
+            raise ValueError(f"Ya existe una lista de precios llamada «{nombre}».")
+        conn.execute("UPDATE lista_precios SET nombre=? WHERE id=?", (nombre, lista_id))
 
     # ---- lectura ----
     def _fila_a_insumo(self, r) -> Insumo:

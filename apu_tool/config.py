@@ -55,6 +55,15 @@ def classify_price_source(fuente: str) -> str:
     return "publico" if f in {s.upper() for s in PUBLIC_PRICE_SOURCES} else "interno"
 
 
+# ---------------------------------------------------------------------------
+# Listas de precios. Una lista = una tarifa (la del catálogo, o la de una obra
+# de No Previstos). La lista 1 es SIEMPRE 'Principal': es el DEFAULT de la
+# columna insumo_precios.lista_id y el ancla del invariante
+#   lista_id = None  ==  Principal  ==  comportamiento histórico.
+# ---------------------------------------------------------------------------
+LISTA_PRINCIPAL_ID = 1
+
+
 def detect_source_xlsx() -> Path | None:
     """Devuelve la ruta al Excel definida en la variable APU_SOURCE_XLSX, o None.
 

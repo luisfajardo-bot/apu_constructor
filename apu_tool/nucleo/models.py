@@ -83,6 +83,15 @@ class Carpeta:
 
 
 @dataclass(frozen=True)
+class ListaPrecios:
+    """Una tarifa. 'Principal' (id 1) es la del catálogo; las demás son de obra (NP)."""
+    id: Optional[int]
+    nombre: str
+    creada_en: str                # ISO 8601 (YYYY-MM-DD)
+    creado_por: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class EventoAuditoria:
     """Un evento de auditoría (tabla seguridad.auditoria). SIN dinero directo:
     los precios viajan dentro de antes/despues como parte del estado, nunca hacia la IA."""

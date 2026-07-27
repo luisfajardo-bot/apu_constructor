@@ -16,6 +16,14 @@ CREATE TABLE IF NOT EXISTS insumos (
 );
 CREATE INDEX IF NOT EXISTS idx_insumo_cod ON insumos(codigo);
 
+-- Una lista = una tarifa. La id 1 es SIEMPRE 'Principal' (la siembra init_schema).
+CREATE TABLE IF NOT EXISTS lista_precios (
+    id         INTEGER PRIMARY KEY,
+    nombre     TEXT NOT NULL UNIQUE,
+    creada_en  TEXT NOT NULL,      -- ISO (YYYY-MM-DD)
+    creado_por TEXT                -- user_id (NULL = sistema/migración)
+);
+
 CREATE TABLE IF NOT EXISTS insumo_precios (
     -- SQLite autollena un INTEGER PRIMARY KEY (rowid); sin AUTOINCREMENT para portar limpio.
     -- Postgres: id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
@@ -27,6 +35,10 @@ CREATE TABLE IF NOT EXISTS insumo_precios (
     fecha         TEXT,          -- ISO (YYYY-MM-DD)
     vigente       INTEGER NOT NULL DEFAULT 1,
     creado_por    TEXT,          -- user_id de quien fijó el precio (NULL = histórico/seed)
+    lista_id      INTEGER NOT NULL DEFAULT 1 REFERENCES lista_precios(id),
+    -- NOTA (drift vs. base migrada): SQLite no permite ADD COLUMN con NOT NULL DEFAULT
+    -- *y* REFERENCES a la vez, así que una base preexistente recibe la columna SIN la
+    -- FK (ver PreciosDB.init_schema). Misma clase de drift ya anotada en db/pg/precios.sql.
     FOREIGN KEY (insumo_id) REFERENCES insumos(id)
 );
 
@@ -36,3 +48,4 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 
 CREATE INDEX IF NOT EXISTS idx_precio_ins ON insumo_precios(insumo_id, vigente);
+CREATE INDEX IF NOT EXISTS idx_precio_ins_lista ON insumo_precios(insumo_id, lista_id, vigente);

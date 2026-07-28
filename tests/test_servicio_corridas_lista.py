@@ -78,6 +78,51 @@ def test_confirmar_item_costea_con_la_lista(alm, np):
     assert v["items"][0]["costo_unitario"] == 8400
 
 
+def test_construir_corrida_stream_progreso_costea_con_la_lista(alm, np):
+    """construir_corrida_stream pinta la fila EN VIVO en el evento 'progress' con el
+    Assembler que arma esa corrida (el que ve el usuario mientras se arma, antes de
+    que 'done' recalcule vía vista_corrida). Si ese Assembler se queda sin la lista,
+    el usuario ve precios de Principal durante todo el armado y recién se autocorrige
+    al final. Hay que drenar el generador (no construir_corrida, que descarta el
+    progreso) para capturar el costo tal como lo ve el usuario en vivo."""
+    eventos = list(svc.construir_corrida_stream(
+        alm, "acta.xlsx", _items(), "DIURNO", False,
+        carpeta_id=None, lista_precios_id=np))
+    progreso = [payload for evento, payload in eventos if evento == "progress"]
+    assert len(progreso) == 1
+    costo_en_vivo = progreso[0]["fila"]["costo_unitario"]
+    assert costo_en_vivo == 8400          # 2 * 4200 (precio vigente en la lista NP)
+    assert costo_en_vivo != 7000          # distinto de Principal (2 * 3500): el test discrimina
+
+
+def test_confirmar_item_construye_el_assembler_con_la_lista_de_la_corrida(alm, np, monkeypatch):
+    """El Assembler que arma confirmar_item hoy no se observa desde afuera: _estructura()
+    le quita el dinero antes de persistir la composición, y la función retorna
+    vista_corrida(...), que recalcula por su cuenta con su PROPIO PricingEngine. Por
+    eso quitarle la lista a ESE Assembler no cambia ningún número observable hoy
+    (test_confirmar_item_costea_con_la_lista en realidad valida vista_corrida, no este
+    Assembler). Es frágil: un refactor futuro que lea el costo de este Assembler
+    directamente -en vez de volver a llamar a vista_corrida- empezaría a servir
+    precios de catálogo en una corrida NP, sin que nada avise. Este test protege el
+    invariante DIRECTAMENTE: espía la construcción del Assembler (parcheando el
+    nombre en el módulo servicio.corridas) y afirma que confirmar_item lo ata a la
+    lista de la corrida, sin depender de que el costo se filtre hacia afuera."""
+    class _AssemblerEspia(svc.Assembler):
+        capturado: dict = {}
+
+        def __init__(self, almacen, advisor=None, lista_id=None):
+            _AssemblerEspia.capturado["lista_id"] = lista_id
+            super().__init__(almacen, advisor=advisor, lista_id=lista_id)
+
+    monkeypatch.setattr(svc, "Assembler", _AssemblerEspia)
+
+    cid = svc.construir_corrida(alm, "acta.xlsx", _items(), "DIURNO", False,
+                                carpeta_id=None, lista_precios_id=np)
+    _AssemblerEspia.capturado.clear()   # descarta la construcción del armado inicial
+    svc.confirmar_item(alm, cid, 0, "NP-3002", "DIURNO")
+    assert _AssemblerEspia.capturado["lista_id"] == np
+
+
 def test_generar_cuadro_costea_con_la_lista(alm, np):
     """Sitio 5/5: `generar_cuadro` arma su PROPIO PricingEngine (no reusa el de
     `congelar`) para costear en vivo los ítems que, estando la corrida ya

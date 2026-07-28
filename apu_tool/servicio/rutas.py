@@ -25,6 +25,7 @@ from apu_tool.servicio import carpetas as carpetas_svc
 from apu_tool.servicio import corridas as svc
 from apu_tool.servicio.carpetas import CarpetaInvalida, CarpetaNoVacia
 from apu_tool.servicio import insumos as insumos_svc
+from apu_tool.servicio import listas as listas_svc
 from apu_tool.servicio import plantillas as plantillas_svc
 from apu_tool.servicio import usuarios as usuarios_svc
 from apu_tool.servicio.auth import requiere_rol
@@ -32,8 +33,8 @@ from apu_tool.servicio.dependencias import get_almacen
 from apu_tool.servicio import limites
 from pydantic import BaseModel
 from apu_tool.servicio.esquemas import (
-    ApuEditIn, ApuNuevoIn, CambiosIn, ConfirmarIn, EstadoIn, InsumoNuevoIn, RolIn, StatusOut,
-    UsuarioInvitarIn)
+    ApuEditIn, ApuNuevoIn, CambiosIn, ConfirmarIn, EstadoIn, InsumoNuevoIn, ListaPreciosIn,
+    RolIn, StatusOut, UsuarioInvitarIn)
 
 
 class CarpetaIn(BaseModel):
@@ -310,6 +311,32 @@ def cuadro(cid: int, alm: Almacen = Depends(get_almacen),
     if out is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return FileResponse(str(out), filename=out.name, media_type=_XLSX)
+
+
+# ---- listas de precios (tarifas) ----
+@router.get("/listas-precios")
+def listar_listas_precios(alm: Almacen = Depends(get_almacen),
+                          _: object = Depends(requiere_rol("consulta"))):
+    return listas_svc.listar(alm)
+
+
+@router.post("/listas-precios")
+def crear_lista_precios(body: ListaPreciosIn, alm: Almacen = Depends(get_almacen),
+                        actor=Depends(requiere_rol("editor"))):
+    try:
+        return listas_svc.crear(alm, body.nombre, actor=actor)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.patch("/listas-precios/{lista_id}")
+def renombrar_lista_precios(lista_id: int, body: ListaPreciosIn,
+                            alm: Almacen = Depends(get_almacen),
+                            actor=Depends(requiere_rol("editor"))):
+    try:
+        return listas_svc.renombrar(alm, lista_id, body.nombre, actor=actor)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/insumos")

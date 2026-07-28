@@ -27,6 +27,10 @@ class CambiosIn(BaseModel):
     cambios: list[CambioIn]
 
 
+class ListaPreciosIn(BaseModel):
+    nombre: str
+
+
 class InsumoNuevoIn(BaseModel):
     codigo: str
     nombre: str

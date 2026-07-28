@@ -454,9 +454,11 @@ def crear_insumo(body: InsumoNuevoIn, alm: Almacen = Depends(get_almacen),
 @router.get("/apus")
 def listar_apus(q: Optional[str] = None, grupo: Optional[str] = None,
                 turno: Optional[str] = None, limit: int = 100, offset: int = 0,
+                lista: Optional[int] = None,
                 alm: Almacen = Depends(get_almacen),
                 _: object = Depends(requiere_rol("consulta"))):
-    return apus_svc.listar(alm, q, grupo, turno, limit, offset)
+    _validar_lista(alm, lista)
+    return apus_svc.listar(alm, q, grupo, turno, limit, offset, lista)
 
 
 @router.post("/apus/crear")
@@ -500,9 +502,11 @@ def apus_plantilla(_: object = Depends(requiere_rol("editor"))):
 
 
 @router.get("/apus/{codigo}/{turno}")
-def detalle_apu(codigo: str, turno: str, alm: Almacen = Depends(get_almacen),
+def detalle_apu(codigo: str, turno: str, lista: Optional[int] = None,
+                alm: Almacen = Depends(get_almacen),
                 _: object = Depends(requiere_rol("consulta"))):
-    d = apus_svc.detalle(alm, codigo, turno)
+    _validar_lista(alm, lista)
+    d = apus_svc.detalle(alm, codigo, turno, lista_id=lista)
     if d is None:
         raise HTTPException(status_code=404, detail="APU no encontrado.")
     return d

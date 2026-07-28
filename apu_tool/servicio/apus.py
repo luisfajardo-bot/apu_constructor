@@ -14,13 +14,15 @@ from apu_tool.dominio.pricing import PricingEngine
 
 
 def listar(alm: Almacen, q: Optional[str] = None, grupo: Optional[str] = None,
-           turno: Optional[str] = None, limit: int = 100, offset: int = 0) -> dict:
+           turno: Optional[str] = None, limit: int = 100, offset: int = 0,
+           lista_id: Optional[int] = None) -> dict:
     items, total = alm.apus.list_apus(q, grupo, turno, limit, offset)
     counts = alm.apus.component_counts()
     # Costo unitario por APU de la página (para verlo sin desplegar). Un solo
-    # PricingEngine reutiliza el caché de candidatos entre APUs. Ve dinero como el
-    # cuadro, pero NUNCA lo pasa a la IA (Invariante #1).
-    eng = PricingEngine(alm)
+    # PricingEngine reutiliza el caché de candidatos entre APUs, y queda atado a
+    # `lista_id` (None = Principal). Ve dinero como el cuadro, pero NUNCA lo pasa
+    # a la IA (Invariante #1).
+    eng = PricingEngine(alm, lista_id=lista_id)
     out = []
     for a in items:
         _comp, costo = eng.cost_apu(a.codigo, a.shift)
@@ -31,11 +33,12 @@ def listar(alm: Almacen, q: Optional[str] = None, grupo: Optional[str] = None,
     return {"items": out, "total": total, "limit": limit, "offset": offset}
 
 
-def detalle(alm: Almacen, codigo: str, turno: str) -> Optional[dict]:
+def detalle(alm: Almacen, codigo: str, turno: str,
+            lista_id: Optional[int] = None) -> Optional[dict]:
     apu = alm.apus.get_apu(codigo, turno)
     if apu is None:
         return None
-    costed, total = PricingEngine(alm).cost_apu(codigo, turno)
+    costed, total = PricingEngine(alm, lista_id=lista_id).cost_apu(codigo, turno)
     return {
         "codigo": apu.codigo, "turno": apu.shift, "nombre": apu.nombre,
         "unidad": apu.unidad, "grupo": apu.grupo, "costo_unitario": total,

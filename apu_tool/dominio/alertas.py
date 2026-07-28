@@ -8,6 +8,7 @@ NUNCA entra al payload de la IA (Invariante #1).
 """
 from __future__ import annotations
 
+from apu_tool.dominio.pricing import CALIDAD_SIN_PRECIO
 from apu_tool.nucleo.models import AssembledApu, MatchStatus
 
 _MOTIVO_CRUCE = {
@@ -23,7 +24,12 @@ def alertas_costeo(a: AssembledApu) -> list[str]:
     motivos: list[str] = []
     for c in a.componentes:
         etiqueta = f"{c.insumo_codigo} {c.insumo_nombre}".strip()
-        if c.costo <= 0 or c.precio_unitario <= 0:          # regla dura: $0 siempre
+        # Va ANTES de la regla del $0 para dar el motivo accionable en vez del genérico.
+        # Solo puede aparecer costeando contra una lista distinta de Principal, así que
+        # el camino histórico queda idéntico.
+        if c.calidad_cruce == CALIDAD_SIN_PRECIO:
+            motivos.append(f"{etiqueta}: sin precio en la lista")
+        elif c.costo <= 0 or c.precio_unitario <= 0:        # regla dura: $0 siempre
             motivos.append(f"{etiqueta}: en $0")
         elif c.calidad_cruce in _MOTIVO_CRUCE:
             motivos.append(f"{etiqueta}: {_MOTIVO_CRUCE[c.calidad_cruce]}")

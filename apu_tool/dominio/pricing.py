@@ -11,15 +11,24 @@ Este módulo NO se le pasa nunca a la IA.
 """
 from __future__ import annotations
 
+from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio import cruce
 from apu_tool.nucleo.models import ApuComponent, CostedComponent
 from apu_tool.nucleo.redondeo import mul_redondeado
 
+# Marca de un componente que no tiene tarifa en la lista contra la que se costea.
+FUENTE_SIN_PRECIO = "sin precio en lista"
+CALIDAD_SIN_PRECIO = "sin_precio_lista"
+
 
 class PricingEngine:
-    def __init__(self, almacen: Almacen):
+    def __init__(self, almacen: Almacen, lista_id: int | None = None):
         self.alm = almacen
+        # La instancia queda ATADA a una lista de precios (None = Principal). Por eso
+        # los tres cachés de abajo NO llevan la lista en la clave: dos listas distintas
+        # son dos instancias distintas y no pueden contaminarse entre sí.
+        self.lista_id = lista_id
         self._cache: dict[str, list] = {}          # codigo -> list[Insumo] candidatos
         self._comp_cache: dict[tuple, list] = {}   # (codigo, shift) -> list[ApuComponent]
         # Memo (codigo, shift) -> costo_unitario, POR INSTANCIA (no global).
@@ -29,11 +38,27 @@ class PricingEngine:
         # es un error de datos; la guarda de ciclos garantiza terminación igual.
         self._apu_cost_cache: dict[tuple, float] = {}
 
+    def _respalda_con_historico(self) -> bool:
+        """Solo la lista Principal usa el precio histórico embebido como respaldo.
+
+        En una lista de obra (NP) ese histórico es una tarifa CONTRACTUAL: usarlo
+        sería costear el no previsto con el precio equivocado en silencio. Preferimos
+        el $0 con alerta explícita (regla de negocio: nada en $0 pasa desapercibido)."""
+        return self.lista_id in (None, config.LISTA_PRINCIPAL_ID)
+
     def _candidatos(self, codigo: str) -> list:
         if not codigo:
             return []
         if codigo not in self._cache:
-            self._cache[codigo] = self.alm.precios.get_candidatos(codigo)
+            # Con lista_id=None se llama SIN el kwarg: mismo call exacto que antes de
+            # esta feature (no solo mismo resultado), para que el camino Principal sea
+            # byte por byte idéntico incluso frente a dobles de prueba/fakes que aún
+            # no conocen el parámetro `lista_id`.
+            if self.lista_id is None:
+                self._cache[codigo] = self.alm.precios.get_candidatos(codigo)
+            else:
+                self._cache[codigo] = self.alm.precios.get_candidatos(
+                    codigo, lista_id=self.lista_id)
         return self._cache[codigo]
 
     def components(self, codigo: str, shift: str) -> list:
@@ -76,32 +101,42 @@ class PricingEngine:
         codigos_ins = {comp.insumo_codigo for comps in self._comp_cache.values()
                        for comp in comps
                        if (comp.tipo or "insumo") != "apu" and comp.insumo_codigo}
-        for cod, cands in self.alm.precios.get_candidatos_bulk(codigos_ins).items():
+        for cod, cands in self.alm.precios.get_candidatos_bulk(
+                codigos_ins, lista_id=self.lista_id).items():
             self._cache.setdefault(cod, cands)
 
     def cost_component(self, comp: ApuComponent, _visitando: tuple = ()) -> CostedComponent:
         if (comp.tipo or "insumo") == "apu":
             return self._cost_subapu(comp, _visitando)
         r = cruce.resolver(self._candidatos(comp.insumo_codigo), comp.insumo_nombre)
+        calidad = r.calidad.value
         if r.insumo is not None and r.insumo.precio > 0:        # EXACTO o APROXIMADO
             precio, fuente = r.insumo.precio, r.insumo.fuente_precio
-        else:                                                   # AMBIGUO o HUERFANO
+        elif self._respalda_con_historico():                    # AMBIGUO/HUERFANO en Principal
             precio, fuente = comp.precio_unitario_hist, "histórico"
+        else:                                                   # lista NP: señal, no un número
+            precio, fuente, calidad = 0.0, FUENTE_SIN_PRECIO, CALIDAD_SIN_PRECIO
         costo = mul_redondeado(comp.rendimiento, precio)
         return CostedComponent(
             insumo_codigo=comp.insumo_codigo, insumo_nombre=comp.insumo_nombre,
             unidad=comp.unidad, rendimiento=comp.rendimiento,
             precio_unitario=precio, fuente_precio=fuente, costo=costo,
-            calidad_cruce=r.calidad.value, tipo="insumo", ref_shift="")
+            calidad_cruce=calidad, tipo="insumo", ref_shift="")
 
     def _fallback_historico(self, comp: ApuComponent, sub_shift: str, calidad: str) -> CostedComponent:
-        """Respaldo histórico para un sub-APU que no se puede costear por su árbol
-        (ciclo o sin composición): usa `comp.precio_unitario_hist` tal cual."""
-        precio = comp.precio_unitario_hist
+        """Respaldo de un sub-APU que no se puede costear por su árbol (ciclo o sin
+        composición). En Principal usa `comp.precio_unitario_hist`; en una lista NP ese
+        histórico es tarifa contractual, así que queda en 0 y lo delata la alerta.
+        La `calidad` estructural (ciclo / apu_vacio) se CONSERVA: el problema real no es
+        que falte el precio, es que el árbol está mal."""
+        if self._respalda_con_historico():
+            precio, fuente = comp.precio_unitario_hist, "histórico"
+        else:
+            precio, fuente = 0.0, FUENTE_SIN_PRECIO
         return CostedComponent(
             insumo_codigo=comp.insumo_codigo, insumo_nombre=comp.insumo_nombre,
             unidad=comp.unidad, rendimiento=comp.rendimiento,
-            precio_unitario=precio, fuente_precio="histórico",
+            precio_unitario=precio, fuente_precio=fuente,
             costo=mul_redondeado(comp.rendimiento, precio), calidad_cruce=calidad,
             tipo="apu", ref_shift=sub_shift)
 

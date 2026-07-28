@@ -2,7 +2,7 @@
 import pytest
 
 from apu_tool import config
-from apu_tool.datos.precios_db import PreciosDB
+from apu_tool.datos.precios_db import PreciosDB, _resolver_lista_id
 from apu_tool.nucleo.models import Insumo
 
 
@@ -97,3 +97,24 @@ def test_fuentes_por_lista(precios, np):
     precios.set_precio_por_id(iid, 4200.0, "ACTA NP", lista_id=np)
     assert precios.fuentes(lista_id=np) == ["ACTA NP"]
     assert "ACTA NP" not in precios.fuentes()
+
+
+def test_resolver_lista_id_none_a_principal():
+    """None debe resolverse a la lista Principal (config.LISTA_PRINCIPAL_ID)."""
+    assert _resolver_lista_id(None) == config.LISTA_PRINCIPAL_ID
+
+
+def test_resolver_lista_id_cero_a_cero():
+    """Un id de 0 debe devolverse tal cual, no tratarse como ausencia.
+
+    Esto es crítico: si la función usara el patrón `lista_id or config.LISTA_PRINCIPAL_ID`,
+    un 0 se evaluaría como falsy y caería a Principal en silencio, costeando contra
+    la tarifa equivocada sin avisar. Por eso la función usa `if lista_id is not None`
+    en lugar de `if lista_id`.
+    """
+    assert _resolver_lista_id(0) == 0
+
+
+def test_resolver_lista_id_id_normal():
+    """Un id normal debe devolverse tal cual."""
+    assert _resolver_lista_id(7) == 7

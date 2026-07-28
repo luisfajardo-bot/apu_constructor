@@ -218,6 +218,7 @@ export interface InsumoNuevo {
   grupo: string;
   precio: number;
   fuente: string;
+  lista_id?: number | null;
 }
 
 export interface ComponenteNuevo {
@@ -273,7 +274,10 @@ export interface ListaApus {
   offset: number;
 }
 
-// Fila candidata a crear / ya existente en una importación de insumos
+// Fila candidata a crear / ya existente en una importación de insumos.
+// `motivo`: solo presente en filas de `invalida` cuando el backend puede explicar
+// por qué (p.ej. sin precio en el archivo y sin tarifa previa en la lista destino);
+// ausente cuando la fila es inválida por no traer código.
 export interface InsumoImportFila {
   codigo: string;
   nombre: string;
@@ -281,6 +285,7 @@ export interface InsumoImportFila {
   grupo: string;
   precio: number;
   fuente: string;
+  motivo?: string;
 }
 
 export interface VinculoSubApu {

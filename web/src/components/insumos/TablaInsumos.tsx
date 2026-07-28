@@ -16,11 +16,12 @@ import { cop as fmtMoneda } from "@/lib/moneda";
 interface TablaInsumosProps {
   insumos: Insumo[];
   fuentes?: string[];
+  listaId: number;
   onReload: () => void;
   puedeEditar?: boolean;
 }
 
-export function TablaInsumos({ insumos, fuentes = [], onReload, puedeEditar = false }: TablaInsumosProps) {
+export function TablaInsumos({ insumos, fuentes = [], listaId, onReload, puedeEditar = false }: TablaInsumosProps) {
   const { setCampo, descartar, cambios, count, dirty } = useDirtyRows(
     insumos.map((i) => ({ id: i.id, precio: i.precio, fuente: i.fuente }))
   );
@@ -32,7 +33,7 @@ export function TablaInsumos({ insumos, fuentes = [], onReload, puedeEditar = fa
 
   async function abrirDetalle(id: number) {
     try {
-      const d = await getInsumo(id);
+      const d = await getInsumo(id, listaId);
       setDetalle(d);
       setDetalleOpen(true);
     } catch {
@@ -45,7 +46,7 @@ export function TablaInsumos({ insumos, fuentes = [], onReload, puedeEditar = fa
     if (cs.length === 0) return;
     setGuardando(true);
     try {
-      const res = await aplicarCambios(cs);
+      const res = await aplicarCambios(cs, listaId);
       const errCount = res.errores?.length ?? 0;
       if (errCount === 0) {
         toast.success(`${res.aplicados} cambio(s) guardado(s) correctamente`);
@@ -179,7 +180,9 @@ export function TablaInsumos({ insumos, fuentes = [], onReload, puedeEditar = fa
                         }
                         title={puedeEditar ? "Clic para editar" : undefined}
                       >
-                        {fmtMoneda(precioEdit as number)}
+                        {ins.sin_precio && dirty[ins.id]?.precio === undefined
+                          ? <span className="text-muted-foreground">—</span>
+                          : fmtMoneda(precioEdit as number)}
                       </button>
                     )}
                   </td>
@@ -265,7 +268,9 @@ export function TablaInsumos({ insumos, fuentes = [], onReload, puedeEditar = fa
                 <span className="text-muted-foreground">Grupo</span>
                 <span>{detalle.insumo.grupo}</span>
                 <span className="text-muted-foreground">Precio vigente</span>
-                <span className="font-medium">{fmtMoneda(detalle.insumo.precio)}</span>
+                <span className="font-medium">
+                  {detalle.insumo.sin_precio ? "—" : fmtMoneda(detalle.insumo.precio)}
+                </span>
                 <span className="text-muted-foreground">Fuente</span>
                 <span>{detalle.insumo.fuente}</span>
                 <span className="text-muted-foreground">Clasificación</span>

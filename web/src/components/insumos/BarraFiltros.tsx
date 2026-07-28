@@ -9,31 +9,40 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { getGrupos, getFuentes } from "@/api/insumos";
+import type { ListaPrecios } from "@/lib/tipos";
 
 export interface FiltrosState {
   q: string;
   grupo: string;
   fuente: string;
   clasificacion: string;
+  lista: number;
+  sinPrecio: boolean;
   offset: number;
 }
 
 interface BarraFiltrosProps {
   filtros: FiltrosState;
+  listas: ListaPrecios[];
   total: number;
   limit: number;
   onChange: (f: Partial<FiltrosState>) => void;
 }
 
-export function BarraFiltros({ filtros, total, limit, onChange }: BarraFiltrosProps) {
+export function BarraFiltros({ filtros, listas, total, limit, onChange }: BarraFiltrosProps) {
   const [grupos, setGrupos] = useState<string[]>([]);
   const [fuentes, setFuentes] = useState<string[]>([]);
   const [inputQ, setInputQ] = useState(filtros.q);
 
   useEffect(() => {
     getGrupos().then(setGrupos).catch(() => {});
-    getFuentes().then(setFuentes).catch(() => {});
   }, []);
+
+  // Las fuentes son un atributo de la fila de precio de CADA lista: hay que
+  // recargarlas cuando la lista activa cambia (si no, se ven las de la anterior).
+  useEffect(() => {
+    getFuentes(filtros.lista).then(setFuentes).catch(() => {});
+  }, [filtros.lista]);
 
   // Debounce q
   useEffect(() => {
@@ -50,6 +59,24 @@ export function BarraFiltros({ filtros, total, limit, onChange }: BarraFiltrosPr
 
   return (
     <div className="flex flex-wrap gap-2 items-center px-3 py-2 border-b bg-muted/30">
+      <Select
+        value={String(filtros.lista)}
+        onValueChange={(v) =>
+          onChange({ lista: Number(v), fuente: "", clasificacion: "", sinPrecio: false, offset: 0 })
+        }
+      >
+        <SelectTrigger size="sm" className="w-44 text-xs">
+          <SelectValue placeholder="Lista de precios" />
+        </SelectTrigger>
+        <SelectContent>
+          {listas.map((l) => (
+            <SelectItem key={l.id} value={String(l.id)}>
+              {l.nombre}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
       <Input
         className="h-7 w-48 text-xs"
         placeholder="Buscar código / nombre…"
@@ -78,7 +105,7 @@ export function BarraFiltros({ filtros, total, limit, onChange }: BarraFiltrosPr
         value={filtros.fuente || "__all__"}
         onValueChange={(v) => onChange({ fuente: v === "__all__" ? "" : v, offset: 0 })}
       >
-        <SelectTrigger size="sm" className="w-36 text-xs">
+        <SelectTrigger size="sm" className="w-36 text-xs" disabled={filtros.sinPrecio}>
           <SelectValue placeholder="Todas las fuentes" />
         </SelectTrigger>
         <SelectContent>
@@ -97,7 +124,7 @@ export function BarraFiltros({ filtros, total, limit, onChange }: BarraFiltrosPr
           onChange({ clasificacion: v === "__all__" ? "" : v, offset: 0 })
         }
       >
-        <SelectTrigger size="sm" className="w-32 text-xs">
+        <SelectTrigger size="sm" className="w-32 text-xs" disabled={filtros.sinPrecio}>
           <SelectValue placeholder="Clasificación" />
         </SelectTrigger>
         <SelectContent>
@@ -106,6 +133,16 @@ export function BarraFiltros({ filtros, total, limit, onChange }: BarraFiltrosPr
           <SelectItem value="interno">Solo interno</SelectItem>
         </SelectContent>
       </Select>
+
+      <Button
+        size="xs"
+        variant={filtros.sinPrecio ? "default" : "outline"}
+        disabled={Boolean(filtros.fuente || filtros.clasificacion)}
+        title="Insumos sin tarifa en la lista seleccionada"
+        onClick={() => onChange({ sinPrecio: !filtros.sinPrecio, offset: 0 })}
+      >
+        Sin precio
+      </Button>
 
       <span className="ml-auto text-xs text-muted-foreground">
         {total} insumos · pág. {page}/{totalPages}

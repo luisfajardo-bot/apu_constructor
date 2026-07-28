@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { listarInsumos, getFuentes, type ListarInsumosParams } from "@/api/insumos";
-import type { Insumo } from "@/lib/tipos";
+import { listarListas } from "@/api/listas";
+import { LISTA_PRINCIPAL_ID, type Insumo, type ListaPrecios } from "@/lib/tipos";
 import { BarraFiltros, type FiltrosState } from "@/components/insumos/BarraFiltros";
 import { TablaInsumos } from "@/components/insumos/TablaInsumos";
 import { Button } from "@/components/ui/button";
@@ -19,8 +20,11 @@ export default function Insumos() {
     grupo: "",
     fuente: "",
     clasificacion: "",
+    lista: LISTA_PRINCIPAL_ID,
+    sinPrecio: false,
     offset: 0,
   });
+  const [listas, setListas] = useState<ListaPrecios[]>([]);
   const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [total, setTotal] = useState(0);
   const [fuentes, setFuentes] = useState<string[]>([]);
@@ -36,11 +40,13 @@ export default function Insumos() {
       const params: ListarInsumosParams = {
         limit: LIMIT,
         offset: f.offset,
+        lista: f.lista,
       };
       if (f.q) params.q = f.q;
       if (f.grupo) params.grupo = f.grupo;
       if (f.fuente) params.fuente = f.fuente;
       if (f.clasificacion) params.clasificacion = f.clasificacion;
+      if (f.sinPrecio) params.sin_precio = true;
 
       const res = await listarInsumos(params);
       setInsumos(res.items);
@@ -54,8 +60,14 @@ export default function Insumos() {
   }, []);
 
   useEffect(() => {
-    getFuentes().then(setFuentes).catch(() => {});
+    listarListas().then(setListas).catch(() => {});
   }, []);
+
+  // Las fuentes son atributo de precio de la lista activa: recargar al cambiarla
+  // (TablaInsumos las usa para el autocompletado del editor de fuente).
+  useEffect(() => {
+    getFuentes(filtros.lista).then(setFuentes).catch(() => {});
+  }, [filtros.lista]);
 
   useEffect(() => {
     cargar(filtros);
@@ -68,6 +80,9 @@ export default function Insumos() {
   function recargar() {
     cargar(filtros);
   }
+
+  const listaActivaNombre =
+    listas.find((l) => l.id === filtros.lista)?.nombre ?? "Principal";
 
   return (
     <div className="flex flex-col h-full">
@@ -96,8 +111,16 @@ export default function Insumos() {
         )}
       </div>
 
+      {filtros.lista !== LISTA_PRINCIPAL_ID && (
+        <div className="px-4 py-1.5 text-xs border-b bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          Editando la lista <span className="font-semibold">{listaActivaNombre}</span>.
+          Los precios que cambies aquí NO afectan la lista Principal.
+        </div>
+      )}
+
       <BarraFiltros
         filtros={filtros}
+        listas={listas}
         total={total}
         limit={LIMIT}
         onChange={cambiarFiltros}
@@ -112,6 +135,7 @@ export default function Insumos() {
       <TablaInsumos
         insumos={insumos}
         fuentes={fuentes}
+        listaId={filtros.lista}
         onReload={recargar}
         puedeEditar={puedeEditar}
       />
@@ -121,12 +145,15 @@ export default function Insumos() {
           <DialogoImportarInsumos
             open={importarOpen}
             onOpenChange={setImportarOpen}
+            listaId={filtros.lista}
+            listaNombre={listaActivaNombre}
             onAplicado={recargar}
           />
 
           <DialogoAgregarInsumo
             open={agregarOpen}
             onOpenChange={setAgregarOpen}
+            listaId={filtros.lista}
             onCreado={recargar}
           />
         </>

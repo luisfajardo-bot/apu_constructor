@@ -13,6 +13,7 @@ import { crearInsumo } from "@/api/autoria";
 interface DialogoAgregarInsumoProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  listaId: number;
   onCreado: () => void;
 }
 
@@ -40,6 +41,7 @@ const inputCls =
 export function DialogoAgregarInsumo({
   open,
   onOpenChange,
+  listaId,
   onCreado,
 }: DialogoAgregarInsumoProps) {
   const [c, setC] = useState<Campos>(VACIO);
@@ -78,6 +80,7 @@ export function DialogoAgregarInsumo({
         grupo: c.grupo.trim(),
         precio: precioNum,
         fuente: c.fuente.trim(),
+        lista_id: listaId,
       });
       toast.success(`Insumo ${ins.codigo} creado`);
       handleOpenChange(false);

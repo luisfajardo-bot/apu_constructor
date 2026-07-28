@@ -14,6 +14,8 @@ import { cop } from "@/lib/moneda";
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  listaId: number;
+  listaNombre: string;
   onAplicado: () => void;
 }
 
@@ -23,7 +25,7 @@ type Estado =
   | { fase: "preview"; prev: ImportInsumosUpsertPreview }
   | { fase: "aplicando" };
 
-export function DialogoImportarInsumos({ open, onOpenChange, onAplicado }: Props) {
+export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombre, onAplicado }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const archivoRef = useRef<File | null>(null);
   const [estado, setEstado] = useState<Estado>({ fase: "idle" });
@@ -50,6 +52,7 @@ export function DialogoImportarInsumos({ open, onOpenChange, onAplicado }: Props
     try {
       const form = new FormData();
       form.append("archivo", archivo);
+      form.append("lista_id", String(listaId));
       const prev = await previewImportarInsumos(form);
       setEstado({ fase: "preview", prev });
     } catch (e: unknown) {
@@ -74,6 +77,7 @@ export function DialogoImportarInsumos({ open, onOpenChange, onAplicado }: Props
     try {
       const form = new FormData();
       form.append("archivo", archivo);
+      form.append("lista_id", String(listaId));
       const res = await aplicarImportarInsumos(form);
       const errCount = res.errores?.length ?? 0;
       const resumen = `${res.creados} creado(s), ${res.actualizados} actualizado(s)`;
@@ -103,6 +107,9 @@ export function DialogoImportarInsumos({ open, onOpenChange, onAplicado }: Props
         <p className="text-xs text-muted-foreground">
           Con nombre: crea el insumo o, si ya existe, actualiza su precio. Sin nombre: solo
           actualiza el precio por código.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Se importará sobre la lista <span className="font-semibold">{listaNombre}</span>.
         </p>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -143,8 +150,13 @@ export function DialogoImportarInsumos({ open, onOpenChange, onAplicado }: Props
             <Seccion titulo="No encontradas (sin nombre, código inexistente)">
               <Tabla cols={["Código"]} filas={prev.no_encontrada.map((n) => [n.codigo])} />
             </Seccion>
-            <Seccion titulo="Inválidas (sin código)">
-              <Tabla cols={["Nombre"]} filas={prev.invalida.map((f) => [f.nombre])} />
+            <Seccion titulo="Inválidas">
+              <Tabla cols={["Código", "Nombre", "Motivo"]}
+                     filas={prev.invalida.map((f) => [
+                       f.codigo || "—",
+                       f.nombre || "—",
+                       f.motivo ?? "Falta el código.",
+                     ])} />
             </Seccion>
           </div>
         )}

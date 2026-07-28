@@ -23,6 +23,7 @@ describe("api de listas de precios", () => {
   it("crear manda el nombre por POST", async () => {
     const spy = mockFetch({ id: 2, nombre: "NP Calle 13", creada_en: "2026-07-27" });
     const lista = await crearLista("NP Calle 13");
+    expect(spy.mock.calls[0][0]).toContain("/listas-precios");
     expect(spy.mock.calls[0][1].method).toBe("POST");
     expect(JSON.parse(spy.mock.calls[0][1].body as string)).toEqual({ nombre: "NP Calle 13" });
     expect(lista.id).toBe(2);

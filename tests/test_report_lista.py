@@ -1,7 +1,6 @@
 """El cuadro dice con qué tarifa se emitió: sin eso, un cuadro NP y uno contractual
 son indistinguibles en el archivo."""
 import openpyxl
-import pytest
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.report import write_report

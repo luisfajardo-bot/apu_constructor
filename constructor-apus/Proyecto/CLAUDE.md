@@ -32,7 +32,7 @@ pip install -r requirements.txt
 
 python run_cli.py demo      # semilla + ejemplo + cuadro resumen (todo)
 python run_cli.py seed      # semillar las bases desde el Excel histórico
-python run_cli.py seed --force  # re-semillar (borra datos mantenidos)
+python run_cli.py seed --force  # re-semillar (borra datos mantenidos Y listas NP, sin Excel del que recuperarlas)
 python run_cli.py build <licitacion.xlsx>
 python run_cli.py status
 python run_cli.py db price <codigo>     # precio vigente + historial de un insumo
@@ -54,7 +54,7 @@ lista licitación ──► matching ──► IA acotada (sin dinero) ──►
                                        └─► motor de precios ──► cuadro resumen (Excel)
 
 Interfaces sobre el mismo pipeline (dominio/pipeline.py):
-  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 44 endpoints) + web/ (React) para multiusuario
+  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 47 endpoints) + web/ (React) para multiusuario
 ```
 
 `apu_tool/config.py` es transversal, fuera de cualquier paquete: rutas, umbrales de
@@ -117,6 +117,7 @@ matching, modelo de IA, clasificación de precios.
 | `seguridad_headers.py` | middleware de headers de seguridad (HSTS, CSP, etc.) |
 | `corridas.py`          | lógica de servicio de corridas (armado en vivo) |
 | `insumos.py`           | lógica de servicio para editar insumos |
+| `listas.py`            | listas de precios (tarifas): Principal + una por obra de NP |
 | `autoria.py`           | alta de insumos/APUs nuevos |
 | `subapus.py`           | migración: marca componentes que son sub-APU |
 | `apus.py`              | lectura de la biblioteca de APUs |
@@ -156,6 +157,19 @@ matching, modelo de IA, clasificación de precios.
   (`db update-price`) no toca los APUs, que toman el precio vigente al costear.
   El contrato de almacenamiento está en `datos/repositorio.py` (Protocol) para que un
   backend de nube sea un reemplazo limpio.
+- **Listas de precios (tarifas).** El precio de un insumo es *por lista*: la lista
+  `Principal` (id 1, `config.LISTA_PRINCIPAL_ID`, intocable — no se renombra ni se
+  borra) es la del catálogo, y cada obra de No Previstos (NP) puede tener la suya
+  (tabla `lista_precios`, columna `insumo_precios.lista_id NOT NULL DEFAULT 1`). Una
+  corrida elige su lista **al crearse** (`corrida.lista_precios_id`, sin FK) y no la
+  cambia — no existe ningún `set_lista`. Costeando contra una lista que no es
+  Principal, un insumo sin tarifa **no** cae al precio histórico embebido: queda en
+  $0 con alerta explícita (`calidad_cruce = sin_precio_lista`), porque usar el
+  histórico sería cobrar el no previsto con la tarifa contractual sin que nadie se
+  entere. Si el insumo existe pero le falta precio en el catálogo (Principal), se
+  costea con el histórico pero con alerta (`sin_precio_catalogo`) — antes era un
+  underbid silencioso. API: `GET/POST /api/listas-precios`, `PATCH
+  /api/listas-precios/{id}` (sin DELETE, a propósito).
 - **Salidas:** `salidas/` (cuadros) y `ejemplos/` (licitaciones de ejemplo).
 - Fuentes de precio: `PRECIO IDU` se trata como **público**; el resto
   (`COSTO INTERNO`, `COMPRAS…`, etc.) como **interno/confidencial**
@@ -171,3 +185,7 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
 - No le pases dinero a la IA (invariante #1).
 - No edites el Excel fuente ni borres `data/`, `salidas/`, `ejemplos/`.
 - No dupliques lógica de orquestación: reúsala desde `pipeline.py`.
+- No hagas que una lista que no sea Principal caiga al precio histórico ni al de
+  Principal: el respaldo silencioso es justo lo que esta feature evita.
+- No borres listas de precios: una corrida guarda su `lista_precios_id` sin FK, y
+  `seed --force` ya las destruye sin poder recuperarlas del Excel (ver Comandos).

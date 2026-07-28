@@ -20,7 +20,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 33 plane
 
 ## Otros
 
-_(vacío)_
+- [[Otros/listas-precios-np|Listas de precios y APUs de No Previstos (NP)]]
 
 ## Specs (diseños)
 

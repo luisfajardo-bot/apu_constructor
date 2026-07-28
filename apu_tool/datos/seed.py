@@ -198,7 +198,9 @@ def seed(almacen: Optional[Almacen] = None, xlsx_path: Optional[Path] = None,
     if (c.get("apus", 0) or c.get("insumos", 0)) and not force:
         raise SeedExistente(
             "precios.db/apus.db ya tienen datos. Usa --force para re-semillar "
-            "(¡borra correcciones mantenidas!).")
+            "(¡borra correcciones mantenidas Y las listas de precios (tarifas NP) "
+            "cargadas a mano! A diferencia del resto, esas listas no viven en "
+            "ningún Excel: si las borras, no hay de dónde recuperarlas).")
 
     xlsx_path = Path(xlsx_path) if xlsx_path else config.detect_source_xlsx()
     if not xlsx_path or not xlsx_path.exists():
@@ -208,6 +210,9 @@ def seed(almacen: Optional[Almacen] = None, xlsx_path: Optional[Path] = None,
 
     # Resetea SOLO el catálogo (precios + apus): re-sembrar NO debe borrar las
     # corridas del usuario (son estado de aplicación, no datos de la fuente).
+    # OJO: precios.reset() también dropea `lista_precios` (las tarifas NP creadas
+    # a mano) — a diferencia de insumos/apus, esas NO se pueden re-sembrar desde el
+    # Excel. Ver la advertencia en el mensaje de SeedExistente más arriba.
     alm.reset_catalogo()
     wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
     try:

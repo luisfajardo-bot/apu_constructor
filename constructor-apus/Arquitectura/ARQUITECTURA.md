@@ -30,9 +30,9 @@ abarata cada migración (local→nube, CLI→web).
 
 | Nivel | Capa | Responsabilidad | Estado |
 |------:|------|-----------------|--------|
-| 01 | **Plataforma de datos** | Dos dominios canónicos y separados: **Precios** (catálogo + libro de precios) y **APUs** (biblioteca histórica). Fuente de verdad. SQLite hoy → Postgres/nube después. Acceso por repositorios + fachada `Almacen`. | existe hoy (SQLite + Postgres) |
+| 01 | **Plataforma de datos** | Dos dominios canónicos y separados: **Precios** (catálogo + libro de precios, con tarifas por lista — tabla `lista_precios` + `insumo_precios.lista_id`) y **APUs** (biblioteca histórica). Fuente de verdad. SQLite hoy → Postgres/nube después. Acceso por repositorios + fachada `Almacen`. | existe hoy (SQLite + Postgres) |
 | 02 | **Dominio / motor** | Lógica pura y reutilizable, sin UI ni red: lectura de entrada, matching, ensamblado, IA acotada, costeo, reporte, orquestación. Es una **librería con API clara**. | existe hoy |
-| 03 | **Servicio / API** | Expone las operaciones del dominio por HTTP (FastAPI): mantener precios, mantener APUs, armar licitación, generar cuadro, chequeo de integridad. Auth ligera de equipo. | existe hoy (FastAPI, 44 endpoints) |
+| 03 | **Servicio / API** | Expone las operaciones del dominio por HTTP (FastAPI): mantener precios, mantener APUs, mantener listas de precios, armar licitación, generar cuadro, chequeo de integridad. Auth ligera de equipo. | existe hoy (FastAPI, 47 endpoints) |
 | 04 | **Interfaz** | App web sobre la API (destino); CLI/GUI para operación. | existe hoy (CLI, GUI y web) |
 
 ### Transversales (invariantes)
@@ -42,6 +42,11 @@ abarata cada migración (local→nube, CLI→web).
   impide después.
 - **Aislamiento de almacenamiento:** los repositorios son la costura que permite local→nube
   sin reescribir el dominio.
+- **Listas de precios:** el precio de un insumo es *por lista* (`insumo_precios.lista_id`,
+  tabla `lista_precios`); la lista `Principal` (id 1) es el ancla del invariante
+  `lista_id = None` ≡ Principal ≡ comportamiento histórico. Una corrida fija su lista
+  **al crearse** (`corrida.lista_precios_id`, sin FK) y no la cambia; en una lista que
+  no es Principal no hay respaldo silencioso al precio histórico (queda en $0 con alerta).
 
 ## Estructura de carpetas (objetivo)
 
@@ -76,10 +81,10 @@ intento_plan/
 │   │   ├── integridad.py          #   chequeo de integridad APU↔insumo
 │   │   └── pipeline.py            #   orquestación (usa datos + dominio)
 │   │
-│   ├── servicio/                  ── NIVEL 03 · API (FastAPI) — 44 endpoints
+│   ├── servicio/                  ── NIVEL 03 · API (FastAPI) — 47 endpoints
 │   │   ├── app.py   rutas.py   dependencias.py   esquemas.py
 │   │   ├── auth.py   limites.py   seguridad_headers.py
-│   │   └── corridas.py   insumos.py   autoria.py   subapus.py   apus.py
+│   │   └── corridas.py   insumos.py   listas.py   autoria.py   subapus.py   apus.py
 │   │       carpetas.py   usuarios.py   auditoria.py   supabase_admin.py   plantillas.py
 │   │
 │   └── interfaz/                  ── NIVEL 04 · interfaces
@@ -106,7 +111,7 @@ el historial de features desde entonces).
 2. ✅ **Dominio como librería con API clara.**
 3. ✅ **Postgres** — `datos/pg/` implementa los repositorios contra Supabase; `datos/almacen.py`
    elige el backend. Migración con `datos/migracion_pg.py`.
-4. ✅ **Capa de servicio / API (FastAPI)** — `servicio/`, 44 endpoints, auth Supabase + RBAC,
+4. ✅ **Capa de servicio / API (FastAPI)** — `servicio/`, 47 endpoints, auth Supabase + RBAC,
    rate limiting, headers de seguridad.
 5. ✅ **App web** — `web/` (React + TypeScript + Vite), consume la API, servida por
    `servicio/app.py` desde `web/dist`.

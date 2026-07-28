@@ -43,3 +43,7 @@ ejemplos/~$*.xlsx
 # El resto de constructor-apus/.obsidian/ (plugins, apariencia, grafo) sí se versiona.
 constructor-apus/.obsidian/workspace.json
 constructor-apus/.obsidian/workspace-mobile.json
+
+# Scratch de subagent-driven-development (briefs, reportes, diffs de review, ledger).
+# Es andamiaje de la sesión de trabajo, no del producto; nunca se versiona.
+.superpowers/

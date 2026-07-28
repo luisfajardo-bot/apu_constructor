@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { getGrupos, getFuentes } from "@/api/insumos";
-import type { ListaPrecios } from "@/lib/tipos";
+import { LISTA_PRINCIPAL_ID, type ListaPrecios } from "@/lib/tipos";
 
 export interface FiltrosState {
   q: string;
@@ -27,9 +27,21 @@ interface BarraFiltrosProps {
   total: number;
   limit: number;
   onChange: (f: Partial<FiltrosState>) => void;
+  puedeEditar?: boolean;
+  onCrearLista?: () => void;
+  onRenombrarLista?: () => void;
 }
 
-export function BarraFiltros({ filtros, listas, total, limit, onChange }: BarraFiltrosProps) {
+export function BarraFiltros({
+  filtros,
+  listas,
+  total,
+  limit,
+  onChange,
+  puedeEditar = false,
+  onCrearLista,
+  onRenombrarLista,
+}: BarraFiltrosProps) {
   const [grupos, setGrupos] = useState<string[]>([]);
   const [fuentes, setFuentes] = useState<string[]>([]);
   const [inputQ, setInputQ] = useState(filtros.q);
@@ -76,6 +88,28 @@ export function BarraFiltros({ filtros, listas, total, limit, onChange }: BarraF
           ))}
         </SelectContent>
       </Select>
+
+      {puedeEditar && (
+        <Button
+          size="xs"
+          variant="outline"
+          title="Crear una lista de precios nueva (p. ej. tarifa de una obra No Prevista)"
+          onClick={onCrearLista}
+        >
+          + Nueva
+        </Button>
+      )}
+
+      {puedeEditar && filtros.lista !== LISTA_PRINCIPAL_ID && (
+        <Button
+          size="xs"
+          variant="outline"
+          title="Renombrar la lista de precios seleccionada"
+          onClick={onRenombrarLista}
+        >
+          Renombrar
+        </Button>
+      )}
 
       <Input
         className="h-7 w-48 text-xs"

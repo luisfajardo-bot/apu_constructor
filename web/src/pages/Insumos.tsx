@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
+import { toast } from "sonner";
 import { listarInsumos, getFuentes, type ListarInsumosParams } from "@/api/insumos";
-import { listarListas } from "@/api/listas";
+import { listarListas, crearLista, renombrarLista } from "@/api/listas";
 import { LISTA_PRINCIPAL_ID, type Insumo, type ListaPrecios } from "@/lib/tipos";
 import { BarraFiltros, type FiltrosState } from "@/components/insumos/BarraFiltros";
 import { TablaInsumos } from "@/components/insumos/TablaInsumos";
@@ -62,9 +63,13 @@ export default function Insumos() {
     }
   }, []);
 
-  useEffect(() => {
-    listarListas().then(setListas).catch(() => {});
+  const cargarListas = useCallback(() => {
+    return listarListas().then(setListas).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    cargarListas();
+  }, [cargarListas]);
 
   // Las fuentes son atributo de precio de la lista activa: recargar al cambiarla
   // (TablaInsumos las usa para el autocompletado del editor de fuente).
@@ -94,6 +99,43 @@ export default function Insumos() {
       if (!window.confirm(mensaje)) return;
     }
     setFiltros((prev) => ({ ...prev, ...parcial }));
+  }
+
+  // Crear una lista deja al usuario seleccionado en ella (el flujo real es
+  // "creo la lista de esta obra y la lleno"): si no, el siguiente precio que
+  // edite iría a la Principal por error. Como eso cambia `filtros.lista`, pasa
+  // por `cambiarFiltros` para respetar el guard de cambios sin guardar — si el
+  // usuario cancela la confirmación, la lista queda creada pero no se entra en
+  // ella (no se pierde ninguna edición en curso).
+  async function crearListaNueva() {
+    const nombre = window.prompt(
+      "Nombre de la nueva lista de precios (p. ej. una obra No Prevista)"
+    );
+    if (!nombre || !nombre.trim()) return;
+    try {
+      const nueva = await crearLista(nombre.trim());
+      await cargarListas();
+      cambiarFiltros({ lista: nueva.id, fuente: "", clasificacion: "", sinPrecio: false, offset: 0 });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "No se pudo crear la lista de precios";
+      toast.error(msg);
+    }
+  }
+
+  // Renombrar no cambia la lista activa (mismo id), así que no toca el guard
+  // de cambios sin guardar de la TablaInsumos.
+  async function renombrarListaActual() {
+    if (filtros.lista === LISTA_PRINCIPAL_ID) return; // la Principal no se renombra
+    const actual = listas.find((l) => l.id === filtros.lista);
+    const nombre = window.prompt("Nuevo nombre para la lista", actual?.nombre ?? "");
+    if (!nombre || !nombre.trim()) return;
+    try {
+      await renombrarLista(filtros.lista, nombre.trim());
+      await cargarListas();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "No se pudo renombrar la lista de precios";
+      toast.error(msg);
+    }
   }
 
   function recargar() {
@@ -143,6 +185,9 @@ export default function Insumos() {
         total={total}
         limit={LIMIT}
         onChange={cambiarFiltros}
+        puedeEditar={puedeEditar}
+        onCrearLista={crearListaNueva}
+        onRenombrarLista={renombrarListaActual}
       />
 
       {error && (

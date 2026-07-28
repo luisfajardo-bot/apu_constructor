@@ -248,8 +248,14 @@ class PreciosDB:
             return self._crear_lista(c, limpio, creado_por)
 
     def _crear_lista(self, conn, nombre: str, creado_por: Optional[str]) -> int:
-        if conn.execute("SELECT 1 FROM lista_precios WHERE UPPER(nombre)=UPPER(?)",
-                        (nombre,)).fetchone():
+        # Comparación en Python con normalizar() (quita tildes + MAYÚSCULAS), no con
+        # UPPER() de SQL: UPPER() de SQLite es solo ASCII y no pliega ñ/tildes, así que
+        # "NP Peñón" y "NP PEÑÓN" colarían como listas distintas. Son pocas listas
+        # (unidades), así que traerlas todas y comparar en Python es barato, y la
+        # lógica queda idéntica al backend Postgres (que hará lo mismo).
+        nombre_norm = normalizar(nombre)
+        existentes = conn.execute("SELECT nombre FROM lista_precios").fetchall()
+        if any(normalizar(r["nombre"]) == nombre_norm for r in existentes):
             raise ValueError(f"Ya existe una lista de precios llamada «{nombre}».")
         cur = conn.execute(
             "INSERT INTO lista_precios (nombre, creada_en, creado_por) VALUES (?,?,?)",
@@ -269,8 +275,12 @@ class PreciosDB:
     def _renombrar_lista(self, conn, lista_id: int, nombre: str) -> None:
         if conn.execute("SELECT 1 FROM lista_precios WHERE id=?", (lista_id,)).fetchone() is None:
             raise ValueError(f"No existe la lista de precios id={lista_id}.")
-        if conn.execute("SELECT 1 FROM lista_precios WHERE UPPER(nombre)=UPPER(?) AND id<>?",
-                        (nombre, lista_id)).fetchone():
+        # Mismo criterio que _crear_lista: comparar en Python con normalizar(), no con
+        # UPPER() de SQL (no pliega ñ/tildes).
+        nombre_norm = normalizar(nombre)
+        existentes = conn.execute(
+            "SELECT nombre FROM lista_precios WHERE id<>?", (lista_id,)).fetchall()
+        if any(normalizar(r["nombre"]) == nombre_norm for r in existentes):
             raise ValueError(f"Ya existe una lista de precios llamada «{nombre}».")
         conn.execute("UPDATE lista_precios SET nombre=? WHERE id=?", (nombre, lista_id))
 

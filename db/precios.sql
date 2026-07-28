@@ -36,9 +36,10 @@ CREATE TABLE IF NOT EXISTS insumo_precios (
     vigente       INTEGER NOT NULL DEFAULT 1,
     creado_por    TEXT,          -- user_id de quien fijó el precio (NULL = histórico/seed)
     lista_id      INTEGER NOT NULL DEFAULT 1 REFERENCES lista_precios(id),
-    -- NOTA (drift vs. base migrada): SQLite no permite ADD COLUMN con NOT NULL DEFAULT
-    -- *y* REFERENCES a la vez, así que una base preexistente recibe la columna SIN la
-    -- FK (ver PreciosDB.init_schema). Misma clase de drift ya anotada en db/pg/precios.sql.
+    -- NOTA (drift vs. base migrada): sobre una tabla CON FILAS, SQLite no permite
+    -- ADD COLUMN con NOT NULL DEFAULT *y* REFERENCES a la vez (sobre una tabla vacía
+    -- sí lo permite), así que una base preexistente recibe la columna SIN la FK (ver
+    -- PreciosDB.init_schema). Misma clase de drift ya anotada en db/pg/precios.sql.
     FOREIGN KEY (insumo_id) REFERENCES insumos(id)
 );
 

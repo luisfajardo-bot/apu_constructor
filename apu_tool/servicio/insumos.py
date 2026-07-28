@@ -22,26 +22,33 @@ def _insumo_out(ins) -> dict:
     return {"id": ins.id, "codigo": ins.codigo, "nombre": ins.nombre,
             "unidad": ins.unidad, "grupo": ins.grupo, "precio": ins.precio,
             "fuente": ins.fuente_precio,
-            "clasificacion": config.classify_price_source(ins.fuente_precio)}
+            "clasificacion": config.classify_price_source(ins.fuente_precio),
+            # True = no hay tarifa en la lista consultada (≠ un $0 genuino, que la
+            # regla de negocio prohíbe y la UI debe seguir mostrando como $0).
+            "sin_precio": ins.sin_precio}
 
 
 def listar(alm: Almacen, q: Optional[str] = None, grupo: Optional[str] = None,
            fuente: Optional[str] = None, clasificacion: Optional[str] = None,
-           limit: int = 100, offset: int = 0) -> dict:
-    items, total = alm.precios.list_insumos(q, grupo, fuente, clasificacion, limit, offset)
+           limit: int = 100, offset: int = 0,
+           lista_id: Optional[int] = None, sin_precio: bool = False) -> dict:
+    items, total = alm.precios.list_insumos(q, grupo, fuente, clasificacion, limit, offset,
+                                            lista_id, sin_precio)
     return {"items": [_insumo_out(i) for i in items], "total": total,
             "limit": limit, "offset": offset}
 
 
-def detalle(alm: Almacen, insumo_id: int) -> Optional[dict]:
-    ins = alm.precios.get_insumo_por_id(insumo_id)
+def detalle(alm: Almacen, insumo_id: int, lista_id: Optional[int] = None) -> Optional[dict]:
+    ins = alm.precios.get_insumo_por_id(insumo_id, lista_id=lista_id)
     if ins is None:
         return None
     return {"insumo": _insumo_out(ins),
-            "historial": alm.precios.price_history(ins.codigo, nombre=ins.nombre)}
+            "historial": alm.precios.price_history(ins.codigo, nombre=ins.nombre,
+                                                   lista_id=lista_id)}
 
 
-def aplicar_cambios(alm: Almacen, cambios: list[dict], actor=None) -> dict:
+def aplicar_cambios(alm: Almacen, cambios: list[dict], actor=None,
+                    lista_id: Optional[int] = None) -> dict:
     aplicados, errores = 0, []
     lote = nuevo_lote()
     for c in cambios:
@@ -51,16 +58,18 @@ def aplicar_cambios(alm: Almacen, cambios: list[dict], actor=None) -> dict:
                 raise ValueError(MSG_PRECIO_POSITIVO)
             iid = int(c["insumo_id"])
             fuente = str(c.get("fuente", "") or "")
-            antes_ins = alm.precios.get_insumo_por_id(iid)   # estado previo (lectura)
+            antes_ins = alm.precios.get_insumo_por_id(iid, lista_id=lista_id)
             with alm.transaccion("precios") as conn:
                 alm.precios.set_precio_por_id(iid, precio, fuente, conn=conn,
-                                              creado_por=(actor.user_id if actor else None))
+                                              creado_por=(actor.user_id if actor else None),
+                                              lista_id=lista_id)
                 registrar_auditoria(
                     alm, conn, actor, "precio.editar", "insumo", iid,
                     antes=({"precio": antes_ins.precio, "fuente": antes_ins.fuente_precio}
                            if antes_ins else None),
                     despues={"precio": precio, "fuente": fuente},
-                    contexto={"origen": "edicion", "lote_id": lote})
+                    # lista_id en el contexto: sin esto el log no dice QUÉ tarifa se tocó.
+                    contexto={"origen": "edicion", "lote_id": lote, "lista_id": lista_id})
             aplicados += 1
         except Exception as e:
             errores.append({"insumo_id": c.get("insumo_id"), "error": str(e)})

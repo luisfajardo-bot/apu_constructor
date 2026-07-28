@@ -30,7 +30,7 @@ from apu_tool.servicio.subapus import (
 
 
 # ----------------------------------------------------------------- individual
-def crear_insumo(alm: Almacen, datos: dict, actor=None) -> dict:
+def crear_insumo(alm: Almacen, datos: dict, actor=None, lista_id=None) -> dict:
     codigo = str(datos.get("codigo", "") or "").strip()
     nombre = str(datos.get("nombre", "") or "").strip()
     if not codigo or not nombre:
@@ -44,13 +44,14 @@ def crear_insumo(alm: Almacen, datos: dict, actor=None) -> dict:
                  precio=precio, fuente_precio=str(datos.get("fuente", "") or ""))
     with alm.transaccion("precios") as conn:
         iid = alm.precios.crear_insumo(ins, conn=conn,
-                                       creado_por=(actor.user_id if actor else None))
+                                       creado_por=(actor.user_id if actor else None),
+                                       lista_id=lista_id)
         registrar_auditoria(
             alm, conn, actor, "insumo.crear", "insumo", iid, antes=None,
             despues={"codigo": ins.codigo, "nombre": ins.nombre, "unidad": ins.unidad,
                      "grupo": ins.grupo, "precio": ins.precio, "fuente": ins.fuente_precio},
-            contexto={"origen": "individual"})
-    return _insumo_out(alm.precios.get_insumo_por_id(iid))
+            contexto={"origen": "individual", "lista_id": lista_id})
+    return _insumo_out(alm.precios.get_insumo_por_id(iid, lista_id=lista_id))
 
 
 def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str,
@@ -166,10 +167,12 @@ def borrar_apu(alm: Almacen, codigo: str, shift: str, actor=None) -> dict | None
 
 
 # ------------------------------------------------------------- import insumos
-def _match_identidad(alm: Almacen, codigo: str, nombre: str):
-    """Insumo con (codigo, nombre) exactos (nombre normalizado), o None."""
+def _match_identidad(alm: Almacen, codigo: str, nombre: str, lista_id=None):
+    """Insumo con (codigo, nombre) exactos (nombre normalizado), o None.
+    La identidad es global; el precio devuelto es el de `lista_id` (None = Principal),
+    porque es contra ESE precio que el preview reporta el cambio."""
     nn = normalizar(nombre)
-    for c in alm.precios.get_candidatos(codigo):
+    for c in alm.precios.get_candidatos(codigo, lista_id=lista_id):
         if normalizar(c.nombre) == nn:
             return c
     return None
@@ -228,19 +231,21 @@ def _filas_insumos(contenido: bytes, nombre_archivo: str) -> list[dict]:
     return out
 
 
-def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str) -> dict:
-    """Upsert por fila. Con nombre: identidad código+nombre (crea o actualiza).
-    Sin nombre: actualiza precio por código (único), o marca ambigua/no encontrada."""
+def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
+                             lista_id=None) -> dict:
+    """Upsert por fila CONTRA `lista_id` (None = Principal). Con nombre: identidad
+    código+nombre (crea o actualiza). Sin nombre: actualiza precio por código (único),
+    o marca ambigua/no encontrada."""
     crear, actualizar, ambigua, no_encontrada, invalida = [], [], [], [], []
     for f in _filas_insumos(contenido, nombre_archivo):
         cod, nom = f["codigo"], f["nombre"]
         if not cod:
             invalida.append(f)
         elif nom:
-            match = _match_identidad(alm, cod, nom)
+            match = _match_identidad(alm, cod, nom, lista_id)
             (actualizar.append(_cambio_upsert(match, f)) if match else crear.append(f))
         else:
-            cands = alm.precios.get_candidatos(cod)
+            cands = alm.precios.get_candidatos(cod, lista_id=lista_id)
             if len(cands) == 1:
                 actualizar.append(_cambio_upsert(cands[0], f))
             elif len(cands) > 1:
@@ -253,8 +258,8 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
 
 
 def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
-                             actor=None) -> dict:
-    prev = preview_importar_insumos(alm, contenido, nombre_archivo)
+                             actor=None, lista_id=None) -> dict:
+    prev = preview_importar_insumos(alm, contenido, nombre_archivo, lista_id)
     creados, actualizados, errores = 0, 0, []
     lote = nuevo_lote()
     for f in prev["crear"]:
@@ -265,12 +270,14 @@ def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
                          grupo=f["grupo"], precio=f["precio"], fuente_precio=f["fuente"])
             with alm.transaccion("precios") as conn:
                 iid = alm.precios.crear_insumo(ins, conn=conn,
-                                               creado_por=(actor.user_id if actor else None))
+                                               creado_por=(actor.user_id if actor else None),
+                                               lista_id=lista_id)
                 registrar_auditoria(
                     alm, conn, actor, "insumo.crear", "insumo", iid, antes=None,
                     despues={"codigo": ins.codigo, "nombre": ins.nombre, "unidad": ins.unidad,
                              "grupo": ins.grupo, "precio": ins.precio, "fuente": ins.fuente_precio},
-                    contexto={"origen": "import", "lote_id": lote, "archivo": nombre_archivo})
+                    contexto={"origen": "import", "lote_id": lote, "archivo": nombre_archivo,
+                              "lista_id": lista_id})
             creados += 1
         except ValueError as e:
             errores.append({"codigo": f["codigo"], "error": str(e)})
@@ -283,12 +290,14 @@ def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
             with alm.transaccion("precios") as conn:
                 alm.precios.set_precio_por_id(c["insumo_id"], c["precio_nuevo"], c["fuente_nueva"],
                                               conn=conn,
-                                              creado_por=(actor.user_id if actor else None))
+                                              creado_por=(actor.user_id if actor else None),
+                                              lista_id=lista_id)
                 registrar_auditoria(
                     alm, conn, actor, "precio.editar", "insumo", c["insumo_id"],
                     antes={"precio": c["precio_actual"], "fuente": c["fuente_actual"]},
                     despues={"precio": c["precio_nuevo"], "fuente": c["fuente_nueva"]},
-                    contexto={"origen": "import", "lote_id": lote, "archivo": nombre_archivo})
+                    contexto={"origen": "import", "lote_id": lote, "archivo": nombre_archivo,
+                              "lista_id": lista_id})
             actualizados += 1
         except Exception as e:
             errores.append({"codigo": c["codigo"], "error": str(e)})

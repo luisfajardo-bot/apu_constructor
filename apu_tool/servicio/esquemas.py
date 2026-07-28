@@ -25,6 +25,7 @@ class CambioIn(BaseModel):
 
 class CambiosIn(BaseModel):
     cambios: list[CambioIn]
+    lista_id: Optional[int] = None      # None = Principal
 
 
 class ListaPreciosIn(BaseModel):
@@ -38,6 +39,7 @@ class InsumoNuevoIn(BaseModel):
     grupo: str = ""
     precio: float = 0.0
     fuente: str = ""
+    lista_id: Optional[int] = None      # None = Principal
 
 
 class ComponenteIn(BaseModel):

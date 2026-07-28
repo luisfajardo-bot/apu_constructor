@@ -128,11 +128,13 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
                         use_ai: Optional[bool] = Form(None),
                         carpeta_id: int = Form(...),
                         nombre: Optional[str] = Form(None),
+                        lista_id: Optional[int] = Form(None),
                         archivo: UploadFile = File(...),
                         alm: Almacen = Depends(get_almacen),
                         _: object = Depends(requiere_rol("consulta"))):
     if alm.carpetas.get(carpeta_id) is None:
         raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
+    _validar_lista(alm, lista_id)
     if alm.counts().get("apus", 0) == 0:
         ensure_seeded()
     suf = Path(archivo.filename or "lic.xlsx").suffix or ".xlsx"
@@ -150,7 +152,8 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
     if not items:
         raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
     cid = svc.construir_corrida(alm, archivo.filename or "licitacion", items, turno, use_ai,
-                                carpeta_id=carpeta_id, nombre=nombre)
+                                carpeta_id=carpeta_id, nombre=nombre,
+                                lista_precios_id=lista_id)
     return {"id": cid, "resumen": svc.vista_corrida(alm, cid)["totales"]}
 
 
@@ -191,11 +194,13 @@ async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
                                use_ai: Optional[bool] = Form(None),
                                carpeta_id: int = Form(...),
                                nombre: Optional[str] = Form(None),
+                               lista_id: Optional[int] = Form(None),
                                archivo: UploadFile = File(...),
                                alm: Almacen = Depends(get_almacen),
                                _: object = Depends(requiere_rol("consulta"))):
     if alm.carpetas.get(carpeta_id) is None:
         raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
+    _validar_lista(alm, lista_id)
     if alm.counts().get("apus", 0) == 0:
         ensure_seeded()
     suf = Path(archivo.filename or "lic.xlsx").suffix or ".xlsx"
@@ -212,8 +217,9 @@ async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
         os.unlink(tmp_path)
     if not items:
         raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
-    gen = svc.construir_corrida_stream(alm, archivo.filename or "licitacion", items, turno, use_ai,
-                                       carpeta_id=carpeta_id, nombre=nombre)
+    gen = svc.construir_corrida_stream(alm, archivo.filename or "licitacion", items, turno,
+                                       use_ai, carpeta_id=carpeta_id, nombre=nombre,
+                                       lista_precios_id=lista_id)
     return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
 
@@ -339,13 +345,28 @@ def renombrar_lista_precios(lista_id: int, body: ListaPreciosIn,
         raise HTTPException(status_code=400, detail=str(e))
 
 
+def _validar_lista(alm: Almacen, lista_id: Optional[int]) -> None:
+    """Un `lista_id` que no exista (o <=0) es un error del cliente, no un costeo
+    silencioso en $0: sin este chequeo, `PricingEngine(alm, lista_id=999)` costea
+    todo en $0 con alertas por componente, sin que nadie diga que esa lista no
+    existe. `lista_id=None` (Principal) siempre es válido."""
+    if lista_id is not None and (lista_id <= 0 or alm.precios.get_lista(lista_id) is None):
+        raise HTTPException(status_code=400, detail="La lista de precios indicada no existe.")
+
+
 @router.get("/insumos")
 def listar_insumos(q: Optional[str] = None, grupo: Optional[str] = None,
                    fuente: Optional[str] = None, clasificacion: Optional[str] = None,
                    limit: int = 100, offset: int = 0,
+                   lista: Optional[int] = None, sin_precio: bool = False,
                    alm: Almacen = Depends(get_almacen),
                    _: object = Depends(requiere_rol("consulta"))):
-    return insumos_svc.listar(alm, q, grupo, fuente, clasificacion, limit, offset)
+    _validar_lista(alm, lista)
+    try:
+        return insumos_svc.listar(alm, q, grupo, fuente, clasificacion, limit, offset,
+                                  lista, sin_precio)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/insumos/grupos")
@@ -355,15 +376,18 @@ def insumos_grupos(alm: Almacen = Depends(get_almacen),
 
 
 @router.get("/insumos/fuentes")
-def insumos_fuentes(alm: Almacen = Depends(get_almacen),
+def insumos_fuentes(lista: Optional[int] = None, alm: Almacen = Depends(get_almacen),
                     _: object = Depends(requiere_rol("consulta"))):
-    return alm.precios.fuentes()
+    _validar_lista(alm, lista)
+    return alm.precios.fuentes(lista_id=lista)
 
 
 @router.get("/insumos/{insumo_id}")
-def insumo_detalle(insumo_id: int, alm: Almacen = Depends(get_almacen),
+def insumo_detalle(insumo_id: int, lista: Optional[int] = None,
+                   alm: Almacen = Depends(get_almacen),
                    _: object = Depends(requiere_rol("consulta"))):
-    d = insumos_svc.detalle(alm, insumo_id)
+    _validar_lista(alm, lista)
+    d = insumos_svc.detalle(alm, insumo_id, lista_id=lista)
     if d is None:
         raise HTTPException(status_code=404, detail="Insumo no encontrado.")
     return d
@@ -372,16 +396,21 @@ def insumo_detalle(insumo_id: int, alm: Almacen = Depends(get_almacen),
 @router.post("/insumos/cambios")
 def insumos_cambios(body: CambiosIn, alm: Almacen = Depends(get_almacen),
                     actor=Depends(requiere_rol("editor"))):
-    return insumos_svc.aplicar_cambios(alm, [c.model_dump() for c in body.cambios], actor=actor)
+    _validar_lista(alm, body.lista_id)
+    return insumos_svc.aplicar_cambios(alm, [c.model_dump() for c in body.cambios],
+                                       actor=actor, lista_id=body.lista_id)
 
 
 @router.post("/insumos/importar/preview")
 async def insumos_importar_preview(archivo: UploadFile = File(...),
+                                   lista_id: Optional[int] = Form(None),
                                    alm: Almacen = Depends(get_almacen),
                                    _: object = Depends(requiere_rol("editor"))):
+    _validar_lista(alm, lista_id)
     contenido = await archivo.read()
     try:
-        return autoria.preview_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx")
+        return autoria.preview_importar_insumos(alm, contenido,
+                                                archivo.filename or "insumos.xlsx", lista_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except (zipfile.BadZipFile, InvalidFileException):
@@ -390,12 +419,14 @@ async def insumos_importar_preview(archivo: UploadFile = File(...),
 
 @router.post("/insumos/importar")
 async def insumos_importar(archivo: UploadFile = File(...),
+                           lista_id: Optional[int] = Form(None),
                            alm: Almacen = Depends(get_almacen),
                            actor=Depends(requiere_rol("editor"))):
+    _validar_lista(alm, lista_id)
     contenido = await archivo.read()
     try:
         return autoria.aplicar_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx",
-                                                actor=actor)
+                                                actor=actor, lista_id=lista_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except (zipfile.BadZipFile, InvalidFileException):
@@ -411,8 +442,11 @@ def insumos_plantilla(_: object = Depends(requiere_rol("editor"))):
 @router.post("/insumos/crear")
 def crear_insumo(body: InsumoNuevoIn, alm: Almacen = Depends(get_almacen),
                  actor=Depends(requiere_rol("editor"))):
+    datos = body.model_dump()
+    lista_id = datos.pop("lista_id", None)
+    _validar_lista(alm, lista_id)
     try:
-        return autoria.crear_insumo(alm, body.model_dump(), actor=actor)
+        return autoria.crear_insumo(alm, datos, actor=actor, lista_id=lista_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

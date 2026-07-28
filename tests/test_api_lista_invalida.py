@@ -155,3 +155,23 @@ def test_post_corridas_lista_valida_ok(tmp_path):
                            "carpeta_id": str(obra["id"]), "lista_id": str(lid)},
                      files={"archivo": ("lic.xlsx", f, _XLSX)})
     assert r.status_code == 200
+
+
+def test_get_apus_lista_inexistente_400(tmp_path):
+    """GET /api/apus?lista=999 debe devolver 400 (lista no existe)."""
+    cli, _ = _cli(tmp_path, rol="consulta")
+    r = cli.get("/api/apus?lista=999")
+    assert r.status_code == 400
+    assert "no existe" in r.json()["detail"]
+
+
+def test_get_apus_detalle_lista_inexistente_400(tmp_path):
+    """GET /api/apus/{codigo}/{turno}?lista=999 debe devolver 400 (lista no existe)."""
+    cli, alm = _cli(tmp_path, rol="consulta")
+    # Insertar un APU en la base para que el endpoint lo encuentre
+    from apu_tool.nucleo.models import Apu
+    alm.apus.insert_apus([Apu("A1", "CONCRETO", "M3", "DIURNO")])
+
+    r = cli.get("/api/apus/A1/DIURNO?lista=999")
+    assert r.status_code == 400
+    assert "no existe" in r.json()["detail"]

@@ -177,6 +177,17 @@ class MatchResult:
     confianza: float = 0.0        # 0..1
 
 
+# Vocabulario de CostedComponent.calidad_cruce/fuente_precio para los estados "sin
+# tarifa" que decide el motor de precios (dominio/pricing.py, el único que ve dinero).
+# Viven aquí y no en pricing.py porque son vocabulario del TIPO, no del motor: así
+# alertas.py (que solo lee calidad_cruce) no necesita importar el motor de precios
+# y arrastrar detrás `datos.almacen`/`precios_db`/`apus_db`/`corridas_db`/`sqlite3`.
+FUENTE_SIN_PRECIO_LISTA = "sin precio en lista"      # insumo encontrado, sin fila de precio en una lista NP
+FUENTE_SIN_RESPALDO = "sin respaldo"                 # sub-APU sin árbol costeable (ciclo/vacío) en una lista NP
+CALIDAD_SIN_PRECIO_LISTA = "sin_precio_lista"        # ausencia de precio en una lista NP
+CALIDAD_SIN_PRECIO_CATALOGO = "sin_precio_catalogo"  # insumo encontrado sin fila de precio en Principal
+
+
 @dataclass
 class CostedComponent:
     insumo_codigo: str
@@ -186,7 +197,7 @@ class CostedComponent:
     precio_unitario: float        # precio usado (catálogo actual o histórico)
     fuente_precio: str
     costo: float                  # rendimiento * precio_unitario
-    calidad_cruce: str = "exacto" # exacto | aproximado | ambiguo | huerfano | apu | apu_vacio | ciclo | sin_precio_lista
+    calidad_cruce: str = "exacto" # exacto | aproximado | ambiguo | huerfano | apu | apu_vacio | ciclo | sin_precio_lista | sin_precio_catalogo
     tipo: str = "insumo"          # "insumo" | "apu"
     ref_shift: str = ""           # turno del sub-APU cuando tipo == "apu"
 

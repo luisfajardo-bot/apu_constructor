@@ -8,14 +8,16 @@ NUNCA entra al payload de la IA (Invariante #1).
 """
 from __future__ import annotations
 
-from apu_tool.dominio.pricing import CALIDAD_SIN_PRECIO
-from apu_tool.nucleo.models import AssembledApu, MatchStatus
+from apu_tool.nucleo.models import (
+    AssembledApu, MatchStatus, CALIDAD_SIN_PRECIO_CATALOGO, CALIDAD_SIN_PRECIO_LISTA,
+)
 
 _MOTIVO_CRUCE = {
     "ambiguo": "cruce ambiguo",
     "huerfano": "sin insumo en catálogo",
     "apu_vacio": "sub-APU sin composición",
     "ciclo": "ciclo de sub-APUs",
+    CALIDAD_SIN_PRECIO_CATALOGO: "sin precio en el catálogo",
 }
 
 
@@ -26,8 +28,8 @@ def alertas_costeo(a: AssembledApu) -> list[str]:
         etiqueta = f"{c.insumo_codigo} {c.insumo_nombre}".strip()
         # Va ANTES de la regla del $0 para dar el motivo accionable en vez del genérico.
         # Solo puede aparecer costeando contra una lista distinta de Principal, así que
-        # el camino histórico queda idéntico.
-        if c.calidad_cruce == CALIDAD_SIN_PRECIO:
+        # el camino histórico (Principal) queda idéntico.
+        if c.calidad_cruce == CALIDAD_SIN_PRECIO_LISTA:
             motivos.append(f"{etiqueta}: sin precio en la lista")
         elif c.costo <= 0 or c.precio_unitario <= 0:        # regla dura: $0 siempre
             motivos.append(f"{etiqueta}: en $0")

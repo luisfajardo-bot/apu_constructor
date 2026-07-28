@@ -321,7 +321,11 @@ def test_costear_row_motor_compartido_no_reconsulta_precios(tmp_path):
 
     llamadas: list[str] = []
     orig = alm.precios.get_candidatos
-    alm.precios.get_candidatos = lambda cod: (llamadas.append(cod), orig(cod))[1]
+    # Ensanchado para reenviar kwargs (p.ej. lista_id=): el motor SIEMPRE pasa
+    # lista_id explícito (ver hallazgo 5 de la revisión de pricing.py), y este stub
+    # no debe imponerle una aridad que el código real ya no usa. La aserción de
+    # abajo (llamadas.count == 1) sigue siendo sensible a que el caché funcione.
+    alm.precios.get_candidatos = lambda cod, **kw: (llamadas.append(cod), orig(cod, **kw))[1]
 
     def _row(seq, cod):
         return CorridaItemRow(

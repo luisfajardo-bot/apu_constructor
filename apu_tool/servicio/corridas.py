@@ -49,10 +49,20 @@ def nombre_desde_archivo(filename: str) -> str:
     return Path(base).stem.strip() if base else ""
 
 
+def _nombre_lista(alm: Almacen, lista_id: Optional[int]) -> str:
+    """Etiqueta legible de la tarifa de una corrida. None = Principal.
+    Se resuelve en vivo (no se denormaliza): renombrar una lista debe reflejarse."""
+    if lista_id is None:
+        return "Principal"
+    lista = alm.precios.get_lista(lista_id)
+    return lista.nombre if lista else f"lista {lista_id}"
+
+
 def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
                              turno_def: str, use_ai: Optional[bool],
                              carpeta_id: Optional[int] = None,
-                             nombre: Optional[str] = None):
+                             nombre: Optional[str] = None,
+                             lista_precios_id: Optional[int] = None):
     """Arma la corrida de forma INCREMENTAL, emitiendo eventos:
       ('started', {'id', 'total'})           — al crear la corrida (estado 'armando').
       ('progress', {'i','total','descripcion','fila'}) — por ítem, con la fila ya
@@ -65,13 +75,13 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
     lo ya armado sobrevive si se abandona. La corrida nace 'armando'; si desaparece
     durante el armado, `agregar_item` lanza CorridaEliminada y se cancela."""
     advisor = ApuAdvisor(enabled=use_ai)
-    assembler = Assembler(alm, advisor=advisor)
+    assembler = Assembler(alm, advisor=advisor, lista_id=lista_precios_id)
     nombre_efectivo = (nombre or "").strip()[:120].strip() or nombre_desde_archivo(archivo)
     corrida_id = alm.corridas.crear_corrida(CorridaMeta(
         id=None, creada_en=datetime.now().isoformat(timespec="seconds"),
         archivo=archivo, turno_def=turno_def, use_ai=use_ai,
         estado="armando", cuadro_path=None, carpeta_id=carpeta_id,
-        nombre=nombre_efectivo))
+        nombre=nombre_efectivo, lista_precios_id=lista_precios_id))
     total = len(items)
     yield ("started", {"id": corrida_id, "total": total})
     t0 = time.monotonic()
@@ -109,18 +119,21 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
 def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
                       turno_def: str, use_ai: Optional[bool],
                       carpeta_id: Optional[int] = None,
-                      nombre: Optional[str] = None) -> int:
+                      nombre: Optional[str] = None,
+                      lista_precios_id: Optional[int] = None) -> int:
     """Envoltorio no-stream: drena el generador e ignora el progreso; devuelve el id."""
     corrida_id = -1
     for evento, payload in construir_corrida_stream(alm, archivo, items, turno_def,
-                                                    use_ai, carpeta_id, nombre):
+                                                    use_ai, carpeta_id, nombre,
+                                                    lista_precios_id):
         if evento == "done":
             corrida_id = payload["id"]
     return corrida_id
 
 
 def _costear_row(alm: Almacen, row: CorridaItemRow,
-                 pricing: Optional[PricingEngine] = None) -> AssembledApu:
+                 pricing: Optional[PricingEngine] = None,
+                 lista_id: Optional[int] = None) -> AssembledApu:
     """Costeo ACTIVA: re-lee la composición del APU asignado desde la biblioteca y
     costea con precios vigentes. Si no hay apu_codigo o el APU fue borrado, usa la
     composición guardada del ítem (respaldo).
@@ -129,8 +142,11 @@ def _costear_row(alm: Almacen, row: CorridaItemRow,
     precios y de costo de sub-APUs se reusan entre ítems, evitando re-consultar el
     mismo insumo/sub-APU una vez por fila. Si es None se crea uno por fila (como
     antes). El caché por (código, precio vigente) da el mismo costo dentro del
-    request, así que compartirlo no cambia resultados."""
-    pricing = pricing or PricingEngine(alm)
+    request, así que compartirlo no cambia resultados.
+
+    `lista_id`: tarifa a usar cuando se crea el motor aquí (None = Principal). Si llega
+    un `pricing` compartido, la lista viaja DENTRO de él y este parámetro se ignora."""
+    pricing = pricing or PricingEngine(alm, lista_id=lista_id)
     seed = ((row.apu_codigo or "", row.shift),)
     costed = None
     if row.apu_codigo:
@@ -189,8 +205,8 @@ def _ensamblar_corrida(alm: Almacen, meta, rows, pricing: PricingEngine) -> list
     if meta.modo == "congelada":
         snaps = alm.corridas.get_snapshots(meta.id)
         return [_assembled_desde_snapshot(r, snaps[r.seq]) if r.seq in snaps
-                else _costear_row(alm, r, pricing) for r in rows]
-    return [_costear_row(alm, r, pricing) for r in rows]
+                else _costear_row(alm, r, pricing, meta.lista_precios_id) for r in rows]
+    return [_costear_row(alm, r, pricing, meta.lista_precios_id) for r in rows]
 
 
 def _totales(ensambles: list[AssembledApu], rows) -> dict:
@@ -209,7 +225,7 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
     if meta is None:
         return None
     rows = alm.corridas.get_items(corrida_id)
-    pricing = PricingEngine(alm)                       # motor COMPARTIDO por toda la corrida
+    pricing = PricingEngine(alm, lista_id=meta.lista_precios_id)   # COMPARTIDO por la corrida
     pricing.precargar((r.apu_codigo, r.shift) for r in rows if r.apu_codigo)  # lote
     ensambles = _ensamblar_corrida(alm, meta, rows, pricing)
     items = [_vista_item(ens, r.seq, r.status) for ens, r in zip(ensambles, rows)]
@@ -217,6 +233,8 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
         "id": meta.id, "nombre": meta.nombre, "archivo": meta.archivo,
         "estado": meta.estado, "modo": meta.modo,
         "carpeta_id": meta.carpeta_id,
+        "lista_precios_id": meta.lista_precios_id,
+        "lista_nombre": _nombre_lista(alm, meta.lista_precios_id),
         "duracion_ms": meta.duracion_ms, "items": items,
         "totales": _totales(ensambles, rows),
     }
@@ -231,9 +249,10 @@ def detalle_item(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
         return None
     if meta.modo == "congelada":
         snaps = alm.corridas.get_snapshots(corrida_id)
-        ens = _assembled_desde_snapshot(row, snaps[seq]) if seq in snaps else _costear_row(alm, row)
+        ens = (_assembled_desde_snapshot(row, snaps[seq]) if seq in snaps
+               else _costear_row(alm, row, None, meta.lista_precios_id))
     else:
-        ens = _costear_row(alm, row)
+        ens = _costear_row(alm, row, None, meta.lista_precios_id)
     return {
         "seq": row.seq, "descripcion": row.item.descripcion,
         "apu_codigo": row.apu_codigo, "apu_nombre": row.apu_nombre,
@@ -255,7 +274,7 @@ def congelar(alm: Almacen, corrida_id: int) -> Optional[dict]:
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:
         return None
-    pricing = PricingEngine(alm)                       # motor COMPARTIDO al congelar
+    pricing = PricingEngine(alm, lista_id=meta.lista_precios_id)   # COMPARTIDO al congelar
     _rows = alm.corridas.get_items(corrida_id)
     pricing.precargar((r.apu_codigo, r.shift) for r in _rows if r.apu_codigo)
     for r in _rows:
@@ -304,7 +323,8 @@ def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
     row = alm.corridas.get_item(corrida_id, seq)
     if row is None:
         return None
-    assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False))
+    assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False),
+                          lista_id=meta.lista_precios_id)
     ens = assembler.reassemble_with_choice(row.item, apu_codigo, shift or row.shift)
     alm.corridas.actualizar_eleccion(
         corrida_id, seq, status=MatchStatus.CONFIRMED.value, apu_codigo=ens.apu_codigo,
@@ -316,17 +336,26 @@ def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
 
 def listar_corridas(alm: Almacen) -> list[dict]:
     out: list[dict] = []
+    # Nombres de lista resueltos UNA vez para todas las corridas (no una consulta por
+    # fila dentro del bucle): este listado ya sufrió round-trips N+1 contra Postgres
+    # (precios/composición) y se arregló precargando en lote; el nombre de la lista
+    # sigue la misma regla para no reintroducir el mismo patrón.
+    nombres_lista = {l.id: l.nombre for l in alm.precios.listar_listas()}
     for meta in alm.corridas.listar_corridas():
         rows = alm.corridas.get_items(meta.id)
         n_rev = sum(1 for it in rows if it.status in ("review", "new"))
+        lista_nombre = ("Principal" if meta.lista_precios_id is None
+                        else nombres_lista.get(meta.lista_precios_id, f"lista {meta.lista_precios_id}"))
         fila = {"id": meta.id, "nombre": meta.nombre, "archivo": meta.archivo,
                 "creada_en": meta.creada_en,
                 "estado": meta.estado, "modo": meta.modo, "duracion_ms": meta.duracion_ms,
                 "carpeta_id": meta.carpeta_id,
+                "lista_precios_id": meta.lista_precios_id,
+                "lista_nombre": lista_nombre,
                 "n_items": len(rows), "n_revision": n_rev,
                 "contractual": None, "costo": None, "margen": None, "margen_pct": None}
         try:                                           # fail-safe: si una corrida no
-            pricing = PricingEngine(alm)               # costea, su fila queda con None
+            pricing = PricingEngine(alm, lista_id=meta.lista_precios_id)   # costea, su fila queda con None
             pricing.precargar((r.apu_codigo, r.shift) for r in rows if r.apu_codigo)
             tot = _totales(_ensamblar_corrida(alm, meta, rows, pricing), rows)
             fila.update(contractual=tot["contractual"], costo=tot["costo"],
@@ -363,7 +392,7 @@ def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:
         congelar(alm, corrida_id)
         snaps = alm.corridas.get_snapshots(corrida_id)
     rows = alm.corridas.get_items(corrida_id)
-    pricing = PricingEngine(alm)                       # motor COMPARTIDO al generar el cuadro
+    pricing = PricingEngine(alm, lista_id=meta.lista_precios_id)   # COMPARTIDO al generar el cuadro
     pricing.precargar((r.apu_codigo, r.shift) for r in rows
                       if r.apu_codigo and r.seq not in snaps)
     assembled = [_assembled_desde_snapshot(r, snaps[r.seq]) if r.seq in snaps

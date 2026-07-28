@@ -33,9 +33,13 @@ ProgressCb = Optional[Callable[[int, int, str], None]]
 
 
 class Assembler:
-    def __init__(self, almacen: Almacen, advisor: Optional[ApuAdvisor] = None):
+    def __init__(self, almacen: Almacen, advisor: Optional[ApuAdvisor] = None,
+                 lista_id: Optional[int] = None):
         self.alm = almacen
-        self.pricing = PricingEngine(almacen)
+        # Costear con la tarifa de la corrida: armar y confirmar deben dar el mismo
+        # número que la vista. None = Principal.
+        self.lista_id = lista_id
+        self.pricing = PricingEngine(almacen, lista_id=lista_id)
         self.advisor = advisor or ApuAdvisor()
         # Matcher / retriever / índice de códigos son PEREZOSOS: construirlos lee el
         # catálogo completo de APUs (2 consultas) y arma un índice invertido en CPU.

@@ -30,6 +30,10 @@ class Insumo:
     precio: float
     fuente_precio: str          # "PRECIO IDU", "COSTO INTERNO", etc.
     id: Optional[int] = None    # id interno del catálogo (None si aún no persistido)
+    # True = NO hay fila de precio vigente en la lista con la que se leyó este insumo.
+    # Distingue "sin tarifa en esta lista" de un $0 genuino, que la regla de negocio
+    # prohíbe y que las alertas de costeo deben seguir mostrando.
+    sin_precio: bool = False
 
     @property
     def es_confidencial(self) -> bool:

@@ -113,7 +113,7 @@ class PreciosDB:
         return n
 
     def crear_insumo(self, insumo: Insumo, conn: Optional[sqlite3.Connection] = None,
-                     creado_por: Optional[str] = None) -> int:
+                     creado_por: Optional[str] = None, lista_id: Optional[int] = None) -> int:
         """Crea un insumo NUEVO + su precio vigente; devuelve el id.
 
         Identidad (código, nombre_norm): si ya existe → ValueError (no se pisa, a
@@ -123,11 +123,12 @@ class PreciosDB:
         if not str(insumo.codigo or "").strip() or not str(insumo.nombre or "").strip():
             raise ValueError("El insumo necesita código y nombre.")
         if conn is not None:
-            return self._crear_insumo(conn, insumo, creado_por)
+            return self._crear_insumo(conn, insumo, creado_por, lista_id)
         with self.connect() as c:
-            return self._crear_insumo(c, insumo, creado_por)
+            return self._crear_insumo(c, insumo, creado_por, lista_id)
 
-    def _crear_insumo(self, conn, insumo: Insumo, creado_por: Optional[str]) -> int:
+    def _crear_insumo(self, conn, insumo: Insumo, creado_por: Optional[str],
+                      lista_id: Optional[int] = None) -> int:
         nombre_norm = normalizar(insumo.nombre)
         hoy = date.today().isoformat()
         existe = conn.execute(
@@ -141,7 +142,8 @@ class PreciosDB:
             "VALUES (?,?,?,?,?)",
             (str(insumo.codigo), insumo.nombre, nombre_norm, insumo.unidad, insumo.grupo))
         iid = int(cur.lastrowid)
-        self._insertar_precio_vigente(conn, iid, insumo.precio, insumo.fuente_precio, hoy, creado_por)
+        self._insertar_precio_vigente(conn, iid, insumo.precio, insumo.fuente_precio, hoy,
+                                      creado_por, lista_id)
         return iid
 
     def _ids_de(self, conn, codigo: str, nombre: Optional[str]) -> list[int]:
@@ -155,14 +157,17 @@ class PreciosDB:
         return [r["id"] for r in rows]
 
     def _insertar_precio_vigente(self, conn: sqlite3.Connection, insumo_id: int, precio: float,
-                                fuente: str, fecha: str, creado_por: Optional[str] = None) -> None:
-        conn.execute("UPDATE insumo_precios SET vigente=0 WHERE insumo_id=?", (int(insumo_id),))
+                                fuente: str, fecha: str, creado_por: Optional[str] = None,
+                                lista_id: Optional[int] = None) -> None:
+        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
+        conn.execute("UPDATE insumo_precios SET vigente=0 WHERE insumo_id=? AND lista_id=?",
+                     (int(insumo_id), lid))
         conn.execute(
             "INSERT INTO insumo_precios "
-            "(insumo_id, precio, fuente, clasificacion, fecha, vigente, creado_por) "
-            "VALUES (?,?,?,?,?,1,?)",
+            "(insumo_id, precio, fuente, clasificacion, fecha, vigente, creado_por, lista_id) "
+            "VALUES (?,?,?,?,?,1,?,?)",
             (int(insumo_id), float(precio), fuente,
-             config.classify_price_source(fuente), fecha, creado_por))
+             config.classify_price_source(fuente), fecha, creado_por, lid))
 
     def set_precio(self, codigo: str, precio: float, fuente: str = "",
                    fecha: Optional[str] = None, nombre: Optional[str] = None) -> None:
@@ -177,19 +182,22 @@ class PreciosDB:
 
     def set_precio_por_id(self, insumo_id: int, precio: float, fuente: str = "",
                           fecha: Optional[str] = None, conn: Optional[sqlite3.Connection] = None,
-                          creado_por: Optional[str] = None) -> None:
+                          creado_por: Optional[str] = None,
+                          lista_id: Optional[int] = None) -> None:
         fecha = fecha or date.today().isoformat()
         if conn is not None:
-            self._set_precio_por_id(conn, insumo_id, precio, fuente, fecha, creado_por)
+            self._set_precio_por_id(conn, insumo_id, precio, fuente, fecha, creado_por, lista_id)
             return
         with self.connect() as c:
-            self._set_precio_por_id(c, insumo_id, precio, fuente, fecha, creado_por)
+            self._set_precio_por_id(c, insumo_id, precio, fuente, fecha, creado_por, lista_id)
 
-    def _set_precio_por_id(self, conn, insumo_id, precio, fuente, fecha, creado_por) -> None:
+    def _set_precio_por_id(self, conn, insumo_id, precio, fuente, fecha, creado_por,
+                           lista_id=None) -> None:
         r = conn.execute("SELECT id FROM insumos WHERE id=?", (int(insumo_id),)).fetchone()
         if r is None:
             raise ValueError(f"No existe el insumo id={insumo_id}.")
-        self._insertar_precio_vigente(conn, int(insumo_id), precio, fuente, fecha, creado_por)
+        self._insertar_precio_vigente(conn, int(insumo_id), precio, fuente, fecha,
+                                      creado_por, lista_id)
 
     def set_meta(self, clave: str, valor: str) -> None:
         with self.connect() as conn:
@@ -286,21 +294,29 @@ class PreciosDB:
 
     # ---- lectura ----
     def _fila_a_insumo(self, r) -> Insumo:
+        # precio es NOT NULL en la tabla: un NULL aquí solo puede venir del LEFT JOIN,
+        # o sea "no hay precio vigente en esta lista" (≠ un $0 genuino).
         return Insumo(codigo=r["codigo"], nombre=r["nombre"], unidad=r["unidad"] or "",
                       grupo=r["grupo"] or "", precio=r["precio"] or 0.0,
-                      fuente_precio=r["fuente"] or "", id=r["id"])
+                      fuente_precio=r["fuente"] or "", id=r["id"],
+                      sin_precio=r["precio"] is None)
 
-    def get_candidatos(self, codigo: str) -> list[Insumo]:
-        """Todos los insumos con ese código (cada uno con su precio vigente e id)."""
+    _SELECT_INSUMO = (
+        "SELECT i.id, i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente "
+        "FROM insumos i LEFT JOIN insumo_precios p "
+        "  ON p.insumo_id = i.id AND p.vigente = 1 AND p.lista_id = ? ")
+
+    def get_candidatos(self, codigo: str, lista_id: Optional[int] = None) -> list[Insumo]:
+        """Todos los insumos con ese código, con su precio vigente EN `lista_id`."""
+        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT i.id, i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente "
-                "FROM insumos i LEFT JOIN insumo_precios p "
-                "  ON p.insumo_id = i.id AND p.vigente = 1 "
-                "WHERE i.codigo = ? ORDER BY i.id", (str(codigo),)).fetchall()
+                self._SELECT_INSUMO + "WHERE i.codigo = ? ORDER BY i.id",
+                (lid, str(codigo))).fetchall()
         return [self._fila_a_insumo(r) for r in rows]
 
-    def get_candidatos_bulk(self, codigos) -> dict:
+    def get_candidatos_bulk(self, codigos, lista_id: Optional[int] = None) -> dict:
+        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
         codes = [c for c in dict.fromkeys(str(x) for x in codigos if x)]
         out: dict[str, list[Insumo]] = {c: [] for c in codes}
         if not codes:
@@ -310,29 +326,28 @@ class PreciosDB:
                 chunk = codes[i:i + 800]
                 ph = ",".join("?" * len(chunk))
                 rows = conn.execute(
-                    "SELECT i.id, i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente "
-                    "FROM insumos i LEFT JOIN insumo_precios p "
-                    "  ON p.insumo_id = i.id AND p.vigente = 1 "
-                    f"WHERE i.codigo IN ({ph}) ORDER BY i.codigo, i.id", chunk).fetchall()
+                    self._SELECT_INSUMO + f"WHERE i.codigo IN ({ph}) ORDER BY i.codigo, i.id",
+                    [lid] + chunk).fetchall()
                 for r in rows:
                     out[r["codigo"]].append(self._fila_a_insumo(r))
         return out
 
-    def get_insumo_por_id(self, insumo_id: int) -> Optional[Insumo]:
+    def get_insumo_por_id(self, insumo_id: int,
+                          lista_id: Optional[int] = None) -> Optional[Insumo]:
+        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
         with self.connect() as conn:
-            r = conn.execute(
-                "SELECT i.id, i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente "
-                "FROM insumos i LEFT JOIN insumo_precios p "
-                "  ON p.insumo_id = i.id AND p.vigente = 1 "
-                "WHERE i.id = ?", (int(insumo_id),)).fetchone()
+            r = conn.execute(self._SELECT_INSUMO + "WHERE i.id = ?",
+                             (lid, int(insumo_id))).fetchone()
         return self._fila_a_insumo(r) if r else None
 
-    def price_history(self, codigo: str, nombre: Optional[str] = None) -> list[dict]:
+    def price_history(self, codigo: str, nombre: Optional[str] = None,
+                      lista_id: Optional[int] = None) -> list[dict]:
+        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
         with self.connect() as conn:
             q = ("SELECT p.precio, p.fuente, p.clasificacion, p.fecha, p.vigente "
                  "FROM insumo_precios p JOIN insumos i ON i.id = p.insumo_id "
-                 "WHERE i.codigo = ?")
-            params: list = [str(codigo)]
+                 "WHERE i.codigo = ? AND p.lista_id = ?")
+            params: list = [str(codigo), lid]
             if nombre is not None:
                 q += " AND i.nombre_norm = ?"
                 params.append(normalizar(nombre))
@@ -342,10 +357,22 @@ class PreciosDB:
 
     def list_insumos(self, q=None, grupo=None, fuente=None,
                      clasificacion: Optional[str] = None,
-                     limit: int = 100, offset: int = 0) -> tuple[list[Insumo], int]:
+                     limit: int = 100, offset: int = 0,
+                     lista_id: Optional[int] = None,
+                     sin_precio: bool = False) -> tuple[list[Insumo], int]:
+        """Catálogo COMPLETO con el precio vigente en `lista_id`. Los insumos sin
+        tarifa en esa lista vienen igual, con precio 0 y `sin_precio=True`: la lista
+        decide QUÉ PRECIO se lee, no QUÉ INSUMOS existen."""
+        if sin_precio and (fuente or clasificacion):
+            raise ValueError(
+                "El filtro «sin precio en esta lista» no se puede combinar con "
+                "fuente ni clasificación: son atributos de un precio que no existe.")
+        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
         base = ("FROM insumos i LEFT JOIN insumo_precios p "
-                "ON p.insumo_id = i.id AND p.vigente = 1")
-        where, params = ["i.oculto = 0"], []
+                "ON p.insumo_id = i.id AND p.vigente = 1 AND p.lista_id = ?")
+        where, params = ["i.oculto = 0"], [lid]
+        if sin_precio:
+            where.append("p.id IS NULL")
         if q:
             where.append("(i.nombre_norm LIKE ? OR UPPER(i.codigo) LIKE ?)")
             like = f"%{normalizar(q)}%"
@@ -380,13 +407,15 @@ class PreciosDB:
                 "WHERE grupo IS NOT NULL AND grupo <> '' AND oculto = 0 ORDER BY grupo").fetchall()
         return [r["grupo"] for r in rows]
 
-    def fuentes(self) -> list[str]:
+    def fuentes(self, lista_id: Optional[int] = None) -> list[str]:
+        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT DISTINCT p.fuente FROM insumo_precios p "
                 "JOIN insumos i ON i.id = p.insumo_id AND i.oculto = 0 "
-                "WHERE p.vigente = 1 AND p.fuente IS NOT NULL AND p.fuente <> '' "
-                "ORDER BY p.fuente").fetchall()
+                "WHERE p.vigente = 1 AND p.lista_id = ? "
+                "  AND p.fuente IS NOT NULL AND p.fuente <> '' "
+                "ORDER BY p.fuente", (lid,)).fetchall()
         return [r["fuente"] for r in rows]
 
     def search_insumos(self, texto: str, limit: int = 20) -> list[Insumo]:

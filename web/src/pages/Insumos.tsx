@@ -32,6 +32,9 @@ export default function Insumos() {
   const [error, setError] = useState<string | null>(null);
   const [importarOpen, setImportarOpen] = useState(false);
   const [agregarOpen, setAgregarOpen] = useState(false);
+  // Cambios sin guardar en la TablaInsumos de la lista activa (ver hallazgo
+  // CRITICAL: un precio editado en la lista A no debe poder guardarse en la B).
+  const [dirtyCount, setDirtyCount] = useState(0);
 
   const cargar = useCallback(async (f: FiltrosState) => {
     setCargando(true);
@@ -74,6 +77,22 @@ export default function Insumos() {
   }, [filtros, cargar]);
 
   function cambiarFiltros(parcial: Partial<FiltrosState>) {
+    // Cambiar de lista de precios descarta cualquier edición sin guardar de la
+    // TablaInsumos actual (se remonta con key={filtros.lista}). Si hay cambios
+    // pendientes, confirmamos con el usuario antes de perderlos; si cancela,
+    // la lista NO cambia (tampoco el resto del filtro que venga en el mismo
+    // parcial, p.ej. el reseteo de fuente/clasificación de BarraFiltros).
+    if (
+      parcial.lista !== undefined &&
+      parcial.lista !== filtros.lista &&
+      dirtyCount > 0
+    ) {
+      const plural = dirtyCount === 1 ? "cambio" : "cambios";
+      const mensaje =
+        `Tienes ${dirtyCount} ${plural} sin guardar en esta lista. ` +
+        "Si cambias de lista se van a descartar. ¿Deseas continuar?";
+      if (!window.confirm(mensaje)) return;
+    }
     setFiltros((prev) => ({ ...prev, ...parcial }));
   }
 
@@ -133,11 +152,13 @@ export default function Insumos() {
       )}
 
       <TablaInsumos
+        key={filtros.lista}
         insumos={insumos}
         fuentes={fuentes}
         listaId={filtros.lista}
         onReload={recargar}
         puedeEditar={puedeEditar}
+        onDirtyCountChange={setDirtyCount}
       />
 
       {puedeEditar && (

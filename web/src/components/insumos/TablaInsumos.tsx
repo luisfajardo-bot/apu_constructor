@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,12 +19,21 @@ interface TablaInsumosProps {
   listaId: number;
   onReload: () => void;
   puedeEditar?: boolean;
+  // Notifica al padre cuántas filas tienen ediciones sin guardar. Insumos.tsx
+  // lo usa para confirmar con el usuario antes de cambiar de lista de precios
+  // (el reseteo real del `dirty` ocurre por el key={listaId} que remonta este
+  // componente; este callback solo permite avisar ANTES de que eso pase).
+  onDirtyCountChange?: (count: number) => void;
 }
 
-export function TablaInsumos({ insumos, fuentes = [], listaId, onReload, puedeEditar = false }: TablaInsumosProps) {
+export function TablaInsumos({ insumos, fuentes = [], listaId, onReload, puedeEditar = false, onDirtyCountChange }: TablaInsumosProps) {
   const { setCampo, descartar, cambios, count, dirty } = useDirtyRows(
     insumos.map((i) => ({ id: i.id, precio: i.precio, fuente: i.fuente }))
   );
+
+  useEffect(() => {
+    onDirtyCountChange?.(count);
+  }, [count, onDirtyCountChange]);
 
   const [detalle, setDetalle] = useState<InsumoDetalle | null>(null);
   const [detalleOpen, setDetalleOpen] = useState(false);

@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 import io
 from dataclasses import replace
+from typing import Optional
 
 import openpyxl
 
@@ -30,7 +31,7 @@ from apu_tool.servicio.subapus import (
 
 
 # ----------------------------------------------------------------- individual
-def crear_insumo(alm: Almacen, datos: dict, actor=None, lista_id=None) -> dict:
+def crear_insumo(alm: Almacen, datos: dict, actor=None, lista_id: Optional[int] = None) -> dict:
     codigo = str(datos.get("codigo", "") or "").strip()
     nombre = str(datos.get("nombre", "") or "").strip()
     if not codigo or not nombre:
@@ -167,7 +168,7 @@ def borrar_apu(alm: Almacen, codigo: str, shift: str, actor=None) -> dict | None
 
 
 # ------------------------------------------------------------- import insumos
-def _match_identidad(alm: Almacen, codigo: str, nombre: str, lista_id=None):
+def _match_identidad(alm: Almacen, codigo: str, nombre: str, lista_id: Optional[int] = None):
     """Insumo con (codigo, nombre) exactos (nombre normalizado), o None.
     La identidad es global; el precio devuelto es el de `lista_id` (None = Principal),
     porque es contra ESE precio que el preview reporta el cambio."""
@@ -178,12 +179,34 @@ def _match_identidad(alm: Almacen, codigo: str, nombre: str, lista_id=None):
     return None
 
 
-def _cambio_upsert(ins, f: dict) -> dict:
+# Motivo en español reportado en 'invalida' cuando el archivo no trae precio y el
+# insumo tampoco tiene tarifa en la lista destino (ver _cambio_upsert).
+MOTIVO_SIN_PRECIO_EN_LISTA = (
+    "El archivo no trae precio para este insumo y todavía no tiene tarifa "
+    "en la lista de precios seleccionada.")
+
+
+def _cambio_upsert(ins, f: dict) -> Optional[dict]:
+    """Arma el cambio propuesto para 'actualizar'.
+
+    `ins.precio` viene de un LEFT JOIN contra la lista consultada: si el insumo NO
+    tiene tarifa ahí (`ins.sin_precio`), ese 0.0 es un artefacto de la ausencia, no
+    un precio real (ver docstring de `Insumo.sin_precio` en nucleo/models.py). Si
+    además el archivo tampoco trae precio para esa fila, no hay NADA que conservar
+    ni que "no cambiar": devolvemos None para que el llamador la reporte como
+    inválida en vez de colar el 0 fantasma en 'actualizar'.
+
+    `sin_precio_actual` viaja en el dict para que el guard de no-op de
+    `aplicar_importar_insumos` sepa que un precio_actual/fuente_actual en 0/"" es una
+    AUSENCIA (nunca hay que tratarla como "no cambió nada")."""
+    if not f["tiene_precio"] and ins.sin_precio:
+        return None
     precio_nuevo = f["precio"] if f["tiene_precio"] else ins.precio
     fuente_nueva = f["fuente"] or ins.fuente_precio
     return {"insumo_id": ins.id, "codigo": ins.codigo, "nombre": ins.nombre,
             "precio_actual": ins.precio, "precio_nuevo": precio_nuevo,
-            "fuente_actual": ins.fuente_precio, "fuente_nueva": fuente_nueva}
+            "fuente_actual": ins.fuente_precio, "fuente_nueva": fuente_nueva,
+            "sin_precio_actual": ins.sin_precio}
 
 
 def _filas_insumos(contenido: bytes, nombre_archivo: str) -> list[dict]:
@@ -231,8 +254,19 @@ def _filas_insumos(contenido: bytes, nombre_archivo: str) -> list[dict]:
     return out
 
 
+def _upsert_o_invalida(ins, f: dict, actualizar: list, invalida: list) -> None:
+    """Aplica `_cambio_upsert` y enruta el resultado: a 'actualizar' si hay un cambio
+    real que proponer, a 'invalida' (con motivo) si no había ni precio en el archivo
+    ni tarifa previa en la lista destino (ver `_cambio_upsert`)."""
+    cambio = _cambio_upsert(ins, f)
+    if cambio is not None:
+        actualizar.append(cambio)
+    else:
+        invalida.append({**f, "motivo": MOTIVO_SIN_PRECIO_EN_LISTA})
+
+
 def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
-                             lista_id=None) -> dict:
+                             lista_id: Optional[int] = None) -> dict:
     """Upsert por fila CONTRA `lista_id` (None = Principal). Con nombre: identidad
     código+nombre (crea o actualiza). Sin nombre: actualiza precio por código (único),
     o marca ambigua/no encontrada."""
@@ -243,11 +277,12 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
             invalida.append(f)
         elif nom:
             match = _match_identidad(alm, cod, nom, lista_id)
-            (actualizar.append(_cambio_upsert(match, f)) if match else crear.append(f))
+            (_upsert_o_invalida(match, f, actualizar, invalida) if match
+             else crear.append(f))
         else:
             cands = alm.precios.get_candidatos(cod, lista_id=lista_id)
             if len(cands) == 1:
-                actualizar.append(_cambio_upsert(cands[0], f))
+                _upsert_o_invalida(cands[0], f, actualizar, invalida)
             elif len(cands) > 1:
                 ambigua.append({"codigo": cod,
                                 "candidatos": [{"id": c.id, "nombre": c.nombre} for c in cands]})
@@ -258,7 +293,7 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
 
 
 def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
-                             actor=None, lista_id=None) -> dict:
+                             actor=None, lista_id: Optional[int] = None) -> dict:
     prev = preview_importar_insumos(alm, contenido, nombre_archivo, lista_id)
     creados, actualizados, errores = 0, 0, []
     lote = nuevo_lote()
@@ -282,7 +317,12 @@ def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
         except ValueError as e:
             errores.append({"codigo": f["codigo"], "error": str(e)})
     for c in prev["actualizar"]:
-        if c["precio_nuevo"] == c["precio_actual"] and c["fuente_nueva"] == c["fuente_actual"]:
+        # No-op SOLO si ya había una tarifa real en la lista destino (sin_precio_actual
+        # False) y nada cambió. Si `sin_precio_actual` es True, precio_actual/fuente_actual
+        # son el 0.0/"" fantasma del LEFT JOIN (ninguna tarifa que "no cambiara"): la fila
+        # debe seguir de largo hacia el guard del $0 de abajo, no tragarse en silencio.
+        if (not c["sin_precio_actual"] and c["precio_nuevo"] == c["precio_actual"]
+                and c["fuente_nueva"] == c["fuente_actual"]):
             continue                                   # no-op: nada cambió
         try:
             if c["precio_nuevo"] <= 0:

@@ -15,16 +15,30 @@ import type { CorridaIniciada, ItemCuadro, Progreso } from "@/lib/tipos";
 
 type EstadoVivo = "armando" | "listo" | "error" | null;
 
+// Lista de precios elegida al iniciar el armado (CorridasInicio), para que la
+// pantalla de la corrida (Corrida.tsx) pueda mostrarla en el placeholder en vivo
+// mientras la corrida aún no existe en el backend. `null` = Principal.
+interface ListaElegida {
+  id: number;
+  nombre: string;
+}
+
 interface ArmadoState {
   corridaId: number | null;
   total: number;
   filas: ItemCuadro[];
   estado: EstadoVivo;
   error: string | null;
+  listaId: number | null;
+  listaNombre: string;
 }
 
 interface ArmadoCtx extends ArmadoState {
-  armarArchivo: (form: FormData, onStarted: (id: number) => void) => Promise<void>;
+  armarArchivo: (
+    form: FormData,
+    onStarted: (id: number) => void,
+    lista?: ListaElegida,
+  ) => Promise<void>;
   armarEjemplo: (onStarted: (id: number) => void) => Promise<void>;
 }
 
@@ -34,6 +48,8 @@ const VACIO: ArmadoState = {
   filas: [],
   estado: null,
   error: null,
+  listaId: null,
+  listaNombre: "Principal",
 };
 
 const Ctx = createContext<ArmadoCtx | null>(null);
@@ -54,8 +70,14 @@ export function ArmadoVivoProvider({ children }: { children: ReactNode }) {
         onStarted: (c: CorridaIniciada) => void;
       }) => Promise<unknown>,
       onStarted: (id: number) => void,
+      lista?: ListaElegida,
     ) => {
-      setEstado({ ...VACIO, estado: "armando" });
+      setEstado({
+        ...VACIO,
+        estado: "armando",
+        listaId: lista?.id ?? null,
+        listaNombre: lista?.nombre ?? "Principal",
+      });
       try {
         await run({
           onStarted: (c) => {
@@ -80,8 +102,8 @@ export function ArmadoVivoProvider({ children }: { children: ReactNode }) {
   );
 
   const armarArchivo = useCallback(
-    (form: FormData, onStarted: (id: number) => void) =>
-      correr((cbs) => crearCorridaStream(form, cbs.onProgress, cbs.onStarted), onStarted),
+    (form: FormData, onStarted: (id: number) => void, lista?: ListaElegida) =>
+      correr((cbs) => crearCorridaStream(form, cbs.onProgress, cbs.onStarted), onStarted, lista),
     [correr],
   );
 

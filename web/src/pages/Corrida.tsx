@@ -93,8 +93,8 @@ export default function Corrida() {
         duracion_ms: null,
         modo: "activa",
         carpeta_id: null,
-        lista_precios_id: null,
-        lista_nombre: "",
+        lista_precios_id: vivo.listaId,
+        lista_nombre: vivo.listaNombre,
       }
     : corrida;
 
@@ -125,9 +125,16 @@ export default function Corrida() {
       {/* Header row */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">
-            Corrida #{data.id}
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-foreground">
+              Corrida #{data.id}
+            </h2>
+            {data.lista_precios_id !== null && (
+              <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                {data.lista_nombre}
+              </span>
+            )}
+          </div>
           <p className="text-xs text-muted-foreground mt-0.5">
             {data.archivo} &mdash; {data.estado}
           </p>

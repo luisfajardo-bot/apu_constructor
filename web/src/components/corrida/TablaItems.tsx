@@ -13,6 +13,7 @@ import SubApuBadge from "@/components/SubApuBadge";
 import BuscadorApu from "@/components/corrida/BuscadorApu";
 import CabeceraFiltros from "@/components/corrida/CabeceraFiltros";
 import { cop, pct } from "@/lib/moneda";
+import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
 import { getItem, confirmar } from "@/api/corridas";
 import type { ItemCuadro, DetalleItem, CorridaDetalle } from "@/lib/tipos";
 import type { ControlCorridaTabla } from "@/lib/corridaTabla";
@@ -401,7 +402,7 @@ function DetalleExpandido({
                     {/* usa calidad_cruce (no tipo): tipo no viaja en la corrida ni sobrevive el snapshot congelado */}
                     {lin.calidad_cruce === "apu"
                       ? <SubApuBadge />
-                      : lin.calidad_cruce}
+                      : etiquetaCalidadCruce(lin.calidad_cruce)}
                   </TableCell>
                 </TableRow>
               ))}

@@ -51,3 +51,18 @@ test("al filtrar por Und, los totales y el contador recalculan sobre lo filtrado
   expect(screen.queryByText("Excavación")).toBeNull();
   expect(screen.getByText(/1 de 2 ítems/)).toBeTruthy();
 });
+
+test("muestra la lista de precios de la corrida cuando no es Principal", async () => {
+  const { default: Corrida } = await import("./Corrida");
+  const { getCorrida } = await import("@/api/corridas");
+  (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
+    ...CORRIDA,
+    lista_precios_id: 2,
+    lista_nombre: "NP Calle 13",
+  });
+
+  render(<Corrida />);
+
+  await screen.findByText("Excavación");
+  expect(screen.getByText("NP Calle 13")).toBeTruthy();
+});

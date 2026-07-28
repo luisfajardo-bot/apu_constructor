@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useArmadoVivo } from "@/lib/armado";
 import { listarCarpetas, crearCarpeta } from "@/api/carpetas";
-import type { CarpetaNodo } from "@/lib/tipos";
+import { listarListas } from "@/api/listas";
+import { LISTA_PRINCIPAL_ID, type CarpetaNodo, type ListaPrecios } from "@/lib/tipos";
 
 export default function CorridasInicio() {
   const navigate = useNavigate();
@@ -18,6 +19,15 @@ export default function CorridasInicio() {
   const [carpetas, setCarpetas] = useState<CarpetaNodo[]>([]);
   const [nivel1Id, setNivel1Id] = useState<number | null>(null);
   const [nivel2Id, setNivel2Id] = useState<number | null>(null);
+
+  // Lista de precios: se fija al crear la corrida y ya no se puede cambiar
+  // después, así que este formulario es el único momento de acertar.
+  const [listaId, setListaId] = useState<number>(LISTA_PRINCIPAL_ID);
+  const [listas, setListas] = useState<ListaPrecios[]>([]);
+
+  useEffect(() => {
+    listarListas().then(setListas).catch(() => {});
+  }, []);
 
   const carpetaDestino: number | null =
     nivel2Id !== null ? nivel2Id : nivel1Id !== null ? nivel1Id : null;
@@ -103,9 +113,13 @@ export default function CorridasInicio() {
     form.append("use_ai", String(usarIA));
     form.append("carpeta_id", String(carpetaDestino));
     form.append("nombre", nombre.trim());
+    if (listaId !== LISTA_PRINCIPAL_ID) form.append("lista_id", String(listaId));
+    const listaElegida = listaId !== LISTA_PRINCIPAL_ID
+      ? { id: listaId, nombre: listas.find((l) => l.id === listaId)?.nombre ?? "" }
+      : undefined;
     setCargando(true);
     try {
-      await armarArchivo(form, (id) => navigate(`/corridas/${id}`));
+      await armarArchivo(form, (id) => navigate(`/corridas/${id}`), listaElegida);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al crear la corrida");
     } finally {
@@ -220,6 +234,30 @@ export default function CorridasInicio() {
                 + Carpeta
               </button>
             </div>
+          </div>
+
+          {/* Lista de precios: visible (no "avanzado"), porque es inmutable
+              tras crear la corrida — este es el único momento de acertar. */}
+          <div style={styles.campo}>
+            <label style={styles.label} htmlFor="lista">
+              Lista de precios
+            </label>
+            <select
+              id="lista"
+              style={styles.input}
+              value={listaId}
+              onChange={(e) => setListaId(Number(e.target.value))}
+              disabled={cargando}
+            >
+              {listas.map((l) => (
+                <option key={l.id} value={l.id}>{l.nombre}</option>
+              ))}
+            </select>
+            {listaId !== LISTA_PRINCIPAL_ID && (
+              <p style={styles.aviso}>
+                Esta corrida se costeará con la lista seleccionada y no se puede cambiar después.
+              </p>
+            )}
           </div>
 
           {/* Botones */}
@@ -351,5 +389,10 @@ const styles: Record<string, React.CSSProperties> = {
     margin: "8px 0 0",
     fontSize: "11px",
     color: "#4a5568",
+  },
+  aviso: {
+    margin: "2px 0 0",
+    fontSize: "11px",
+    color: "#b7791f",
   },
 };

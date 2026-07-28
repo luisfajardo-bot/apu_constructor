@@ -324,6 +324,7 @@ export default function MisCorridas() {
                 <thead>
                   <tr>
                     <th style={styles.th}>Nombre</th>
+                    <th style={styles.th}>Lista</th>
                     <th style={{ ...styles.th, ...styles.thNum }}>Items</th>
                     <th style={{ ...styles.th, ...styles.thNum }}>Por revisar</th>
                     <th style={{ ...styles.th, ...styles.thNum }}>Contractual</th>
@@ -352,6 +353,11 @@ export default function MisCorridas() {
                       <td style={styles.td}>
                         <span style={styles.nombre} title={c.archivo}>{c.nombre}</span>
                         <span style={styles.fecha}> — {fechaLegible(c.creada_en)}</span>
+                      </td>
+                      <td style={styles.td}>
+                        {c.lista_precios_id === null
+                          ? <span style={styles.listaPrincipal}>Principal</span>
+                          : <span style={styles.listaNombre}>{c.lista_nombre}</span>}
                       </td>
                       <td style={{ ...styles.td, ...styles.tdNum }}>{c.n_items}</td>
                       <td style={{ ...styles.td, ...styles.tdNum }}>{c.n_revision}</td>
@@ -611,6 +617,13 @@ const styles: Record<string, React.CSSProperties> = {
   fecha: {
     color: "#718096",
     fontSize: "11px",
+  },
+  listaPrincipal: {
+    color: "#718096",
+  },
+  listaNombre: {
+    fontWeight: 500,
+    color: "#b7791f",
   },
   badge: {
     display: "inline-block",

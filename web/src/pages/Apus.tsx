@@ -19,6 +19,7 @@ import {
 import { listarApus, getApuDetalle, type ListarApusParams } from "@/api/autoria";
 import type { ApuResumen, ApuDetalle } from "@/lib/tipos";
 import { cop } from "@/lib/moneda";
+import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
 import SubApuBadge from "@/components/SubApuBadge";
 import { DialogoAgregarApu } from "@/components/autoria/DialogoAgregarApu";
 import { DialogoImportarApus } from "@/components/autoria/DialogoImportarApus";
@@ -389,7 +390,7 @@ function DetalleApu({
                   {/* usa calidad_cruce (no tipo): tipo no viaja en la corrida ni sobrevive el snapshot congelado */}
                   {lin.calidad_cruce === "apu"
                     ? <SubApuBadge />
-                    : lin.calidad_cruce}
+                    : etiquetaCalidadCruce(lin.calidad_cruce)}
                 </TableCell>
               </TableRow>
             ))}

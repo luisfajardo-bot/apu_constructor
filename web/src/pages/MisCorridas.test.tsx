@@ -116,3 +116,29 @@ test("Renombrar corrida: al hacer clic y confirmar, llama renombrarCorrida(1, nu
 
   promptSpy.mockRestore();
 });
+
+test("la columna Lista distingue una corrida NP de una Principal", async () => {
+  const { default: MisCorridas } = await import("./MisCorridas");
+  const { listarCorridas } = await import("@/api/corridas");
+  (listarCorridas as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([
+    {
+      id: 1, nombre: "lic.xlsx", archivo: "lic.xlsx", creada_en: "2026-07-08T10:00:00",
+      estado: "en_revision", modo: "activa", n_items: 2, n_revision: 1, duracion_ms: 1000,
+      contractual: 4000000, costo: 3675000, margen: 325000, margen_pct: 0.08125,
+      carpeta_id: 1, lista_precios_id: null, lista_nombre: "Principal",
+    },
+    {
+      id: 2, nombre: "np.xlsx", archivo: "np.xlsx", creada_en: "2026-07-28T10:00:00",
+      estado: "en_revision", modo: "activa", n_items: 1, n_revision: 0, duracion_ms: 500,
+      contractual: 1000, costo: 800, margen: 200, margen_pct: 0.2,
+      carpeta_id: 1, lista_precios_id: 2, lista_nombre: "NP Calle 13",
+    },
+  ]);
+
+  render(<MemoryRouter initialEntries={["/corridas?carpeta=1"]}><MisCorridas /></MemoryRouter>);
+
+  await waitFor(() => expect(screen.getByText("np.xlsx")).toBeTruthy());
+  expect(screen.getByText("NP Calle 13")).toBeTruthy();
+  const filaPrincipal = screen.getByText("lic.xlsx").closest("tr")!;
+  expect(within(filaPrincipal).getByText("Principal")).toBeTruthy();
+});

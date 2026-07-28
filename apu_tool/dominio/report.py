@@ -164,7 +164,8 @@ def _build_alertas(ws, apus: list[AssembledApu]) -> None:
     _autosize(ws, {1: 8, 2: 45, 3: 12, 4: 10, 5: 14, 6: 60})
 
 
-def write_report(apus: list[AssembledApu], path: Path | str) -> Path:
+def write_report(apus: list[AssembledApu], path: Path | str,
+                 lista_nombre: str = "Principal") -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     wb = openpyxl.Workbook()
@@ -176,6 +177,9 @@ def write_report(apus: list[AssembledApu], path: Path | str) -> Path:
     meta = wb.create_sheet("INFO")
     meta.append(["Generado", date.today().isoformat()])
     meta.append(["Ítems", len(apus)])
+    # Qué tarifa costeó este cuadro. Sin esta fila, un cuadro de No Previstos y uno
+    # contractual son indistinguibles en el archivo.
+    meta.append(["Lista de precios", lista_nombre])
     meta.append(["Nota", "Los precios de costo NO fueron vistos por la IA. "
                          "La IA solo decidió la estructura de los APUs."])
     wb.save(path)

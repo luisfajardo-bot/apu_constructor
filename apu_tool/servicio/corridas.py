@@ -399,7 +399,7 @@ def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:
                  else _costear_row(alm, r, pricing) for r in rows]
     stamp = meta.creada_en.replace(":", "").replace("-", "").replace("T", "_")
     out = config.OUTPUT_DIR / f"cuadro_corrida_{corrida_id}_{stamp}.xlsx"
-    write_report(assembled, out)
+    write_report(assembled, out, lista_nombre=_nombre_lista(alm, meta.lista_precios_id))
     alm.corridas.set_cuadro(corrida_id, str(out))
     alm.corridas.set_estado(corrida_id, "finalizada")
     return out

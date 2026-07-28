@@ -169,7 +169,8 @@ def _build_alertas(ws, apus: list[AssembledApu]) -> None:
     _autosize(ws, {1: 9, 2: 45, 3: 30, 4: 12, 5: 10, 6: 14, 7: 50})
 
 
-def write_report_categorizado(apus: list[AssembledApu], path: Path | str) -> Path:
+def write_report_categorizado(apus: list[AssembledApu], path: Path | str,
+                              lista_nombre: str = "Principal") -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     grupos = agrupar_por_capitulo(apus)
@@ -185,6 +186,8 @@ def write_report_categorizado(apus: list[AssembledApu], path: Path | str) -> Pat
     info.append(["Generado", date.today().isoformat()])
     info.append(["Ítems", len(apus)])
     info.append(["Capítulos", len(grupos)])
+    # Qué tarifa costeó este cuadro (ver write_report: misma razón).
+    info.append(["Lista de precios", lista_nombre])
     info.append(["Precio contractual", "Valor unitario BÁSICO (sin AIU)"])
     info.append(["Nota", "Los precios de costo NO fueron vistos por la IA. "
                          "La IA solo decidió la estructura de los APUs."])

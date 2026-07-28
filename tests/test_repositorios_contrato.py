@@ -263,3 +263,48 @@ def test_apu_componente_tipo_y_ref_shift_round_trip(repos):
     comps = apus.get_components("A1", "DIURNO")
     assert comps[0].tipo == "insumo" and comps[0].ref_shift == ""
     assert comps[1].tipo == "apu" and comps[1].ref_shift == "DIURNO"
+
+
+def test_lista_principal_sembrada(repos):
+    from apu_tool import config
+    precios, _ = repos
+    listas = precios.listar_listas()
+    assert [(l.id, l.nombre) for l in listas] == [(config.LISTA_PRINCIPAL_ID, "Principal")]
+
+
+def test_crear_y_renombrar_lista(repos):
+    precios, _ = repos
+    lid = precios.crear_lista("NP Calle 13", creado_por="u1")
+    assert precios.get_lista(lid).nombre == "NP Calle 13"
+    precios.renombrar_lista(lid, "NP Calle 13 - Acta 2")
+    assert precios.get_lista(lid).nombre == "NP Calle 13 - Acta 2"
+    with pytest.raises(ValueError):
+        precios.crear_lista("np calle 13 - acta 2")     # duplicado, case-insensitive
+
+
+def test_renombrar_principal_prohibido(repos):
+    from apu_tool import config
+    precios, _ = repos
+    with pytest.raises(ValueError):
+        precios.renombrar_lista(config.LISTA_PRINCIPAL_ID, "Otra")
+
+
+def test_precio_por_lista_no_contamina_principal(repos):
+    precios, _ = repos
+    iid = precios.crear_insumo(
+        Insumo("6140", "ACERO 60000 PSI", "KG", "MATERIAL", 3500.0, "PRECIO IDU"))
+    np = precios.crear_lista("NP Calle 13")
+    precios.set_precio_por_id(iid, 4200.0, "ACTA NP", lista_id=np)
+    assert precios.get_insumo_por_id(iid, lista_id=np).precio == 4200.0
+    assert precios.get_insumo_por_id(iid).precio == 3500.0
+    assert precios.get_candidatos_bulk(["6140"], lista_id=np)["6140"][0].precio == 4200.0
+
+
+def test_sin_precio_en_la_lista(repos):
+    precios, _ = repos
+    precios.crear_insumo(
+        Insumo("9", "CEMENTO GRIS", "KG", "MATERIAL", 900.0, "COSTO INTERNO"))
+    np = precios.crear_lista("NP Calle 13")
+    assert precios.get_candidatos("9", lista_id=np)[0].sin_precio is True
+    items, total = precios.list_insumos(lista_id=np, sin_precio=True, limit=50, offset=0)
+    assert total == 1 and items[0].codigo == "9"

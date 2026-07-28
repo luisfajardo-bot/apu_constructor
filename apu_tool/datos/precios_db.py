@@ -24,6 +24,14 @@ def _load_schema() -> str:
     return SCHEMA_PATH.read_text(encoding="utf-8")
 
 
+def _resolver_lista_id(lista_id: Optional[int]) -> int:
+    """`None` ≡ Principal (comportamiento de hoy). Cualquier otro valor, incluido
+    `0`, se usa tal cual: `0` no es un id alcanzable hoy, pero tratarlo como
+    "ausente" (p.ej. con `lista_id or LISTA_PRINCIPAL_ID`) costearía en silencio
+    contra Principal en vez de fallar con la tarifa equivocada."""
+    return int(lista_id) if lista_id is not None else config.LISTA_PRINCIPAL_ID
+
+
 class PreciosDB:
     """Backend SQLite de precios. Implementa RepositorioPrecios."""
 
@@ -159,7 +167,7 @@ class PreciosDB:
     def _insertar_precio_vigente(self, conn: sqlite3.Connection, insumo_id: int, precio: float,
                                 fuente: str, fecha: str, creado_por: Optional[str] = None,
                                 lista_id: Optional[int] = None) -> None:
-        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
+        lid = _resolver_lista_id(lista_id)
         conn.execute("UPDATE insumo_precios SET vigente=0 WHERE insumo_id=? AND lista_id=?",
                      (int(insumo_id), lid))
         conn.execute(
@@ -308,7 +316,7 @@ class PreciosDB:
 
     def get_candidatos(self, codigo: str, lista_id: Optional[int] = None) -> list[Insumo]:
         """Todos los insumos con ese código, con su precio vigente EN `lista_id`."""
-        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
+        lid = _resolver_lista_id(lista_id)
         with self.connect() as conn:
             rows = conn.execute(
                 self._SELECT_INSUMO + "WHERE i.codigo = ? ORDER BY i.id",
@@ -316,7 +324,7 @@ class PreciosDB:
         return [self._fila_a_insumo(r) for r in rows]
 
     def get_candidatos_bulk(self, codigos, lista_id: Optional[int] = None) -> dict:
-        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
+        lid = _resolver_lista_id(lista_id)
         codes = [c for c in dict.fromkeys(str(x) for x in codigos if x)]
         out: dict[str, list[Insumo]] = {c: [] for c in codes}
         if not codes:
@@ -334,7 +342,7 @@ class PreciosDB:
 
     def get_insumo_por_id(self, insumo_id: int,
                           lista_id: Optional[int] = None) -> Optional[Insumo]:
-        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
+        lid = _resolver_lista_id(lista_id)
         with self.connect() as conn:
             r = conn.execute(self._SELECT_INSUMO + "WHERE i.id = ?",
                              (lid, int(insumo_id))).fetchone()
@@ -342,7 +350,7 @@ class PreciosDB:
 
     def price_history(self, codigo: str, nombre: Optional[str] = None,
                       lista_id: Optional[int] = None) -> list[dict]:
-        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
+        lid = _resolver_lista_id(lista_id)
         with self.connect() as conn:
             q = ("SELECT p.precio, p.fuente, p.clasificacion, p.fecha, p.vigente "
                  "FROM insumo_precios p JOIN insumos i ON i.id = p.insumo_id "
@@ -367,7 +375,7 @@ class PreciosDB:
             raise ValueError(
                 "El filtro «sin precio en esta lista» no se puede combinar con "
                 "fuente ni clasificación: son atributos de un precio que no existe.")
-        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
+        lid = _resolver_lista_id(lista_id)
         base = ("FROM insumos i LEFT JOIN insumo_precios p "
                 "ON p.insumo_id = i.id AND p.vigente = 1 AND p.lista_id = ?")
         where, params = ["i.oculto = 0"], [lid]
@@ -388,8 +396,15 @@ class PreciosDB:
             where.append(f"UPPER(p.fuente) IN ({placeholders})")
             params += [s.upper() for s in config.PUBLIC_PRICE_SOURCES]
         elif clasificacion == "interno":
+            # p.id IS NOT NULL exige que EXISTA una fila de precio vigente en esta
+            # lista: sin eso, un insumo sin tarifa (p.fuente IS NULL por el LEFT JOIN)
+            # colaría como "interno" sin serlo. En Principal es inocuo (todo insumo
+            # tiene su fila de precio desde que se crea), pero en una lista NP la
+            # ausencia de fila es el caso dominante, no la excepción.
             placeholders = ",".join("?" * len(config.PUBLIC_PRICE_SOURCES))
-            where.append(f"(p.fuente IS NULL OR UPPER(p.fuente) NOT IN ({placeholders}))")
+            where.append(
+                f"(p.id IS NOT NULL AND "
+                f"(p.fuente IS NULL OR UPPER(p.fuente) NOT IN ({placeholders})))")
             params += [s.upper() for s in config.PUBLIC_PRICE_SOURCES]
         wsql = (" WHERE " + " AND ".join(where)) if where else ""
         with self.connect() as conn:
@@ -408,7 +423,7 @@ class PreciosDB:
         return [r["grupo"] for r in rows]
 
     def fuentes(self, lista_id: Optional[int] = None) -> list[str]:
-        lid = int(lista_id or config.LISTA_PRINCIPAL_ID)
+        lid = _resolver_lista_id(lista_id)
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT DISTINCT p.fuente FROM insumo_precios p "

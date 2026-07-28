@@ -182,6 +182,76 @@ def test_apu_borrar_inexistente_devuelve_false(repos):
     assert apus.borrar_apu("NOPE", "DIURNO") is False
 
 
+def test_precio_cero_genuino_no_es_sin_precio(repos):
+    """Regla de negocio: nada puede costar $0; un $0 SIEMPRE es alerta (dura), nunca
+    una ausencia de tarifa (alerta blanda). `sin_precio` debe derivarse de "no hay
+    fila de precio vigente en la lista" (IS NULL por el LEFT JOIN), jamás de
+    `precio == 0`: un insumo con una fila de precio de 0.0 genuina es un DATO."""
+    precios, _ = repos
+    lista_np = precios.crear_lista("NP Cero Genuino")
+    iid_cero = precios.crear_insumo(
+        Insumo("T1", "TRANSPORTE CERO", "VJ", "TRANSPORTE", 0.0, "ACTA NP"),
+        lista_id=lista_np)
+    iid_ausente = precios.crear_insumo(
+        Insumo("T2", "TRANSPORTE AUSENTE", "VJ", "TRANSPORTE", 100.0, "PRECIO IDU"))
+
+    # fila de precio 0.0 EN la lista: es un dato real, no una ausencia.
+    con_cero = precios.get_insumo_por_id(iid_cero, lista_id=lista_np)
+    assert con_cero.precio == 0.0
+    assert con_cero.sin_precio is False
+
+    # sin fila de precio en la lista: sí es ausencia.
+    sin_fila = precios.get_insumo_por_id(iid_ausente, lista_id=lista_np)
+    assert sin_fila.sin_precio is True
+
+    # el filtro "sin precio en esta lista" no debe confundir un $0 con una ausencia.
+    items, total = precios.list_insumos(lista_id=lista_np, sin_precio=True,
+                                        limit=50, offset=0)
+    codigos = {i.codigo for i in items}
+    assert "T1" not in codigos    # el de $0 NO es "sin precio"
+    assert "T2" in codigos
+    assert total == 1
+
+
+def test_interno_excluye_insumos_sin_tarifa_en_la_lista(repos):
+    """En una lista no-Principal, `clasificacion="interno"` no debe devolver el
+    catálogo completo: un insumo sin ninguna fila de precio en esa lista no es
+    ni público ni interno, debe quedar fuera de ambas clasificaciones."""
+    precios, _ = repos
+    lista_np = precios.crear_lista("NP Clasificacion")
+    precios.insert_insumos([
+        Insumo("C1", "ARENA CLAS", "M3", "MATERIAL", 10.0, "PRECIO IDU"),
+        Insumo("C2", "CEMENTO CLAS", "KG", "MATERIAL", 20.0, "COSTO INTERNO")])
+    iid_c1 = precios.get_candidatos("C1")[0].id
+    precios.set_precio_por_id(iid_c1, 15.0, "ACTA NP", lista_id=lista_np)
+    # C2 NO tiene tarifa en lista_np.
+
+    pub, _ = precios.list_insumos(lista_id=lista_np, clasificacion="publico",
+                                  limit=50, offset=0)
+    intr, _ = precios.list_insumos(lista_id=lista_np, clasificacion="interno",
+                                   limit=50, offset=0)
+    assert {i.codigo for i in pub} == set()
+    assert {i.codigo for i in intr} == {"C1"}    # C2 no debe colar por no tener fila
+
+
+def test_interno_publico_particionan_catalogo_en_principal(repos):
+    """Invariante de no-regresión: en Principal, todo insumo tiene su fila de precio
+    desde que se crea, así que la corrección del Hallazgo 2 (exigir fila de precio
+    en la rama "interno") es inocua ahí: publico + interno siguen particionando el
+    catálogo completo, igual que antes del cambio."""
+    precios, _ = repos
+    precios.insert_insumos([
+        Insumo("P1", "ARENA PART", "M3", "MATERIAL", 10.0, "PRECIO IDU"),
+        Insumo("P2", "CEMENTO PART", "KG", "MATERIAL", 20.0, "COSTO INTERNO"),
+        Insumo("P3", "GRAVA PART", "M3", "MATERIAL", 15.0, "COMPRAS 2026")])
+    pub, total_pub = precios.list_insumos(clasificacion="publico", limit=50, offset=0)
+    intr, total_intr = precios.list_insumos(clasificacion="interno", limit=50, offset=0)
+    _, total = precios.list_insumos(limit=50, offset=0)
+    assert {i.codigo for i in pub} == {"P1"}
+    assert {i.codigo for i in intr} == {"P2", "P3"}
+    assert total_pub + total_intr == total == 3
+
+
 def test_apu_componente_tipo_y_ref_shift_round_trip(repos):
     # FIX 4: paridad de contrato dual-backend para las marcas de sub-APU.
     _, apus = repos

@@ -93,6 +93,8 @@ export default function Corrida() {
         duracion_ms: null,
         modo: "activa",
         carpeta_id: null,
+        lista_precios_id: null,
+        lista_nombre: "",
       }
     : corrida;
 

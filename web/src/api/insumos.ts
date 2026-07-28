@@ -14,6 +14,8 @@ export interface ListarInsumosParams {
   clasificacion?: string;
   limit?: number;
   offset?: number;
+  lista?: number;
+  sin_precio?: boolean;
 }
 
 function buildQuery(params: ListarInsumosParams): string {
@@ -24,6 +26,8 @@ function buildQuery(params: ListarInsumosParams): string {
   if (params.clasificacion !== undefined) qs.set("clasificacion", params.clasificacion);
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  if (params.lista !== undefined) qs.set("lista", String(params.lista));
+  if (params.sin_precio) qs.set("sin_precio", "true");
   const str = qs.toString();
   return str ? `?${str}` : "";
 }
@@ -36,12 +40,12 @@ export function getGrupos(): Promise<string[]> {
   return apiGet<string[]>("/insumos/grupos");
 }
 
-export function getFuentes(): Promise<string[]> {
-  return apiGet<string[]>("/insumos/fuentes");
+export function getFuentes(lista?: number): Promise<string[]> {
+  return apiGet<string[]>(`/insumos/fuentes${lista !== undefined ? `?lista=${lista}` : ""}`);
 }
 
-export function getInsumo(id: number): Promise<InsumoDetalle> {
-  return apiGet<InsumoDetalle>(`/insumos/${id}`);
+export function getInsumo(id: number, lista?: number): Promise<InsumoDetalle> {
+  return apiGet<InsumoDetalle>(`/insumos/${id}${lista !== undefined ? `?lista=${lista}` : ""}`);
 }
 
 export interface CambioInput {
@@ -50,8 +54,8 @@ export interface CambioInput {
   fuente: string;
 }
 
-export function aplicarCambios(cambios: CambioInput[]): Promise<CambiosAplicados> {
-  return apiPost<CambiosAplicados>("/insumos/cambios", { cambios });
+export function aplicarCambios(cambios: CambioInput[], lista_id?: number): Promise<CambiosAplicados> {
+  return apiPost<CambiosAplicados>("/insumos/cambios", { cambios, lista_id: lista_id ?? null });
 }
 
 export function previewImportarInsumos(form: FormData): Promise<ImportInsumosUpsertPreview> {

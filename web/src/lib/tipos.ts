@@ -1,5 +1,14 @@
 // Tipos de dominio — shapes exactos que devuelve el backend
 
+// La lista 1 es SIEMPRE 'Principal' (el catálogo). Gemelo de config.LISTA_PRINCIPAL_ID.
+export const LISTA_PRINCIPAL_ID = 1;
+
+export interface ListaPrecios {
+  id: number;
+  nombre: string;
+  creada_en: string;
+}
+
 export interface Progreso {
   i: number;
   total: number;
@@ -81,6 +90,9 @@ export interface Insumo {
   precio: number;
   fuente: string;
   clasificacion: string;
+  // true = no hay tarifa en la lista consultada. Distinto de un $0 genuino, que
+  // la regla de negocio prohíbe y hay que seguir mostrando como $0.
+  sin_precio: boolean;
 }
 
 export interface HistorialPrecio {
@@ -135,6 +147,8 @@ export interface CorridaResumen {
   margen: number | null;
   margen_pct: number | null;
   carpeta_id: number | null;
+  lista_precios_id: number | null;
+  lista_nombre: string;
 }
 
 // Wrappers de respuesta
@@ -160,6 +174,8 @@ export interface CorridaDetalle {
   totales: Totales;
   duracion_ms: number | null;
   carpeta_id: number | null;
+  lista_precios_id: number | null;
+  lista_nombre: string;
 }
 
 export interface ListaInsumos {

@@ -48,6 +48,68 @@ def test_migracion_traslada_y_verifica(tmp_path):
         cx.cerrar()
 
 
+# ---------------------------------------------------------------------------
+# Hallazgo 3 (review 2026-07 sobre d4530b8) — el SELECT/INSERT de insumo_precios
+# no viajaba con lista_id (todo caía en el DEFAULT 1) y lista_precios no se
+# copiaba en absoluto. Escenario de daño: un insumo con precio vigente en
+# Principal Y en una lista NP terminaba con DOS filas vigente=1/lista_id=1 en
+# destino -> get_candidatos devuelve 2 candidatos ambiguos para el mismo
+# (código, nombre) -> cruce.py::resolver marca AMBIGUO -> costeo en $0
+# silencioso. Este test siembra exactamente ese escenario (mismo insumo con
+# tarifa propia en Principal y en una lista NP) y verifica que ambas quedan
+# separadas y correctas tras migrar.
+# ---------------------------------------------------------------------------
+def _sembrar_sqlite_con_lista_np(tmp_path):
+    from apu_tool.datos.precios_db import PreciosDB
+    from apu_tool.datos.apus_db import ApusDB
+    from apu_tool.nucleo.models import Insumo
+    p = PreciosDB(tmp_path / "precios.db"); p.init_schema()
+    a = ApusDB(tmp_path / "apus.db"); a.init_schema()
+    iid = p.crear_insumo(Insumo("6140", "ACERO", "KG", "MAT", 3500.0, "PRECIO IDU"))
+    lid = p.crear_lista("NP Calle 13", creado_por="u1")
+    # tarifa PROPIA del mismo insumo en la lista NP (no toca el vigente de Principal:
+    # _insertar_precio_vigente solo desvigenta filas CON ese mismo lista_id).
+    p.set_precio_por_id(iid, 5000.0, fuente="COSTO INTERNO", lista_id=lid)
+    return tmp_path / "precios.db", tmp_path / "apus.db", lid
+
+
+def test_migracion_copia_listas_y_preserva_lista_id(tmp_path):
+    from apu_tool.datos.pg.conexion import Conexion, ejecutar_script
+    from apu_tool.datos import migracion_pg
+    from apu_tool import config
+    sp, sa, lid = _sembrar_sqlite_con_lista_np(tmp_path)
+    cx = Conexion(os.environ["TEST_DATABASE_URL"])
+    try:
+        with cx.connection() as conn:
+            for schema in ("precios", "apus", "corridas"):
+                conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+        with cx.connection() as conn:
+            for f in ("precios.sql", "apus.sql", "corridas.sql"):
+                ejecutar_script(conn, (config.PROJECT_ROOT / "db" / "pg" / f).read_text("utf-8"))
+        res = migracion_pg.migrar_catalogo(sp, sa, cx)
+        assert res["listas"] == 2        # Principal (id 1) + NP Calle 13
+        assert res["precios"] == 2       # una fila vigente por lista, no una sola pisada
+        ver = migracion_pg.verificar(sp, sa, cx)
+        assert ver["ok"] is True, ver["detalle"]
+
+        from apu_tool.datos.pg.precios_pg import PreciosPg
+        pg = PreciosPg(cx)
+        lista = pg.get_lista(lid)
+        assert lista is not None and lista.nombre == "NP Calle 13"
+
+        # Principal conserva SU precio, sin ambigüedad (un solo candidato)
+        cand_principal = pg.get_candidatos("6140")
+        assert len(cand_principal) == 1
+        assert cand_principal[0].precio == 3500.0
+
+        # la lista NP tiene SU PROPIO precio vigente, no el de Principal
+        cand_np = pg.get_candidatos("6140", lista_id=lid)
+        assert len(cand_np) == 1
+        assert cand_np[0].precio == 5000.0
+    finally:
+        cx.cerrar()
+
+
 def test_migrar_catalogo_es_idempotente(tmp_path):
     from apu_tool.datos.pg.conexion import Conexion, ejecutar_script
     from apu_tool.datos import migracion_pg

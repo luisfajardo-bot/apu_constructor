@@ -29,8 +29,24 @@ INSERT INTO precios.lista_precios (id, nombre, creada_en)
 SELECT 1, 'Principal', to_char(now(), 'YYYY-MM-DD')
 WHERE NOT EXISTS (SELECT 1 FROM precios.lista_precios WHERE id = 1);
 
-SELECT setval(pg_get_serial_sequence('precios.lista_precios', 'id'),
-              GREATEST((SELECT COALESCE(MAX(id), 1) FROM precios.lista_precios), 1));
+-- El GREATEST también compara contra el last_value de la secuencia (no solo
+-- MAX(id)): hoy es inocuo porque nada borra listas, pero si algún día se borra
+-- la de id más alto, MAX(id) cae mientras la secuencia ya avanzó (algún
+-- crear_lista la consumió). Sin el last_value acá, el siguiente boot
+-- rebobinaría setval() hacia atrás y el próximo crear_lista reutilizaría un id
+-- retirado. Como corrida.lista_precios_id se guarda deliberadamente SIN FK
+-- (lista_precios vive en el schema precios, corridas en otro), una corrida
+-- vieja quedaría apuntando en silencio a la tarifa de otra obra.
+SELECT setval(
+    pg_get_serial_sequence('precios.lista_precios', 'id'),
+    GREATEST(
+        (SELECT COALESCE(MAX(id), 1) FROM precios.lista_precios),
+        (SELECT COALESCE(last_value, 1) FROM pg_sequences
+         WHERE schemaname || '.' || sequencename
+               = pg_get_serial_sequence('precios.lista_precios', 'id')),
+        1
+    )
+);
 
 CREATE TABLE IF NOT EXISTS precios.insumo_precios (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

@@ -6,9 +6,8 @@ calificadas por schema. NO toca dinero de cara a la IA (fuera de su alcance).
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
 from datetime import date
-from typing import Iterable, Iterator, Optional
+from typing import Iterable, Optional
 
 from apu_tool import config
 from apu_tool.datos.pg.conexion import Conexion, ejecutar_script
@@ -29,13 +28,6 @@ def _resolver_lista_id(lista_id: Optional[int]) -> int:
 class PreciosPg:
     def __init__(self, cx: Conexion):
         self.cx = cx
-
-    @contextmanager
-    def connect(self) -> Iterator:
-        """Espejo de PreciosDB.connect(): conexión "cruda" para consultas ad-hoc
-        (tests, herramientas). Delega en el pool compartido de `self.cx`."""
-        with self.cx.connection() as conn:
-            yield conn
 
     def init_schema(self) -> None:
         self.cx.ejecutar_migracion(SCHEMA_PATH.read_text(encoding="utf-8"))

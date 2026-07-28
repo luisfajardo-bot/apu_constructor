@@ -21,7 +21,11 @@ CREATE TABLE IF NOT EXISTS corrida (
   duracion_ms   INTEGER,
   modo          TEXT NOT NULL DEFAULT 'activa',
   carpeta_id    INTEGER REFERENCES carpeta(id) ON DELETE RESTRICT,
-  nombre        TEXT
+  nombre        TEXT,
+  -- Tarifa de la corrida. NULL = Principal. Sin FK: lista_precios vive en precios.db,
+  -- otro archivo SQLite (mismo trato que corrida_item.apu_codigo). La integridad se
+  -- cuida no borrando listas (la API no expone DELETE).
+  lista_precios_id INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS corrida_item (

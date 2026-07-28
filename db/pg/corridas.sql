@@ -23,7 +23,11 @@ CREATE TABLE IF NOT EXISTS corridas.corrida (
     creado_por    TEXT,
     modo          TEXT NOT NULL DEFAULT 'activa',
     carpeta_id    BIGINT REFERENCES corridas.carpeta(id) ON DELETE RESTRICT,
-    nombre        TEXT
+    nombre        TEXT,
+    -- Tarifa de la corrida. NULL = Principal. Sin FK: lista_precios vive en el
+    -- catálogo de precios, mismo trato que corrida_item.apu_codigo. La integridad
+    -- se cuida no borrando listas (la API no expone DELETE).
+    lista_precios_id BIGINT
 );
 
 CREATE TABLE IF NOT EXISTS corridas.corrida_item (
@@ -52,6 +56,7 @@ ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS carpeta_id BIGINT
     REFERENCES corridas.carpeta(id) ON DELETE RESTRICT;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS nombre TEXT;
 UPDATE corridas.corrida SET nombre = archivo WHERE nombre IS NULL OR nombre = '';
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS lista_precios_id BIGINT;
 
 -- Bootstrap "Sin clasificar" + backfill de corridas sin carpeta (idempotente).
 INSERT INTO corridas.carpeta (nombre, creada_en)

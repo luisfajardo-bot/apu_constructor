@@ -254,6 +254,9 @@ class CorridaMeta:
     modo: str = "activa"
     carpeta_id: Optional[int] = None
     nombre: str = ""              # alias editable; vacío => se deriva de `archivo`
+    # Tarifa contra la que se costea la corrida. None = Principal (el catálogo).
+    # Se fija AL CREAR y no cambia: una corrida nunca debe mudar de tarifa por accidente.
+    lista_precios_id: Optional[int] = None
 
 
 @dataclass

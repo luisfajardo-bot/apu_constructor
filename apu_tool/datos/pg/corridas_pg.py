@@ -44,12 +44,12 @@ class CorridasPg:
     def _insert_corrida(self, conn, meta: CorridaMeta) -> int:
         cur = conn.execute(
             "INSERT INTO corridas.corrida (creada_en, archivo, turno_def, use_ai, estado, "
-            "cuadro_path, duracion_ms, modo, carpeta_id, nombre) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            "cuadro_path, duracion_ms, modo, carpeta_id, nombre, lista_precios_id) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
             (meta.creada_en, meta.archivo, meta.turno_def,
              None if meta.use_ai is None else int(meta.use_ai),
              meta.estado, meta.cuadro_path, meta.duracion_ms, meta.modo,
-             meta.carpeta_id, meta.nombre))
+             meta.carpeta_id, meta.nombre, meta.lista_precios_id))
         return int(cur.fetchone()["id"])
 
     def crear_corrida(self, meta: CorridaMeta) -> int:
@@ -147,7 +147,8 @@ class CorridasPg:
             estado=r["estado"], cuadro_path=r["cuadro_path"],
             duracion_ms=r["duracion_ms"], modo=(r["modo"] or "activa"),
             carpeta_id=r["carpeta_id"],
-            nombre=(r["nombre"] or r["archivo"]))
+            nombre=(r["nombre"] or r["archivo"]),
+            lista_precios_id=r.get("lista_precios_id"))
 
     def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
         with self.cx.connection() as conn:

@@ -56,6 +56,8 @@ class CorridasDB:
                              "REFERENCES carpeta(id) ON DELETE RESTRICT")
             if "nombre" not in cols:
                 conn.execute("ALTER TABLE corrida ADD COLUMN nombre TEXT")
+            if "lista_precios_id" not in cols:
+                conn.execute("ALTER TABLE corrida ADD COLUMN lista_precios_id INTEGER")
             # Backfill idempotente: corridas viejas muestran su archivo hasta renombrarse.
             conn.execute("UPDATE corrida SET nombre = archivo "
                          "WHERE nombre IS NULL OR nombre = ''")
@@ -98,12 +100,12 @@ class CorridasDB:
     def _insert_corrida(self, conn: sqlite3.Connection, meta: CorridaMeta) -> int:
         cur = conn.execute(
             "INSERT INTO corrida (creada_en, archivo, turno_def, use_ai, estado, "
-            "cuadro_path, duracion_ms, modo, carpeta_id, nombre) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "cuadro_path, duracion_ms, modo, carpeta_id, nombre, lista_precios_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (meta.creada_en, meta.archivo, meta.turno_def,
              None if meta.use_ai is None else int(meta.use_ai),
              meta.estado, meta.cuadro_path, meta.duracion_ms, meta.modo,
-             meta.carpeta_id, meta.nombre))
+             meta.carpeta_id, meta.nombre, meta.lista_precios_id))
         return int(cur.lastrowid)
 
     def crear_corrida(self, meta: CorridaMeta) -> int:
@@ -204,7 +206,8 @@ class CorridasDB:
             estado=r["estado"], cuadro_path=r["cuadro_path"],
             duracion_ms=r["duracion_ms"], modo=(r["modo"] or "activa"),
             carpeta_id=(r["carpeta_id"] if "carpeta_id" in r.keys() else None),
-            nombre=((r["nombre"] if "nombre" in r.keys() else None) or r["archivo"]))
+            nombre=((r["nombre"] if "nombre" in r.keys() else None) or r["archivo"]),
+            lista_precios_id=(r["lista_precios_id"] if "lista_precios_id" in r.keys() else None))
 
     def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
         with self.connect() as conn:

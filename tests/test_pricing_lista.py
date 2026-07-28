@@ -183,6 +183,44 @@ def test_mismo_insumo_creado_solo_en_np_costeado_en_esa_lista_dice_sin_precio_li
 # --- Hallazgo 2 (Important): tarifa de $0 GENUINA en una lista NP no debe
 # tragarse la regla del $0 (no confundirla con "sin precio en la lista") -----
 
+def test_tarifa_cero_en_principal_no_se_tapa_con_el_historico(alm):
+    """Decisión de negocio (no un accidente): fijamos que un $0 en Principal NO
+    se tapa con el histórico, aunque el histórico sea > 0.
+
+    Esto CAMBIÓ con 179db00. Antes de esa feature (listas de precios), el motor
+    decidía "hay tarifa" con `r.insumo.precio > 0`; un insumo con FILA de precio
+    en 0 en Principal (sin_precio=False: hay fila, no es una ausencia) caía a la
+    rama "sin tarifa" y usaba `comp.precio_unitario_hist` (la tarifa CONTRACTUAL
+    embebida en el APU) sin ninguna alerta. Desde 179db00 la condición es `not
+    r.insumo.sin_precio`: como SÍ hay fila de precio, el 0 es un DATO (p. ej. un
+    material que pone el cliente), no una ausencia, y se usa tal cual — delatado
+    por la regla dura de alertas.py ("nada en $0"). CLAUDE.md es explícito: el
+    histórico embebido es SOLO respaldo para cuando NO hay precio vigente; si hay
+    precio vigente -aunque sea 0- ese manda. Tapar el 0 real con un número
+    contractual plausible es justo la clase de underbid silencioso que el
+    proyecto documenta como su riesgo dominante (regla "nada en $0").
+
+    El caso es alcanzable desde ANTES de la feature de listas: `insert_insumos`
+    (lo que corre `seed`) escribe precio=0.0 con sin_precio=False para cualquier
+    celda del Excel histórico que venga vacía o en 0. hist=5000 (>0) es la clave
+    del caso: es el único valor de histórico con el que el comportamiento viejo
+    y el nuevo difieren (con hist=0 ambos coinciden y no probarían nada)."""
+    alm.precios.insert_insumos([
+        Insumo("444", "MATERIAL EN CERO", "UN", "MATERIAL", 0.0, "PRECIO IDU")])
+    alm.apus.insert_components([
+        ApuComponent("NP-3002", "DIURNO", "444", "MATERIAL EN CERO", "UN", 1.0, 5000.0)])
+
+    costed, total = PricingEngine(alm).cost_apu("NP-3002", "DIURNO")
+    mat = [c for c in costed if c.insumo_codigo == "444"][0]
+
+    assert mat.precio_unitario == 0.0                  # la tarifa de $0, NO los 5000 del histórico
+    assert mat.fuente_precio == "PRECIO IDU"           # la fuente del catálogo, NO "histórico"
+    assert mat.calidad_cruce == "exacto"               # el cruce fue bueno; el problema es el monto
+
+    motivos = alertas_costeo(_ensamblado(costed, total))
+    assert any("444" in m and "en $0" in m for m in motivos)
+
+
 def test_tarifa_cero_genuina_en_lista_np_sigue_alertando_en_0(alm, np):
     """Insumo con tarifa de $0 puesta A PROPÓSITO en la lista NP (material que pone
     el cliente): debe seguir detectándose como 'en $0' (regla dura), no como

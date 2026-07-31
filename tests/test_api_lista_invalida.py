@@ -6,7 +6,7 @@ import openpyxl
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.licitacion import write_sample_licitacion
-from apu_tool.nucleo.models import Insumo, LicitacionItem
+from apu_tool.nucleo.models import Apu, ApuComponent, Insumo, LicitacionItem
 from apu_tool.servicio.app import create_app
 from tests.conftest import cliente
 
@@ -20,6 +20,18 @@ def _cli(tmp_path, rol="editor"):
     alm.precios.insert_insumos([
         Insumo("100", "Concreto 3000 PSI", "M3", "CONCRETOS", 350000.0, "COSTO INTERNO")])
     return cliente(create_app(almacen=alm), rol=rol), alm
+
+
+def _con_apu(alm):
+    """Biblioteca no vacía: `POST /corridas` auto-semilla si `counts()["apus"] == 0`
+    (rutas.py -> pipeline.ensure_seeded), y ese camino lee el Excel histórico, que no
+    existe en CI -> 500. Con un APU en la biblioteca el guard no se dispara, igual que
+    en tests/test_api_corridas.py::_cliente. Ojo: ensure_seeded() se arma su propio
+    Almacen() por defecto, así que NO mira este almacén inyectado.
+    """
+    alm.apus.insert_apus([Apu("APU-1", "Concreto 3000 PSI", "M3", "DIURNO", "ESTR")])
+    alm.apus.insert_components([ApuComponent(
+        "APU-1", "DIURNO", "100", "Concreto 3000 PSI", "M3", 1.0, 350000.0)])
 
 
 def _xlsx_insumos() -> bytes:
@@ -134,7 +146,8 @@ def test_post_corridas_stream_lista_inexistente_400(tmp_path):
 
 def test_post_corridas_sin_lista_ok(tmp_path):
     """lista_id ausente (None = Principal) no se rechaza."""
-    cli, _ = _cli(tmp_path, rol="consulta")
+    cli, alm = _cli(tmp_path, rol="consulta")
+    _con_apu(alm)
     obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
     lic = _xlsx_lic(tmp_path)
     with open(lic, "rb") as f:
@@ -146,6 +159,7 @@ def test_post_corridas_sin_lista_ok(tmp_path):
 
 def test_post_corridas_lista_valida_ok(tmp_path):
     cli, alm = _cli(tmp_path, rol="editor")
+    _con_apu(alm)
     lid = alm.precios.crear_lista("NP Calle 13")
     obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
     lic = _xlsx_lic(tmp_path)

@@ -166,8 +166,9 @@ def test_post_sample_stream_biblioteca_vacia_da_409(tmp_path, monkeypatch):
 def test_api_semilla_sobre_el_almacen_del_request(tmp_path, monkeypatch):
     """EL test que faltaba: el que habría atrapado el rojo de CI de bd5fece.
 
-    Con un Excel disponible, el seed que dispara la API tiene que caer en la base del
-    request — no en `data/*.db`, que es la del desarrollador (y en CI no existe).
+    Espía `seed` (mockeado por completo, sin tocar el Excel real) para verificar que
+    el que dispara la API reciba la base del request — no `data/*.db`, que es la del
+    desarrollador (y en CI no existe).
     """
     cli, alm = _cli_vacio(tmp_path, monkeypatch)
     recibidos = []
@@ -179,3 +180,10 @@ def test_api_semilla_sobre_el_almacen_del_request(tmp_path, monkeypatch):
 
     assert recibidos, "la API no intentó semillar"
     assert recibidos[0] is alm, "semilló sobre otra base, no la del request"
+
+
+def test_biblioteca_vacia_la_sigue_traduciendo_el_cli():
+    """`cli.main` traduce `FileNotFoundError` a "ERROR: ..." + exit 2. `BibliotecaVacia`
+    hereda de esa clase para no romper ese contrato: sin la herencia,
+    `python run_cli.py demo` en una máquina sin datos escupe un traceback."""
+    assert issubclass(pipeline.BibliotecaVacia, FileNotFoundError)

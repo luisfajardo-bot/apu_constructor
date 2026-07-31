@@ -25,9 +25,11 @@ def _cli(tmp_path, rol="editor"):
 def _con_apu(alm):
     """Biblioteca no vacía: `POST /corridas` auto-semilla si `counts()["apus"] == 0`
     (rutas.py -> pipeline.ensure_seeded), y ese camino lee el Excel histórico, que no
-    existe en CI -> 500. Con un APU en la biblioteca el guard no se dispara, igual que
-    en tests/test_api_corridas.py::_cliente. Ojo: ensure_seeded() se arma su propio
-    Almacen() por defecto, así que NO mira este almacén inyectado.
+    existe en CI -> hoy termina en 409 (antes, en 500). Con un APU en la biblioteca el
+    guard no se dispara, igual que en tests/test_api_corridas.py::_cliente. El
+    auto-seed ya trabaja sobre el almacén inyectado del request (arreglado en la rama
+    fix/ensure-seeded-almacen-inyectado); este fixture no depende de eso, solo evita
+    disparar el guard para no meter el Excel histórico en el camino del test.
     """
     alm.apus.insert_apus([Apu("APU-1", "Concreto 3000 PSI", "M3", "DIURNO", "ESTR")])
     alm.apus.insert_components([ApuComponent(

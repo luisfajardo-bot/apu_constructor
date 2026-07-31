@@ -36,8 +36,13 @@ def db_is_empty(alm: Optional[Almacen] = None) -> bool:
     return alm.counts()["apus"] == 0
 
 
-class BibliotecaVacia(Exception):
-    """La biblioteca de APUs está vacía y no hay Excel histórico del que semillarla."""
+class BibliotecaVacia(FileNotFoundError):
+    """La biblioteca de APUs está vacía y no hay Excel histórico del que semillarla.
+
+    Hereda de `FileNotFoundError` (no de `Exception`) para que `cli.main` la siga
+    traduciendo a "ERROR: ..." + exit 2: ese `except` atrapa por tipo específico, y sin
+    esta herencia se escaparía como traceback crudo en `python run_cli.py demo`.
+    """
 
 
 def ensure_seeded(alm: Optional[Almacen] = None,

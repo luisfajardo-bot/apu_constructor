@@ -128,10 +128,17 @@ es que el estado del sistema no permite la operación todavía.
 | Situación | Hoy | Después |
 |---|---|---|
 | Biblioteca con APUs (caso normal) | no pasa nada | idéntico, ni un query extra |
-| Vacía + Excel disponible (local) | semilla en `data/*.db`, aunque la app use otra base | semilla en la base del request |
-| Vacía + sin Excel (Render) | 500 con `FileNotFoundError` | 409 con mensaje entendible |
+| Vacía del todo (`apus`=0 y `insumos`=0) + Excel disponible (local) | semilla en `data/*.db`, aunque la app use otra base | semilla en la base del request |
+| Vacía del todo (`apus`=0 y `insumos`=0) + sin Excel (Render) | 500 con `FileNotFoundError` | 409 con mensaje entendible |
 | Pool de conexiones | un pool huérfano por disparo | ninguno |
 | Bucle guard-A / semilla-B | posible | imposible |
+
+**Nota — restauración a medias (`insumos` > 0, `apus` == 0):** `ensure_seeded` solo
+semilla cuando las dos cuentas están en cero (`pipeline.py:55`); `_asegurar_biblioteca`
+solo mira `apus` (`rutas.py`). Con insumos presentes y APUs ausentes, ninguno de los dos
+guards se dispara: no se semilla, no hay 409, la corrida responde **200** y se arma
+contra una biblioteca vacía — el aviso queda en las alertas de costeo por ítem. Esto es
+idéntico a `master`; esta rama no lo cambia (ver Hallazgo 2 de la revisión).
 
 ## Qué NO cambia
 

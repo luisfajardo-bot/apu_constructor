@@ -358,7 +358,15 @@ def _asegurar_biblioteca(alm: Almacen) -> None:
     `ensure_seeded` sin argumentos se armaba su propio `Almacen()` con las rutas por
     defecto de config: el guard preguntaba por esta base y el seed escribía en otra. El
     409 (no 500) es porque no es un pedido mal formado ni un fallo del servidor: es que
-    el estado del sistema todavía no permite la operación."""
+    el estado del sistema todavía no permite la operación.
+
+    Ojo: este guard solo mira `apus`, y `ensure_seeded` (pipeline.py) solo semilla
+    cuando la base está vacía DEL TODO (`apus` **y** `insumos` en cero). Con insumos
+    cargados y APUs ausentes (p. ej. una restauración a medias) este helper no
+    semilla ni levanta 409: la corrida se arma igual, contra una biblioteca vacía, y
+    responde 200 — el aviso queda en las alertas de costeo por ítem. Es el mismo
+    comportamiento que `master`; no se tocó a propósito (ver Hallazgo 2 de la
+    revisión de esta rama)."""
     if alm.counts().get("apus", 0) != 0:
         return
     try:

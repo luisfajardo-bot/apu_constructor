@@ -78,10 +78,26 @@ toma un lock breve sobre `precios.insumo_precios`, que en producción ya tiene ~
 insumos y su historial — valídala contra el Postgres real antes de desplegar, como se
 hizo con nombre/alias de corridas.
 
+Esa validación está automatizada en `tests/test_migracion_lista_pg.py`: levanta el
+esquema ANTERIOR a las listas, lo llena con ~8200 insumos y 24 600 filas de precio, y
+recién entonces aplica `db/pg/precios.sql` (el resto de los tests de Postgres hace
+`DROP SCHEMA` primero, así que el `ALTER TABLE` les queda como no-op y no prueban este
+camino). Corre con `TEST_DATABASE_URL` apuntando a un Postgres **desechable** — esos
+tests hacen `DROP SCHEMA ... CASCADE`, nunca a producción. Medido en PG 17: **57 ms**.
+
+**Falta un paso manual:** `supabase/migrations/0005_lista_precios_rls.sql` habilita RLS
+en `precios.lista_precios`, y nada lo aplica automáticamente (el boot solo aplica
+`db/pg/*.sql`). Hay que correrlo a mano en el SQL editor de Supabase **después** del
+primer arranque con el código nuevo, que es el que crea la tabla. Sin ese paso la tabla
+queda sin RLS: la defensa en profundidad se pierde (la API sigue aplicando su RBAC con
+la `service_role`, que hace bypass de RLS igual).
+
 Antes de dar por buena la migración en producción:
 1. Confirmar que la lista `Principal` quedó sembrada con id 1.
 2. `SELECT count(*) FROM precios.insumo_precios WHERE lista_id <> 1` debe devolver 0
    (nada quedó fuera de Principal antes de que exista ninguna lista NP).
-3. Smoke test en el navegador: crear una lista, importar 2-3 precios, armar una
+3. Aplicar `0005_lista_precios_rls.sql` (ver arriba) y verificar con
+   `SELECT relrowsecurity FROM pg_class WHERE oid = 'precios.lista_precios'::regclass`.
+4. Smoke test en el navegador: crear una lista, importar 2-3 precios, armar una
    corrida contra ella, comprobar la alerta "Sin tarifa en la lista" en un insumo sin
    precio, y descargar el cuadro para ver la fila `Lista de precios` en `INFO`.

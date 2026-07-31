@@ -17,7 +17,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.licitacion import read_licitacion
-from apu_tool.dominio.pipeline import ensure_seeded, generate_sample
+from apu_tool.dominio.pipeline import BibliotecaVacia, ensure_seeded, generate_sample
 from apu_tool.servicio import apus as apus_svc
 from apu_tool.servicio import auditoria as auditoria_svc
 from apu_tool.servicio import autoria
@@ -137,8 +137,7 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
     if alm.carpetas.get(carpeta_id) is None:
         raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
     _validar_lista(alm, lista_id)
-    if alm.counts().get("apus", 0) == 0:
-        ensure_seeded()
+    _asegurar_biblioteca(alm)
     suf = Path(archivo.filename or "lic.xlsx").suffix or ".xlsx"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suf) as tmp:
         tmp.write(await archivo.read())
@@ -162,8 +161,7 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
 @router.post("/sample")
 def crear_sample(alm: Almacen = Depends(get_almacen),
                  _: object = Depends(requiere_rol("consulta"))):
-    if alm.counts().get("apus", 0) == 0:
-        ensure_seeded()
+    _asegurar_biblioteca(alm)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
         sample_path = tmp.name
     try:
@@ -203,8 +201,7 @@ async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
     if alm.carpetas.get(carpeta_id) is None:
         raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
     _validar_lista(alm, lista_id)
-    if alm.counts().get("apus", 0) == 0:
-        ensure_seeded()
+    _asegurar_biblioteca(alm)
     suf = Path(archivo.filename or "lic.xlsx").suffix or ".xlsx"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suf) as tmp:
         tmp.write(await archivo.read())
@@ -229,8 +226,7 @@ async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
 @router.post("/sample/stream")
 def crear_sample_stream(alm: Almacen = Depends(get_almacen),
                         _: object = Depends(requiere_rol("consulta"))):
-    if alm.counts().get("apus", 0) == 0:
-        ensure_seeded()
+    _asegurar_biblioteca(alm)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
         sample_path = tmp.name
     try:
@@ -354,6 +350,21 @@ def _validar_lista(alm: Almacen, lista_id: Optional[int]) -> None:
     existe. `lista_id=None` (Principal) siempre es válido."""
     if lista_id is not None and (lista_id <= 0 or alm.precios.get_lista(lista_id) is None):
         raise HTTPException(status_code=400, detail="La lista de precios indicada no existe.")
+
+
+def _asegurar_biblioteca(alm: Almacen) -> None:
+    """Auto-seed sobre LA base del request, y 409 si no hay de dónde semillar.
+
+    `ensure_seeded` sin argumentos se armaba su propio `Almacen()` con las rutas por
+    defecto de config: el guard preguntaba por esta base y el seed escribía en otra. El
+    409 (no 500) es porque no es un pedido mal formado ni un fallo del servidor: es que
+    el estado del sistema todavía no permite la operación."""
+    if alm.counts().get("apus", 0) != 0:
+        return
+    try:
+        ensure_seeded(alm)
+    except BibliotecaVacia as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.get("/insumos")

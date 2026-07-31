@@ -103,3 +103,79 @@ def test_generate_sample_pasa_su_almacen_al_auto_seed(tmp_path, monkeypatch):
         pipeline.generate_sample(out_path=tmp_path / "sample.xlsx", alm=alm)
 
     assert recibidos == [alm], "generate_sample no le pasó su almacén a ensure_seeded"
+
+
+# --------------------------------------------------------------------- nivel HTTP
+from apu_tool.dominio.licitacion import write_sample_licitacion          # noqa: E402
+from apu_tool.nucleo.models import LicitacionItem                        # noqa: E402
+from apu_tool.servicio.app import create_app                             # noqa: E402
+from tests.conftest import cliente                                       # noqa: E402
+
+_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _cli_vacio(tmp_path, monkeypatch):
+    """Cliente HTTP contra un almacén vacío y sin Excel histórico a la vista."""
+    monkeypatch.delenv("APU_SOURCE_XLSX", raising=False)
+    alm = _alm_vacio(tmp_path)
+    return cliente(create_app(almacen=alm), rol="admin"), alm
+
+
+def _xlsx_lic(tmp_path):
+    p = tmp_path / "lic.xlsx"
+    write_sample_licitacion(p, [LicitacionItem(
+        item="1", descripcion="EXCAVACION MANUAL", unidad="M3", cantidad=10.0,
+        precio_contractual=400000.0, shift="DIURNO")])
+    return p
+
+
+def _post_corrida(cli, tmp_path, ruta="/api/corridas"):
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
+    with open(_xlsx_lic(tmp_path), "rb") as f:
+        return cli.post(ruta,
+                        data={"turno": "DIURNO", "use_ai": "false",
+                              "carpeta_id": str(obra["id"])},
+                        files={"archivo": ("lic.xlsx", f, _XLSX)})
+
+
+def test_post_corridas_biblioteca_vacia_da_409(tmp_path, monkeypatch):
+    cli, _ = _cli_vacio(tmp_path, monkeypatch)
+    r = _post_corrida(cli, tmp_path)
+    assert r.status_code == 409, r.text
+    assert "biblioteca de APUs está vacía" in r.json()["detail"]
+
+
+def test_post_corridas_stream_biblioteca_vacia_da_409(tmp_path, monkeypatch):
+    cli, _ = _cli_vacio(tmp_path, monkeypatch)
+    r = _post_corrida(cli, tmp_path, ruta="/api/corridas/stream")
+    assert r.status_code == 409, r.text
+
+
+def test_post_sample_biblioteca_vacia_da_409(tmp_path, monkeypatch):
+    cli, _ = _cli_vacio(tmp_path, monkeypatch)
+    r = cli.post("/api/sample")
+    assert r.status_code == 409, r.text
+
+
+def test_post_sample_stream_biblioteca_vacia_da_409(tmp_path, monkeypatch):
+    cli, _ = _cli_vacio(tmp_path, monkeypatch)
+    r = cli.post("/api/sample/stream")
+    assert r.status_code == 409, r.text
+
+
+def test_api_semilla_sobre_el_almacen_del_request(tmp_path, monkeypatch):
+    """EL test que faltaba: el que habría atrapado el rojo de CI de bd5fece.
+
+    Con un Excel disponible, el seed que dispara la API tiene que caer en la base del
+    request — no en `data/*.db`, que es la del desarrollador (y en CI no existe).
+    """
+    cli, alm = _cli_vacio(tmp_path, monkeypatch)
+    recibidos = []
+    monkeypatch.setattr(pipeline, "seed",
+                        lambda almacen, **kw: (recibidos.append(almacen),
+                                               {"apus": 0, "insumos": 0})[1])
+
+    _post_corrida(cli, tmp_path)
+
+    assert recibidos, "la API no intentó semillar"
+    assert recibidos[0] is alm, "semilló sobre otra base, no la del request"

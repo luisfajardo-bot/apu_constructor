@@ -128,7 +128,7 @@ def generate_sample(n: int = 15, margen: float = 0.18, seed: int = 7,
     config.ensure_dirs()
     alm = alm or get_almacen()
     if db_is_empty(alm):
-        ensure_seeded()
+        ensure_seeded(alm)
     rng = random.Random(seed)
     pricing = PricingEngine(alm)
 

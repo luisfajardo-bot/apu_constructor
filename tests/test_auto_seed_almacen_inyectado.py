@@ -79,3 +79,27 @@ def test_biblioteca_poblada_no_semilla(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "seed", explota)
 
     assert pipeline.ensure_seeded(alm)["apus"] == 1
+
+
+def test_generate_sample_pasa_su_almacen_al_auto_seed(tmp_path, monkeypatch):
+    """`generate_sample` recibe un almacén (los endpoints le pasan el del request) y
+    decide con `db_is_empty(alm)`, pero llamaba a `ensure_seeded()` sin pasarlo: misma
+    divergencia guard/acción. Se corta la ejecución en el propio ensure_seeded para no
+    depender de nada de lo que hace generate_sample después.
+    """
+    class Corte(Exception):
+        pass
+
+    recibidos = []
+
+    def fake_ensure(alm=None, xlsx_path=None):
+        recibidos.append(alm)
+        raise Corte
+
+    monkeypatch.setattr(pipeline, "ensure_seeded", fake_ensure)
+    alm = _alm_vacio(tmp_path)          # 0 APUs -> db_is_empty(alm) es True
+
+    with pytest.raises(Corte):
+        pipeline.generate_sample(out_path=tmp_path / "sample.xlsx", alm=alm)
+
+    assert recibidos == [alm], "generate_sample no le pasó su almacén a ensure_seeded"

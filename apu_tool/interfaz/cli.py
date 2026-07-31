@@ -68,7 +68,9 @@ def cmd_status(args) -> int:
     meta = {**meta_precios, **meta_apus}
     print(f"Base de precios: {alm.precios.descripcion()}")
     print(f"Base de APUs:    {alm.apus.descripcion()}")
-    print(f"  Insumos:        {c.get('insumos', 0)}")
+    # Los VISIBLES, igual que /api/status y la tabla de Insumos de la web. El total con
+    # ocultos sigue en counts()["insumos"], que es el guard de seed().
+    print(f"  Insumos:        {c.get('insumos_visibles', c.get('insumos', 0))}")
     print(f"  Precios:        {c.get('insumo_precios', 0)}")
     print(f"  APUs:           {c.get('apus', 0)}")
     print(f"  Componentes:    {c.get('apu_componentes', 0)}")

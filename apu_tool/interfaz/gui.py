@@ -165,7 +165,8 @@ class ApuApp:
         c = self.alm.counts()
         ai = "IA habilitada" if config.ai_available() else "IA: fallback determinístico"
         self.status_lbl.config(
-            text=f"Insumos: {c['insumos']}   APUs: {c['apus']}   "
+            # Los visibles, igual que el CLI y la web (ver cmd_status en cli.py).
+            text=f"Insumos: {c.get('insumos_visibles', c['insumos'])}   APUs: {c['apus']}   "
                  f"Componentes: {c['apu_componentes']}   |   {ai}")
 
     def _log(self, msg: str) -> None:

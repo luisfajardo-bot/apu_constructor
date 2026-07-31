@@ -36,11 +36,32 @@ def db_is_empty(alm: Optional[Almacen] = None) -> bool:
     return alm.counts()["apus"] == 0
 
 
-def ensure_seeded(xlsx_path: Optional[Path] = None) -> dict:
-    """Semilla si las bases están vacías; si no, devuelve los conteos actuales."""
-    alm = get_almacen()
+class BibliotecaVacia(Exception):
+    """La biblioteca de APUs está vacía y no hay Excel histórico del que semillarla."""
+
+
+def ensure_seeded(alm: Optional[Almacen] = None,
+                  xlsx_path: Optional[Path] = None) -> dict:
+    """Semilla si las bases están vacías; si no, devuelve los conteos actuales.
+
+    `alm` es la base sobre la que trabajar. Los endpoints DEBEN pasar la del request
+    (`Depends(get_almacen)`): antes esta función se armaba su propio `Almacen()` con las
+    rutas por defecto de `config`, así que el guard preguntaba por una base y el seed
+    escribía en otra — eso dejó 4 tests en rojo en CI y, en producción, un pool de
+    conexiones huérfano por cada disparo. Sin `alm` se arma el global, que es lo correcto
+    para CLI y GUI.
+    """
+    alm = alm or get_almacen()
     if alm.counts()["apus"] == 0 and alm.counts()["insumos"] == 0:
-        return seed(alm, xlsx_path=xlsx_path)
+        try:
+            return seed(alm, xlsx_path=xlsx_path)
+        except FileNotFoundError as e:
+            # Semillar necesita el Excel histórico, que no existe en el servidor: el
+            # error tiene que decir qué hacer, no ser un 500 con un traceback.
+            raise BibliotecaVacia(
+                "La biblioteca de APUs está vacía y no hay Excel histórico en el "
+                "servidor. Semilla la base antes de armar corridas "
+                "(run_cli.py seed, o la variable APU_SOURCE_XLSX).") from e
     return alm.counts()
 
 

@@ -455,9 +455,27 @@ class PreciosDB:
         return [self.get_insumo_por_id(r["id"]) for r in rows]
 
     def counts(self) -> dict[str, int]:
+        """`insumos` = TODAS las filas; `insumos_visibles` = las que no están ocultas.
+
+        Las dos claves existen a propósito: `insumos` es el guard de `seed()` y de
+        `pipeline.ensure_seeded()` ("¿la base ya tiene catálogo?") y tiene que seguir
+        contando los ocultos — si no, una base con todo oculto parecería vacía y se
+        re-semillaría encima. `insumos_visibles` es lo que se le muestra al usuario,
+        para que cuadre con `GET /api/insumos` (que filtra `oculto = 0`).
+        """
         with self.connect() as conn:
-            return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-                    for t in ("insumos", "insumo_precios")}
+            c = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                 for t in ("insumos", "insumo_precios")}
+            try:
+                c["insumos_visibles"] = conn.execute(
+                    "SELECT COUNT(*) FROM insumos WHERE oculto = 0").fetchone()[0]
+            except sqlite3.OperationalError:
+                # Base anterior a la columna `oculto` (la agrega init_schema, y
+                # `seed()` llama a counts() ANTES de eso). Si dejáramos propagar,
+                # seed se come el OperationalError, la ve vacía y la re-semilla
+                # encima: nada estaba oculto en ese esquema, así que total == visible.
+                c["insumos_visibles"] = c["insumos"]
+            return c
 
     def get_meta(self) -> dict[str, str]:
         with self.connect() as conn:

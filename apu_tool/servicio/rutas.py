@@ -99,8 +99,10 @@ def _descarga_xlsx(data: bytes, filename: str) -> Response:
 def status(alm: Almacen = Depends(get_almacen),
           _: object = Depends(requiere_rol("consulta"))):
     c = alm.counts()
-    return StatusOut(insumos=c.get("insumos", 0), apus=c.get("apus", 0),
-                     ia=config.ai_available())
+    # Los VISIBLES, para que el chip diga lo mismo que la tabla de Insumos (que filtra
+    # los ocultos). El total sigue disponible en counts()["insumos"] para el seed.
+    return StatusOut(insumos=c.get("insumos_visibles", c.get("insumos", 0)),
+                     apus=c.get("apus", 0), ia=config.ai_available())
 
 
 @router.get("/corridas")

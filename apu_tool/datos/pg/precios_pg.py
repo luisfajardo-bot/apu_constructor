@@ -397,9 +397,14 @@ class PreciosPg:
         return [self.get_insumo_por_id(r["id"]) for r in rows]
 
     def counts(self) -> dict[str, int]:
+        """Espejo de PreciosDB.counts(): ver allí por qué van las dos claves."""
         with self.cx.connection() as conn:
-            return {t: conn.execute(f"SELECT COUNT(*) AS n FROM precios.{t}").fetchone()["n"]
-                    for t in ("insumos", "insumo_precios")}
+            c = {t: conn.execute(f"SELECT COUNT(*) AS n FROM precios.{t}").fetchone()["n"]
+                 for t in ("insumos", "insumo_precios")}
+            c["insumos_visibles"] = conn.execute(
+                "SELECT COUNT(*) AS n FROM precios.insumos WHERE oculto = FALSE"
+            ).fetchone()["n"]
+            return c
 
     def get_meta(self) -> dict[str, str]:
         with self.cx.connection() as conn:

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, test, vi } from "vitest";
 import { toast } from "sonner";
@@ -14,8 +14,9 @@ import CorridasInicio from "./CorridasInicio";
 // pantalla llama a armarArchivo — en particular, qué trae el FormData —
 // sin cambiar el comportamiento (resuelve enseguida) que ya asumían los tests
 // existentes de este archivo.
-const { armarArchivoMock } = vi.hoisted(() => ({
+const { armarArchivoMock, crearCarpetaMock } = vi.hoisted(() => ({
   armarArchivoMock: vi.fn(() => Promise.resolve()),
+  crearCarpetaMock: vi.fn(),
 }));
 
 vi.mock("@/lib/armado", () => ({
@@ -34,7 +35,7 @@ vi.mock("@/api/carpetas", () => ({
       ],
     },
   ]),
-  crearCarpeta: vi.fn(),
+  crearCarpeta: crearCarpetaMock,
 }));
 
 vi.mock("@/api/listas", () => ({
@@ -168,4 +169,26 @@ test("el FormData incluye lista_id solo cuando la lista elegida no es Principal,
   await waitFor(() => expect(armarArchivoMock).toHaveBeenCalledTimes(2));
   const formNP = armarArchivoMock.mock.calls[1][0] as FormData;
   expect(formNP.get("lista_id")).toBe("2");
+});
+
+test("crear carpeta usa el modal y auto-selecciona la nueva", async () => {
+  crearCarpetaMock.mockResolvedValue({ id: 9, nombre: "Obra Nueva", parent_id: null, n_corridas: 0, hijas: [] });
+  render(
+    <MemoryRouter>
+      <CorridasInicio />
+    </MemoryRouter>
+  );
+  await screen.findByText("Calle 13");
+
+  fireEvent.click(screen.getByRole("button", { name: "+ Carpeta" }));
+  // Se busca escopado al diálogo: la propia página ya tiene un campo "Nombre" (el de la
+  // corrida), y el diálogo usa la etiqueta por defecto de DialogoTexto, también "Nombre" —
+  // sin el `within`, `findByLabelText` ambiguaba entre los dos (ambos presentes a la vez en
+  // el DOM; el de la página queda aria-hidden por Radix, pero las queries de Testing
+  // Library por label no filtran por aria-hidden).
+  const dialogo = await screen.findByRole("dialog");
+  fireEvent.change(await within(dialogo).findByLabelText("Nombre"), { target: { value: "Obra Nueva" } });
+  fireEvent.click(within(dialogo).getByRole("button", { name: "Crear" }));
+
+  await waitFor(() => expect(crearCarpetaMock).toHaveBeenCalledWith("Obra Nueva", null));
 });

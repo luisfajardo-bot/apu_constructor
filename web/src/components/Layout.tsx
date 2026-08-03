@@ -39,14 +39,16 @@ export default function Layout() {
   const num = (n: number | undefined) => (n === undefined ? "—" : n.toLocaleString("es-CO"));
 
   const esAdmin = puede(perfil?.rol, "admin");
+  // `admin` marca el grupo, en vez de deducirlo de la posición: con un `i === 3` el
+  // separador se corría de lugar en silencio en cuanto alguien agregara una sección.
   const links = [
-    { to: "/corridas", label: "Corridas", end: false, Icono: Layers },
-    { to: "/insumos", label: "Insumos", end: true, Icono: Package },
-    { to: "/apus", label: "APUs", end: true, Icono: FileSpreadsheet },
+    { to: "/corridas", label: "Corridas", end: false, Icono: Layers, admin: false },
+    { to: "/insumos", label: "Insumos", end: true, Icono: Package, admin: false },
+    { to: "/apus", label: "APUs", end: true, Icono: FileSpreadsheet, admin: false },
     ...(esAdmin
       ? [
-          { to: "/usuarios", label: "Usuarios", end: true, Icono: Users },
-          { to: "/auditoria", label: "Auditoría", end: true, Icono: ScrollText },
+          { to: "/usuarios", label: "Usuarios", end: true, Icono: Users, admin: true },
+          { to: "/auditoria", label: "Auditoría", end: true, Icono: ScrollText, admin: true },
         ]
       : []),
   ];
@@ -78,11 +80,12 @@ export default function Layout() {
             </span>
 
             <nav aria-label="Secciones" className="flex items-stretch">
-              {links.map(({ to, label, end, Icono }, i) => (
+              {links.map(({ to, label, end, Icono, admin }, i) => (
                 <span key={to} className="flex items-stretch">
                   {/* Los de administración van detrás de un separador: no son parte
-                      del trabajo diario y conviene que se lean como otro grupo. */}
-                  {esAdmin && i === 3 && (
+                      del trabajo diario y conviene que se lean como otro grupo. Se
+                      dibuja en el primero del grupo, sea cual sea su posición. */}
+                  {admin && !links[i - 1]?.admin && (
                     <span aria-hidden className="my-4 w-px shrink-0 bg-hairline" />
                   )}
                   <NavLink

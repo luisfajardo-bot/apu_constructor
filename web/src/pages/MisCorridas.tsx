@@ -1,11 +1,14 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { Folder } from "lucide-react";
 import { toast } from "sonner";
 import { listarCorridas, eliminarCorrida, renombrarCorrida, descargarPlantillaLicitacion } from "@/api/corridas";
 import { listarCarpetas, crearCarpeta, renombrarCarpeta, borrarCarpeta, moverCorrida, moverCarpeta } from "@/api/carpetas";
 import { useAuth } from "@/lib/auth";
 import { fmtDuracion } from "@/lib/tiempo";
 import { cop, pct } from "@/lib/moneda";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { CorridaResumen, CarpetaNodo } from "@/lib/tipos";
 
 function fechaLegible(iso: string): string {
@@ -223,89 +226,93 @@ export default function MisCorridas() {
     : [];
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <h2 style={styles.titulo}>Mis corridas</h2>
-        <div style={styles.acciones}>
-          <button style={styles.btnPlantilla} onClick={bajarPlantilla}>
+    <div className="px-6 py-5">
+      <div className="mb-3.5 flex items-center justify-between">
+        <h2 className="text-[15px] font-semibold tracking-[-0.01em]">Mis corridas</h2>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={bajarPlantilla}>
             Descargar plantilla
-          </button>
-          <button style={styles.btnNuevaCarpeta} onClick={handleNuevaCarpeta}>
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleNuevaCarpeta}>
             Nueva carpeta
-          </button>
-          <button style={styles.btnNueva} onClick={() => navigate("/corridas/nueva")}>
+          </Button>
+          <Button size="sm" onClick={() => navigate("/corridas/nueva")}>
             Nueva corrida
-          </button>
+          </Button>
         </div>
       </div>
 
-      {/* Breadcrumb */}
-      <div style={styles.breadcrumb}>
-        <span
-          style={styles.breadcrumbLink}
-          onClick={() => setSearchParams({})}
-        >
+      {/* Breadcrumb. Eran <span onClick>, o sea inalcanzables con teclado; pasan a
+          <button>, que es lo que son. Mismo onClick, misma navegación. */}
+      <nav aria-label="Ruta de carpetas" className="mb-3 text-xs text-muted-foreground">
+        <button type="button" className={CLASE_MIGAJA} onClick={() => setSearchParams({})}>
           Todas
-        </span>
+        </button>
         {migajas.map((m) => (
           <span key={m.id}>
-            <span style={styles.breadcrumbSep}> › </span>
-            <span
-              style={styles.breadcrumbLink}
+            <span aria-hidden className="text-muted-foreground/70"> › </span>
+            <button
+              type="button"
+              className={CLASE_MIGAJA}
               onClick={() => setSearchParams({ carpeta: String(m.id) })}
             >
               {m.nombre}
-            </span>
+            </button>
           </span>
         ))}
-      </div>
+      </nav>
 
-      {cargando && <p style={styles.msg}>Cargando…</p>}
-      {error && <p style={styles.msgError}>{error}</p>}
+      {cargando && <p className="my-2 text-xs text-muted-foreground">Cargando…</p>}
+      {error && <p className="my-2 text-xs text-destructive">{error}</p>}
 
       {!cargando && !error && (
         <>
           {/* Filas de subcarpetas */}
           {subcarpetas.length > 0 && (
-            <div style={styles.carpetasWrap}>
+            <div className="mb-4">
               {subcarpetas.map((carpeta) => (
+                // ponytail: la fila sigue siendo un <div onClick>, no alcanzable con
+                // teclado. No se arregla acá porque un <button> no puede contener los
+                // botones de acción que ya tiene dentro; necesita su propio rediseño,
+                // igual que el <tr onClick> de la tabla de abajo.
                 <div
                   key={carpeta.id}
-                  style={styles.carpetaFila}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-md border-b border-hairline px-2.5 py-2 text-[13px] transition-colors hover:bg-muted"
                   onClick={() => setSearchParams({ carpeta: String(carpeta.id) })}
-                  onMouseEnter={(e) =>
-                    ((e.currentTarget as HTMLDivElement).style.background = "#f0f4f8")
-                  }
-                  onMouseLeave={(e) =>
-                    ((e.currentTarget as HTMLDivElement).style.background = "")
-                  }
                 >
-                  <span style={styles.carpetaIcono}>📁</span>
-                  <span style={styles.carpetaNombre}>{carpeta.nombre}</span>
-                  <span style={styles.carpetaCount}>{carpeta.n_corridas} corrida{carpeta.n_corridas !== 1 ? "s" : ""}</span>
+                  {/* Era el emoji 📁. La guía no-emoji-icons lo prohíbe: depende de la
+                      fuente del sistema y no se puede teñir con un token. */}
+                  <Folder aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 font-medium">{carpeta.nombre}</span>
+                  <span className="mr-2 text-[11px] text-muted-foreground">
+                    {carpeta.n_corridas} corrida{carpeta.n_corridas !== 1 ? "s" : ""}
+                  </span>
                   {puedeEditar && (
-                    <div style={styles.carpetaAcciones}>
-                      <button
-                        style={styles.btnCarpetaAccion}
+                    <div className="flex gap-1.5">
+                      <Button
+                        variant="outline"
+                        size="xs"
                         onClick={(e) => handleRenombrar(e, carpeta)}
                         title="Renombrar carpeta"
                       >
                         Renombrar
-                      </button>
-                      <button
-                        style={styles.btnCarpetaAccion}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="xs"
                         onClick={(e) => handleMoverCarpeta(e, carpeta)}
                         title="Mover carpeta"
                       >
                         Mover
-                      </button>
-                      <button
-                        style={{ ...styles.btnCarpetaAccion, ...styles.btnCarpetaEliminar }}
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="xs"
                         onClick={(e) => handleEliminarCarpeta(e, carpeta)}
                         title="Eliminar carpeta"
                       >
                         Eliminar
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -315,103 +322,107 @@ export default function MisCorridas() {
 
           {/* Tabla de corridas: solo dentro de una carpeta */}
           {carpetaActual != null && corridasFiltradas.length === 0 && (
-            <p style={styles.msgVacio}>No hay corridas en esta carpeta.</p>
+            <p className="my-6 text-[13px] text-muted-foreground">
+              No hay corridas en esta carpeta.
+            </p>
           )}
 
           {carpetaActual != null && corridasFiltradas.length > 0 && (
-            <div style={styles.tableWrap}>
-              <table style={styles.table}>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-xs">
                 <thead>
                   <tr>
-                    <th style={styles.th}>Nombre</th>
-                    <th style={styles.th}>Lista</th>
-                    <th style={{ ...styles.th, ...styles.thNum }}>Items</th>
-                    <th style={{ ...styles.th, ...styles.thNum }}>Por revisar</th>
-                    <th style={{ ...styles.th, ...styles.thNum }}>Contractual</th>
-                    <th style={{ ...styles.th, ...styles.thNum }}>Costo</th>
-                    <th style={{ ...styles.th, ...styles.thNum }}>Dif. $</th>
-                    <th style={{ ...styles.th, ...styles.thNum }}>Margen %</th>
-                    <th style={{ ...styles.th, ...styles.thNum }}>Tiempo</th>
-                    <th style={styles.th}>Estado</th>
-                    <th style={styles.th}>Modo</th>
-                    <th style={styles.th}></th>
+                    <th className={CLASE_TH}>Nombre</th>
+                    <th className={CLASE_TH}>Lista</th>
+                    <th className={cn(CLASE_TH, "text-right")}>Items</th>
+                    <th className={cn(CLASE_TH, "text-right")}>Por revisar</th>
+                    <th className={cn(CLASE_TH, "text-right")}>Contractual</th>
+                    <th className={cn(CLASE_TH, "text-right")}>Costo</th>
+                    <th className={cn(CLASE_TH, "text-right")}>Dif. $</th>
+                    <th className={cn(CLASE_TH, "text-right")}>Margen %</th>
+                    <th className={cn(CLASE_TH, "text-right")}>Tiempo</th>
+                    <th className={CLASE_TH}>Estado</th>
+                    <th className={CLASE_TH}>Modo</th>
+                    <th className={CLASE_TH}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {corridasFiltradas.map((c) => (
                     <tr
                       key={c.id}
-                      style={styles.tr}
+                      className="cursor-pointer border-b border-hairline transition-colors hover:bg-muted"
                       onClick={() => navigate(`/corridas/${c.id}`)}
-                      onMouseEnter={(e) =>
-                        ((e.currentTarget as HTMLTableRowElement).style.background = "#f0f4f8")
-                      }
-                      onMouseLeave={(e) =>
-                        ((e.currentTarget as HTMLTableRowElement).style.background = "")
-                      }
                     >
-                      <td style={styles.td}>
-                        <span style={styles.nombre} title={c.archivo}>{c.nombre}</span>
-                        <span style={styles.fecha}> — {fechaLegible(c.creada_en)}</span>
-                      </td>
-                      <td style={styles.td}>
-                        {c.lista_precios_id === null
-                          ? <span style={styles.listaPrincipal}>Principal</span>
-                          : <span style={styles.listaNombre}>{c.lista_nombre}</span>}
-                      </td>
-                      <td style={{ ...styles.td, ...styles.tdNum }}>{c.n_items}</td>
-                      <td style={{ ...styles.td, ...styles.tdNum }}>{c.n_revision}</td>
-                      <td style={{ ...styles.td, ...styles.tdNum }}>
-                        {c.contractual === null ? "—" : cop(c.contractual)}
-                      </td>
-                      <td style={{ ...styles.td, ...styles.tdNum }}>
-                        {c.costo === null ? "—" : cop(c.costo)}
-                      </td>
-                      <td style={{ ...styles.td, ...styles.tdNum, color: colorSigno(c.margen) }}>
-                        {c.margen === null ? "—" : cop(c.margen)}
-                      </td>
-                      <td style={{ ...styles.td, ...styles.tdNum, color: colorSigno(c.margen) }}>
-                        {c.margen_pct === null ? "—" : pct(c.margen_pct)}
-                      </td>
-                      <td style={{ ...styles.td, ...styles.tdNum }}>{fmtDuracion(c.duracion_ms)}</td>
-                      <td style={styles.td}>
-                        <span style={{ ...styles.badge, ...estadoBadgeStyle(c.estado) }}>
-                          {c.estado}
+                      <td className={CLASE_TD}>
+                        <span className="font-medium" title={c.archivo}>{c.nombre}</span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {" "}— {fechaLegible(c.creada_en)}
                         </span>
                       </td>
-                      <td style={styles.td}>
-                        <span style={{ ...styles.badge, ...(c.modo === "congelada"
-                          ? { background: "#bee3f8", color: "#2a4365" }
-                          : { background: "#c6f6d5", color: "#276749" }) }}>
+                      <td className={CLASE_TD}>
+                        {c.lista_precios_id === null
+                          ? <span className="text-muted-foreground">Principal</span>
+                          : <span className="font-medium text-revisar">{c.lista_nombre}</span>}
+                      </td>
+                      <td className={cn(CLASE_TD, CLASE_NUM)}>{c.n_items}</td>
+                      <td className={cn(CLASE_TD, CLASE_NUM)}>{c.n_revision}</td>
+                      <td className={cn(CLASE_TD, CLASE_NUM)}>
+                        {c.contractual === null ? "—" : cop(c.contractual)}
+                      </td>
+                      <td className={cn(CLASE_TD, CLASE_NUM)}>
+                        {c.costo === null ? "—" : cop(c.costo)}
+                      </td>
+                      <td className={cn(CLASE_TD, CLASE_NUM, claseSigno(c.margen))}>
+                        {c.margen === null ? "—" : cop(c.margen)}
+                      </td>
+                      <td className={cn(CLASE_TD, CLASE_NUM, claseSigno(c.margen))}>
+                        {c.margen_pct === null ? "—" : pct(c.margen_pct)}
+                      </td>
+                      <td className={cn(CLASE_TD, CLASE_NUM)}>{fmtDuracion(c.duracion_ms)}</td>
+                      <td className={CLASE_TD}>
+                        <span className={cn(CLASE_BADGE, claseEstado(c.estado))}>{c.estado}</span>
+                      </td>
+                      <td className={CLASE_TD}>
+                        <span
+                          className={cn(
+                            CLASE_BADGE,
+                            c.modo === "congelada"
+                              ? "bg-info-surface text-info"
+                              : "bg-margen-pos-surface text-margen-pos",
+                          )}
+                        >
                           {c.modo === "congelada" ? "Congelada" : "Activa"}
                         </span>
                       </td>
-                      <td style={{ ...styles.td, ...styles.tdAccion }}>
+                      <td className={cn(CLASE_TD, "w-[140px] space-x-1 text-right whitespace-nowrap")}>
                         {puedeEditar && (
-                          <button
-                            style={styles.btnMover}
+                          <Button
+                            variant="outline"
+                            size="xs"
                             onClick={(e) => handleRenombrarCorrida(e, c)}
                             title="Renombrar corrida"
                           >
                             Renombrar
-                          </button>
+                          </Button>
                         )}
                         {puedeEditar && (
-                          <button
-                            style={styles.btnMover}
+                          <Button
+                            variant="outline"
+                            size="xs"
                             onClick={(e) => handleMoverCorrida(e, c)}
                             title="Mover corrida"
                           >
                             Mover
-                          </button>
+                          </Button>
                         )}
-                        <button
-                          style={styles.btnEliminar}
+                        <Button
+                          variant="destructive"
+                          size="xs"
                           onClick={(e) => handleEliminar(e, c)}
                           title="Eliminar corrida"
                         >
                           Eliminar
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -425,231 +436,44 @@ export default function MisCorridas() {
   );
 }
 
-export function colorSigno(n: number | null): string | undefined {
+/** Clase del signo de una cifra: positivo en `--margen-pos`, negativo en `--margen-neg`.
+ *
+ *  Antes se llamaba `colorSigno` y devolvía los hex `#276749` / `#c53030` para meterlos
+ *  en un `style={{color}}`. Devolver una clase es lo que permite que el color viva en
+ *  index.css y no acá. El contrato lógico es el mismo: >= 0 positivo, < 0 negativo,
+ *  `null` sin clase. */
+export function claseSigno(n: number | null): string | undefined {
   if (n === null || n === undefined) return undefined;
-  return n >= 0 ? "#276749" : "#c53030";
+  return n >= 0 ? "text-margen-pos" : "text-margen-neg";
 }
 
-function estadoBadgeStyle(estado: string): React.CSSProperties {
+/** Clase del badge de estado de una corrida. Los cinco casos son los mismos de antes;
+ *  lo que cambia es que salen de tokens y no de hex sueltos. */
+function claseEstado(estado: string): string {
   switch (estado.toLowerCase()) {
     case "ok":
     case "listo":
-      return { background: "#c6f6d5", color: "#276749" };
+      return "bg-margen-pos-surface text-margen-pos";
     case "armando":
-      return { background: "#bee3f8", color: "#2a4365" };
+      return "bg-info-surface text-info";
     case "revision":
     case "en_revision":
     case "por_revisar":
-      return { background: "#fefcbf", color: "#744210" };
+      return "bg-revisar-surface text-revisar";
     case "error":
-      return { background: "#fed7d7", color: "#9b2c2c" };
+      return "bg-destructive-surface text-destructive";
     default:
-      return { background: "#e2e8f0", color: "#4a5568" };
+      return "bg-muted text-muted-foreground";
   }
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    padding: "20px 24px",
-  },
-  header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: "14px",
-  },
-  titulo: {
-    margin: 0,
-    fontSize: "15px",
-    fontWeight: 600,
-    color: "#1a1a2e",
-  },
-  acciones: {
-    display: "flex",
-    gap: "8px",
-    alignItems: "center",
-  },
-  btnPlantilla: {
-    padding: "5px 14px",
-    fontSize: "12px",
-    fontWeight: 600,
-    background: "#fff",
-    color: "#1a1a2e",
-    border: "1px solid #cbd5e0",
-    borderRadius: "4px",
-    cursor: "pointer",
-  },
-  btnNuevaCarpeta: {
-    padding: "5px 14px",
-    fontSize: "12px",
-    fontWeight: 600,
-    background: "#fff",
-    color: "#1a1a2e",
-    border: "1px solid #cbd5e0",
-    borderRadius: "4px",
-    cursor: "pointer",
-  },
-  btnNueva: {
-    padding: "5px 14px",
-    fontSize: "12px",
-    fontWeight: 600,
-    background: "#1a1a2e",
-    color: "#e2e8f0",
-    border: "none",
-    borderRadius: "4px",
-    cursor: "pointer",
-  },
-  breadcrumb: {
-    fontSize: "12px",
-    color: "#718096",
-    marginBottom: "12px",
-  },
-  breadcrumbLink: {
-    cursor: "pointer",
-    color: "#3182ce",
-    textDecoration: "underline",
-  },
-  breadcrumbSep: {
-    color: "#a0aec0",
-  },
-  msg: {
-    fontSize: "12px",
-    color: "#718096",
-    margin: "8px 0",
-  },
-  msgError: {
-    fontSize: "12px",
-    color: "#c53030",
-    margin: "8px 0",
-  },
-  msgVacio: {
-    fontSize: "13px",
-    color: "#718096",
-    margin: "24px 0",
-  },
-  carpetasWrap: {
-    marginBottom: "16px",
-  },
-  carpetaFila: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    padding: "8px 10px",
-    borderBottom: "1px solid #edf2f7",
-    cursor: "pointer",
-    fontSize: "13px",
-    borderRadius: "4px",
-    transition: "background 0.1s",
-  },
-  carpetaIcono: {
-    fontSize: "16px",
-    lineHeight: 1,
-  },
-  carpetaNombre: {
-    fontWeight: 500,
-    color: "#2d3748",
-    flex: 1,
-  },
-  carpetaCount: {
-    fontSize: "11px",
-    color: "#718096",
-    marginRight: "8px",
-  },
-  carpetaAcciones: {
-    display: "flex",
-    gap: "6px",
-  },
-  btnCarpetaAccion: {
-    padding: "2px 8px",
-    fontSize: "11px",
-    background: "transparent",
-    color: "#4a5568",
-    border: "1px solid #cbd5e0",
-    borderRadius: "4px",
-    cursor: "pointer",
-  },
-  btnCarpetaEliminar: {
-    color: "#c53030",
-    border: "1px solid #feb2b2",
-  },
-  tableWrap: {
-    overflowX: "auto",
-  },
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-    fontSize: "12px",
-  },
-  th: {
-    padding: "6px 10px",
-    background: "#f7f7f8",
-    borderBottom: "1px solid #e2e8f0",
-    textAlign: "left" as const,
-    fontWeight: 600,
-    color: "#4a5568",
-    whiteSpace: "nowrap" as const,
-  },
-  thNum: {
-    textAlign: "right" as const,
-  },
-  tr: {
-    cursor: "pointer",
-    borderBottom: "1px solid #edf2f7",
-    transition: "background 0.1s",
-  },
-  td: {
-    padding: "6px 10px",
-    color: "#2d3748",
-    verticalAlign: "middle" as const,
-  },
-  tdNum: {
-    textAlign: "right" as const,
-    fontVariantNumeric: "tabular-nums",
-  },
-  tdAccion: {
-    textAlign: "right" as const,
-    width: "140px",
-    whiteSpace: "nowrap" as const,
-  },
-  nombre: {
-    fontWeight: 500,
-  },
-  fecha: {
-    color: "#718096",
-    fontSize: "11px",
-  },
-  listaPrincipal: {
-    color: "#718096",
-  },
-  listaNombre: {
-    fontWeight: 500,
-    color: "#b7791f",
-  },
-  badge: {
-    display: "inline-block",
-    padding: "1px 7px",
-    borderRadius: "10px",
-    fontSize: "11px",
-    fontWeight: 500,
-    whiteSpace: "nowrap" as const,
-  },
-  btnMover: {
-    padding: "3px 10px",
-    fontSize: "11px",
-    color: "#2b6cb0",
-    background: "transparent",
-    border: "1px solid #bee3f8",
-    borderRadius: "4px",
-    cursor: "pointer",
-    marginRight: "4px",
-  },
-  btnEliminar: {
-    padding: "3px 10px",
-    fontSize: "11px",
-    color: "#c53030",
-    background: "transparent",
-    border: "1px solid #feb2b2",
-    borderRadius: "4px",
-    cursor: "pointer",
-  },
-};
+const CLASE_MIGAJA =
+  "cursor-pointer rounded-sm text-ring underline underline-offset-2 " +
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+const CLASE_TH =
+  "border-b border-border bg-muted px-2.5 py-1.5 text-left font-semibold " +
+  "whitespace-nowrap text-muted-foreground";
+const CLASE_TD = "px-2.5 py-1.5 align-middle";
+const CLASE_NUM = "text-right font-mono tabular-nums";
+const CLASE_BADGE =
+  "inline-block rounded-md px-1.5 py-px text-[11px] font-medium whitespace-nowrap";

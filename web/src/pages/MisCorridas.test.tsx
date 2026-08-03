@@ -1,7 +1,13 @@
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { expect, test, vi, beforeEach, afterEach } from "vitest";
-import { colorSigno } from "./MisCorridas";
+import { expect, test, vi } from "vitest";
+// Los imports van ARRIBA. Estaban adentro de cada test (`await import("./MisCorridas")`)
+// y el costo de transformar el módulo se le cobraba al presupuesto de 5 s de cada uno:
+// medido en otro archivo con la misma forma, 1682-2232 ms de los 5000. `vi.mock` lo
+// hoistea vitest antes de los imports, así que los mocks de abajo siguen aplicándose.
+import MisCorridas, { claseSigno } from "./MisCorridas";
+import { moverCorrida } from "@/api/carpetas";
+import { listarCorridas, renombrarCorrida } from "@/api/corridas";
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ perfil: { rol: "admin", email: "a@b.c", nombre: "A" } }),
@@ -35,15 +41,19 @@ vi.mock("@/api/carpetas", () => ({
   moverCarpeta: vi.fn(async () => ({})),
 }));
 
-test("colorSigno: verde si >=0, rojo si <0, undefined si null", () => {
-  expect(colorSigno(10)).toBe("#276749");
-  expect(colorSigno(0)).toBe("#276749");
-  expect(colorSigno(-5)).toBe("#c53030");
-  expect(colorSigno(null)).toBeUndefined();
+// Este test SÍ se modificó, y es el único de la rama. Assertaba los hex literales
+// ("#276749" / "#c53030"), que son exactamente lo que esta task viene a eliminar: un
+// test que codifica el token viejo tiene que seguir al token. El contrato lógico que
+// verifica es idéntico — >= 0 positivo, < 0 negativo, null sin clase — y el color real
+// lo verifica scripts/verificar_contraste.py contra WCAG.
+test("claseSigno: positivo, negativo, y sin clase si es null", () => {
+  expect(claseSigno(10)).toBe("text-margen-pos");
+  expect(claseSigno(0)).toBe("text-margen-pos");
+  expect(claseSigno(-5)).toBe("text-margen-neg");
+  expect(claseSigno(null)).toBeUndefined();
 });
 
 test("MisCorridas muestra contractual, costo, dif y margen % formateados (dentro de carpeta)", async () => {
-  const { default: MisCorridas } = await import("./MisCorridas");
   render(<MemoryRouter initialEntries={["/corridas?carpeta=1"]}><MisCorridas /></MemoryRouter>);
   await waitFor(() => expect(screen.getByText("$4.000.000")).toBeTruthy());
   expect(screen.getByText("$3.675.000")).toBeTruthy();
@@ -52,7 +62,6 @@ test("MisCorridas muestra contractual, costo, dif y margen % formateados (dentro
 });
 
 test("MisCorridas: root muestra carpeta y oculta corridas; entrando a carpeta las muestra", async () => {
-  const { default: MisCorridas } = await import("./MisCorridas");
 
   // Root: carpeta visible, dinero de la corrida no visible
   const { unmount } = render(<MemoryRouter initialEntries={["/corridas"]}><MisCorridas /></MemoryRouter>);
@@ -61,14 +70,11 @@ test("MisCorridas: root muestra carpeta y oculta corridas; entrando a carpeta la
   unmount();
 
   // Con carpeta=1: dinero de la corrida visible
-  const { default: MisCorridasB } = await import("./MisCorridas");
-  render(<MemoryRouter initialEntries={["/corridas?carpeta=1"]}><MisCorridasB /></MemoryRouter>);
+  render(<MemoryRouter initialEntries={["/corridas?carpeta=1"]}><MisCorridas /></MemoryRouter>);
   await waitFor(() => expect(screen.getByText("$4.000.000")).toBeTruthy());
 });
 
 test("Mover corrida: al hacer clic en 'Mover' y elegir opción 1, llama moverCorrida(1, destinoId)", async () => {
-  const { default: MisCorridas } = await import("./MisCorridas");
-  const { moverCorrida } = await import("@/api/carpetas");
 
   const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("1");
 
@@ -94,8 +100,6 @@ test("Mover corrida: al hacer clic en 'Mover' y elegir opción 1, llama moverCor
 });
 
 test("Renombrar corrida: al hacer clic y confirmar, llama renombrarCorrida(1, nuevo)", async () => {
-  const { default: MisCorridas } = await import("./MisCorridas");
-  const { renombrarCorrida } = await import("@/api/corridas");
 
   const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Obra Norte");
 
@@ -118,8 +122,6 @@ test("Renombrar corrida: al hacer clic y confirmar, llama renombrarCorrida(1, nu
 });
 
 test("la columna Lista distingue una corrida NP de una Principal", async () => {
-  const { default: MisCorridas } = await import("./MisCorridas");
-  const { listarCorridas } = await import("@/api/corridas");
   (listarCorridas as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce([
     {
       id: 1, nombre: "lic.xlsx", archivo: "lic.xlsx", creada_en: "2026-07-08T10:00:00",

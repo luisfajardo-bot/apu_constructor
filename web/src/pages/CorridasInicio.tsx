@@ -5,6 +5,8 @@ import { useArmadoVivo } from "@/lib/armado";
 import { listarCarpetas, crearCarpeta } from "@/api/carpetas";
 import { listarListas } from "@/api/listas";
 import { LISTA_PRINCIPAL_ID, type CarpetaNodo, type ListaPrecios } from "@/lib/tipos";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export default function CorridasInicio() {
   const navigate = useNavigate();
@@ -139,272 +141,165 @@ export default function CorridasInicio() {
   }
 
   return (
-    <div style={styles.container}>
-        <h2 style={styles.titulo}>Nueva corrida</h2>
-        <form onSubmit={handleArmar} style={styles.form}>
-          {/* Archivo */}
-          <div style={styles.campo}>
-            <label style={styles.label} htmlFor="archivo">
-              Archivo de licitación
-            </label>
-            <input
-              id="archivo"
-              ref={fileRef}
-              type="file"
-              accept=".xlsx,.csv"
-              onChange={handleArchivoChange}
-              style={styles.inputFile}
-              disabled={cargando}
-            />
-          </div>
+    <div className="max-w-[400px] px-7 py-6">
+      <h2 className="mb-4 text-[15px] font-semibold tracking-[-0.01em]">Nueva corrida</h2>
+      <form onSubmit={handleArmar} className="flex flex-col gap-3">
+        {/* Archivo */}
+        <div className={CLASE_CAMPO}>
+          <label className={CLASE_ETIQUETA} htmlFor="archivo">
+            Archivo de licitación
+          </label>
+          <input
+            id="archivo"
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.csv"
+            onChange={handleArchivoChange}
+            disabled={cargando}
+            className="rounded-sm text-xs text-foreground file:mr-2 file:cursor-pointer file:rounded-md file:border file:border-input file:bg-card file:px-2 file:py-1 file:text-xs file:font-medium file:text-foreground hover:file:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
+          />
+        </div>
 
-          {/* Nombre */}
-          <div style={styles.campo}>
-            <label style={styles.label} htmlFor="nombre">
-              Nombre
-            </label>
-            <input
-              id="nombre"
-              type="text"
-              value={nombre}
-              onChange={(e) => { setNombre(e.target.value); setNombreTocado(true); }}
-              placeholder="Nombre de la corrida"
-              style={styles.input}
-              disabled={cargando}
-            />
-          </div>
+        {/* Nombre */}
+        <div className={CLASE_CAMPO}>
+          <label className={CLASE_ETIQUETA} htmlFor="nombre">
+            Nombre
+          </label>
+          <Input
+            id="nombre"
+            type="text"
+            value={nombre}
+            onChange={(e) => { setNombre(e.target.value); setNombreTocado(true); }}
+            placeholder="Nombre de la corrida"
+            disabled={cargando}
+            className="text-xs"
+          />
+        </div>
 
-          {/* Usar IA */}
-          <div style={styles.campoInline}>
-            <input
-              id="usar-ia"
-              type="checkbox"
-              checked={usarIA}
-              onChange={(e) => setUsarIA(e.target.checked)}
-              disabled={cargando}
-              style={styles.checkbox}
-            />
-            <label htmlFor="usar-ia" style={styles.labelInline}>
-              Usar IA
-            </label>
-          </div>
+        {/* Usar IA */}
+        <div className="flex items-center gap-1.5">
+          <input
+            id="usar-ia"
+            type="checkbox"
+            checked={usarIA}
+            onChange={(e) => setUsarIA(e.target.checked)}
+            disabled={cargando}
+            className="size-3.5 cursor-pointer accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          />
+          <label htmlFor="usar-ia" className="cursor-pointer text-xs font-medium">
+            Usar IA
+          </label>
+        </div>
 
-          {/* Carpeta */}
-          <div style={styles.campo}>
-            <label style={styles.label} htmlFor="carpeta-nivel1">
-              Carpeta <span style={{ color: "#b91c1c" }} title="Obligatorio">*</span>
-            </label>
-            <div style={styles.selectFila}>
+        {/* Carpeta */}
+        <div className={CLASE_CAMPO}>
+          <label className={CLASE_ETIQUETA} htmlFor="carpeta-nivel1">
+            Carpeta{" "}
+            <span className="text-destructive" title="Obligatorio">
+              *
+            </span>
+          </label>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {/* Los <select> quedan NATIVOS a propósito. Los 7 tests de esta pantalla usan
+                fireEvent.change() y getByRole("option"), que no funcionan contra el Select
+                de Radix — no es un componente <select>. Se estilizan con tokens. */}
+            <select
+              id="carpeta-nivel1"
+              value={nivel1Id ?? ""}
+              onChange={handleNivel1Change}
+              disabled={cargando}
+              className={CLASE_SELECT}
+            >
+              <option value="">— Elegir carpeta —</option>
+              {carpetas.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre}
+                </option>
+              ))}
+            </select>
+            {hijas.length > 0 && (
               <select
-                id="carpeta-nivel1"
-                value={nivel1Id ?? ""}
-                onChange={handleNivel1Change}
+                id="carpeta-nivel2"
+                value={nivel2Id ?? ""}
+                onChange={handleNivel2Change}
                 disabled={cargando}
-                style={styles.select}
+                className={CLASE_SELECT}
               >
-                <option value="">— Elegir carpeta —</option>
-                {carpetas.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nombre}
+                <option value="">— (ninguna) —</option>
+                {hijas.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.nombre}
                   </option>
                 ))}
               </select>
-              {hijas.length > 0 && (
-                <select
-                  id="carpeta-nivel2"
-                  value={nivel2Id ?? ""}
-                  onChange={handleNivel2Change}
-                  disabled={cargando}
-                  style={styles.select}
-                >
-                  <option value="">— (ninguna) —</option>
-                  {hijas.map((h) => (
-                    <option key={h.id} value={h.id}>
-                      {h.nombre}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <button
-                type="button"
-                style={styles.btnCrearCarpeta}
-                disabled={cargando}
-                onClick={handleCrearCarpeta}
-              >
-                + Carpeta
-              </button>
-            </div>
-          </div>
-
-          {/* Lista de precios: visible (no "avanzado"), porque es inmutable
-              tras crear la corrida — este es el único momento de acertar. */}
-          <div style={styles.campo}>
-            <label style={styles.label} htmlFor="lista">
-              Lista de precios
-            </label>
-            <select
-              id="lista"
-              style={styles.input}
-              value={listaId}
-              onChange={(e) => setListaId(Number(e.target.value))}
-              disabled={cargando}
-            >
-              {listas.map((l) => (
-                <option key={l.id} value={l.id}>{l.nombre}</option>
-              ))}
-            </select>
-            {/* El aviso está al lado de DOS botones y solo aplica a uno: "Usar ejemplo"
-                pega a /api/sample/stream, que no recibe lista_id — el ejemplo es una demo
-                construida sobre Principal (sus contractuales son costo_Principal * (1+margen),
-                ver pipeline.py::generate_sample). Sorprendió en el smoke test de producción
-                del 2026-08-03, así que se dice explícitamente. Sin <strong> a propósito: el
-                <p> queda como un solo nodo de texto y getByText() lo encuentra entero. */}
-            {listaId !== LISTA_PRINCIPAL_ID && (
-              <p style={styles.aviso}>
-                Se aplica al armar y no se puede cambiar después. «Usar ejemplo» usa Principal.
-              </p>
             )}
-          </div>
-
-          {/* Botones */}
-          <div style={styles.botones}>
-            <button
-              type="submit"
-              style={styles.btnPrimario}
-              /* Solo `cargando` (evita el doble-submit). NO se deshabilita por falta de
-                 carpeta: `handleArmar` ya avisa con un toast, y un botón deshabilitado sin
-                 explicación deja al usuario sin salida — pasó en el smoke test de
-                 producción del 2026-08-03, donde ese guard volvía inalcanzable al propio
-                 mensaje. El backend valida igual: carpeta_id es Form(...) obligatorio y
-                 rutas.py rechaza con 400 una carpeta inexistente. */
-              disabled={cargando}
-            >
-              {cargando ? "Armando…" : "Armar"}
-            </button>
-            <button
+            <Button
               type="button"
-              style={styles.btnSecundario}
+              variant="outline"
+              size="xs"
               disabled={cargando}
-              onClick={handleEjemplo}
+              onClick={handleCrearCarpeta}
             >
-              Usar ejemplo
-            </button>
+              + Carpeta
+            </Button>
           </div>
-        </form>
+        </div>
+
+        {/* Lista de precios: visible (no "avanzado"), porque es inmutable
+            tras crear la corrida — este es el único momento de acertar. */}
+        <div className={CLASE_CAMPO}>
+          <label className={CLASE_ETIQUETA} htmlFor="lista">
+            Lista de precios
+          </label>
+          <select
+            id="lista"
+            value={listaId}
+            onChange={(e) => setListaId(Number(e.target.value))}
+            disabled={cargando}
+            className={CLASE_SELECT}
+          >
+            {listas.map((l) => (
+              <option key={l.id} value={l.id}>{l.nombre}</option>
+            ))}
+          </select>
+          {/* El aviso está al lado de DOS botones y solo aplica a uno: "Usar ejemplo"
+              pega a /api/sample/stream, que no recibe lista_id — el ejemplo es una demo
+              construida sobre Principal (sus contractuales son costo_Principal * (1+margen),
+              ver pipeline.py::generate_sample). Sorprendió en el smoke test de producción
+              del 2026-08-03, así que se dice explícitamente. Sin <strong> a propósito: el
+              <p> queda como un solo nodo de texto y getByText() lo encuentra entero. */}
+          {listaId !== LISTA_PRINCIPAL_ID && (
+            <p className="mt-0.5 text-[11px] text-revisar">
+              Se aplica al armar y no se puede cambiar después. «Usar ejemplo» usa Principal.
+            </p>
+          )}
+        </div>
+
+        {/* Botones */}
+        <div className="mt-0.5 flex gap-2">
+          {/* Solo `cargando` (evita el doble-submit). NO se deshabilita por falta de
+              carpeta: `handleArmar` ya avisa con un toast, y un botón deshabilitado sin
+              explicación deja al usuario sin salida — pasó en el smoke test de
+              producción del 2026-08-03, donde ese guard volvía inalcanzable al propio
+              mensaje. El backend valida igual: carpeta_id es Form(...) obligatorio y
+              rutas.py rechaza con 400 una carpeta inexistente.
+              Y ahora el deshabilitado SE VE gris: antes usaba estilo inline y el
+              disabled:opacity-50 del primitivo no llegaba a aplicarse. */}
+          <Button type="submit" disabled={cargando}>
+            {cargando ? "Armando…" : "Armar"}
+          </Button>
+          <Button type="button" variant="outline" disabled={cargando} onClick={handleEjemplo}>
+            Usar ejemplo
+          </Button>
+        </div>
+      </form>
     </div>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    padding: "24px 28px",
-    maxWidth: "400px",
-  },
-  titulo: {
-    margin: "0 0 16px",
-    fontSize: "15px",
-    fontWeight: 600,
-    color: "#1a1a2e",
-  },
-  form: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "12px",
-  },
-  campo: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px",
-  },
-  label: {
-    fontSize: "12px",
-    fontWeight: 500,
-    color: "#4a5568",
-  },
-  inputFile: {
-    fontSize: "12px",
-    color: "#2d3748",
-  },
-  input: {
-    fontSize: "12px",
-    color: "#2d3748",
-    padding: "4px 6px",
-    borderRadius: "4px",
-    border: "1px solid #cbd5e0",
-    background: "#fff",
-  },
-  campoInline: {
-    display: "flex",
-    alignItems: "center",
-    gap: "6px",
-  },
-  checkbox: {
-    cursor: "pointer",
-  },
-  labelInline: {
-    fontSize: "12px",
-    fontWeight: 500,
-    color: "#4a5568",
-    cursor: "pointer",
-  },
-  selectFila: {
-    display: "flex",
-    gap: "6px",
-    alignItems: "center",
-    flexWrap: "wrap",
-  },
-  select: {
-    fontSize: "12px",
-    color: "#2d3748",
-    padding: "4px 6px",
-    borderRadius: "4px",
-    border: "1px solid #cbd5e0",
-    background: "#fff",
-  },
-  botones: {
-    display: "flex",
-    gap: "8px",
-    marginTop: "4px",
-  },
-  btnPrimario: {
-    padding: "6px 16px",
-    fontSize: "12px",
-    fontWeight: 600,
-    background: "#1a1a2e",
-    color: "#e2e8f0",
-    border: "none",
-    borderRadius: "4px",
-    cursor: "pointer",
-  },
-  btnSecundario: {
-    padding: "6px 14px",
-    fontSize: "12px",
-    fontWeight: 500,
-    background: "#fff",
-    color: "#4a5568",
-    border: "1px solid #cbd5e0",
-    borderRadius: "4px",
-    cursor: "pointer",
-  },
-  btnCrearCarpeta: {
-    padding: "4px 10px",
-    fontSize: "11px",
-    fontWeight: 500,
-    background: "#fff",
-    color: "#4a5568",
-    border: "1px solid #cbd5e0",
-    borderRadius: "4px",
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-  },
-  progresoLinea: {
-    margin: "8px 0 0",
-    fontSize: "11px",
-    color: "#4a5568",
-  },
-  aviso: {
-    margin: "2px 0 0",
-    fontSize: "11px",
-    color: "#b7791f",
-  },
-};
+const CLASE_CAMPO = "flex flex-col gap-1";
+const CLASE_ETIQUETA = "text-xs font-medium";
+const CLASE_SELECT =
+  "h-8 rounded-md border border-input bg-card px-2 text-xs text-foreground outline-none " +
+  "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 " +
+  "disabled:cursor-not-allowed disabled:opacity-50";

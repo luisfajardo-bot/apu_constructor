@@ -4,8 +4,7 @@ import { toast } from "sonner";
 import { useArmadoVivo } from "@/lib/armado";
 import { listarCarpetas, crearCarpeta } from "@/api/carpetas";
 import { listarListas } from "@/api/listas";
-import { LISTA_PRINCIPAL_ID, type Carpeta, type CarpetaNodo, type ListaPrecios } from "@/lib/tipos";
-import { DialogoTexto } from "@/components/DialogoTexto";
+import { LISTA_PRINCIPAL_ID, type CarpetaNodo, type ListaPrecios } from "@/lib/tipos";
 
 export default function CorridasInicio() {
   const navigate = useNavigate();
@@ -20,7 +19,6 @@ export default function CorridasInicio() {
   const [carpetas, setCarpetas] = useState<CarpetaNodo[]>([]);
   const [nivel1Id, setNivel1Id] = useState<number | null>(null);
   const [nivel2Id, setNivel2Id] = useState<number | null>(null);
-  const [pidiendoCarpeta, setPidiendoCarpeta] = useState(false);
 
   // Lista de precios: se fija al crear la corrida y ya no se puede cambiar
   // después, así que este formulario es el único momento de acertar.
@@ -62,29 +60,30 @@ export default function CorridasInicio() {
     setNivel2Id(val ? Number(val) : null);
   }
 
-  async function handleCrearCarpeta(nombre: string) {
-    let nueva: Carpeta;
+  async function handleCrearCarpeta() {
+    const nombre = window.prompt(
+      nivel1Id !== null
+        ? "Nombre de la nueva subcarpeta"
+        : "Nombre de la nueva carpeta"
+    );
+    if (!nombre || !nombre.trim()) return;
     try {
-      nueva = await crearCarpeta(nombre, nivel1Id);
-    } catch (e) {
-      toast.error("No se pudo crear la carpeta");
-      throw e;   // el diálogo queda abierto
-    }
-    // Fuera del try de arriba a propósito: si la carpeta SE CREÓ pero esta recarga
-    // falla, no es un fallo de creación — no hay que mentir con ese toast ni dejar el
-    // modal abierto invitando a reintentar una creación que ya sucedió.
-    const arbol = await cargarCarpetas();
-    // Auto-selecciona la carpeta recién creada como destino
-    if (nivel1Id !== null) {
-      // Era una subcarpeta del nivel 1 elegido
-      setNivel2Id(nueva.id);
-    } else {
-      // Era una carpeta raíz nueva: la seleccionamos en nivel 1
-      const nodo = arbol.find((c) => c.id === nueva.id);
-      if (nodo) {
-        setNivel1Id(nueva.id);
-        setNivel2Id(null);
+      const nueva = await crearCarpeta(nombre.trim(), nivel1Id);
+      const arbol = await cargarCarpetas();
+      // Auto-select the new folder as destination
+      if (nivel1Id !== null) {
+        // Created a subfolder under the current level-1
+        setNivel2Id(nueva.id);
+      } else {
+        // Created a new level-1 folder; select it
+        const nodo = arbol.find((c) => c.id === nueva.id);
+        if (nodo) {
+          setNivel1Id(nueva.id);
+          setNivel2Id(null);
+        }
       }
+    } catch {
+      toast.error("No se pudo crear la carpeta");
     }
   }
 
@@ -230,7 +229,7 @@ export default function CorridasInicio() {
                 type="button"
                 style={styles.btnCrearCarpeta}
                 disabled={cargando}
-                onClick={() => setPidiendoCarpeta(true)}
+                onClick={handleCrearCarpeta}
               >
                 + Carpeta
               </button>
@@ -292,13 +291,6 @@ export default function CorridasInicio() {
             </button>
           </div>
         </form>
-        <DialogoTexto
-          open={pidiendoCarpeta}
-          onOpenChange={setPidiendoCarpeta}
-          titulo={nivel1Id !== null ? "Nueva subcarpeta" : "Nueva carpeta"}
-          textoConfirmar="Crear"
-          onConfirmar={handleCrearCarpeta}
-        />
     </div>
   );
 }

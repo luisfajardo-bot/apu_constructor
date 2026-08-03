@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, test, vi } from "vitest";
 import { toast } from "sonner";
@@ -14,35 +14,27 @@ import CorridasInicio from "./CorridasInicio";
 // pantalla llama a armarArchivo — en particular, qué trae el FormData —
 // sin cambiar el comportamiento (resuelve enseguida) que ya asumían los tests
 // existentes de este archivo.
-const ARBOL_INICIAL = [
-  {
-    id: 1,
-    nombre: "Calle 13",
-    parent_id: null,
-    n_corridas: 0,
-    hijas: [
-      { id: 2, nombre: "Lote 3", parent_id: 1, n_corridas: 0, hijas: [] },
-    ],
-  },
-];
-
-// listarCarpetasMock también hoisted y con implementación por defecto (para que los tests
-// que no la tocan sigan viendo el árbol de siempre); el test de auto-selección la
-// sobreescribe con `mockResolvedValueOnce` para simular la recarga real tras crear.
-const { armarArchivoMock, crearCarpetaMock, listarCarpetasMock } = vi.hoisted(() => ({
+const { armarArchivoMock } = vi.hoisted(() => ({
   armarArchivoMock: vi.fn(() => Promise.resolve()),
-  crearCarpetaMock: vi.fn(),
-  listarCarpetasMock: vi.fn(),
 }));
-listarCarpetasMock.mockResolvedValue(ARBOL_INICIAL);
 
 vi.mock("@/lib/armado", () => ({
   useArmadoVivo: () => ({ armarArchivo: armarArchivoMock, armarEjemplo: vi.fn() }),
 }));
 
 vi.mock("@/api/carpetas", () => ({
-  listarCarpetas: listarCarpetasMock,
-  crearCarpeta: crearCarpetaMock,
+  listarCarpetas: vi.fn(async () => [
+    {
+      id: 1,
+      nombre: "Calle 13",
+      parent_id: null,
+      n_corridas: 0,
+      hijas: [
+        { id: 2, nombre: "Lote 3", parent_id: 1, n_corridas: 0, hijas: [] },
+      ],
+    },
+  ]),
+  crearCarpeta: vi.fn(),
 }));
 
 vi.mock("@/api/listas", () => ({
@@ -176,42 +168,4 @@ test("el FormData incluye lista_id solo cuando la lista elegida no es Principal,
   await waitFor(() => expect(armarArchivoMock).toHaveBeenCalledTimes(2));
   const formNP = armarArchivoMock.mock.calls[1][0] as FormData;
   expect(formNP.get("lista_id")).toBe("2");
-});
-
-test("crear carpeta usa el modal y auto-selecciona la nueva", async () => {
-  const carpetaNueva = { id: 9, nombre: "Obra Nueva", parent_id: null, n_corridas: 0, hijas: [] };
-  crearCarpetaMock.mockResolvedValue(carpetaNueva);
-  // La carga inicial (montaje) trae el árbol de siempre; la recarga que hace
-  // `handleCrearCarpeta` después de crear (`cargarCarpetas()`) es la que realmente trae la
-  // carpeta nueva — así se entera el frontend de que existe. Con el mock fijo de
-  // `listarCarpetas` (mismo árbol siempre), `arbol.find(c => c.id === nueva.id)` daba
-  // `undefined` y la rama de auto-selección de nivel 1 nunca corría, pero el test seguía
-  // en verde porque su única aserción miraba los argumentos de `crearCarpetaMock`, no el
-  // estado resultante. Encontrado en la revisión de código (Ronda de arreglos 1).
-  listarCarpetasMock
-    .mockResolvedValueOnce(ARBOL_INICIAL)
-    .mockResolvedValueOnce([...ARBOL_INICIAL, carpetaNueva]);
-
-  render(
-    <MemoryRouter>
-      <CorridasInicio />
-    </MemoryRouter>
-  );
-  await screen.findByText("Calle 13");
-
-  fireEvent.click(screen.getByRole("button", { name: "+ Carpeta" }));
-  // Se busca escopado al diálogo: la propia página ya tiene un campo "Nombre" (el de la
-  // corrida), y el diálogo usa la etiqueta por defecto de DialogoTexto, también "Nombre" —
-  // sin el `within`, `findByLabelText` ambiguaba entre los dos (ambos presentes a la vez en
-  // el DOM; el de la página queda aria-hidden por Radix, pero las queries de Testing
-  // Library por label no filtran por aria-hidden).
-  const dialogo = await screen.findByRole("dialog");
-  fireEvent.change(await within(dialogo).findByLabelText("Nombre"), { target: { value: "Obra Nueva" } });
-  fireEvent.click(within(dialogo).getByRole("button", { name: "Crear" }));
-
-  await waitFor(() => expect(crearCarpetaMock).toHaveBeenCalledWith("Obra Nueva", null));
-  // Estado resultante: el select de carpeta de nivel 1 queda con la nueva seleccionada.
-  await waitFor(() =>
-    expect((document.getElementById("carpeta-nivel1") as HTMLSelectElement).value).toBe("9")
-  );
 });

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { toast } from "sonner";
 import Insumos from "@/pages/Insumos";
 
 // Feature: crear/renombrar listas de precios desde la pantalla de Insumos.
@@ -68,6 +67,7 @@ async function cambiarANpCalle13() {
 
 describe("Insumos: crear y renombrar listas de precios", () => {
   it("un editor puede crear una lista y queda seleccionado en ella", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue("NP Peñón");
     crearLista.mockResolvedValue({ id: 3, nombre: "NP Peñón", creada_en: "2026-07-28" });
 
     render(<Insumos />);
@@ -76,28 +76,24 @@ describe("Insumos: crear y renombrar listas de precios", () => {
     expect(listarListas).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByText("+ Nueva"));
-    // Ya no hay prompt nativo: se escribe en el modal.
-    fireEvent.change(await screen.findByLabelText("Nombre"), {
-      target: { value: "NP Peñón" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Crear" }));
 
     await waitFor(() => expect(crearLista).toHaveBeenCalledWith("NP Peñón"));
-    await waitFor(() => expect(listarListas.mock.calls.length).toBeGreaterThan(1));
-    // Auto-selección: el siguiente listado de insumos se pide con la lista nueva (id 3),
-    // no con la Principal — si no, el próximo precio editado iría a la lista equivocada.
+    // Queda seleccionado en la lista recién creada.
     await waitFor(() =>
       expect(listarInsumos.mock.calls.some((c) => c[0].lista === 3)).toBe(true)
     );
+    // El desplegable se recarga tras crear.
+    await waitFor(() => expect(listarListas.mock.calls.length).toBeGreaterThan(1));
   });
 
-  it("cancelar el diálogo no crea ninguna lista", async () => {
+  it("cancelar el prompt no crea ninguna lista", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue(null);
     render(<Insumos />);
     await waitFor(() => expect(listarInsumos).toHaveBeenCalled());
 
     fireEvent.click(screen.getByText("+ Nueva"));
-    fireEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
 
+    await waitFor(() => expect(window.prompt).toHaveBeenCalled());
     expect(crearLista).not.toHaveBeenCalled();
   });
 
@@ -120,6 +116,7 @@ describe("Insumos: crear y renombrar listas de precios", () => {
   });
 
   it("un 400 del backend (nombre duplicado) al crear muestra el mensaje del backend", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue("NP Calle 13");
     crearLista.mockRejectedValue(
       new Error("Ya existe una lista de precios llamada «NP Calle 13».")
     );
@@ -128,20 +125,19 @@ describe("Insumos: crear y renombrar listas de precios", () => {
     await waitFor(() => expect(listarInsumos).toHaveBeenCalled());
 
     fireEvent.click(screen.getByText("+ Nueva"));
-    fireEvent.change(await screen.findByLabelText("Nombre"), {
-      target: { value: "NP Calle 13" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Crear" }));
 
+    const { toast } = await import("sonner");
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
         "Ya existe una lista de precios llamada «NP Calle 13»."
-      ));
-    // El diálogo queda abierto con lo escrito, para corregir sin reescribir.
-    expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("NP Calle 13");
+      )
+    );
+    // No se quedó seleccionado en ninguna lista nueva: sigue en Principal.
+    expect(listarInsumos.mock.calls.every((c) => c[0].lista === 1)).toBe(true);
   });
 
   it("un 400 del backend al renombrar (nombre duplicado) muestra el mensaje del backend", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue("Principal");
     renombrarLista.mockRejectedValue(
       new Error("Ya existe una lista de precios llamada «Principal».")
     );
@@ -151,12 +147,9 @@ describe("Insumos: crear y renombrar listas de precios", () => {
     await cambiarANpCalle13();
 
     fireEvent.click(await screen.findByText("Renombrar"));
-    fireEvent.change(await screen.findByLabelText("Nombre"), {
-      target: { value: "Principal" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
 
     await waitFor(() => expect(renombrarLista).toHaveBeenCalledWith(2, "Principal"));
+    const { toast } = await import("sonner");
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
         "Ya existe una lista de precios llamada «Principal»."
@@ -165,6 +158,7 @@ describe("Insumos: crear y renombrar listas de precios", () => {
   });
 
   it("renombrar exitoso recarga las listas", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue("NP Calle 13 bis");
     renombrarLista.mockResolvedValue({
       id: 2,
       nombre: "NP Calle 13 bis",
@@ -177,16 +171,13 @@ describe("Insumos: crear y renombrar listas de precios", () => {
     expect(listarListas).toHaveBeenCalledTimes(1);
 
     fireEvent.click(await screen.findByText("Renombrar"));
-    fireEvent.change(await screen.findByLabelText("Nombre"), {
-      target: { value: "NP Calle 13 bis" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
 
     await waitFor(() => expect(renombrarLista).toHaveBeenCalledWith(2, "NP Calle 13 bis"));
     await waitFor(() => expect(listarListas.mock.calls.length).toBeGreaterThan(1));
   });
 
   it("crear una lista con cambios sin guardar respeta el guard de confirmación", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue("NP Peñón");
     crearLista.mockResolvedValue({ id: 3, nombre: "NP Peñón", creada_en: "2026-07-28" });
     listarInsumos.mockResolvedValue({
       items: [{ id: 1, codigo: "9", nombre: "CEMENTO GRIS", unidad: "KG", grupo: "MAT",
@@ -206,10 +197,6 @@ describe("Insumos: crear y renombrar listas de precios", () => {
     expect(await screen.findByText("$555")).toBeTruthy();
 
     fireEvent.click(screen.getByText("+ Nueva"));
-    fireEvent.change(await screen.findByLabelText("Nombre"), {
-      target: { value: "NP Peñón" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Crear" }));
 
     // La lista se crea igual (no se pierde el trabajo del usuario), pero
     // como canceló la confirmación, NO se cambia de lista activa: el cambio

@@ -6,7 +6,6 @@ import { listarCarpetas, crearCarpeta, renombrarCarpeta, borrarCarpeta, moverCor
 import { useAuth } from "@/lib/auth";
 import { fmtDuracion } from "@/lib/tiempo";
 import { cop, pct } from "@/lib/moneda";
-import { DialogoTexto } from "@/components/DialogoTexto";
 import type { CorridaResumen, CarpetaNodo } from "@/lib/tipos";
 
 function fechaLegible(iso: string): string {
@@ -71,13 +70,6 @@ export default function MisCorridas() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Qué se está pidiendo por modal. Antes eran tres prompts nativos imperativos.
-  type Pedido =
-    | { tipo: "nueva-carpeta" }
-    | { tipo: "renombrar-carpeta"; id: number; nombre: string }
-    | { tipo: "renombrar-corrida"; id: number; nombre: string };
-  const [pedido, setPedido] = useState<Pedido | null>(null);
-
   const puedeEditar = perfil?.rol === "admin" || perfil?.rol === "editor";
 
   // carpetaActual es null en la raíz o el id de la carpeta activa
@@ -120,24 +112,26 @@ export default function MisCorridas() {
     }
   }
 
-  async function crearCarpetaConNombre(nombre: string) {
+  async function handleNuevaCarpeta() {
+    const nombre = window.prompt("Nombre de la carpeta");
+    if (!nombre?.trim()) return;
     try {
-      await crearCarpeta(nombre, carpetaActual);
+      await crearCarpeta(nombre.trim(), carpetaActual);
       cargar();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Error al crear carpeta");
-      throw e;
     }
   }
 
-  async function renombrarCarpetaConNombre(id: number, actual: string, nuevo: string) {
-    if (nuevo === actual) return;      // no llamamos a la API si no cambió
+  async function handleRenombrar(e: React.MouseEvent, carpeta: CarpetaNodo) {
+    e.stopPropagation();
+    const nuevo = window.prompt("Nuevo nombre", carpeta.nombre);
+    if (!nuevo?.trim() || nuevo.trim() === carpeta.nombre) return;
     try {
-      await renombrarCarpeta(id, nuevo);
+      await renombrarCarpeta(carpeta.id, nuevo.trim());
       cargar();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al renombrar");
-      throw err;
     }
   }
 
@@ -152,15 +146,16 @@ export default function MisCorridas() {
     }
   }
 
-  async function renombrarCorridaConNombre(id: number, actual: string, nuevo: string) {
-    if (nuevo === actual) return;      // no llamamos a la API si no cambió
+  async function handleRenombrarCorrida(e: React.MouseEvent, corrida: CorridaResumen) {
+    e.stopPropagation();
+    const nuevo = window.prompt("Nuevo nombre", corrida.nombre);
+    if (!nuevo?.trim() || nuevo.trim() === corrida.nombre) return;
     try {
-      await renombrarCorrida(id, nuevo);
-      toast.success(`Corrida renombrada a "${nuevo}"`);
+      await renombrarCorrida(corrida.id, nuevo.trim());
+      toast.success(`Corrida renombrada a "${nuevo.trim()}"`);
       cargar();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al renombrar");
-      throw err;
     }
   }
 
@@ -235,7 +230,7 @@ export default function MisCorridas() {
           <button style={styles.btnPlantilla} onClick={bajarPlantilla}>
             Descargar plantilla
           </button>
-          <button style={styles.btnNuevaCarpeta} onClick={() => setPedido({ tipo: "nueva-carpeta" })}>
+          <button style={styles.btnNuevaCarpeta} onClick={handleNuevaCarpeta}>
             Nueva carpeta
           </button>
           <button style={styles.btnNueva} onClick={() => navigate("/corridas/nueva")}>
@@ -292,10 +287,7 @@ export default function MisCorridas() {
                     <div style={styles.carpetaAcciones}>
                       <button
                         style={styles.btnCarpetaAccion}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPedido({ tipo: "renombrar-carpeta", id: carpeta.id, nombre: carpeta.nombre });
-                        }}
+                        onClick={(e) => handleRenombrar(e, carpeta)}
                         title="Renombrar carpeta"
                       >
                         Renombrar
@@ -398,10 +390,7 @@ export default function MisCorridas() {
                         {puedeEditar && (
                           <button
                             style={styles.btnMover}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setPedido({ tipo: "renombrar-corrida", id: c.id, nombre: c.nombre });
-                            }}
+                            onClick={(e) => handleRenombrarCorrida(e, c)}
                             title="Renombrar corrida"
                           >
                             Renombrar
@@ -432,25 +421,6 @@ export default function MisCorridas() {
           )}
         </>
       )}
-
-      <DialogoTexto
-        open={pedido !== null}
-        onOpenChange={(v) => { if (!v) setPedido(null); }}
-        titulo={
-          pedido?.tipo === "nueva-carpeta" ? "Nueva carpeta"
-            : pedido?.tipo === "renombrar-carpeta" ? "Renombrar carpeta"
-              : "Renombrar corrida"
-        }
-        valorInicial={pedido && pedido.tipo !== "nueva-carpeta" ? pedido.nombre : ""}
-        textoConfirmar={pedido?.tipo === "nueva-carpeta" ? "Crear" : "Guardar"}
-        onConfirmar={async (valor) => {
-          if (!pedido) return;
-          if (pedido.tipo === "nueva-carpeta") await crearCarpetaConNombre(valor);
-          else if (pedido.tipo === "renombrar-carpeta")
-            await renombrarCarpetaConNombre(pedido.id, pedido.nombre, valor);
-          else await renombrarCorridaConNombre(pedido.id, pedido.nombre, valor);
-        }}
-      />
     </div>
   );
 }

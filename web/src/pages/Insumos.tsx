@@ -8,7 +8,6 @@ import { TablaInsumos } from "@/components/insumos/TablaInsumos";
 import { Button } from "@/components/ui/button";
 import { DialogoImportarInsumos } from "@/components/insumos/DialogoImportarInsumos";
 import { DialogoAgregarInsumo } from "@/components/autoria/DialogoAgregarInsumo";
-import { DialogoTexto } from "@/components/DialogoTexto";
 import { useAuth } from "@/lib/auth";
 import { puede } from "@/components/rutas";
 
@@ -34,9 +33,6 @@ export default function Insumos() {
   const [error, setError] = useState<string | null>(null);
   const [importarOpen, setImportarOpen] = useState(false);
   const [agregarOpen, setAgregarOpen] = useState(false);
-  // Qué diálogo de texto está abierto. Antes esto era window.prompt() (imperativo);
-  // ahora el modal es declarativo y necesita saber qué se está pidiendo.
-  const [dialogo, setDialogo] = useState<"crear-lista" | "renombrar-lista" | null>(null);
   // Cambios sin guardar en la TablaInsumos de la lista activa (ver hallazgo
   // CRITICAL: un precio editado en la lista A no debe poder guardarse en la B).
   const [dirtyCount, setDirtyCount] = useState(0);
@@ -111,28 +107,34 @@ export default function Insumos() {
   // por `cambiarFiltros` para respetar el guard de cambios sin guardar — si el
   // usuario cancela la confirmación, la lista queda creada pero no se entra en
   // ella (no se pierde ninguna edición en curso).
-  async function crearListaNueva(nombre: string) {
+  async function crearListaNueva() {
+    const nombre = window.prompt(
+      "Nombre de la nueva lista de precios (p. ej. una obra No Prevista)"
+    );
+    if (!nombre || !nombre.trim()) return;
     try {
-      const nueva = await crearLista(nombre);
+      const nueva = await crearLista(nombre.trim());
       await cargarListas();
       cambiarFiltros({ lista: nueva.id, fuente: "", clasificacion: "", sinPrecio: false, offset: 0 });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "No se pudo crear la lista de precios";
       toast.error(msg);
-      throw e;   // el diálogo queda abierto para corregir el nombre
     }
   }
 
   // Renombrar no cambia la lista activa (mismo id), así que no toca el guard
   // de cambios sin guardar de la TablaInsumos.
-  async function renombrarListaActual(nombre: string) {
+  async function renombrarListaActual() {
+    if (filtros.lista === LISTA_PRINCIPAL_ID) return; // la Principal no se renombra
+    const actual = listas.find((l) => l.id === filtros.lista);
+    const nombre = window.prompt("Nuevo nombre para la lista", actual?.nombre ?? "");
+    if (!nombre || !nombre.trim()) return;
     try {
-      await renombrarLista(filtros.lista, nombre);
+      await renombrarLista(filtros.lista, nombre.trim());
       await cargarListas();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "No se pudo renombrar la lista de precios";
       toast.error(msg);
-      throw e;   // el diálogo queda abierto para corregir el nombre
     }
   }
 
@@ -184,11 +186,8 @@ export default function Insumos() {
         limit={LIMIT}
         onChange={cambiarFiltros}
         puedeEditar={puedeEditar}
-        onCrearLista={() => setDialogo("crear-lista")}
-        onRenombrarLista={() => {
-          if (filtros.lista === LISTA_PRINCIPAL_ID) return;   // la Principal no se renombra
-          setDialogo("renombrar-lista");
-        }}
+        onCrearLista={crearListaNueva}
+        onRenombrarLista={renombrarListaActual}
       />
 
       {error && (
@@ -225,23 +224,6 @@ export default function Insumos() {
           />
         </>
       )}
-
-      <DialogoTexto
-        open={dialogo === "crear-lista"}
-        onOpenChange={(v) => setDialogo(v ? "crear-lista" : null)}
-        titulo="Nueva lista de precios"
-        ayuda="Nombrála con la obra, p. ej. «NP Calle 13»."
-        textoConfirmar="Crear"
-        onConfirmar={crearListaNueva}
-      />
-      <DialogoTexto
-        open={dialogo === "renombrar-lista"}
-        onOpenChange={(v) => setDialogo(v ? "renombrar-lista" : null)}
-        titulo="Renombrar lista de precios"
-        valorInicial={listaActivaNombre}
-        textoConfirmar="Guardar"
-        onConfirmar={renombrarListaActual}
-      />
     </div>
   );
 }

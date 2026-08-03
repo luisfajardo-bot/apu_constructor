@@ -70,6 +70,30 @@ heredan la paleta sola. Se descartó tocar solo los cimientos porque dejaría `L
 `DefinirClave`, `CorridasInicio` y `MisCorridas` con su `#1a1a2e` chocando contra la
 paleta nueva: una app mitad nueva y mitad vieja, peor que hoy.
 
+**El shell: barra clara de una fila, con la navegación arriba y sin barra lateral.**
+Decidido sobre maqueta (tres vueltas). La losa oscura de 36px (`#1a1a2e`) y el lateral de
+140px se van; queda **una** barra de 54px sobre `--card` con una hairline abajo, la nav como
+pestañas horizontales y la activa marcada con un subrayado de 2px en `--rail`. El peso lo
+lleva la tipografía, no un bloque de color.
+
+Dos consecuencias:
+
+- **La tabla gana los 140px del lateral.** `TablaItems` tiene 12 columnas cuyo ancho fijo
+  suma ~1064px más la descripción flexible: hoy se va de pantalla. 140px es una columna.
+- **`Layout.tsx` está debajo de las nueve pantallas**, así que el checklist en navegador es
+  obligatorio en las nueve, no solo en las cinco que se migran.
+
+En pantallas angostas la barra degrada con un **orden de sacrificio explícito** —primero el
+correo, después las lecturas de estado, al final el nombre de la marca— y **la navegación no
+se toca nunca**. Se implementa con `@container`, no `@media`, para que responda al espacio
+que realmente tiene.
+
+Se descartaron dos direcciones más. Una barra de **dos filas** (46+38px): más aire, pero
+84px de alto permanentes en una app cuyo contenido es tabla. Y una dirección **«tinta sobre
+papel»** (rótulo de plano, cuadrícula completa, sin ningún color de acento, «en negro y en
+rojo» en vez de semáforo, Archivo + Archivo Narrow sin mono): rechazada en revisión de
+maqueta. Los dos paquetes de Archivo que quedaron instalados hay que desinstalarlos.
+
 **Tipografía auto-hospedada, no CDN.** `seguridad_headers.py:22-30` declara
 `default-src 'self'` sin `font-src`, y `style-src 'self' 'unsafe-inline'` sin
 `fonts.googleapis.com`. Un `<link>` al CDN de Google **funcionaría en `vite dev` (que no
@@ -106,16 +130,24 @@ Estructura:
 | `--foreground` | `0.235 0.020 258` | `#181E28` | 15.97:1 |
 | `--muted` | `0.962 0.005 255` | `#F0F3F6` | — |
 | `--muted-foreground` | `0.500 0.016 258` | `#5E646D` | 5.74:1 |
-| `--border` (hairline decorativo) | `0.900 0.008 255` | `#DADEE3` | — |
+| `--border` (cierra un panel) | `0.900 0.008 255` | `#DADEE3` | — |
+| `--hairline` (divide por dentro) | `0.935 0.006 255` | `#E7EAED` | — |
 | `--input` (borde de componente) | `0.640 0.014 255` | `#878D95` | 3.36:1 |
 | `--primary` | `0.255 0.021 258` | `#1D232D` | — |
 | `--ring` (foco) | `0.520 0.105 225` | `#007596` | 5.08:1 |
 | `--rail` (nav activa) | `0.560 0.115 225` | `#0081A7` | 4.45:1 |
 
-**`--border` y `--input` se separan** (hoy son el mismo valor, `oklch(0.922 0 0)`). WCAG
-1.4.11 exige 3:1 para el borde de un componente, pero un divisor de tabla es decoración:
-un solo token para las dos cosas obliga a elegir entre campos invisibles o tablas
-rayadas.
+**Un solo valor de borde se parte en tres**, donde hoy `--border` e `--input` son el mismo
+(`oklch(0.922 0 0)`) y no existe nada más tenue:
+
+- `--input` — borde de componente. WCAG 1.4.11 exige 3:1. Hoy los campos de `Login` y
+  `DefinirClave` usan `#cbd5e0`, que está en **1.49:1**: no se ve dónde empieza el campo.
+- `--border` — el borde que cierra un panel o una tarjeta.
+- `--hairline` — los divisores *internos*: entre lecturas del riel, entre filas de tabla,
+  bajo la barra de totales. Es el token que hace que la interfaz se sienta delicada, y la
+  razón por la que hace falta es simple: un divisor entre dos números no tiene por qué pesar
+  lo mismo que el borde que cierra un panel. Con un solo token había que elegir entre campos
+  invisibles y tablas rayadas.
 
 Significado, con el matiz separado a propósito — interacción 225, info 250, positivo 155,
 revisar 75, negativo 25:
@@ -174,30 +206,81 @@ Importadas desde `main.tsx`. En `@theme`:
 
 ### Capa 4 — el shell (`components/Layout.tsx`)
 
-Hoy el estado es una sola cadena: `` `${status.insumos} insumos · ${status.apus} APUs · IA:
-${status.ia ? "habilitada" : "fallback"}` `` (`Layout.tsx:20-22`). Pasa a **tres lecturas
-discretas**, cada una con micro-etiqueta arriba y valor en mono: panel de instrumentos, no
-frase. De paso `IA: fallback` deja de leerse como error — pasa a estado neutro con punto,
-porque el fallback determinístico es un modo de operación válido, no una falla.
+**Se reescribe.** No es un retoque: desaparece la barra lateral y la navegación sube a la
+barra superior, que pasa de 36px oscuros a **54px claros** (`bg-card` + `border-b border-border`).
+Una sola fila, con este orden:
 
-Barra lateral:
-- Ícono + texto en cada ítem, de `lucide-react` (ya instalado). La guía `nav-label-icon` lo
-  pide explícitamente: la nav de solo íconos daña la descubribilidad.
-- La activa marcada con el riel `--rail` (hoy ya hay un `borderLeft: 3px solid #4a90d9`, se
-  tokeniza) más `aria-current="page"`, que hoy no está.
-- El grupo de admin (Usuarios, Auditoría) separado con su propia etiqueta de sección
-  (`nav-hierarchy`, y `destructive-nav-separation` para lo que es de administración).
+```
+[ mark + Armador de APUs ] [ Corridas Insumos APUs │ Usuarios Auditoría ]  …  [ lecturas ] [ correo rol ] [ Cerrar sesión ]
+```
 
-`height: 100vh` → `min-h-dvh` (`viewport-units`). Se conserva la densidad actual: topbar de
-36px, cuerpo de 13px.
+- **Las pestañas.** Ícono + texto, de `lucide-react` (ya instalado; la guía `nav-label-icon`
+  lo pide: la nav de solo íconos daña la descubribilidad). La activa lleva
+  `border-b-2 border-rail` y **`aria-current="page"`**, que hoy no existe. El grupo de admin
+  (Usuarios, Auditoría) va detrás de un separador `--hairline` (`nav-hierarchy`).
+- **Las lecturas de estado.** Hoy son una sola cadena:
+  `` `${status.insumos} insumos · ${status.apus} APUs · IA: ${status.ia ? "habilitada" : "fallback"}` ``
+  (`Layout.tsx:20-22`). Pasan a **tres celdas discretas** separadas por `--hairline`, cada una
+  con micro-etiqueta arriba y valor en mono. Y `IA: fallback` deja de leerse como error: va
+  como punto de estado neutro, porque el fallback determinístico es un modo de operación
+  válido. **El texto sigue diciendo «fallback»** — cambiarlo es texto de usuario y no está
+  aprobado.
+- **Degradación con `@container`, no `@media`**, para que la barra responda al espacio que
+  tiene. Orden de sacrificio, y en este orden exacto: `≤1180px` se oculta el correo (queda el
+  rol), `≤980px` se ocultan las lecturas, `≤700px` se oculta el nombre de la marca (queda el
+  mark) y las pestañas pasan a `overflow-x: auto`. **La navegación no se oculta nunca.**
+- `height: 100vh` → `min-h-dvh` (`viewport-units`). Cuerpo en 13px: la densidad se conserva.
+- El objeto `styles` de 116 líneas desaparece, incluidos los dos
+  `onMouseEnter`/`onMouseLeave` que emulan un `:hover` a mano (`Layout.tsx:55-60`) — los
+  reemplaza `Button variant="ghost"`.
 
-El objeto `styles` de 116 líneas desaparece, incluidos los dos `onMouseEnter`/`onMouseLeave`
-que emulan un `:hover` a mano (`Layout.tsx:55-60`).
+Lo que **no** cambia: los cinco destinos y su `end`, el filtro por rol con `puede()`, el
+`getStatus().catch()` silencioso, `logout()`, el `<Outlet />`, y el contrato de
+`/api/status` — `status.insumos` ya trae los visibles (`rutas.py:104`).
 
-### Capa 5 — las 4 páginas con hex
+### Capa 5a — el ingreso: `Login` y `DefinirClave` se rediseñan
 
-Migración **mecánica**: muere el objeto `styles`, queda Tailwind + tokens, y **no cambia
-ningún comportamiento**. Ni un handler, ni una llamada a la API, ni un texto de usuario.
+**Estas dos no son migración mecánica.** El usuario pidió expresamente un ingreso tipo
+split-panel, sobre una referencia. Aprobado en maqueta:
+
+- **Split 50/50.** Panel `--primary` (grafito, plano — la variante con grilla se descartó) a
+  la izquierda; el formulario sobre `--card` a la derecha, centrado, `max-width: 340px`.
+- **El panel** lleva: marca arriba, titular *«Herramienta de evaluación y generación de
+  **APUs**.»* con «APUs» subrayado en `--rail-claro`, una bajada de una frase, tres
+  capacidades reales de la app en un bloque con reglas, y al pie
+  *«Indugravas · Uso interno»*.
+- **El formulario** conserva **literales** los textos de hoy: «Ingresar», «Usa tu correo de
+  la empresa.», «Correo», «Contraseña», «¿Olvidaste tu contraseña?» y «Ingresando…». Los
+  campos ganan ícono de `lucide-react` y «¿Olvidaste tu contraseña?» se alinea a la derecha
+  de la etiqueta de contraseña.
+- **`@container (max-width: 860px)`: el panel desaparece** y el formulario queda centrado,
+  con la marca arriba para no perder identidad.
+- **Un agregado de alcance, declarado:** botón «Mostrar / Ocultar» en la contraseña
+  (`password-toggle`), con `aria-pressed`. No existe hoy.
+
+**`--rail-claro`** (`oklch(0.700 0.110 225)`, `#42ACD2`) hace falta porque `--rail`
+(`#0081A7`) sobre el panel grafito da **3.54:1** y no alcanza para texto; el aclarado da
+6.07:1. **No es un token nuevo**: es el mismo valor que el bloque `.dark` ya asigna a
+`--rail`. Se expone como token propio para poder usarlo sobre `--primary` en tema claro.
+
+De la referencia se descartaron cinco cosas por ser falsas en esta app: los botones de
+Google/GitHub (no hay OAuth; es Supabase con correo y contraseña), «Create account» y
+«Sign up» (no hay registro abierto: invita un Admin), el testimonio con estrellas (sería una
+reseña inventada), los logos de «TRUSTED BY» (serían clientes falsos) y «Remember me»
+(Supabase ya persiste la sesión; un control que no hace nada es peor que ninguno). En lugar
+del testimonio, el panel dice qué hace la app; en lugar de «Sign up», que el acceso lo
+habilita un administrador.
+
+Lo que **no** cambia: `onSubmit`, `login()`, `nav("/corridas", {replace:true})`, `olvide()`
+con su `resetPasswordForEmail` y su `redirectTo`, los `toast`, `required`, `autoFocus`,
+`autoComplete`. Y `DefinirClave` recibe el mismo tratamiento: es la pantalla hermana (se
+llega desde el correo de recuperación) y hoy comparte la misma forma y los mismos defectos.
+
+### Capa 5b — las otras 2 páginas con hex
+
+`CorridasInicio` y `MisCorridas`: migración **mecánica**. Muere el objeto `styles`, queda
+Tailwind + tokens, y **no cambia ningún comportamiento**. Ni un handler, ni una llamada a la
+API, ni un texto de usuario.
 
 | archivo | `style={}` | qué se preserva sin tocar |
 |---|---|---|

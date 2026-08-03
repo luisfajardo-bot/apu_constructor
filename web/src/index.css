@@ -156,6 +156,12 @@
   --radius-md: 2px;
   --radius-lg: 3px;
   --radius-xl: 4px;
+
+  /* Importadas en main.tsx desde @fontsource-variable/*, servidas del mismo
+     origen. Los sufijos "Variable" son los nombres de familia que declara
+     fontsource: si los escribís mal, el navegador cae al fallback en silencio. */
+  --font-sans: "Inter Tight Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, Consolas, monospace;
 }
 
 @layer base {
@@ -163,6 +169,17 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
+  }
+  /* Cifras tabulares en TODO lo monoespaciado. Sin esto, las columnas de dinero
+     cambian de ancho al cambiar de dígito y la tabla baila al filtrar o editar.
+     Las clases `font-mono tabular-nums` de las tablas ya existían; esto hace que
+     no haga falta acordarse de la segunda. */
+  .font-mono,
+  code,
+  kbd,
+  samp,
+  pre {
+    font-variant-numeric: tabular-nums;
   }
 }

@@ -21,6 +21,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 34 plane
 ## Otros
 
 - [[Otros/listas-precios-np|Listas de precios y APUs de No Previstos (NP)]]
+- [[Otros/smoke-test-listas-np|Smoke test — Listas de precios / APUs de No Previstos (NP)]]
 
 ## Specs (diseños)
 

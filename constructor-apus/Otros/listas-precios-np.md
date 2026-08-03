@@ -87,7 +87,13 @@ recién entonces aplica `db/pg/precios.sql` (el resto de los tests de Postgres h
 camino). Corre con `TEST_DATABASE_URL` apuntando a un Postgres **desechable** — esos
 tests hacen `DROP SCHEMA ... CASCADE`, nunca a producción. Medido en PG 17: **57 ms**.
 
-**Falta un paso manual:** `supabase/migrations/0005_lista_precios_rls.sql` habilita RLS
+**Estado (2026-07-31):** el paso 3 de abajo (RLS) ya se aplicó en producción y
+`relrowsecurity` da `true`. Falta el paso 4, el smoke test en el navegador; el
+procedimiento detallado, pensado para que lo ejecute alguien que no conoce el proyecto,
+está en **`docs/smoke-test-listas-np.md`**.
+
+**El paso manual del RLS, para la próxima tabla nueva:**
+`supabase/migrations/0005_lista_precios_rls.sql` habilita RLS
 en `precios.lista_precios`, y nada lo aplica automáticamente (el boot solo aplica
 `db/pg/*.sql`). Hay que correrlo a mano en el SQL editor de Supabase **después** del
 primer arranque con el código nuevo, que es el que crea la tabla. Sin ese paso la tabla
@@ -100,6 +106,8 @@ Antes de dar por buena la migración en producción:
    (nada quedó fuera de Principal antes de que exista ninguna lista NP).
 3. Aplicar `0005_lista_precios_rls.sql` (ver arriba) y verificar con
    `SELECT relrowsecurity FROM pg_class WHERE oid = 'precios.lista_precios'::regclass`.
-4. Smoke test en el navegador: crear una lista, importar 2-3 precios, armar una
-   corrida contra ella, comprobar la alerta "Sin tarifa en la lista" en un insumo sin
-   precio, y descargar el cuadro para ver la fila `Lista de precios` en `INFO`.
+4. Smoke test en el navegador — **pendiente**. Resumen: crear una lista, importar 2-3
+   precios, armar una corrida contra ella, comprobar la alerta "Sin tarifa en la lista"
+   en un insumo sin precio, y descargar el cuadro para ver la fila `Lista de precios` en
+   `INFO`. El paso a paso completo, con qué esperar en cada pantalla y qué severidad tiene
+   cada fallo, está en `docs/smoke-test-listas-np.md`.

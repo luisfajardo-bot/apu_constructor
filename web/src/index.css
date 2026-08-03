@@ -1,81 +1,118 @@
 @import "tailwindcss";
 
-/* Tokens de tema (shadcn/ui, base neutral, Tailwind v4).
-   Sin estos tokens las utilidades semánticas (bg-popover, bg-muted, border-input,
-   text-muted-foreground, ring…) resuelven a "sin color" y los overlays (diálogos,
-   desplegables) quedan transparentes. La app es light-only (no hay ThemeProvider);
-   el bloque .dark queda inerte pero listo por si se añade modo oscuro. */
+/* ═══════════════════════════════════════════════════════════════════════════════
+   SISTEMA DE DISEÑO
+
+   DOS familias de color, con trabajos distintos. No las mezcles:
+
+     ESTRUCTURA (frío, croma bajo)  → superficies, texto, bordes, foco, nav.
+     SIGNIFICADO (reservado)        → SOLO dinero y estado. Nunca decoración.
+
+   Si agregás un cálido o un verde "para que quede lindo", rompés la única señal
+   que no puede fallar: que se vea de un golpe qué hay que revisar y qué margen
+   está en negativo. Los matices están separados a propósito —
+   interacción 225, info 250, positivo 155, revisar 75, negativo 25.
+
+   Todos los pares los verifica `python scripts/verificar_contraste.py`, que lee
+   ESTE archivo y calcula el contraste real. Si cambiás un valor, corrélo.
+
+   La app es light-only (no hay ThemeProvider). El bloque `.dark` se mantiene
+   coherente para no dejar deuda a medias, pero no está activo ni verificado.
+   ═══════════════════════════════════════════════════════════════════════════════ */
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* Radio explícito, NO calc(): con --radius chico, calc(var(--radius) - 4px)
+     daba valores negativos y el navegador descartaba la regla entera. */
+  --radius: 0.125rem;
+
+  /* ── Estructura ───────────────────────────────────────────────────────────── */
+  --background: oklch(0.985 0.003 255);
+  --foreground: oklch(0.235 0.020 258);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.235 0.020 258);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --popover-foreground: oklch(0.235 0.020 258);
+  --secondary: oklch(0.962 0.005 255);
+  --secondary-foreground: oklch(0.255 0.021 258);
+  --muted: oklch(0.962 0.005 255);
+  --muted-foreground: oklch(0.500 0.016 258);
+  /* --accent es la superficie de HOVER en el vocabulario de shadcn, no el color
+     de marca. Si le pones el cian, cada hover:bg-accent se vuelve celeste. */
+  --accent: oklch(0.945 0.008 255);
+  --accent-foreground: oklch(0.255 0.021 258);
+
+  /* El grafito: botón primario, y el panel del ingreso. */
+  --primary: oklch(0.255 0.021 258);
+  --primary-foreground: oklch(0.975 0.003 255);
+  --primary-foreground-muted: oklch(0.780 0.010 255);  /* texto tenue SOBRE grafito */
+  --primary-border: oklch(0.430 0.016 258);            /* regla dentro del grafito */
+
+  /* Tres pesos de borde donde antes había uno solo:
+       --border    cierra un panel o una tarjeta.
+       --hairline  divide POR DENTRO (filas, celdas, separadores). Decorativo.
+       --input     borde de COMPONENTE. Necesita 3:1 por WCAG 1.4.11. */
+  --border: oklch(0.900 0.008 255);
+  --hairline: oklch(0.935 0.006 255);
+  --input: oklch(0.640 0.014 255);
+
+  /* Interacción. --ring lo consumen TODOS los primitivos de ui/ para el foco. */
+  --ring: oklch(0.520 0.105 225);
+  --rail: oklch(0.560 0.115 225);            /* subrayado de la pestaña activa */
+  --rail-on-primary: oklch(0.700 0.110 225); /* el mismo cian, sobre grafito */
+
+  /* ── Significado: dinero y estado ─────────────────────────────────────────── */
+  --destructive: oklch(0.505 0.185 25);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --destructive-surface: oklch(0.955 0.020 25);
+  --revisar: oklch(0.470 0.115 75);
+  --revisar-surface: oklch(0.960 0.028 75);
+  --margen-pos: oklch(0.470 0.105 155);
+  --margen-pos-surface: oklch(0.958 0.026 155);
+  --margen-neg: oklch(0.505 0.185 25);
+  --margen-neg-surface: oklch(0.955 0.020 25);
+  --info: oklch(0.470 0.110 250);
+  --info-surface: oklch(0.958 0.022 250);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: oklch(0.165 0.014 258);
+  --foreground: oklch(0.965 0.003 255);
+  --card: oklch(0.215 0.016 258);
+  --card-foreground: oklch(0.965 0.003 255);
+  --popover: oklch(0.215 0.016 258);
+  --popover-foreground: oklch(0.965 0.003 255);
+  --secondary: oklch(0.275 0.018 258);
+  --secondary-foreground: oklch(0.965 0.003 255);
+  --muted: oklch(0.245 0.016 258);
+  --muted-foreground: oklch(0.700 0.014 258);
+  --accent: oklch(0.275 0.018 258);
+  --accent-foreground: oklch(0.965 0.003 255);
+
+  --primary: oklch(0.135 0.012 258);
+  --primary-foreground: oklch(0.965 0.003 255);
+  --primary-foreground-muted: oklch(0.720 0.012 255);
+  --primary-border: oklch(0.320 0.014 258);
+
+  --border: oklch(0.300 0.014 258);
+  --hairline: oklch(0.260 0.014 258);
+  --input: oklch(0.470 0.016 258);
+
+  --ring: oklch(0.680 0.115 225);
+  --rail: oklch(0.720 0.120 225);
+  --rail-on-primary: oklch(0.720 0.120 225);
+
+  --destructive: oklch(0.740 0.150 25);
+  --destructive-foreground: oklch(0.145 0 0);
+  --destructive-surface: oklch(0.290 0.060 25);
+  --revisar: oklch(0.790 0.130 75);
+  --revisar-surface: oklch(0.290 0.055 75);
+  --margen-pos: oklch(0.790 0.140 155);
+  --margen-pos-surface: oklch(0.285 0.055 155);
+  --margen-neg: oklch(0.740 0.150 25);
+  --margen-neg-surface: oklch(0.290 0.060 25);
+  --info: oklch(0.780 0.110 250);
+  --info-surface: oklch(0.290 0.055 250);
 }
 
 @theme inline {
@@ -87,34 +124,38 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-foreground-muted: var(--primary-foreground-muted);
+  --color-primary-border: var(--primary-border);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-hairline: var(--hairline);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --color-rail: var(--rail);
+  --color-rail-on-primary: var(--rail-on-primary);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-surface: var(--destructive-surface);
+  --color-revisar: var(--revisar);
+  --color-revisar-surface: var(--revisar-surface);
+  --color-margen-pos: var(--margen-pos);
+  --color-margen-pos-surface: var(--margen-pos-surface);
+  --color-margen-neg: var(--margen-neg);
+  --color-margen-neg-surface: var(--margen-neg-surface);
+  --color-info: var(--info);
+  --color-info-surface: var(--info-surface);
+
+  /* Escala de radios explícita. `rounded-lg` de los primitivos cae en 3px. */
+  --radius-sm: 1px;
+  --radius-md: 2px;
+  --radius-lg: 3px;
+  --radius-xl: 4px;
 }
 
 @layer base {

@@ -502,9 +502,11 @@ test("la nav activa se marca con aria-current", async () => {
 ```
 
 Run: `cd web && npm run test -- Layout`
-Expected: los dos nuevos FALLAN. El primero porque hoy el estado es una sola cadena
-interpolada; el segundo porque `NavLink` sin `aria-current` explícito no expone
-`current: "page"` a la query por rol.
+Expected: **solo FALLA el de las tres lecturas** (hoy el estado es una sola cadena
+interpolada). El de `aria-current` **PASA antes de tocar el código**: `NavLink` ya lo pone
+solo cuando la ruta está activa (react-router, `ariaCurrentProp = "page"` aplicado si
+`isActive`). Se conserva como guard anti-regresión, no como mejora — una versión anterior
+de este plan afirmaba que no existía y estaba equivocada.
 
 - [ ] **Step 2: Reescribir `Layout.tsx`**
 
@@ -554,7 +556,7 @@ fallback'): pasa a tres lecturas discretas con etiqueta y valor en mono. Y
 así que va como punto de estado neutro.
 
 La nav gana ícono + texto (guía nav-label-icon: la nav de solo íconos daña la
-descubribilidad), aria-current que no existía, y el grupo de admin separado
+descubribilidad) y el grupo de admin separado
 con su etiqueta de sección.
 
 Mueren el objeto styles de 116 líneas y los dos onMouseEnter/onMouseLeave que

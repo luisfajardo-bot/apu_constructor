@@ -1,9 +1,27 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import { FileSpreadsheet, Layers, Package, ScrollText, Users } from "lucide-react";
 import { getStatus } from "@/api/corridas";
 import type { StatusResponse } from "@/lib/tipos";
 import { useAuth } from "@/lib/auth";
 import { puede } from "@/components/rutas";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+/** Una lectura del estado: etiqueta arriba, valor en mono abajo.
+ *
+ *  Antes las tres iban en una sola cadena interpolada ("7095 insumos · 1204 APUs ·
+ *  IA: fallback") y para sacar un número había que leerla entera. */
+function Lectura({ etiqueta, children }: { etiqueta: string; children: React.ReactNode }) {
+  return (
+    <span className="flex flex-col justify-center gap-px px-3.5 leading-tight border-l border-hairline first:border-l-0 first:pl-0">
+      <span className="text-[9px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+        {etiqueta}
+      </span>
+      <span className="font-mono text-xs font-medium text-foreground">{children}</span>
+    </span>
+  );
+}
 
 export default function Layout() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
@@ -17,197 +35,117 @@ export default function Layout() {
       });
   }, []);
 
-  const chipText = status
-    ? `${status.insumos} insumos · ${status.apus} APUs · IA: ${status.ia ? "habilitada" : "fallback"}`
-    : "cargando…";
+  // Mientras carga, un guion por lectura. Antes decía "cargando…" en el chip entero.
+  const num = (n: number | undefined) => (n === undefined ? "—" : n.toLocaleString("es-CO"));
 
+  const esAdmin = puede(perfil?.rol, "admin");
   const links = [
-    { to: "/corridas", label: "Corridas", end: false },
-    { to: "/insumos", label: "Insumos", end: true },
-    { to: "/apus", label: "APUs", end: true },
-    ...(puede(perfil?.rol, "admin")
+    { to: "/corridas", label: "Corridas", end: false, Icono: Layers },
+    { to: "/insumos", label: "Insumos", end: true, Icono: Package },
+    { to: "/apus", label: "APUs", end: true, Icono: FileSpreadsheet },
+    ...(esAdmin
       ? [
-          { to: "/usuarios", label: "Usuarios", end: true },
-          { to: "/auditoria", label: "Auditoría", end: true },
+          { to: "/usuarios", label: "Usuarios", end: true, Icono: Users },
+          { to: "/auditoria", label: "Auditoría", end: true, Icono: ScrollText },
         ]
       : []),
   ];
 
   return (
-    <div style={styles.root}>
-      {/* Barra superior */}
-      <header style={styles.topbar}>
-        <div style={styles.topbarLeft}>
-          <span style={styles.brand}>Armador de APUs</span>
-          <span style={styles.chip}>{chipText}</span>
-        </div>
-        {perfil && (
-          <div style={styles.userMenu}>
-            <span style={styles.userIdentity}>
-              <span style={styles.userEmail}>{perfil.email}</span>
-              <span style={styles.userRoleDot}>·</span>
-              <span style={styles.userRole}>{perfil.rol}</span>
+    <div className="flex min-h-dvh flex-col text-[13px]">
+      {/* La barra. `@container` para que las piezas cedan según el ancho que la barra
+          tiene de verdad, no el del viewport. */}
+      <header className="@container shrink-0 border-b border-border bg-card">
+        <div className="flex h-[54px] items-stretch justify-between gap-5 px-[18px]">
+          <div className="flex min-w-0 items-stretch gap-1 @max-[700px]:overflow-x-auto">
+            <span className="flex shrink-0 items-center gap-2.5 pr-3.5 whitespace-nowrap">
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                aria-hidden
+                className="size-4 shrink-0 text-rail"
+              >
+                <path d="M2 4h12" />
+                <path d="M2 8h8" />
+                <path d="M2 12h4" />
+              </svg>
+              <span className="text-sm font-semibold tracking-[-0.015em] @max-[700px]:hidden">
+                Armador de APUs
+              </span>
             </span>
-            <button
-              type="button"
-              onClick={() => logout()}
-              style={styles.logoutButton}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(255,255,255,0.12)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "rgba(255,255,255,0.06)";
-              }}
-            >
-              Cerrar sesión
-            </button>
+
+            <nav aria-label="Secciones" className="flex items-stretch">
+              {links.map(({ to, label, end, Icono }, i) => (
+                <span key={to} className="flex items-stretch">
+                  {/* Los de administración van detrás de un separador: no son parte
+                      del trabajo diario y conviene que se lean como otro grupo. */}
+                  {esAdmin && i === 3 && (
+                    <span aria-hidden className="my-4 w-px shrink-0 bg-hairline" />
+                  )}
+                  <NavLink
+                    to={to}
+                    end={end}
+                    className={({ isActive }) =>
+                      cn(
+                        "flex items-center gap-2 whitespace-nowrap border-b-2 px-3 -mb-px no-underline",
+                        "hover:text-foreground [&>svg]:hover:opacity-100",
+                        isActive
+                          ? "border-rail font-semibold text-foreground [&>svg]:text-rail [&>svg]:opacity-100"
+                          : "border-transparent text-muted-foreground",
+                      )
+                    }
+                  >
+                    <Icono aria-hidden className="size-3.5 shrink-0 opacity-75" />
+                    {label}
+                  </NavLink>
+                </span>
+              ))}
+            </nav>
           </div>
-        )}
+
+          {perfil && (
+            <div className="flex shrink-0 items-center gap-3.5">
+              {/* Orden de sacrificio al angostarse: primero el correo (decorativo),
+                  después estas lecturas (informativas), al final el nombre de la marca.
+                  La navegación no se oculta nunca. */}
+              <div className="flex items-stretch @max-[980px]:hidden">
+                <Lectura etiqueta="Insumos">{num(status?.insumos)}</Lectura>
+                <Lectura etiqueta="APUs">{num(status?.apus)}</Lectura>
+                <Lectura etiqueta="IA">
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "size-[5px] shrink-0 rounded-full",
+                        status?.ia ? "bg-margen-pos" : "bg-muted-foreground/55",
+                      )}
+                    />
+                    {status ? (status.ia ? "habilitada" : "fallback") : "—"}
+                  </span>
+                </Lectura>
+              </div>
+
+              <span className="flex items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">
+                <span className="@max-[1180px]:hidden">{perfil.email}</span>
+                <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.1em] text-rail">
+                  {perfil.rol}
+                </span>
+              </span>
+
+              <Button variant="ghost" size="xs" onClick={() => logout()}>
+                Cerrar sesión
+              </Button>
+            </div>
+          )}
+        </div>
       </header>
 
-      <div style={styles.body}>
-        {/* Navegacion lateral */}
-        <nav style={styles.sidebar}>
-          <ul style={styles.navList}>
-            {links.map(({ to, label, end }) => (
-              <li key={to}>
-                <NavLink
-                  to={to}
-                  end={end}
-                  style={({ isActive }) => ({
-                    ...styles.navLink,
-                    ...(isActive ? styles.navLinkActive : {}),
-                  })}
-                >
-                  {label}
-                </NavLink>
-              </li>
-            ))}
-          </ul>
-        </nav>
-
-        {/* Contenido principal */}
-        <main style={styles.main}>
-          <Outlet />
-        </main>
-      </div>
+      <main className="min-w-0 flex-1 overflow-auto bg-background">
+        <Outlet />
+      </main>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  root: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100vh",
-    fontFamily: "system-ui, sans-serif",
-    fontSize: "13px",
-  },
-  topbar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "0 12px",
-    height: "36px",
-    background: "#1a1a2e",
-    color: "#e2e8f0",
-    flexShrink: 0,
-  },
-  topbarLeft: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    minWidth: 0,
-  },
-  brand: {
-    fontWeight: 600,
-    fontSize: "13px",
-    letterSpacing: "0.02em",
-    whiteSpace: "nowrap",
-  },
-  chip: {
-    fontSize: "11px",
-    background: "rgba(255,255,255,0.08)",
-    padding: "2px 8px",
-    borderRadius: "10px",
-    color: "#a0aec0",
-    whiteSpace: "nowrap",
-  },
-  userMenu: {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    flexShrink: 0,
-  },
-  userIdentity: {
-    display: "flex",
-    alignItems: "center",
-    gap: "5px",
-    fontSize: "11px",
-    padding: "3px 8px",
-    borderRadius: "10px",
-    background: "rgba(255,255,255,0.06)",
-    whiteSpace: "nowrap",
-  },
-  userEmail: {
-    color: "#e2e8f0",
-  },
-  userRoleDot: {
-    color: "#5a5f78",
-  },
-  userRole: {
-    color: "#8fb3e8",
-    fontWeight: 600,
-    textTransform: "uppercase",
-    letterSpacing: "0.04em",
-    fontSize: "10px",
-  },
-  logoutButton: {
-    fontSize: "11px",
-    fontFamily: "inherit",
-    color: "#e2e8f0",
-    background: "rgba(255,255,255,0.06)",
-    border: "1px solid rgba(255,255,255,0.14)",
-    borderRadius: "6px",
-    padding: "3px 9px",
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-    transition: "background 120ms ease",
-  },
-  body: {
-    display: "flex",
-    flex: 1,
-    overflow: "hidden",
-  },
-  sidebar: {
-    width: "140px",
-    background: "#f7f7f8",
-    borderRight: "1px solid #e2e8f0",
-    flexShrink: 0,
-    paddingTop: "8px",
-  },
-  navList: {
-    listStyle: "none",
-    margin: 0,
-    padding: 0,
-  },
-  navLink: {
-    display: "block",
-    padding: "6px 14px",
-    color: "#4a5568",
-    textDecoration: "none",
-    fontSize: "13px",
-    borderLeft: "3px solid transparent",
-  },
-  navLinkActive: {
-    color: "#1a1a2e",
-    fontWeight: 600,
-    borderLeft: "3px solid #4a90d9",
-    background: "#edf2f7",
-  },
-  main: {
-    flex: 1,
-    overflow: "auto",
-    background: "#ffffff",
-  },
-};

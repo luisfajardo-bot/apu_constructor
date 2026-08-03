@@ -216,8 +216,16 @@ Una sola fila, con este orden:
 
 - **Las pestañas.** Ícono + texto, de `lucide-react` (ya instalado; la guía `nav-label-icon`
   lo pide: la nav de solo íconos daña la descubribilidad). La activa lleva
-  `border-b-2 border-rail` y **`aria-current="page"`**, que hoy no existe. El grupo de admin
-  (Usuarios, Auditoría) va detrás de un separador `--hairline` (`nav-hierarchy`).
+  `border-b-2 border-rail`. El grupo de admin (Usuarios, Auditoría) va detrás de un separador
+  `--hairline` (`nav-hierarchy`).
+
+  **Corrección:** una versión anterior de este spec decía que `aria-current="page"` no
+  existía y que la reescritura lo agregaba. **Es falso**: `NavLink` de react-router ya lo
+  pone solo cuando la ruta está activa (`ariaCurrentProp = "page"`, aplicado si `isActive`).
+  Verificado en `node_modules/react-router/dist/development/chunk-4ZMWKKQ3.mjs:10580,10616`
+  y con un test que pasa **antes** de tocar el código. El test se conserva como guard
+  anti-regresión —para que la reescritura no lo pierda cambiando `NavLink` por un `<a>`
+  pelado— pero no es una mejora que aporte esta rama.
 - **Las lecturas de estado.** Hoy son una sola cadena:
   `` `${status.insumos} insumos · ${status.apus} APUs · IA: ${status.ia ? "habilitada" : "fallback"}` ``
   (`Layout.tsx:20-22`). Pasan a **tres celdas discretas** separadas por `--hairline`, cada una

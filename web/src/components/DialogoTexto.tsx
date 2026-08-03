@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -40,6 +40,10 @@ export function DialogoTexto({
   const [valor, setValor] = useState(valorInicial);
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
+  // Id único por instancia: Insumos.tsx monta dos DialogoTexto (crear/renombrar lista) y
+  // un id fijo compartido entre ambos es una asociación label/input rota esperando pasar.
+  const inputId = useId();
+  const errorId = `${inputId}-error`;
 
   // Cada apertura arranca limpia y con el valor inicial: al renombrar, precargado con el
   // nombre actual, igual que hacía el segundo argumento de window.prompt().
@@ -80,20 +84,30 @@ export function DialogoTexto({
           <DialogTitle className="text-sm">{titulo}</DialogTitle>
         </DialogHeader>
         <form onSubmit={confirmar} className="space-y-2">
-          <label className="text-xs block" htmlFor="dialogo-texto-valor">
+          <label className="text-xs block" htmlFor={inputId}>
             {etiqueta}
           </label>
           <Input
-            id="dialogo-texto-valor"
+            id={inputId}
             autoFocus
             value={valor}
             onChange={(e) => {
               setValor(e.target.value);
               setError(null);
             }}
+            // Replica la preselección que hacía window.prompt(msg, default): el texto
+            // precargado queda seleccionado al enfocar, así que escribir lo REEMPLAZA en
+            // vez de anteponerse (autoFocus solo hace .focus(), deja el caret al inicio).
+            onFocus={(e) => e.currentTarget.select()}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? errorId : undefined}
           />
           {ayuda && <p className="text-xs text-muted-foreground">{ayuda}</p>}
-          {error && <p className="text-xs text-red-600">{error}</p>}
+          {error && (
+            <p id={errorId} role="alert" className="text-xs text-red-600">
+              {error}
+            </p>
+          )}
           <DialogFooter>
             <Button
               type="button"

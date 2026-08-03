@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useArmadoVivo } from "@/lib/armado";
 import { listarCarpetas, crearCarpeta } from "@/api/carpetas";
 import { listarListas } from "@/api/listas";
-import { LISTA_PRINCIPAL_ID, type CarpetaNodo, type ListaPrecios } from "@/lib/tipos";
+import { LISTA_PRINCIPAL_ID, type Carpeta, type CarpetaNodo, type ListaPrecios } from "@/lib/tipos";
 import { DialogoTexto } from "@/components/DialogoTexto";
 
 export default function CorridasInicio() {
@@ -63,24 +63,28 @@ export default function CorridasInicio() {
   }
 
   async function handleCrearCarpeta(nombre: string) {
+    let nueva: Carpeta;
     try {
-      const nueva = await crearCarpeta(nombre, nivel1Id);
-      const arbol = await cargarCarpetas();
-      // Auto-selecciona la carpeta recién creada como destino
-      if (nivel1Id !== null) {
-        // Era una subcarpeta del nivel 1 elegido
-        setNivel2Id(nueva.id);
-      } else {
-        // Era una carpeta raíz nueva: la seleccionamos en nivel 1
-        const nodo = arbol.find((c) => c.id === nueva.id);
-        if (nodo) {
-          setNivel1Id(nueva.id);
-          setNivel2Id(null);
-        }
-      }
-    } catch {
+      nueva = await crearCarpeta(nombre, nivel1Id);
+    } catch (e) {
       toast.error("No se pudo crear la carpeta");
-      throw new Error("no se pudo crear la carpeta");   // el diálogo queda abierto
+      throw e;   // el diálogo queda abierto
+    }
+    // Fuera del try de arriba a propósito: si la carpeta SE CREÓ pero esta recarga
+    // falla, no es un fallo de creación — no hay que mentir con ese toast ni dejar el
+    // modal abierto invitando a reintentar una creación que ya sucedió.
+    const arbol = await cargarCarpetas();
+    // Auto-selecciona la carpeta recién creada como destino
+    if (nivel1Id !== null) {
+      // Era una subcarpeta del nivel 1 elegido
+      setNivel2Id(nueva.id);
+    } else {
+      // Era una carpeta raíz nueva: la seleccionamos en nivel 1
+      const nodo = arbol.find((c) => c.id === nueva.id);
+      if (nodo) {
+        setNivel1Id(nueva.id);
+        setNivel2Id(null);
+      }
     }
   }
 

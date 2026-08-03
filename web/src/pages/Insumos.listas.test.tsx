@@ -84,6 +84,11 @@ describe("Insumos: crear y renombrar listas de precios", () => {
 
     await waitFor(() => expect(crearLista).toHaveBeenCalledWith("NP Peñón"));
     await waitFor(() => expect(listarListas.mock.calls.length).toBeGreaterThan(1));
+    // Auto-selección: el siguiente listado de insumos se pide con la lista nueva (id 3),
+    // no con la Principal — si no, el próximo precio editado iría a la lista equivocada.
+    await waitFor(() =>
+      expect(listarInsumos.mock.calls.some((c) => c[0].lista === 3)).toBe(true)
+    );
   });
 
   it("cancelar el diálogo no crea ninguna lista", async () => {

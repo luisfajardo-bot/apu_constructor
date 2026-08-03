@@ -124,7 +124,8 @@ test("Renombrar corrida: al hacer clic y confirmar, llama renombrarCorrida(1, nu
   );
 
   await waitFor(() => expect(screen.getByText("lic.xlsx")).toBeTruthy());
-  fireEvent.click(screen.getByTitle("Renombrar corrida"));
+  const row = screen.getByText("lic.xlsx").closest("tr")!;
+  fireEvent.click(within(row).getByRole("button", { name: /renombrar/i }));
 
   const dialogo = await screen.findByRole("dialog");
   fireEvent.change(within(dialogo).getByLabelText("Nombre"), { target: { value: "Obra Norte" } });

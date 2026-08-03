@@ -192,7 +192,7 @@ export default function CorridasInicio() {
           {/* Carpeta */}
           <div style={styles.campo}>
             <label style={styles.label} htmlFor="carpeta-nivel1">
-              Carpeta
+              Carpeta <span style={{ color: "#b91c1c" }} title="Obligatorio">*</span>
             </label>
             <div style={styles.selectFila}>
               <select
@@ -265,7 +265,13 @@ export default function CorridasInicio() {
             <button
               type="submit"
               style={styles.btnPrimario}
-              disabled={cargando || carpetaDestino == null}
+              /* Solo `cargando` (evita el doble-submit). NO se deshabilita por falta de
+                 carpeta: `handleArmar` ya avisa con un toast, y un botón deshabilitado sin
+                 explicación deja al usuario sin salida — pasó en el smoke test de
+                 producción del 2026-08-03, donde ese guard volvía inalcanzable al propio
+                 mensaje. El backend valida igual: carpeta_id es Form(...) obligatorio y
+                 rutas.py rechaza con 400 una carpeta inexistente. */
+              disabled={cargando}
             >
               {cargando ? "Armando…" : "Armar"}
             </button>

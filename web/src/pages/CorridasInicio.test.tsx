@@ -1,6 +1,14 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, test, vi } from "vitest";
+import { toast } from "sonner";
+// El import va ARRIBA, fuera de los `test`. Cuando estaba adentro
+// (`await import("./CorridasInicio")` en cada test), el costo de transformar e importar la
+// página se le cobraba al presupuesto de 5 s de cada test: medido en otro archivo con la
+// misma forma, 1682-2232 ms de los 5000, y con la máquina cargada eso termina en
+// "Test timed out in 5000ms". `vi.mock` lo hoistea vitest antes de los imports, así que los
+// mocks de abajo siguen aplicándose igual.
+import CorridasInicio from "./CorridasInicio";
 
 // Referencia compartida y hoisted para poder inspeccionar (mock.calls) cómo la
 // pantalla llama a armarArchivo — en particular, qué trae el FormData —
@@ -42,34 +50,34 @@ vi.mock("sonner", () => ({
 
 beforeEach(() => {
   armarArchivoMock.mockClear();
+  vi.mocked(toast.error).mockClear();
 });
 
-test('"Armar" está deshabilitado hasta elegir carpeta', async () => {
-  const { default: CorridasInicio } = await import("./CorridasInicio");
+test('"Armar" avisa que falta la carpeta en vez de quedarse deshabilitado', async () => {
+  // Antes el botón se deshabilitaba cuando no había carpeta elegida, y como el campo no
+  // está marcado como obligatorio ni el botón se ve gris (usa estilos inline), el usuario
+  // se quedaba sin poder armar y sin ningún mensaje. Peor: `handleArmar` YA tenía el
+  // toast "Elige una carpeta", pero era código muerto — el guard del botón nunca lo
+  // dejaba correr. Encontrado en el smoke test de producción del 2026-08-03.
   render(
     <MemoryRouter>
       <CorridasInicio />
     </MemoryRouter>
   );
-
-  // Wait for folders to load (level-1 select appears with "Calle 13" option)
-  await screen.findByText("Calle 13");
+  await screen.findByText("Calle 13");           // carpetas cargadas
 
   const btnArmar = screen.getByRole("button", { name: /armar/i });
+  expect(btnArmar.hasAttribute("disabled")).toBe(false);
 
-  // Button should be disabled before selecting a folder
-  expect(btnArmar.hasAttribute("disabled")).toBe(true);
+  fireEvent.click(btnArmar);                     // sin carpeta elegida
 
-  // Select "Calle 13" (id=1) in the level-1 select
-  const selectNivel1 = screen.getByLabelText(/carpeta/i);
-  fireEvent.change(selectNivel1, { target: { value: "1" } });
-
-  // Button should now be enabled
-  await waitFor(() => expect(btnArmar.hasAttribute("disabled")).toBe(false));
+  await waitFor(() =>
+    expect(vi.mocked(toast.error)).toHaveBeenCalledWith("Elige una carpeta"));
+  // Y no dispara una corrida a medias: el aviso reemplaza al bloqueo, no lo saltea.
+  expect(armarArchivoMock).not.toHaveBeenCalled();
 });
 
 test("al elegir archivo, precarga el Nombre sin extensión", async () => {
-  const { default: CorridasInicio } = await import("./CorridasInicio");
   render(<MemoryRouter><CorridasInicio /></MemoryRouter>);
   await screen.findByText("Calle 13");
 
@@ -82,7 +90,6 @@ test("al elegir archivo, precarga el Nombre sin extensión", async () => {
 });
 
 test("no pisa el Nombre si el usuario ya lo editó", async () => {
-  const { default: CorridasInicio } = await import("./CorridasInicio");
   render(<MemoryRouter><CorridasInicio /></MemoryRouter>);
   await screen.findByText("Calle 13");
 
@@ -97,7 +104,6 @@ test("no pisa el Nombre si el usuario ya lo editó", async () => {
 });
 
 test("ofrece las listas de precios disponibles", async () => {
-  const { default: CorridasInicio } = await import("./CorridasInicio");
   render(
     <MemoryRouter>
       <CorridasInicio />
@@ -109,7 +115,6 @@ test("ofrece las listas de precios disponibles", async () => {
 });
 
 test("el FormData incluye lista_id solo cuando la lista elegida no es Principal, y avisa que es inmutable", async () => {
-  const { default: CorridasInicio } = await import("./CorridasInicio");
   render(
     <MemoryRouter>
       <CorridasInicio />

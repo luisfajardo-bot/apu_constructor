@@ -66,12 +66,12 @@ export default function CorridasInicio() {
     try {
       const nueva = await crearCarpeta(nombre, nivel1Id);
       const arbol = await cargarCarpetas();
-      // Auto-select the new folder as destination
+      // Auto-selecciona la carpeta recién creada como destino
       if (nivel1Id !== null) {
-        // Created a subfolder under the current level-1
+        // Era una subcarpeta del nivel 1 elegido
         setNivel2Id(nueva.id);
       } else {
-        // Created a new level-1 folder; select it
+        // Era una carpeta raíz nueva: la seleccionamos en nivel 1
         const nodo = arbol.find((c) => c.id === nueva.id);
         if (nodo) {
           setNivel1Id(nueva.id);

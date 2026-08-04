@@ -176,7 +176,9 @@ class ApuAdvisor:
             user_content = privacy.safe_json(payload)  # garantía: sin dinero
             resp = self._client.messages.create(
                 model=self.model,
-                max_tokens=1500,
+                # Techo, no gasto: cubre el pensamiento adaptativo MÁS el JSON.
+                # Si queda corto, el JSON sale truncado y se pierde la respuesta.
+                max_tokens=16000,
                 system=_COMPOSE_SYSTEM,
                 thinking={"type": "adaptive"},
                 output_config={
@@ -232,7 +234,9 @@ class ApuAdvisor:
 
         resp = self._client.messages.create(
             model=self.model,
-            max_tokens=1024,
+            # Techo, no gasto: el pensamiento adaptativo comparte este límite con
+            # el JSON de respuesta.
+            max_tokens=16000,
             system=_SYSTEM_PROMPT,
             thinking={"type": "adaptive"},
             output_config={

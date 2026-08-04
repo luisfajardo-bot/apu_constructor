@@ -80,3 +80,57 @@ def test_totals_consistency(assembler):
     a = assembler.assemble_item(item)
     assert a.contractual_total == pytest.approx(240000)
     assert a.margen_total == pytest.approx(a.contractual_total - a.costo_total)
+
+
+# --------------------------------------------------------------------------- #
+# Piso del fallback determinístico (config.MATCH_REVIEW)
+#
+# El fallback devolvía `candidatos[0]` sin mirar ningún umbral, así que un
+# parecido de nombre del 25% producía un APU asignado y un precio de seis cifras
+# con pinta de autoritativo. Caso real de producción (2026-08-04): una
+# "Localización y replanteo" quedó costeada como un PEDESTAL DE CONCRETO con 25%
+# de similaridad — 2010 veces el costo correcto, y el margen etiquetado "0.0%".
+#
+# Mejor un $0 con alerta que un número inventado.
+# --------------------------------------------------------------------------- #
+
+def test_fallback_no_asigna_apu_por_debajo_del_piso(assembler):
+    # 0.2303 contra "EXCAVACION MANUAL PARA REDES": es un candidato real
+    # (comparte el token REDES) pero está muy por debajo de MATCH_REVIEW.
+    item = LicitacionItem("9", "SUMINISTRO DE REDES ELECTRICAS", "M3", 5, 0.0, "DIURNO")
+    a = assembler.assemble_item(item)
+
+    assert a.apu_codigo is None, "un 23% de parecido no puede asignar un APU"
+    assert a.costo_unitario == 0.0
+    assert a.costo_total == 0
+    assert a.status == MatchStatus.NEW
+    # El motivo tiene que ser accionable: cuánto dio y cuánto hacía falta.
+    assert "23%" in a.explicacion and "55%" in a.explicacion
+
+    # Y no lo deja sin salida: el candidato sigue existiendo para elegirlo a mano.
+    # (`corridas.py` guarda `result.candidatos` aparte del armado, así que la
+    # lista con "Elegir" se sigue mostrando en la corrida.)
+    cands = assembler.matcher.match(item).candidatos
+    assert [c.apu_codigo for c in cands] == ["3009"]
+
+
+def test_fallback_sigue_asignando_arriba_del_piso(assembler):
+    # 0.7022: por debajo de MATCH_ACCEPT (0.88) pero por encima del piso, así que
+    # sigue armándose como REVISAR igual que antes. El piso no puede volverse una
+    # regresión para lo que ya funcionaba.
+    item = LicitacionItem("10", "EXCAVACION MANUAL", "M3", 2, 0.0, "DIURNO")
+    a = assembler.assemble_item(item)
+
+    assert a.apu_codigo == "3009"
+    assert a.status == MatchStatus.REVIEW
+    assert a.costo_unitario == pytest.approx(60000)
+
+
+def test_item_sin_apu_queda_con_alerta_de_costeo(assembler):
+    # La regla "nada en $0 en silencio": si el piso deja el ítem sin APU, el ítem
+    # tiene que salir alertado, no simplemente en cero.
+    from apu_tool.dominio.alertas import alertas_costeo
+
+    item = LicitacionItem("11", "SUMINISTRO DE REDES ELECTRICAS", "M3", 5, 0.0, "DIURNO")
+    a = assembler.assemble_item(item)
+    assert alertas_costeo(a), "un ítem en $0 nunca puede quedar sin alerta"

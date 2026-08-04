@@ -209,6 +209,33 @@ class ApuAdvisor:
     # --------------------------------------------------------------- interno
     def _choose_deterministic(self, candidatos: list[MatchCandidate]) -> AIDecision:
         best = candidatos[0]
+        # PISO: por debajo de MATCH_REVIEW el "mejor" candidato es ruido, no una
+        # elección. Devolvía candidatos[0] sin mirar umbral, así que un 25% de
+        # parecido de nombre producía un APU asignado y un precio de seis cifras con
+        # pinta de autoritativo. Caso real de producción (2026-08-04): una
+        # "Localización y replanteo" quedó costeada como PEDESTAL DE CONCRETO —
+        # 2010 veces el costo correcto, y el margen etiquetado "0.0%".
+        #
+        # Con apu_codigo=None, assemble_item intenta la composición generativa y, si
+        # no hay IA, marca el ítem como manual en $0 CON alerta. Los candidatos se
+        # siguen guardando aparte (corridas.py), así que la lista con "Elegir" sigue
+        # ahí: no deja al usuario sin salida, le pide la decisión que no se puede
+        # tomar sola. Mejor un $0 con alerta que un número inventado.
+        #
+        # El piso NO se aplica a _choose_with_ai a propósito: la IA sí ve la
+        # composición de cada candidato (insumos, rendimientos, unidad), así que
+        # puede elegir con criterio uno cuyo nombre puntúe bajo. Filtrarla por
+        # similaridad de nombre la reduciría a un matcher fuzzy con más pasos.
+        if best.score < config.MATCH_REVIEW:
+            return AIDecision(
+                apu_codigo=None, confianza=best.score,
+                justificacion=(
+                    f"Mejor coincidencia {best.score:.0%}, por debajo del mínimo de "
+                    f"{config.MATCH_REVIEW:.0%} para asignar un APU. "
+                    f"Elige uno de los candidatos o ármalo a mano."
+                ),
+                fuente="deterministico",
+            )
         return AIDecision(
             apu_codigo=best.apu_codigo, confianza=best.score,
             justificacion=f"Mejor similaridad de nombre ({best.score:.0%}).",

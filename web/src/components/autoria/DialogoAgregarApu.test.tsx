@@ -16,6 +16,7 @@ vi.mock("@/api/autoria", () => ({
 vi.mock("@/api/insumos", () => ({
   listarInsumos: vi.fn(async () => ({ items: [], total: 0, limit: 15, offset: 0 })),
 }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const inicialDemo = {
   codigo: "100", turno: "DIURNO", nombre: "APU DEMO", unidad: "M3", grupo: "G",
@@ -316,5 +317,36 @@ test("cancelar el prompt no cambia el grupo", async () => {
   const sel = (await screen.findByLabelText("Grupo")) as HTMLSelectElement;
   fireEvent.click(screen.getByText("+ nuevo grupo"));
   expect(sel.value).toBe("");
+  spy.mockRestore();
+});
+
+test("si falla el vocabulario de grupos, en modo crear el select queda en el placeholder y avisa con un toast", async () => {
+  const { getGruposApu } = await import("@/api/autoria");
+  const { toast } = await import("sonner");
+  vi.mocked(getGruposApu).mockRejectedValueOnce(new Error("network"));
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(<DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}} />);
+
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  const sel = screen.getByLabelText("Grupo") as HTMLSelectElement;
+  expect(sel.value).toBe("");                          // sin vocabulario, sigue en el placeholder
+  const boton = screen.getByRole("button", { name: /Crear APU/i }) as HTMLButtonElement;
+  expect(boton.disabled).toBe(true);                   // Guardar sigue bloqueado, no colgado en silencio
+  // `mockRejectedValueOnce` ya deja el mock en su comportamiento normal para los tests vecinos.
+});
+
+test("'+ nuevo grupo' con una variante de ortografía reusa el grupo del vocabulario en vez de duplicarlo", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  const spy = vi.spyOn(window, "prompt").mockReturnValue("pavimentos");
+  render(
+    <DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}} puedeCrearGrupo />,
+  );
+  const sel = (await screen.findByLabelText("Grupo")) as HTMLSelectElement;
+  // Esperar el vocabulario cargado antes de crear el grupo nuevo: si el vocabulario
+  // sigue vacío, la comparación normalizada no encuentra nada que reusar.
+  await waitFor(() => expect(screen.getByRole("option", { name: "PAVIMENTOS" })).toBeTruthy());
+  fireEvent.click(screen.getByText("+ nuevo grupo"));
+  await waitFor(() => expect(sel.value).toBe("PAVIMENTOS"));   // ortografía del vocabulario, no "pavimentos"
+  expect(screen.getAllByRole("option", { name: "PAVIMENTOS" }).length).toBe(1);   // sin variante duplicada
   spy.mockRestore();
 });

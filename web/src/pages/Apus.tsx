@@ -38,7 +38,6 @@ function clave(a: ApuResumen): string {
 export default function Apus() {
   const { perfil } = useAuth();
   const puedeEditar = puede(perfil?.rol, "editor");
-  const puedeBorrar = puede(perfil?.rol, "admin");
   const esAdmin = puede(perfil?.rol, "admin");
   const [q, setQ] = useState("");
   const [inputQ, setInputQ] = useState("");
@@ -266,7 +265,7 @@ export default function Apus() {
                             puedeEditar={puedeEditar}
                             onEditar={() => setEditarDetalle(estado)}
                             onDuplicar={() => setDuplicarDetalle(estado)}
-                            puedeBorrar={puedeBorrar}
+                            puedeBorrar={esAdmin}
                             onBorrar={() => setBorrarDetalle(estado)}
                           />
                         )}

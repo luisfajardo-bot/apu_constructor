@@ -17,7 +17,7 @@ import type {
 } from "@/lib/tipos";
 import { crearApu, editarApu, listarApus, getGruposApu } from "@/api/autoria";
 import { listarInsumos } from "@/api/insumos";
-import { baseDe, codigoSugerido, nombreEsDistinto } from "@/lib/duplicarApu";
+import { baseDe, codigoSugerido, nombreEsDistinto, normalizarNombre } from "@/lib/duplicarApu";
 import { cop } from "@/lib/moneda";
 import { costoDeFila, rendimientoDesdeCosto, costoTotalApu } from "@/lib/costoApu";
 import {
@@ -183,8 +183,11 @@ export function DialogoAgregarApu({
     };
   }, [open, modo, inicial]);
 
-  // Vocabulario de grupos. Si falla, el select queda con el grupo actual como única
-  // opción: se puede guardar sin cambiarlo, pero no inventar uno nuevo.
+  // Vocabulario de grupos. Si falla en modo editar/duplicar, el select queda con
+  // el grupo actual como única opción: se puede guardar sin cambiarlo. En modo
+  // crear no hay grupo actual (arranca en ""), así que un fallo deja el select
+  // solo con el placeholder deshabilitado y Guardar bloqueado sin explicación
+  // — de ahí el toast, para no dejar la creación de un APU colgada en silencio.
   useEffect(() => {
     if (!open) return;
     let cancelado = false;
@@ -193,7 +196,9 @@ export function DialogoAgregarApu({
         const gs = await getGruposApu();
         if (!cancelado) setGrupos(gs);
       } catch {
-        /* sin vocabulario: queda el grupo actual */
+        if (!cancelado) {
+          toast.error("No se pudo cargar el vocabulario de grupos.");
+        }
       }
     })();
     return () => {
@@ -211,7 +216,15 @@ export function DialogoAgregarApu({
     const nombre = window.prompt("Nombre del grupo nuevo (capítulo de obra)");
     const limpio = (nombre ?? "").trim();
     if (!limpio) return;
-    setGrupos((prev) => (prev.includes(limpio) ? prev : [...prev, limpio].sort()));
+    // Si el nombre normalizado ya está en el vocabulario, reusa esa ortografía en
+    // vez de agregar una variante (evita la deriva que esta feature existe para frenar).
+    const n = normalizarNombre(limpio);
+    const yaEsta = grupos.find((g) => normalizarNombre(g) === n);
+    if (yaEsta) {
+      setCabecera("grupo", yaEsta);
+      return;
+    }
+    setGrupos((prev) => [...prev, limpio].sort());
     setCabecera("grupo", limpio);
   }
 
@@ -367,25 +380,26 @@ export function DialogoAgregarApu({
               onChange={(e) => setCabecera("nombre", e.target.value)}
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="text-muted-foreground">Grupo</span>
-            <select
-              aria-label="Grupo"
-              className={inputCls}
-              value={cab.grupo}
-              onChange={(e) => setCabecera("grupo", e.target.value)}
-            >
-              {/* Placeholder deshabilitado: `cabeceraValida` ya exige grupo no vacío,
-                  así que el guardado sigue bloqueado hasta que se elija uno. */}
-              <option value="" disabled>
-                Elegí un grupo…
-              </option>
-              {opcionesGrupo.map((g) => (
-                <option key={g} value={g}>
-                  {g}
+          <div className="flex flex-col gap-1 text-xs">
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="text-muted-foreground">Grupo</span>
+              <select
+                className={inputCls}
+                value={cab.grupo}
+                onChange={(e) => setCabecera("grupo", e.target.value)}
+              >
+                {/* Placeholder deshabilitado: `cabeceraValida` ya exige grupo no vacío,
+                    así que el guardado sigue bloqueado hasta que se elija uno. */}
+                <option value="" disabled>
+                  Elegí un grupo…
                 </option>
-              ))}
-            </select>
+                {opcionesGrupo.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+            </label>
             {puedeCrearGrupo && (
               <button
                 type="button"
@@ -395,7 +409,7 @@ export function DialogoAgregarApu({
                 + nuevo grupo
               </button>
             )}
-          </label>
+          </div>
         </div>
 
         {/* Composición */}

@@ -308,3 +308,11 @@ def test_sin_precio_en_la_lista(repos):
     assert precios.get_candidatos("9", lista_id=np)[0].sin_precio is True
     items, total = precios.list_insumos(lista_id=np, sin_precio=True, limit=50, offset=0)
     assert total == 1 and items[0].codigo == "9"
+
+
+def test_grupos_ignora_vacios_y_deduplica(repos):
+    _, apus = repos
+    apus.crear_apu(Apu("Z1", "PISO", "M2", "DIURNO", "PAVIMENTOS"), [])
+    apus.crear_apu(Apu("Z2", "ANDEN", "M2", "DIURNO", "PAVIMENTOS"), [])
+    apus.crear_apu(Apu("Z3", "SIN GRUPO", "M2", "DIURNO"), [])
+    assert apus.grupos() == ["PAVIMENTOS"]

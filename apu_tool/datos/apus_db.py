@@ -209,6 +209,16 @@ class ApusDB:
         return ([Apu(r["codigo"], r["nombre"], r["unidad"], r["shift"], r["grupo"])
                  for r in rows], int(total))
 
+    def grupos(self) -> list[str]:
+        """Grupos en uso por algún APU. Es la mitad viva del vocabulario de grupos
+        (la otra es config.GRUPOS_APU_BASE): un grupo que deja de usarse desaparece,
+        que es cómo se autolimpia un grupo mal escrito. Ver servicio/apus.py::grupos."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT grupo FROM apus "
+                "WHERE grupo IS NOT NULL AND grupo <> '' ORDER BY grupo").fetchall()
+        return [r["grupo"] for r in rows]
+
     def search_apus(self, texto: str, limit: int = 20) -> list[Apu]:
         like = f"%{texto.strip()}%"
         with self.connect() as conn:

@@ -113,14 +113,17 @@ export function DialogoAgregarApu({
   const [filas, setFilas] = useState<FilaComp[]>([nuevaFila()]);
   const [guardando, setGuardando] = useState(false);
   // Duplicar: el código arranca sugerido; si el usuario lo escribe a mano, deja de
-  // recalcularse (no pisamos lo que ya escribió).
-  const [codigoTocado, setCodigoTocado] = useState(false);
+  // recalcularse (no pisamos lo que ya escribió). Vive en un ref (no en estado)
+  // porque lo lee una callback async del efecto de `listarApus`: un `useState`
+  // quedaría fijado al valor que tenía cuando se creó ese efecto.
+  const codigoTocadoRef = useRef(false);
   const [ocupados, setOcupados] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open || !inicial) return;
     if (modo !== "editar" && modo !== "duplicar") return;
     const duplicando = modo === "duplicar";
+    codigoTocadoRef.current = false;
     setCab({
       // Duplicar: código sugerido derivado (se refina cuando llega `ocupados`).
       codigo: duplicando ? codigoSugerido(inicial.codigo, inicial.turno, []) : inicial.codigo,
@@ -161,7 +164,7 @@ export function DialogoAgregarApu({
         const codigos = res.items.map((a) => a.codigo);
         setOcupados(codigos);
         setCab((prev) =>
-          codigoTocado
+          codigoTocadoRef.current
             ? prev
             : { ...prev, codigo: codigoSugerido(inicial.codigo, prev.turno, codigos) },
         );
@@ -172,8 +175,6 @@ export function DialogoAgregarApu({
     return () => {
       cancelado = true;
     };
-    // `codigoTocado` a propósito fuera de deps: solo importa su valor al resolver.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, modo, inicial]);
 
   function setCabecera<K extends keyof Cabecera>(k: K, v: string) {
@@ -185,7 +186,7 @@ export function DialogoAgregarApu({
       setCab(CABECERA_VACIA);
       setFilas([nuevaFila()]);
       setGuardando(false);
-      setCodigoTocado(false);
+      codigoTocadoRef.current = false;
       setOcupados([]);
     }
     onOpenChange(v);
@@ -279,7 +280,7 @@ export function DialogoAgregarApu({
               className={inputCls}
               value={cab.codigo}
               onChange={(e) => {
-                setCodigoTocado(true);
+                codigoTocadoRef.current = true;
                 setCabecera("codigo", e.target.value);
               }}
               autoFocus
@@ -299,7 +300,7 @@ export function DialogoAgregarApu({
                   // Respeta la convención " N" del nocturno mientras no hayas
                   // escrito el código a mano.
                   codigo:
-                    duplicando && !codigoTocado
+                    duplicando && !codigoTocadoRef.current
                       ? codigoSugerido(inicial!.codigo, turno, ocupados)
                       : prev.codigo,
                 }));

@@ -1,5 +1,7 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
+import { DialogoAgregarApu } from "./DialogoAgregarApu";
+import { listarApus } from "@/api/autoria";
 
 vi.mock("@/api/autoria", () => ({
   crearApu: vi.fn(async () => ({})),
@@ -226,4 +228,39 @@ test("modo duplicar NO recalcula el código si ya lo escribiste a mano", async (
   });
   fireEvent.change(screen.getByDisplayValue("DIURNO"), { target: { value: "NOCTURNO" } });
   await waitFor(() => expect(screen.getByDisplayValue("9999")).toBeTruthy());
+});
+
+test("modo duplicar NO pisa el código tipeado si listarApus resuelve después (carrera con autoFocus)", async () => {
+  // Diferido: controlamos a mano cuándo resuelve, para simular que la respuesta
+  // llega después de que el usuario ya empezó a escribir (autoFocus + red lenta).
+  let resolver: ((v: unknown) => void) | null = null;
+  vi.mocked(listarApus).mockImplementationOnce(
+    () => new Promise((res) => { resolver = res as (v: unknown) => void; }),
+  );
+  render(
+    <DialogoAgregarApu
+      open onOpenChange={() => {}} onCreado={() => {}}
+      modo="duplicar" inicial={origenDemo as never}
+    />,
+  );
+  // El código sugerido inicial ("3454-2") se calcula sin esperar la consulta.
+  fireEvent.change(await screen.findByDisplayValue("3454-2"), {
+    target: { value: "9999" },
+  });
+  // Recién ahora resuelve `listarApus`, con un ocupado que forzaría el sugerido
+  // a "3454-3" si el efecto no respetara que el usuario ya escribió a mano.
+  // `waitFor` no sirve para confirmar que un valor "no cambia": si ya es cierto
+  // en el primer chequeo, vuelve enseguida sin esperar a que la promesa
+  // resuelta termine de propagar su actualización de estado. Por eso se
+  // resuelve y se deja correr la cola de microtasks dentro de `act` antes de
+  // afirmar nada.
+  await act(async () => {
+    resolver!({
+      items: [{ codigo: "3454-2", turno: "DIURNO", nombre: "MEZCLA MD12",
+                unidad: "M3", grupo: "PAV", n_componentes: 1, costo_unitario: 0 }],
+      total: 1, limit: 100, offset: 0,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  expect(screen.getByDisplayValue("9999")).toBeTruthy();
 });

@@ -1,4 +1,4 @@
-// Helpers puros para duplicar un APU. Aislados para testearlos sin montar la UI,
+﻿// Helpers puros para duplicar un APU. Aislados para testearlos sin montar la UI,
 // igual que costoApu.ts / validacionApu.ts.
 
 /** Convención de la empresa: el APU nocturno lleva el código con sufijo " N". */
@@ -48,7 +48,7 @@ export function normalizarNombre(s: string): string {
   return (s || "")
     .toUpperCase()
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")            // sin tildes
+    .replace(/[\u0300-\u036f]/g, "")            // sin tildes
     .replace(/[^A-Z0-9 ]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -59,3 +59,4 @@ export function nombreEsDistinto(nombreOrigen: string, nombreNuevo: string): boo
   const nuevo = normalizarNombre(nombreNuevo);
   return nuevo !== "" && nuevo !== normalizarNombre(nombreOrigen);
 }
+

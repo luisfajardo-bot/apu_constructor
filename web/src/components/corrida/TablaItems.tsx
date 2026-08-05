@@ -54,6 +54,10 @@ export default function TablaItems({
   // Duplicar el APU de un ítem: se lee el APU real de la biblioteca (la composición
   // del ítem es la costeada y no trae las marcas de sub-APU).
   const [duplicar, setDuplicar] = useState<{ seq: number; origen: ApuDetalle } | null>(null);
+  // `seq` cuyo fetch de "abrir duplicar" está en vuelo, para deshabilitar SU botón
+  // y evitar que dos fetches en carrera pisen el estado `duplicar` con la fila
+  // equivocada (ver Fix 4 del review).
+  const [cargandoDuplicar, setCargandoDuplicar] = useState<number | null>(null);
 
   const nPorRevisar = items.filter((it) => REVISABLE.has(it.status)).length;
   const visible = control
@@ -108,22 +112,24 @@ export default function TablaItems({
   }
 
   async function abrirDuplicar(seq: number, codigo: string, turno: string) {
+    setCargandoDuplicar(seq);
     try {
       const origen = await getApuDetalle(codigo, turno);
       setDuplicar({ seq, origen });
     } catch {
       toast.error("No se pudo leer el APU de origen.");
+    } finally {
+      setCargandoDuplicar(null);
     }
   }
 
   async function duplicado(seq: number, codigo: string, turno: string) {
     setDuplicar(null);
-    // El APU YA está creado. Si la reasignación falla, hay que decirlo: dejar el
-    // toast de éxito o el silencio sugeriría que no pasó nada.
+    // El APU YA está creado. El diálogo ya confirmó la creación con su propio
+    // toast; si la reasignación falla, hay que decirlo (no alcanza con el
+    // silencio, que sugeriría que no pasó nada).
     const ok = await handleConfirmar(seq, codigo, turno);
-    if (ok) {
-      toast.success(`APU ${codigo} creado y asignado al ítem.`);
-    } else {
+    if (!ok) {
       toast.error(
         `APU ${codigo} creado; no se pudo asignar al ítem — asignalo con Cambiar APU.`,
       );
@@ -272,6 +278,7 @@ export default function TablaItems({
                           onConfirmar={handleConfirmar}
                           readOnly={readOnly}
                           puedeDuplicar={puedeEditar && !readOnly}
+                          duplicarCargando={cargandoDuplicar === it.seq}
                           onDuplicar={abrirDuplicar}
                         />
                       )}
@@ -318,6 +325,8 @@ interface DetalleExpandidoProps {
   onConfirmar: (seq: number, apuCodigo: string, shift?: string) => void;
   readOnly: boolean;
   puedeDuplicar: boolean;
+  /** El fetch de "abrir duplicar" de ESTE ítem está en vuelo: deshabilita su botón. */
+  duplicarCargando: boolean;
   onDuplicar: (seq: number, codigo: string, turno: string) => void;
 }
 
@@ -329,6 +338,7 @@ function DetalleExpandido({
   onConfirmar,
   readOnly,
   puedeDuplicar,
+  duplicarCargando,
   onDuplicar,
 }: DetalleExpandidoProps) {
   const esRevisable = REVISABLE.has(detalle.status);
@@ -417,10 +427,10 @@ function DetalleExpandido({
               <Button
                 size="xs"
                 variant="outline"
-                disabled={confirmando !== null}
+                disabled={confirmando !== null || duplicarCargando}
                 onClick={() => onDuplicar(seq, detalle.apu_codigo, detalle.apu_turno)}
               >
-                Duplicar este APU y usarlo aquí
+                {duplicarCargando ? "Abriendo…" : "Duplicar este APU y usarlo aquí"}
               </Button>
             </div>
           )}

@@ -205,6 +205,19 @@ test("sin rol editor no ofrece duplicar", async () => {
   expect(screen.queryByRole("button", { name: /Duplicar este APU/i })).toBeNull();
 });
 
+test("no ofrece duplicar cuando el ítem no tiene APU asignado", async () => {
+  const { getItem } = await import("@/api/corridas");
+  vi.mocked(getItem).mockResolvedValueOnce({
+    seq: 0, descripcion: "Concreto", apu_codigo: "", apu_turno: "DIURNO",
+    apu_nombre: "", status: "matched", explicacion: "", candidatos: [], composicion: [],
+    costo_unitario: 0,
+  });
+  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} puedeEditar />);
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await screen.findByText(/Cambiar APU/i);
+  expect(screen.queryByRole("button", { name: /Duplicar este APU/i })).toBeNull();
+});
+
 test("en corrida congelada no ofrece duplicar", async () => {
   render(
     <TablaItems
@@ -219,8 +232,10 @@ test("en corrida congelada no ofrece duplicar", async () => {
   expect(screen.queryByRole("button", { name: /Duplicar este APU/i })).toBeNull();
 });
 
-test("al crear la copia, el ítem queda reasignado al APU nuevo", async () => {
+test("al crear la copia, el ítem queda reasignado al APU nuevo (sin toast de éxito duplicado)", async () => {
   const { confirmar } = await import("@/api/corridas");
+  const { toast } = await import("sonner");
+  vi.mocked(toast.success).mockClear();
   render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} puedeEditar />);
   fireEvent.click(screen.getByLabelText("Expandir fila"));
   fireEvent.click(await screen.findByRole("button", { name: /Duplicar este APU/i }));
@@ -231,6 +246,12 @@ test("al crear la copia, el ítem queda reasignado al APU nuevo", async () => {
   fireEvent.click(screen.getByRole("button", { name: /Crear APU/i }));
   await waitFor(() =>
     expect(confirmar).toHaveBeenCalledWith(1, ITEM.seq, "3454-2", "DIURNO"));
+  // El diálogo ya confirma la creación con su propio toast; TablaItems no debe
+  // apilar un segundo toast de éxito por la reasignación (Fix 3 del review final).
+  expect(toast.success).toHaveBeenCalledTimes(1);
+  expect(toast.success).not.toHaveBeenCalledWith(
+    expect.stringContaining("asignado al ítem"),
+  );
 });
 
 test("si el APU se crea pero la reasignación falla, el toast lo dice (no sugiere que no pasó nada)", async () => {
@@ -258,4 +279,27 @@ test("si el APU se crea pero la reasignación falla, el toast lo dice (no sugier
   expect(toast.success).not.toHaveBeenCalledWith(
     expect.stringContaining("asignado al ítem"),
   );
+});
+
+test("regresión: con puedeEditar={false}, 'Confirmar APU actual' sigue visible y funcionando", async () => {
+  const { getItem, confirmar } = await import("@/api/corridas");
+  vi.mocked(getItem).mockResolvedValueOnce({
+    seq: 0, descripcion: "Concreto", apu_codigo: "111", apu_turno: "DIURNO",
+    apu_nombre: "APU VIEJO", status: "review", explicacion: "", candidatos: [],
+    composicion: [], costo_unitario: 0,
+  });
+  render(
+    <TablaItems
+      corridaId={1}
+      items={[{ ...ITEM, status: "review" }]}
+      onConfirmado={() => {}}
+      puedeEditar={false}
+    />,
+  );
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  // La prop nueva `puedeEditar` solo gatea el botón de duplicar: no debe tocar
+  // "Confirmar APU actual" (el backend es el que gatea de verdad).
+  const boton = await screen.findByRole("button", { name: /Confirmar APU actual/i });
+  fireEvent.click(boton);
+  await waitFor(() => expect(confirmar).toHaveBeenCalledWith(1, 0, "111", undefined));
 });

@@ -13,6 +13,10 @@ vi.mock("@/api/corridas", () => ({
     id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
     totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
   })),
+  confirmarLote: vi.fn(async () => ({
+    id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
+    totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
+  })),
 }));
 vi.mock("@/api/autoria", () => ({
   listarApus: vi.fn(async () => ({
@@ -165,6 +169,70 @@ test("cambiar el filtro no arrastra al lote las filas que dejaron de verse", asy
   // filtrar para dejar 1 visible: las otras 3 siguen en `marcadas` pero ya no cuentan
   fireEvent.change(screen.getByLabelText("Filtrar Descripción"), { target: { value: "clase d" } });
   expect(await screen.findByText(/1 línea marcada/i)).toBeTruthy();
+});
+
+test("el ancla del rango sigue al seq, no al índice, cuando el filtro cambia entre el click y el Shift+click", async () => {
+  // Seq 3 (ítem 4) es el ancla, marcada en la posición 3 de la vista sin filtrar.
+  // El filtro "común" deja afuera los ítems 2 y 3 (posiciones 1 y 2): el seq 3
+  // pasa a la posición 1 en la vista filtrada, pero sigue visible.
+  const items = [
+    { ...ITEM, seq: 0, item: "1", descripcion: "Excavación común" },
+    { ...ITEM, seq: 1, item: "2", descripcion: "Perfilado especial A" },
+    { ...ITEM, seq: 2, item: "3", descripcion: "Perfilado especial B" },
+    { ...ITEM, seq: 3, item: "4", descripcion: "Concreto común anchor" },
+    { ...ITEM, seq: 4, item: "5", descripcion: "Relleno común medio" },
+    { ...ITEM, seq: 5, item: "6", descripcion: "Base común objetivo" },
+  ];
+  render(<TablaConControl items={items} />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 4"));
+  fireEvent.change(screen.getByLabelText("Filtrar Descripción"), { target: { value: "común" } });
+  // Shift+click en el seq 5 (objetivo), posición 3 en la vista filtrada. Si el
+  // ancla se leyera como el índice viejo (3, de la vista sin filtrar) en vez de
+  // recalcularse por seq, el rango saldría [3,3] (solo el objetivo) y perdería
+  // la fila del medio (seq 4): 2 líneas marcadas en vez de 3.
+  fireEvent.click(screen.getByLabelText("Marcar ítem 6"), { shiftKey: true });
+  expect(await screen.findByText(/3 líneas marcadas/i)).toBeTruthy();
+});
+
+test("Asignar manda los seqs marcados con el APU elegido", async () => {
+  const { confirmarLote } = await import("@/api/corridas");
+  render(<TablaConControl items={itemsCuatro()} />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  fireEvent.click(screen.getByLabelText("Marcar ítem 3"));
+  const input = await screen.findByPlaceholderText(/Buscar APU/i);
+  fireEvent.change(input, { target: { value: "333" } });
+  fireEvent.click(await screen.findByText("APU NUEVO"));
+  await waitFor(() =>
+    expect(confirmarLote).toHaveBeenCalledWith(1, [0, 2], "33333", "DIURNO"));
+});
+
+test("Confirmar el APU actual manda solo las filas que tienen APU", async () => {
+  const { confirmarLote } = await import("@/api/corridas");
+  const items = itemsCuatro().map((it) => (it.seq === 2 ? { ...it, apu_codigo: "" } : it));
+  render(<TablaConControl items={items} />);
+  fireEvent.click(screen.getByLabelText(/Marcar todas las líneas/i));
+  fireEvent.click(screen.getByRole("button", { name: /Confirmar el APU actual/i }));
+  await waitFor(() =>
+    expect(confirmarLote).toHaveBeenCalledWith(1, [0, 1, 3], undefined, undefined));
+});
+
+test("después de asignar se limpia la selección", async () => {
+  render(<TablaConControl items={itemsCuatro()} />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  const input = await screen.findByPlaceholderText(/Buscar APU/i);
+  fireEvent.change(input, { target: { value: "333" } });
+  fireEvent.click(await screen.findByText("APU NUEVO"));
+  await waitFor(() => expect(screen.queryByText(/líneas marcadas|línea marcada/i)).toBeNull());
+});
+
+test("si el lote falla, la selección se conserva", async () => {
+  const { confirmarLote } = await import("@/api/corridas");
+  vi.mocked(confirmarLote).mockRejectedValueOnce(new Error("boom"));
+  render(<TablaConControl items={itemsCuatro()} />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  fireEvent.click(screen.getByLabelText("Marcar ítem 2"));
+  fireEvent.click(screen.getByRole("button", { name: /Confirmar el APU actual/i }));
+  expect(await screen.findByText(/2 líneas marcadas/i)).toBeTruthy();
 });
 
 test("con readOnly no hay checkboxes", async () => {

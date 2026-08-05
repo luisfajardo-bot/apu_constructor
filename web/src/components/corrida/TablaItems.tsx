@@ -16,7 +16,7 @@ import CabeceraFiltros from "@/components/corrida/CabeceraFiltros";
 import { DialogoAgregarApu } from "@/components/autoria/DialogoAgregarApu";
 import { cop, pct } from "@/lib/moneda";
 import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
-import { getItem, confirmar } from "@/api/corridas";
+import { getItem, confirmar, confirmarLote } from "@/api/corridas";
 import { getApuDetalle } from "@/api/autoria";
 import type { ItemCuadro, DetalleItem, CorridaDetalle, ApuDetalle } from "@/lib/tipos";
 import type { ControlCorridaTabla } from "@/lib/corridaTabla";
@@ -67,9 +67,10 @@ export default function TablaItems({
   // Selección para las acciones en lote. Guarda seqs, no índices: la tabla se
   // reordena y se filtra, y un índice dejaría de apuntar a la misma fila.
   const [marcadas, setMarcadas] = useState<Set<number>>(new Set());
-  // Índice (dentro de `visible`) del último click sin Shift, para el rango.
-  // Va en un ref: lo lee el handler del click siguiente, no el render.
-  const ultimoIdxRef = useRef<number | null>(null);
+  // Ancla del rango: guarda el SEQ, no el índice. Si el usuario cambia el filtro o
+  // el orden entre el click y el Shift+click, el índice viejo apuntaría a otra fila;
+  // el seq se resuelve contra el `visible` del momento.
+  const ancorSeqRef = useRef<number | null>(null);
 
   const nPorRevisar = items.filter((it) => REVISABLE.has(it.status)).length;
   const visible = control
@@ -87,14 +88,16 @@ export default function TablaItems({
   const seleccionable = control !== undefined && !readOnly;
 
   function alternar(idx: number, seq: number, conShift: boolean) {
-    const desde = ultimoIdxRef.current;
-    if (conShift && desde !== null) {
+    const desde = ancorSeqRef.current === null
+      ? -1
+      : visible.findIndex((it) => it.seq === ancorSeqRef.current);
+    if (conShift && desde >= 0) {
       const [a, b] = desde <= idx ? [desde, idx] : [idx, desde];
       const rango = visible.slice(a, b + 1).map((it) => it.seq);
       setMarcadas((prev) => new Set([...prev, ...rango]));
       return;                                  // el ancla del rango no se mueve
     }
-    ultimoIdxRef.current = idx;
+    ancorSeqRef.current = seq;
     setMarcadas((prev) => {
       const s = new Set(prev);
       if (s.has(seq)) s.delete(seq); else s.add(seq);
@@ -103,12 +106,17 @@ export default function TablaItems({
   }
 
   function marcarTodas(marcar: boolean) {
-    ultimoIdxRef.current = null;
+    ancorSeqRef.current = null;
     setMarcadas((prev) => {
       const s = new Set(prev);
       for (const it of visible) { if (marcar) s.add(it.seq); else s.delete(it.seq); }
       return s;
     });
+  }
+
+  function limpiarSeleccion() {
+    ancorSeqRef.current = null;
+    setMarcadas(new Set());
   }
 
   async function toggleExpand(seq: number) {
@@ -153,6 +161,36 @@ export default function TablaItems({
       return false;
     } finally {
       setConfirmando(null);
+    }
+  }
+
+  const [enLote, setEnLote] = useState(false);
+
+  /** `apu` undefined = confirmar el APU que cada línea ya tiene. */
+  async function accionLote(apu?: { codigo: string; turno: string }) {
+    // Sin APU explícito, las filas sin APU no tienen nada que confirmar: se filtran
+    // acá para no mandarle al backend seqs que va a saltear igual.
+    const objetivo = apu
+      ? seleccionadas
+      : visible.filter((it) => marcadas.has(it.seq) && it.apu_codigo).map((it) => it.seq);
+    if (objetivo.length === 0) {
+      toast.error("Ninguna de las líneas marcadas tiene APU para confirmar.");
+      return;
+    }
+    setEnLote(true);
+    try {
+      const actualizada = await confirmarLote(corridaId, objetivo, apu?.codigo, apu?.turno);
+      onConfirmado(actualizada);
+      limpiarSeleccion();
+      const n = objetivo.length;
+      toast.success(apu
+        ? `${apu.codigo} asignado a ${n} ${n === 1 ? "línea" : "líneas"}`
+        : `${n} ${n === 1 ? "línea" : "líneas"} confirmadas`);
+    } catch (e) {
+      // La selección NO se limpia: el usuario puede reintentar sin volver a marcar.
+      toast.error(e instanceof Error ? e.message : "No se pudo aplicar el cambio en lote.");
+    } finally {
+      setEnLote(false);
     }
   }
 
@@ -381,6 +419,26 @@ export default function TablaItems({
           )}
         </TableBody>
       </Table>
+
+      {seleccionable && haySeleccion && (
+        <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t bg-background/95 px-2 py-2 backdrop-blur">
+          <span className="text-xs font-medium">
+            {seleccionadas.length} {seleccionadas.length === 1 ? "línea" : "líneas"}
+          </span>
+          <div className="min-w-[220px] flex-1">
+            <BuscadorApu
+              disabled={enLote}
+              onElegir={(apu) => accionLote({ codigo: apu.codigo, turno: apu.turno })}
+            />
+          </div>
+          <Button size="xs" variant="outline" disabled={enLote} onClick={() => accionLote()}>
+            {enLote ? "Aplicando…" : "Confirmar el APU actual"}
+          </Button>
+          <Button size="xs" variant="ghost" disabled={enLote} onClick={limpiarSeleccion}>
+            Limpiar
+          </Button>
+        </div>
+      )}
 
       {duplicar && (
         <DialogoAgregarApu

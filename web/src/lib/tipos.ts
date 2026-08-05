@@ -73,6 +73,7 @@ export interface DetalleItem {
   seq: number;
   descripcion: string;
   apu_codigo: string;
+  apu_turno: string;
   apu_nombre: string;
   status: string;
   explicacion: string;
@@ -237,6 +238,9 @@ export interface ApuNuevo {
   unidad: string;
   grupo: string;
   componentes: ComponenteNuevo[];
+  // Presente solo cuando el alta es una copia de otro APU: el backend hereda de
+  // ahí el precio histórico de respaldo y las marcas de sub-APU.
+  duplicado_de?: { codigo: string; turno: string };
 }
 
 export interface ApuEditar {

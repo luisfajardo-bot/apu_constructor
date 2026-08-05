@@ -15,8 +15,9 @@ import type {
   LineaComposicion,
   ApuResumen,
 } from "@/lib/tipos";
-import { crearApu, editarApu } from "@/api/autoria";
+import { crearApu, editarApu, listarApus } from "@/api/autoria";
 import { listarInsumos } from "@/api/insumos";
+import { baseDe, codigoSugerido, nombreEsDistinto } from "@/lib/duplicarApu";
 import { cop } from "@/lib/moneda";
 import { costoDeFila, rendimientoDesdeCosto, costoTotalApu } from "@/lib/costoApu";
 import {
@@ -29,8 +30,10 @@ import SubApuBadge from "@/components/SubApuBadge";
 interface DialogoAgregarApuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreado: () => void;
-  modo?: "crear" | "editar";
+  /** `codigo`/`turno` del APU creado o editado (los llamadores pueden ignorarlos). */
+  onCreado: (codigo: string, turno: string) => void;
+  modo?: "crear" | "editar" | "duplicar";
+  /** APU base: el que se edita, o el que se duplica. */
   inicial?: ApuDetalle | null;
 }
 
@@ -109,35 +112,68 @@ export function DialogoAgregarApu({
   const [cab, setCab] = useState<Cabecera>(CABECERA_VACIA);
   const [filas, setFilas] = useState<FilaComp[]>([nuevaFila()]);
   const [guardando, setGuardando] = useState(false);
+  // Duplicar: el código arranca sugerido; si el usuario lo escribe a mano, deja de
+  // recalcularse (no pisamos lo que ya escribió).
+  const [codigoTocado, setCodigoTocado] = useState(false);
+  const [ocupados, setOcupados] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!open) return;
-    if (modo === "editar" && inicial) {
-      setCab({
-        codigo: inicial.codigo,
-        turno: inicial.turno,
-        nombre: inicial.nombre,
-        unidad: inicial.unidad,
-        grupo: inicial.grupo,
-      });
-      setFilas(
-        inicial.composicion.length === 0
-          ? [nuevaFila()]
-          : inicial.composicion.map((c) => {
-              const { tipo, ref_shift } = tipoRefDeLinea(c);
-              return {
-                uid: uidSeq++,
-                tipo,
-                ref_shift,
-                insumo_codigo: c.insumo_codigo,
-                insumo_nombre: c.insumo_nombre,
-                unidad: c.unidad,
-                rendimiento: String(c.rendimiento),
-                precio: c.precio_unitario,
-              };
-            }),
-      );
-    }
+    if (!open || !inicial) return;
+    if (modo !== "editar" && modo !== "duplicar") return;
+    const duplicando = modo === "duplicar";
+    setCab({
+      // Duplicar: código sugerido derivado (se refina cuando llega `ocupados`).
+      codigo: duplicando ? codigoSugerido(inicial.codigo, inicial.turno, []) : inicial.codigo,
+      turno: inicial.turno,
+      nombre: inicial.nombre,
+      unidad: inicial.unidad,
+      grupo: inicial.grupo,
+    });
+    setFilas(
+      inicial.composicion.length === 0
+        ? [nuevaFila()]
+        : inicial.composicion.map((c) => {
+            const { tipo, ref_shift } = tipoRefDeLinea(c);
+            return {
+              uid: uidSeq++,
+              tipo,
+              ref_shift,
+              insumo_codigo: c.insumo_codigo,
+              insumo_nombre: c.insumo_nombre,
+              unidad: c.unidad,
+              rendimiento: String(c.rendimiento),
+              precio: c.precio_unitario,
+            };
+          }),
+    );
+  }, [open, modo, inicial]);
+
+  // Duplicar: una sola consulta para saber qué códigos derivados están tomados.
+  // Si falla, se queda con el "-2" sugerido: el backend rechaza el choque con 400.
+  useEffect(() => {
+    if (!open || modo !== "duplicar" || !inicial) return;
+    let cancelado = false;
+    (async () => {
+      try {
+        // `q` va con la BASE del código: buscar "3454 N" no matchearía "3454-2 N".
+        const res = await listarApus({ q: baseDe(inicial.codigo), limit: 100 });
+        if (cancelado) return;
+        const codigos = res.items.map((a) => a.codigo);
+        setOcupados(codigos);
+        setCab((prev) =>
+          codigoTocado
+            ? prev
+            : { ...prev, codigo: codigoSugerido(inicial.codigo, prev.turno, codigos) },
+        );
+      } catch {
+        /* sin lista de ocupados: se conserva el sugerido */
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+    // `codigoTocado` a propósito fuera de deps: solo importa su valor al resolver.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, modo, inicial]);
 
   function setCabecera<K extends keyof Cabecera>(k: K, v: string) {
@@ -149,6 +185,8 @@ export function DialogoAgregarApu({
       setCab(CABECERA_VACIA);
       setFilas([nuevaFila()]);
       setGuardando(false);
+      setCodigoTocado(false);
+      setOcupados([]);
     }
     onOpenChange(v);
   }
@@ -176,7 +214,16 @@ export function DialogoAgregarApu({
     cab.unidad.trim() !== "" &&
     cab.grupo.trim() !== "";
 
-  const valido = cabeceraValida && compValidos.length > 0 && !hayRendInvalido;
+  const duplicando = modo === "duplicar" && inicial !== null && inicial !== undefined;
+  // La copia necesita nombre propio e identidad propia; si no, no distinguió nada.
+  const nombreOk = !duplicando || nombreEsDistinto(inicial!.nombre, cab.nombre);
+  const identidadOk =
+    !duplicando ||
+    cab.codigo.trim() !== inicial!.codigo ||
+    cab.turno !== inicial!.turno;
+
+  const valido =
+    cabeceraValida && compValidos.length > 0 && !hayRendInvalido && nombreOk && identidadOk;
 
   async function guardar() {
     if (!valido) return;
@@ -192,11 +239,18 @@ export function DialogoAgregarApu({
         await editarApu(cab.codigo, cab.turno, payload);
         toast.success(`APU ${cab.codigo} (${cab.turno}) actualizado`);
       } else {
-        await crearApu({ codigo: cab.codigo.trim(), turno: cab.turno, ...payload });
+        await crearApu({
+          codigo: cab.codigo.trim(),
+          turno: cab.turno,
+          ...payload,
+          ...(duplicando
+            ? { duplicado_de: { codigo: inicial!.codigo, turno: inicial!.turno } }
+            : {}),
+        });
         toast.success(`APU ${cab.codigo.trim()} (${cab.turno}) creado`);
       }
       handleOpenChange(false);
-      onCreado();
+      onCreado(cab.codigo.trim(), cab.turno);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Error al guardar el APU";
       toast.error(msg);
@@ -209,7 +263,11 @@ export function DialogoAgregarApu({
       <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle className="text-sm">
-            {modo === "editar" ? "Editar APU" : "Agregar APU"}
+            {modo === "editar"
+              ? "Editar APU"
+              : duplicando
+                ? `Duplicar APU ${inicial!.codigo} (${inicial!.turno})`
+                : "Agregar APU"}
           </DialogTitle>
         </DialogHeader>
 
@@ -220,7 +278,10 @@ export function DialogoAgregarApu({
             <input
               className={inputCls}
               value={cab.codigo}
-              onChange={(e) => setCabecera("codigo", e.target.value)}
+              onChange={(e) => {
+                setCodigoTocado(true);
+                setCabecera("codigo", e.target.value);
+              }}
               autoFocus
               disabled={modo === "editar"}
             />
@@ -230,7 +291,19 @@ export function DialogoAgregarApu({
             <select
               className={inputCls}
               value={cab.turno}
-              onChange={(e) => setCabecera("turno", e.target.value)}
+              onChange={(e) => {
+                const turno = e.target.value;
+                setCab((prev) => ({
+                  ...prev,
+                  turno,
+                  // Respeta la convención " N" del nocturno mientras no hayas
+                  // escrito el código a mano.
+                  codigo:
+                    duplicando && !codigoTocado
+                      ? codigoSugerido(inicial!.codigo, turno, ocupados)
+                      : prev.codigo,
+                }));
+              }}
               disabled={modo === "editar"}
             >
               <option value="DIURNO">DIURNO</option>
@@ -413,6 +486,16 @@ export function DialogoAgregarApu({
           {hayRendInvalido && (
             <p className="text-xs text-destructive mt-1">
               El rendimiento de cada insumo elegido debe ser mayor que 0.
+            </p>
+          )}
+          {duplicando && !nombreOk && (
+            <p className="text-xs text-destructive mt-1">
+              El nombre debe ser distinto al del APU de origen.
+            </p>
+          )}
+          {duplicando && !identidadOk && (
+            <p className="text-xs text-destructive mt-1">
+              La copia necesita un código o un turno distinto al del APU de origen.
             </p>
           )}
         </div>

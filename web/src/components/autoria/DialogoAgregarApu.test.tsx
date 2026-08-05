@@ -128,3 +128,102 @@ test("precio 0: no hay input de costo; el rendimiento sigue editable", async () 
   expect(screen.queryByLabelText("Costo")).toBeNull();    // sin input de costo
   expect(screen.getByLabelText("Rendimiento")).toBeTruthy();
 });
+
+const origenDemo = {
+  codigo: "3454", turno: "DIURNO", nombre: "MEZCLA MD12", unidad: "M3", grupo: "PAV",
+  costo_unitario: 480000,
+  composicion: [{
+    insumo_codigo: "999", insumo_nombre: "MEZCLA MD12", unidad: "M3",
+    rendimiento: 1, precio_unitario: 480000, fuente_precio: "PRECIO IDU",
+    costo: 480000, calidad_cruce: "exacto",
+  }],
+};
+
+test("modo duplicar precarga el código sugerido y deja código y turno editables", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(
+    <DialogoAgregarApu
+      open onOpenChange={() => {}} onCreado={() => {}}
+      modo="duplicar" inicial={origenDemo as never}
+    />,
+  );
+  const codigo = await screen.findByDisplayValue("3454-2");
+  expect((codigo as HTMLInputElement).disabled).toBe(false);
+  const turno = screen.getByDisplayValue("DIURNO");
+  expect((turno as HTMLSelectElement).disabled).toBe(false);
+  // la composición del origen viene copiada
+  expect(screen.getByText("MEZCLA MD12")).toBeTruthy();
+});
+
+test("modo duplicar bloquea el guardado mientras el nombre sea el del origen", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(
+    <DialogoAgregarApu
+      open onOpenChange={() => {}} onCreado={() => {}}
+      modo="duplicar" inicial={origenDemo as never}
+    />,
+  );
+  const boton = await screen.findByRole("button", { name: /Crear APU/i });
+  expect((boton as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/nombre debe ser distinto/i)).toBeTruthy();
+
+  fireEvent.change(screen.getByDisplayValue("MEZCLA MD12"), {
+    target: { value: "MEZCLA MD13" },
+  });
+  await waitFor(() =>
+    expect((screen.getByRole("button", { name: /Crear APU/i }) as HTMLButtonElement)
+      .disabled).toBe(false));
+});
+
+test("modo duplicar manda duplicado_de en el payload y avisa el código creado", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  const { crearApu } = await import("@/api/autoria");
+  const onCreado = vi.fn();
+  render(
+    <DialogoAgregarApu
+      open onOpenChange={() => {}} onCreado={onCreado}
+      modo="duplicar" inicial={origenDemo as never}
+    />,
+  );
+  fireEvent.change(await screen.findByDisplayValue("MEZCLA MD12"), {
+    target: { value: "MEZCLA MD13" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Crear APU/i }));
+
+  await waitFor(() => expect(crearApu).toHaveBeenCalled());
+  const payload = (crearApu as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0] as {
+    codigo: string; nombre: string; duplicado_de?: { codigo: string; turno: string };
+  };
+  expect(payload.codigo).toBe("3454-2");
+  expect(payload.nombre).toBe("MEZCLA MD13");
+  expect(payload.duplicado_de).toEqual({ codigo: "3454", turno: "DIURNO" });
+  await waitFor(() => expect(onCreado).toHaveBeenCalledWith("3454-2", "DIURNO"));
+});
+
+test("modo duplicar recalcula el código al cambiar el turno si no lo tocaste", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(
+    <DialogoAgregarApu
+      open onOpenChange={() => {}} onCreado={() => {}}
+      modo="duplicar" inicial={origenDemo as never}
+    />,
+  );
+  await screen.findByDisplayValue("3454-2");
+  fireEvent.change(screen.getByDisplayValue("DIURNO"), { target: { value: "NOCTURNO" } });
+  await waitFor(() => expect(screen.getByDisplayValue("3454-2 N")).toBeTruthy());
+});
+
+test("modo duplicar NO recalcula el código si ya lo escribiste a mano", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(
+    <DialogoAgregarApu
+      open onOpenChange={() => {}} onCreado={() => {}}
+      modo="duplicar" inicial={origenDemo as never}
+    />,
+  );
+  fireEvent.change(await screen.findByDisplayValue("3454-2"), {
+    target: { value: "9999" },
+  });
+  fireEvent.change(screen.getByDisplayValue("DIURNO"), { target: { value: "NOCTURNO" } });
+  await waitFor(() => expect(screen.getByDisplayValue("9999")).toBeTruthy());
+});

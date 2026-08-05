@@ -120,6 +120,29 @@ def test_confirmar_item_sigue_funcionando_igual(tmp_path):
     assert _estado(alm, cid)[1] == ("confirmed", "A2")
 
 
+def test_confirmar_item_con_seq_inexistente_devuelve_none(tmp_path):
+    """El wrapper de un solo ítem, a diferencia del lote, no puede saltear en
+    silencio: el endpoint de un solo ítem siempre devolvió 404 para un seq que
+    no existe en una corrida que sí existe."""
+    alm, sc = _alm(tmp_path)
+    cid = _corrida(alm, sc)
+    antes = _estado(alm, cid)
+    assert svc.confirmar_item(alm, cid, 999, "A2", "DIURNO") is None
+    assert _estado(alm, cid) == antes
+
+
+def test_endpoint_confirmar_item_seq_inexistente_404(tmp_path):
+    from apu_tool.servicio.app import create_app
+    from tests.conftest import cliente
+
+    alm, sc = _alm(tmp_path)
+    cid = _corrida(alm, sc)
+    cli = cliente(create_app(almacen=alm), rol="admin")
+    r = cli.post(f"/api/corridas/{cid}/items/999/confirmar",
+                 json={"apu_codigo": "A2", "shift": "DIURNO"})
+    assert r.status_code == 404
+
+
 def test_endpoint_confirmar_lote(tmp_path):
     from apu_tool.servicio.app import create_app
     from tests.conftest import cliente

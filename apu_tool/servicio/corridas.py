@@ -345,7 +345,7 @@ def confirmar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
     # El turno se resuelve POR FILA (`shift or row.shift`): confirmar sin turno es
     # un camino real y usado — el botón "Elegir" de los candidatos y "Confirmar APU
     # actual" llaman sin él —, así que no se puede exigir.
-    trabajo: list[tuple[int, object, str, str]] = []
+    trabajo: list[tuple[int, CorridaItemRow, str, str]] = []
     validados: set[tuple[str, str]] = set()
     for seq in seqs:
         row = alm.corridas.get_item(corrida_id, seq)
@@ -373,7 +373,14 @@ def confirmar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
 def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
                    shift: Optional[str] = None) -> Optional[dict]:
     """Un solo ítem. Wrapper sobre `confirmar_items` para que confirmar-uno y
-    confirmar-muchos no se puedan separar con el tiempo."""
+    confirmar-muchos no se puedan separar con el tiempo.
+
+    Chequea el ítem antes de delegar: `confirmar_items` saltea (no falla) un seq
+    que no existe -correcto para el lote, que puede pedir seqs viejos ya
+    vueltos a barajar-, pero el endpoint de un solo ítem siempre devolvió 404
+    en ese caso (`get_item is None` -> None -> 404 en rutas.py)."""
+    if alm.corridas.get_item(corrida_id, seq) is None:
+        return None
     return confirmar_items(alm, corrida_id, [seq], apu_codigo, shift or None)
 
 

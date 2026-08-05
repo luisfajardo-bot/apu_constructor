@@ -19,6 +19,10 @@ La función es **duplicar**: abrir el diálogo de alta precargado con todo el AP
 origen, cambiar lo que haga falta (típicamente un insumo) y guardar como APU nuevo con
 su propia identidad.
 
+Para que la copia no salga costando menos que el original, el diseño arregla en el camino
+la pérdida del precio histórico de respaldo al escribir APUs desde la web — incluida la que
+sufre hoy `editar_apu`— y le pone piso de 1 (nada en $0).
+
 ## Decisiones de alcance
 
 | Decisión | Elección |
@@ -31,13 +35,17 @@ su propia identidad.
 | Entradas | Página **APUs** (fila expandida) **y** detalle de ítem de **corrida** (duplicar + reasignar en un paso). |
 | De a uno | Una copia por vez. Sin lote. |
 | Precio histórico de respaldo | La copia **hereda** `precio_unitario_hist` de los componentes que no cambiaron. |
+| Nada en $0 | Ningún componente escrito desde la web queda con `precio_unitario_hist` en 0: **piso de 1**. |
+| `editar_apu` | Se **arregla** en esta feature: hereda el histórico del propio APU en vez de borrarlo. |
+| `pricing.py` | **No se toca.** Los APUs del histórico costean exactamente igual que hoy. |
 | Backend | Sin ruta nueva: `POST /api/apus` gana un campo opcional `duplicado_de`. |
 | Capa de datos | **No se toca** (`repositorio.py`, esquemas SQL y ambos backends quedan igual). Sin migración. |
 | Rol | `editor`, igual que "Editar APU". |
 
 **Fuera de alcance:** duplicar en lote (varias variantes de una vez); duplicar desde el
 cuadro Excel; cambiar la identidad de un APU ya creado (eso sigue siendo borrar + crear);
-y arreglar la pérdida de `precio_unitario_hist` en `editar_apu` (ver *Deuda conocida*).
+aplicar el piso de 1 al **costear** (sería un cambio de conducta para los APUs que ya
+tienen histórico 0 en la base) y migrar esos valores ya guardados.
 
 ## Por qué el `precio_unitario_hist` importa
 
@@ -47,13 +55,36 @@ catálogo, o cuando existe pero no tiene tarifa en Principal (`sin_precio_catalo
 
 `autoria.py::_componentes_de` —la que arma componentes desde el diálogo web— pone
 **`precio_unitario_hist=0.0` siempre**. Si la copia viajara de vuelta por el diálogo sin
-más, esas líneas quedarían en **$0 con alerta** en la copia mientras el original sí
-costea el histórico: la copia costaría menos que el original sin que eso sea decisión de
-nadie, contra la regla de negocio "nada en $0".
+más, esas líneas quedarían en **$0** en la copia mientras el original sí costea el
+histórico: la copia costaría menos que el original sin que eso sea decisión de nadie,
+contra la regla de negocio "nada en $0".
 
-Por eso la copia **hereda** el histórico de los componentes que siguen siendo los mismos.
-El insumo que sustituiste entra como cualquier alta manual (hist 0.0), que es lo correcto:
-de ese componente no hay histórico que heredar.
+De ahí las dos reglas de esta feature:
+
+1. **Heredar.** La copia toma el histórico de los componentes que siguen siendo los
+   mismos. Lo mismo vale para `editar_apu`, que hoy lo borra: pasa a heredar el del propio
+   APU (ver abajo).
+2. **Piso de 1.** Lo que se escriba desde la web nunca queda en 0: si no hay histórico que
+   heredar, se guarda `1.0`. Es el mismo idioma que ya usa el proyecto para el material del
+   cliente ("nada en $0", y `mul_redondeado` sube a 1 lo que redondearía a 0).
+
+### El piso no apaga ninguna alerta (verificado)
+
+`alertas.py:34` es un `elif`: la regla dura del `$0` va **antes** de los motivos de cruce.
+Hoy, un componente ambiguo con histórico 0 reporta el genérico *"en $0"* y **tapa** el
+motivo real. Con el piso, cae al `elif` siguiente y reporta *"cruce ambiguo"*, *"sin
+insumo en catálogo"* o *"sin precio en el catálogo"* — más accionable, que es justo lo que
+persigue el comentario de `alertas.py:29`.
+
+Todas las ramas de `pricing.py` que leen el histórico llevan un `calidad_cruce` que está
+en `_MOTIVO_CRUCE` (`ambiguo`, `huerfano`, `apu_vacio`, `ciclo`,
+`CALIDAD_SIN_PRECIO_CATALOGO`), así que ninguna se queda muda. El `$0` deliberado de las
+listas NP (`CALIDAD_SIN_PRECIO_LISTA`) tiene su propia rama antes de la regla dura y no
+depende del histórico: **no se toca**.
+
+El piso va en el camino de **escritura**, no en el de costeo. `pricing.py` queda intacto,
+así que los APUs que ya tienen histórico 0 en la base siguen costeando igual que hoy: cero
+riesgo de que el cuadro cambie por debajo.
 
 ## Backend
 
@@ -74,10 +105,20 @@ Nadie más cambia: `ComponenteIn` ya lleva `tipo`/`ref_shift`, y `ApuEditIn` no 
 
 ### `apu_tool/servicio/autoria.py`
 
-`_componentes_de(...)` gana un parámetro **opcional** `hist: dict[str, float] | None`:
-por cada componente, si su `insumo_codigo` está en `hist`, usa ese valor como
-`precio_unitario_hist`; si no, `0.0` (comportamiento actual). Las llamadas existentes
-(`crear_apu` sin duplicado, `editar_apu`) no cambian de conducta.
+`_componentes_de(...)` gana un parámetro **opcional** `hist: dict[str, float] | None` y
+aplica el piso:
+
+```python
+PISO_HIST = 1.0   # regla de negocio: nada en $0
+
+heredado = (hist or {}).get(cod, 0.0)
+precio_unitario_hist = max(PISO_HIST, heredado)
+```
+
+Un histórico real, en pesos, está muy por encima de 1, así que el piso solo muerde donde no
+había nada que heredar (o donde el propio origen ya traía 0, que también sube a 1). Con
+esto, **ninguna** escritura desde la web —alta individual, duplicado o edición— puede
+guardar un componente con histórico 0.
 
 `crear_apu(alm, datos, actor)` — cuando `datos["duplicado_de"]` viene:
 
@@ -103,7 +144,24 @@ por cada componente, si su `insumo_codigo` está en `hist`, usa ese valor como
    una acción nueva, así la pantalla de auditoría no necesita aprender nada, y el
    contexto deja la trazabilidad de dónde salió la copia.
 
-Cuando `duplicado_de` es `None`, `crear_apu` se comporta **exactamente** como hoy.
+Cuando `duplicado_de` es `None`, `crear_apu` se comporta como hoy salvo por el piso de 1
+en el histórico de los componentes.
+
+### `editar_apu` — arreglo del histórico
+
+`editar_apu` ya lee los componentes existentes para armar el mapa `previos` (conserva las
+marcas de sub-APU). Con el mismo recorrido arma **también** el mapa `hist` del propio APU y
+lo pasa a `_componentes_de`. Efecto: editar el rendimiento de un insumo desde la web deja
+de destruir el respaldo histórico de los demás componentes.
+
+Es el mismo helper que usa `crear_apu` con `duplicado_de`, así que la extracción del par de
+mapas (`previos`, `hist`) desde una lista de componentes se hace **una vez** y la comparten
+las dos rutas. La regla de desempate cuando un código se repite es la que ya aplica
+`editar_apu` hoy: gana la primera aparición, salvo que otra sea de `tipo == "apu"`.
+
+Es un arreglo de conducta, no una feature: un APU editado que antes bajaba de costo (o
+caía a $0) en sus componentes huérfanos ahora conserva el costo del original. Va con test
+de regresión propio.
 
 ### `apu_tool/servicio/corridas.py`
 
@@ -214,6 +272,8 @@ importa `ai_assist` cubre también estos cambios.
 | La consulta de códigos ocupados falla | Se sugiere `-2`; el `409` cubre el choque |
 | El origen tiene sub-APUs en su composición | Se copian como sub-APU (marca `tipo="apu"` + `ref_shift` preservados) |
 | Un componente del origen apunta a un insumo huérfano/ambiguo | La copia hereda su `precio_unitario_hist`, así que cuesta igual que el original |
+| El insumo nuevo (el que sustituiste) no tiene precio en catálogo | Su histórico queda en el piso de 1, y la línea alerta por el motivo de cruce ("sin insumo en catálogo" / "cruce ambiguo" / "sin precio en el catálogo") en vez de por "en $0" |
+| El origen ya traía un componente con histórico 0 | Sube al piso de 1 en la copia (nada en $0) |
 | Corrida congelada | El botón de la entrada B no aparece (consistente con el resto del solo-lectura) |
 | Ítem de corrida sin APU asignado | El botón de la entrada B no aparece |
 
@@ -227,7 +287,17 @@ importa `ai_assist` cubre también estos cambios.
   que solo cambia mayúsculas/espacios).
 - `409` cuando el `(código, turno)` destino ya existe.
 - Auditoría: la entrada `apu.crear` lleva `contexto.origen == "duplicado"` y el `de`.
-- `crear_apu` **sin** `duplicado_de` sigue comportándose igual (regresión).
+- `crear_apu` **sin** `duplicado_de` sigue comportándose igual, salvo el piso (regresión).
+- **Piso de 1:** un componente sin histórico que heredar queda guardado en `1.0`, nunca en
+  `0.0` — en alta individual, en duplicado y en edición.
+- **`editar_apu`:** editar un APU conserva el `precio_unitario_hist` de los componentes que
+  siguen siendo los mismos (test de regresión del arreglo), y sigue conservando las marcas
+  de sub-APU (test que ya existe, debe seguir verde).
+- **Alertas:** un componente ambiguo/huérfano con histórico en el piso sigue alertando, con
+  el motivo de cruce en vez del genérico "en $0" (`alertas_costeo`). Y un componente con
+  `CALIDAD_SIN_PRECIO_LISTA` sigue reportando "sin precio en la lista", intacto.
+- **`pricing.py` sin cambios:** los tests del motor de precios y del cuadro deben pasar sin
+  tocarlos. Si alguno necesita cambio, es señal de que el piso se filtró al costeo.
 - Endpoint `POST /api/apus` con `duplicado_de` vía `TestClient`.
 - `detalle_item` devuelve `apu_turno`.
 - La suite completa (`python -m pytest tests/ -q`) verde, incluidos los tests de Postgres.
@@ -259,13 +329,18 @@ importa `ai_assist` cubre también estos cambios.
 6. Desde un ítem de corrida activa, "Duplicar este APU y usarlo aquí" crea la copia y deja
    el ítem reasignado en un paso; en una corrida congelada el botón no aparece.
 7. La auditoría muestra que ese APU nació como duplicado, y de cuál.
-8. `pytest` completo verde y `npm run build` sin errores.
+8. **Nada en $0:** ningún componente guardado desde la web queda con histórico en 0; el
+   mínimo es 1.
+9. **Editar deja de romper el respaldo:** editar el rendimiento de un insumo de un APU no
+   cambia el costo de los demás componentes.
+10. Los APUs del histórico costean **igual que antes** (los tests de `pricing.py` y del
+    cuadro pasan sin modificarlos).
+11. `pytest` completo verde y `npm run build` sin errores.
 
-## Deuda conocida (no se arregla aquí)
+## Lo que queda pendiente a propósito
 
-`editar_apu` también pasa por `_componentes_de` y por lo tanto pone
-`precio_unitario_hist=0.0` en **todos** los componentes al guardar: editar el rendimiento
-de un insumo desde la web puede tirar a $0 (con alerta) las líneas cuyo insumo es huérfano
-o sin tarifa en catálogo. Es preexistente y ajeno a esta feature. Este diseño deja el
-helper (`hist=`) que haría el arreglo trivial —pasar el mapa del propio APU—, pero **no lo
-aplica**: cambiar la conducta de `editar_apu` merece su propia decisión.
+En la base ya hay componentes con `precio_unitario_hist = 0` guardados desde antes (los que
+se crearon o editaron por la web hasta ahora). Esta feature **no los toca**: el piso aplica
+de aquí en adelante, y `pricing.py` sigue costeándolos como hoy. Subirlos requeriría o
+parchear el costeo —cambiaría el cuadro de APUs existentes— o migrar datos en producción con
+backup. Se decide aparte, con la cuenta de cuántas filas son sobre la mesa.

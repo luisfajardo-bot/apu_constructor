@@ -36,7 +36,7 @@ sufre hoy `editar_apu`— y le pone piso de 1 (nada en $0).
 | Nada en $0 | Ningún componente escrito desde la web queda con `precio_unitario_hist` en 0: **piso de 1**. |
 | `editar_apu` | Se **arregla** en esta feature: hereda el histórico del propio APU en vez de borrarlo. |
 | `pricing.py` | **No se toca.** Los APUs del histórico costean exactamente igual que hoy. |
-| Backend | Sin ruta nueva: `POST /api/apus` gana un campo opcional `duplicado_de`. |
+| Backend | Sin ruta nueva: `POST /api/apus/crear` gana un campo opcional `duplicado_de`. |
 | Capa de datos | **No se toca** (`repositorio.py`, esquemas SQL y ambos backends quedan igual). Sin migración. |
 | Rol | `editor`, igual que "Editar APU". |
 
@@ -136,7 +136,8 @@ guardar un componente con histórico 0.
    `tipo == "apu"` (misma regla que `editar_apu` ya aplica para `previos`).
 5. Llama a `_componentes_de(..., previos=previos, hist=hist)` y sigue el camino normal:
    `alm.apus.crear_apu(...)`, que ya lanza `ValueError` si `(codigo, turno)` existe →
-   **409** por el manejo de errores que ya tiene la ruta.
+   **400** por el manejo de errores que ya tiene la ruta (`rutas.py` mapea todo
+   `ValueError` a 400; no hay 409 en este endpoint).
 6. Auditoría: misma acción `apu.crear`, con
    `contexto={"origen": "duplicado", "de": cod_o, "de_turno": turno_o}`. No se inventa
    una acción nueva, así la pantalla de auditoría no necesita aprender nada, y el
@@ -173,7 +174,7 @@ Sin rutas nuevas.
 
 | Método + ruta | Cambio |
 |---|---|
-| `POST /api/apus` | acepta `duplicado_de: {codigo, turno}` opcional; `400` en las tres validaciones nuevas, `409` si `(código,turno)` ya existe (ya estaba) |
+| `POST /api/apus/crear` | acepta `duplicado_de: {codigo, turno}` opcional; `400` en las tres validaciones nuevas y `400` si `(código,turno)` ya existe (esto último ya estaba) |
 | `GET /api/corridas/{id}/items/{seq}` | la respuesta agrega `apu_turno` |
 
 ## Frontend
@@ -201,7 +202,7 @@ Helpers puros, testeables sin montar UI (patrón de `costoApu.ts` / `validacionA
 `ocupados` se obtiene con **una** llamada `listarApus({ q: base, limit: 100 })` al abrir
 el diálogo (`base` = la del párrafo anterior; `q` ya busca por código y nombre, así que
 trae de sobra) y se queda con los `codigo` de los `items`. Si falla, se sugiere `-2` a
-secas: el `409` del backend cubre el choque, así que el fallo de la consulta no bloquea
+secas: el `400` de "ya existe" del backend cubre el choque, así que el fallo de la consulta no bloquea
 nada.
 
 ### `web/src/components/autoria/DialogoAgregarApu.tsx`
@@ -264,10 +265,10 @@ importa `ai_assist` cubre también estos cambios.
 | Caso | Comportamiento |
 |---|---|
 | El APU de origen fue borrado entre abrir el diálogo y guardar | `400` con mensaje claro; nada se crea |
-| `(código, turno)` de la copia ya existe | `409` (ya lo daba `crear_apu`); el diálogo lo muestra en un toast y no cierra |
+| `(código, turno)` de la copia ya existe | `400` con el mensaje de `crear_apu` (ya lo daba); el diálogo lo muestra en un toast y no cierra |
 | Nombre igual al del origen (o solo distinto en espacios/mayúsculas) | Botón bloqueado en el frontend; `400` si alguien llama la API directo |
 | Código igual y turno igual al del origen | Igual que arriba |
-| La consulta de códigos ocupados falla | Se sugiere `-2`; el `409` cubre el choque |
+| La consulta de códigos ocupados falla | Se sugiere `-2`; el `400` de "ya existe" cubre el choque |
 | El origen tiene sub-APUs en su composición | Se copian como sub-APU (marca `tipo="apu"` + `ref_shift` preservados) |
 | Un componente del origen apunta a un insumo huérfano/ambiguo | La copia hereda su `precio_unitario_hist`, así que cuesta igual que el original |
 | El insumo nuevo (el que sustituiste) no tiene precio en catálogo | Su histórico queda en el piso de 1, y la línea alerta por el motivo de cruce ("sin insumo en catálogo" / "cruce ambiguo" / "sin precio en el catálogo") en vez de por "en $0" |
@@ -283,7 +284,7 @@ importa `ai_assist` cubre también estos cambios.
 - Conserva las marcas de sub-APU del origen cuando el componente entrante no trae `tipo`.
 - Los tres `400`: origen inexistente, misma identidad, nombre igual (incluida la variante
   que solo cambia mayúsculas/espacios).
-- `409` cuando el `(código, turno)` destino ya existe.
+- `400` cuando el `(código, turno)` destino ya existe.
 - Auditoría: la entrada `apu.crear` lleva `contexto.origen == "duplicado"` y el `de`.
 - `crear_apu` **sin** `duplicado_de` sigue comportándose igual, salvo el piso (regresión).
 - **Piso de 1:** un componente sin histórico que heredar queda guardado en `1.0`, nunca en
@@ -296,7 +297,7 @@ importa `ai_assist` cubre también estos cambios.
   `CALIDAD_SIN_PRECIO_LISTA` sigue reportando "sin precio en la lista", intacto.
 - **`pricing.py` sin cambios:** los tests del motor de precios y del cuadro deben pasar sin
   tocarlos. Si alguno necesita cambio, es señal de que el piso se filtró al costeo.
-- Endpoint `POST /api/apus` con `duplicado_de` vía `TestClient`.
+- Endpoint `POST /api/apus/crear` con `duplicado_de` vía `TestClient`.
 - `detalle_item` devuelve `apu_turno`.
 - La suite completa (`python -m pytest tests/ -q`) verde, incluidos los tests de Postgres.
 

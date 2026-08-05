@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 36 planes, 44 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 36 planes, 48 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -36,7 +36,9 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 36 plane
 | 2026-07-27 | [[Specs/2026-07-27-ocultar-insumos-duplicados-apu-design|Diseño — Ocultar del catálogo de insumos los códigos que son APU]] |
 | 2026-07-27 | [[Specs/2026-07-27-apus-np-design|Diseño — APUs para NP (No Previstos): listas de precios]] |
 | 2026-07-24 | [[Specs/2026-07-24-vault-obsidian-design|Diseño — Vault de Obsidian auto-mantenida (constructor-apus/)]] |
+| 2026-07-24 | [[Specs/2026-07-24-redondeo-multiplicaciones-design|Diseño — Redondeo a la unidad en multiplicaciones]] |
 | 2026-07-24 | [[Specs/2026-07-24-mapa-arquitectura-design|Diseño — Corrección de docs de arquitectura + mapa auto-generado de módulos]] |
+| 2026-07-23 | [[Specs/2026-07-23-nombre-corridas-design|Diseño — Nombre/alias para corridas]] |
 | 2026-07-14 | [[Specs/2026-07-14-costo-editable-apu-design|Costo editable en el armador de APUs — diseño]] |
 | 2026-07-10 | [[Specs/2026-07-10-costeo-cero-alertas-design|Costeo en $0 nunca mudo + regla "nada en 0" — diseño]] |
 | 2026-07-09 | [[Specs/2026-07-09-columnas-unitarias-corrida-design|Columnas unitarias en la tabla de corrida — diseño]] |
@@ -54,6 +56,8 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 36 plane
 | 2026-07-03 | [[Specs/2026-07-03-editar-borrar-apus-design|Diseño — Editar y borrar APUs (biblioteca)]] |
 | 2026-07-02 | [[Specs/2026-07-02-fix-auditoria-important-design|Diseño — Plan B: 8 Important + Minors de la auditoría]] |
 | 2026-07-02 | [[Specs/2026-07-02-fix-auditoria-critical-design|Diseño — Plan A: arreglar los 3 Critical de la auditoría]] |
+| 2026-07-02 | [[Specs/2026-07-02-estados-corrida-design|Diseño — Estados de corrida (activa / congelada)]] |
+| 2026-07-02 | [[Specs/2026-07-02-alta-de-apus-design|Diseño — Alta de APUs (biblioteca): crear/editar/borrar en web + importar Excel]] |
 | 2026-07-01 | [[Specs/2026-07-01-produccion-multiusuario-design|Diseño — Ruta a producción multiusuario del Armador de APUs]] |
 | 2026-07-01 | [[Specs/2026-07-01-endurecimiento-despliegue-design|Diseño — Plan 4: Endurecimiento + despliegue]] |
 | 2026-07-01 | [[Specs/2026-07-01-auth-rbac-design|Diseño — Plan 2a: Auth + RBAC (backend)]] |

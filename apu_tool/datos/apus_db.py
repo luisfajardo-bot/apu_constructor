@@ -216,7 +216,7 @@ class ApusDB:
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT DISTINCT grupo FROM apus "
-                "WHERE grupo IS NOT NULL AND grupo <> '' ORDER BY grupo").fetchall()
+                "WHERE grupo IS NOT NULL AND TRIM(grupo) <> '' ORDER BY grupo").fetchall()
         return [r["grupo"] for r in rows]
 
     def search_apus(self, texto: str, limit: int = 20) -> list[Apu]:

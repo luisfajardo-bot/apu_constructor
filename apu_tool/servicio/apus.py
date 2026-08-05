@@ -69,4 +69,4 @@ def grupos(alm: Almacen) -> list[str]:
     """
     vistos = {normalizar(g): g for g in alm.apus.grupos()}
     vistos.update({normalizar(g): g for g in config.GRUPOS_APU_BASE})
-    return sorted(vistos.values())
+    return sorted(vistos.values(), key=normalizar)

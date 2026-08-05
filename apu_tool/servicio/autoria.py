@@ -29,6 +29,10 @@ from apu_tool.servicio.subapus import (
     mapa_codigos_apu, nombres_apu, detectar_subapus_lote, marcar_comps_subapu,
 )
 
+# Regla de negocio "nada en $0": el precio histórico de respaldo que se escribe
+# desde la web nunca queda en 0. Ver docs/superpowers/specs/2026-08-04-duplicar-apu-design.md
+PISO_HIST = 1.0
+
 
 # ----------------------------------------------------------------- individual
 def crear_insumo(alm: Almacen, datos: dict, actor=None, lista_id: Optional[int] = None) -> dict:
@@ -55,14 +59,41 @@ def crear_insumo(alm: Almacen, datos: dict, actor=None, lista_id: Optional[int] 
     return _insumo_out(alm.precios.get_insumo_por_id(iid, lista_id=lista_id))
 
 
+def _mapas_de_componentes(
+    comps: list[ApuComponent],
+) -> tuple[dict[str, tuple[str, str]], dict[str, float]]:
+    """Marcas y precio histórico de una composición existente, por código de insumo.
+
+    - `previos`: (tipo, ref_shift), para preservar la marca de sub-APU cuando el
+      componente entrante no trae `tipo` explícito (invariante de FIX 1).
+    - `hist`: `precio_unitario_hist`, para que duplicar o editar un APU no destruya
+      el respaldo histórico de los componentes que siguen siendo los mismos.
+
+    Si un código se repite, gana la primera aparición salvo que otra sea de
+    `tipo == "apu"` (la regla que ya aplicaba `editar_apu` para las marcas)."""
+    previos: dict[str, tuple[str, str]] = {}
+    hist: dict[str, float] = {}
+    for c in comps:
+        if c.insumo_codigo not in previos or c.tipo == "apu":
+            previos[c.insumo_codigo] = (c.tipo, c.ref_shift)
+            hist[c.insumo_codigo] = c.precio_unitario_hist
+    return previos, hist
+
+
 def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str,
-                    previos: dict | None = None) -> list[ApuComponent]:
+                    previos: dict | None = None,
+                    hist: dict | None = None) -> list[ApuComponent]:
     """Arma los ApuComponent a partir de los dicts del contrato HTTP.
 
     `previos` (opcional): marcas existentes por código -> (tipo, ref_shift), para
     preservarlas al editar cuando el componente entrante no trae `tipo` explícito
-    (invariante de FIX 1: editar un APU no debe borrar las marcas de sub-APU)."""
+    (invariante de FIX 1: editar un APU no debe borrar las marcas de sub-APU).
+
+    `hist` (opcional): precio histórico de respaldo por código, del APU de origen
+    (duplicado) o del propio APU (edición). Lo que no está ahí no tiene histórico
+    que heredar y queda en `PISO_HIST`: nunca en 0 (regla "nada en $0")."""
     previos = previos or {}
+    hist = hist or {}
     comps: list[ApuComponent] = []
     for c in comp_dicts:
         cod = str(c.get("insumo_codigo", "") or "").strip()
@@ -88,7 +119,8 @@ def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str,
             tipo, ref_shift = "insumo", ""
         comps.append(ApuComponent(
             apu_codigo="", shift=shift, insumo_codigo=cod, insumo_nombre=nombre,
-            unidad=unidad, rendimiento=rend, precio_unitario_hist=0.0,
+            unidad=unidad, rendimiento=rend,
+            precio_unitario_hist=max(PISO_HIST, hist.get(cod, 0.0)),
             tipo=tipo, ref_shift=ref_shift))
     return comps
 

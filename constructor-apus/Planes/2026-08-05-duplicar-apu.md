@@ -1319,9 +1319,14 @@ Expected: PASS — los 5 nuevos y todos los que ya existían.
 
 Run: `cd web && npm run build`
 
-Expected: build OK. Si `tsc -b` se queja de `onCreado` en `Apus.tsx`, es esperado
-(la Task 8 lo arregla): si el error es solo ahí, podés dejar el commit y seguir; si es
-en otro archivo, arreglalo ahora.
+Expected: **build OK, sin excepciones.** No dejes un commit con el build rojo.
+
+Dos cosas verificadas de antemano, para que no te desvíes: `onCreado={recargar}` en
+`Apus.tsx` sigue compilando (TypeScript acepta pasar una función de menos parámetros),
+y los mocks de `vi.mock` son objetos sin tipar, así que el `apu_turno` nuevo y
+obligatorio de `DetalleItem` no rompe los fixtures existentes. Si igual aparece un
+error de tipos por un objeto literal tipado como `DetalleItem`, agregale
+`apu_turno: "DIURNO"` en este mismo commit.
 
 - [ ] **Step 7: Commit**
 

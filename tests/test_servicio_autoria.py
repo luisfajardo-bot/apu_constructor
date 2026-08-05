@@ -271,3 +271,56 @@ def test_editar_apu_tipo_explicito_gana_sobre_marca_previa(tmp_path):
         "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0, "tipo": "insumo"}]})
     comps = alm.apus.get_components("B2", "DIURNO")
     assert comps[0].tipo == "insumo" and comps[0].ref_shift == ""      # explícito gana
+
+
+# ------------------------------------------- piso de $1 y herencia del histórico
+def test_crear_apu_pone_piso_de_uno_en_el_historico(tmp_path):
+    """Regla de negocio 'nada en $0': un componente sin histórico que heredar se
+    guarda en 1.0, no en 0.0."""
+    alm = _alm(tmp_path)
+    autoria.crear_apu(alm, {"codigo": "B2", "turno": "DIURNO", "nombre": "PISO",
+        "unidad": "M2", "grupo": "ACAB",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}]})
+    comps = alm.apus.get_components("B2", "DIURNO")
+    assert comps[0].precio_unitario_hist == autoria.PISO_HIST == 1.0
+
+
+def test_mapas_de_componentes_devuelve_marcas_y_historico():
+    comps = [
+        ApuComponent("A1", "DIURNO", "100", "CEMENTO GRIS", "KG", 2.0, 900.0),
+        ApuComponent("A1", "DIURNO", "200", "ARENA", "M3", 0.5, 48000.0,
+                     tipo="apu", ref_shift="NOCTURNO"),
+    ]
+    previos, hist = autoria._mapas_de_componentes(comps)
+    assert previos == {"100": ("insumo", ""), "200": ("apu", "NOCTURNO")}
+    assert hist == {"100": 900.0, "200": 48000.0}
+
+
+def test_mapas_de_componentes_codigo_repetido_gana_el_de_tipo_apu():
+    """Misma regla de desempate que ya aplicaba editar_apu para las marcas."""
+    comps = [
+        ApuComponent("A1", "DIURNO", "100", "X", "KG", 1.0, 500.0),
+        ApuComponent("A1", "DIURNO", "100", "X", "KG", 1.0, 700.0,
+                     tipo="apu", ref_shift="DIURNO"),
+    ]
+    previos, hist = autoria._mapas_de_componentes(comps)
+    assert previos["100"] == ("apu", "DIURNO")
+    assert hist["100"] == 700.0
+
+
+def test_componentes_de_hereda_el_historico_del_mapa(tmp_path):
+    alm = _alm(tmp_path)
+    comps = autoria._componentes_de(
+        alm, [{"insumo_codigo": "100", "rendimiento": 2.0},
+              {"insumo_codigo": "200", "rendimiento": 1.0}],
+        "DIURNO", hist={"100": 900.0})
+    assert comps[0].precio_unitario_hist == 900.0     # heredado
+    assert comps[1].precio_unitario_hist == 1.0       # sin nada que heredar -> piso
+
+
+def test_componentes_de_sube_al_piso_un_historico_en_cero(tmp_path):
+    alm = _alm(tmp_path)
+    comps = autoria._componentes_de(
+        alm, [{"insumo_codigo": "100", "rendimiento": 2.0}],
+        "DIURNO", hist={"100": 0.0})
+    assert comps[0].precio_unitario_hist == 1.0

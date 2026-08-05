@@ -482,6 +482,12 @@ def listar_apus(q: Optional[str] = None, grupo: Optional[str] = None,
     return apus_svc.listar(alm, q, grupo, turno, limit, offset, lista)
 
 
+@router.get("/apus/grupos")
+def apus_grupos(alm: Almacen = Depends(get_almacen),
+                _: object = Depends(requiere_rol("consulta"))):
+    return apus_svc.grupos(alm)
+
+
 @router.post("/apus/crear")
 def crear_apu(body: ApuNuevoIn, alm: Almacen = Depends(get_almacen),
              actor=Depends(requiere_rol("editor"))):

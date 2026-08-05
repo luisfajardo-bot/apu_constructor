@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from typing import Optional
 
+from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.pricing import PricingEngine
+from apu_tool.nucleo.texto import normalizar
 
 
 def listar(alm: Almacen, q: Optional[str] = None, grupo: Optional[str] = None,
@@ -50,3 +52,21 @@ def detalle(alm: Almacen, codigo: str, turno: str,
             "costo": c.costo, "calidad_cruce": c.calidad_cruce,
             "tipo": c.tipo, "ref_shift": c.ref_shift} for c in costed],
     }
+
+
+def grupos(alm: Almacen) -> list[str]:
+    """Vocabulario de grupos de APU: la lista base de config ∪ los grupos en uso.
+
+    No hay tabla de grupos a propósito (ver el spec): así no hace falta migrar nada en
+    Supabase, un Admin crea un grupo usándolo, y uno mal escrito se autolimpia cuando
+    ningún APU lo usa. Dedup insensible a tildes/mayúsculas con `normalizar` (mismo
+    criterio que servicio/listas.py); gana la ortografía de config.
+
+    ponytail: el vocabulario se cierra en la pantalla, no acá — `crear_apu`/`editar_apu`
+    siguen aceptando cualquier texto. Si algún día hay un segundo cliente de la API, el
+    upgrade es exigir en esas dos escrituras que el grupo esté en este vocabulario salvo
+    para rol == "admin".
+    """
+    vistos = {normalizar(g): g for g in alm.apus.grupos()}
+    vistos.update({normalizar(g): g for g in config.GRUPOS_APU_BASE})
+    return sorted(vistos.values())

@@ -132,13 +132,27 @@ forma orgánica de que crezca el vocabulario.
   querer al abrir el diálogo.
 - Grupo vacío → una opción placeholder deshabilitada, para que `cabeceraValida`
   (línea 216) siga bloqueando el guardado como hoy.
-- Solo si `puede(perfil?.rol, "admin")` (de `components/rutas.tsx`), un botón
-  **+ nuevo grupo** que pide el nombre con `window.prompt`, lo agrega a las opciones
-  locales y lo deja seleccionado. `window.prompt` es el patrón de la casa para
+- Un botón **+ nuevo grupo** que pide el nombre con `window.prompt`, lo agrega a las
+  opciones locales y lo deja seleccionado. `window.prompt` es el patrón de la casa para
   "crear una cosa con nombre" (7 usos entre listas, carpetas y renombrar corridas), y
   evita el modal anidado que ya rompió una vez (`DialogoTexto`, revertido).
   El grupo se persiste implícitamente al guardar el APU.
-- El rol se lee con `useAuth()` dentro del diálogo, sin pasar props nuevas.
+- El rol llega por una prop nueva `puedeCrearGrupo?: boolean` (default `false`), **no**
+  por `useAuth()`: `lib/auth.tsx:68` hace que `useAuth()` lance fuera de
+  `<AuthProvider>`, y `DialogoAgregarApu.test.tsx` y `TablaItems.test.tsx` montan el
+  diálogo sin provider. Leerlo con el hook rompería esos tests — el mismo tipo de error
+  que el `DialogoTexto` revertido.
+- **Solo la página de APUs pasa la prop** (`Apus.tsx:41` ya tiene
+  `puede(perfil?.rol, "admin")`), en sus 3 montajes del diálogo. El flujo de duplicar
+  desde la corrida (`TablaItems.tsx`) no cambia: crear vocabulario mientras se costea
+  una corrida no es el momento, y el grupo nuevo queda disponible en todas partes
+  igual. Así la prop tiene un solo llamador.
+
+Cuidado al implementar: agregar `getGruposApu` al módulo `@/api/autoria` obliga a
+sumarlo a las factories de `vi.mock("@/api/autoria", …)` de los tests que abren el
+diálogo (`DialogoAgregarApu.test.tsx`, `TablaItems.test.tsx`, `Apus.duplicar.test.tsx`),
+porque esas factories listan función por función y un miembro ausente revienta al
+llamarse.
 
 `web/src/api/autoria.ts`: `getGruposApu(): Promise<string[]>`.
 

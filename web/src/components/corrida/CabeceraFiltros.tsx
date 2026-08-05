@@ -45,13 +45,21 @@ function Rango({ clave, label, control }: { clave: ClaveColumna; label: string; 
   );
 }
 
-export default function CabeceraFiltros({ control }: { control: ControlCorridaTabla }) {
+export default function CabeceraFiltros({
+  control,
+  conSeleccion = false,
+}: {
+  control: ControlCorridaTabla;
+  /** Layout: reserva la celda de la columna de checkboxes cuando la selección está activa. */
+  conSeleccion?: boolean;
+}) {
   const flecha = (clave: ClaveColumna) =>
     control.orden?.clave === clave ? (control.orden.dir === "asc" ? "↑" : "↓") : "";
 
   return (
     <TableHeader>
       <TableRow>
+        {conSeleccion && <TableHead className="w-8 px-1" />}
         <TableHead className="w-6 px-1" />
         {COLS.map((c) => (
           <TableHead key={c.clave} className={`text-xs ${c.ancho} ${c.derecha ? "text-right" : ""}`}>
@@ -68,6 +76,7 @@ export default function CabeceraFiltros({ control }: { control: ControlCorridaTa
         ))}
       </TableRow>
       <TableRow className="hover:bg-transparent">
+        {conSeleccion && <TableHead className="w-8 px-1" />}
         <TableHead className="w-6 px-1" />
         {COLS.map((c) => (
           <TableHead key={c.clave} className={`${c.ancho} py-1 align-top`}>

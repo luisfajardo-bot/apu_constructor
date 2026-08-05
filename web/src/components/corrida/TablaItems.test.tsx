@@ -115,12 +115,62 @@ test("muestra el código de licitación (Ítem) junto al APU", async () => {
   expect(screen.getByText("111")).toBeTruthy();
 });
 
-function TablaConControl({ items }: { items: typeof ITEM[] }) {
+function TablaConControl({ items, readOnly }: { items: typeof ITEM[]; readOnly?: boolean }) {
   const control = useCorridaTabla(items);
   return (
-    <TablaItems corridaId={1} items={control.filtradas} control={control} onConfirmado={() => {}} />
+    <TablaItems
+      corridaId={1}
+      items={control.filtradas}
+      control={control}
+      onConfirmado={() => {}}
+      readOnly={readOnly}
+    />
   );
 }
+
+function itemsCuatro() {
+  return [
+    { ...ITEM, seq: 0, item: "1", descripcion: "Excavación manual" },
+    { ...ITEM, seq: 1, item: "2", descripcion: "Concreto clase D" },
+    { ...ITEM, seq: 2, item: "3", descripcion: "Concreto clase E" },
+    { ...ITEM, seq: 3, item: "4", descripcion: "Relleno compactado" },
+  ];
+}
+
+test("el checkbox de una fila la marca y muestra el contador", async () => {
+  render(<TablaConControl items={itemsCuatro()} />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 2"));
+  expect(await screen.findByText(/1 línea marcada/i)).toBeTruthy();
+});
+
+test("Shift+click marca el rango visible", async () => {
+  render(<TablaConControl items={itemsCuatro()} />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  fireEvent.click(screen.getByLabelText("Marcar ítem 4"), { shiftKey: true });
+  expect(await screen.findByText(/4 líneas marcadas/i)).toBeTruthy();
+});
+
+test("marcar todo usa solo lo que dejó pasar el filtro", async () => {
+  render(<TablaConControl items={itemsCuatro()} />);
+  // "concreto" deja 2 de los 4 ítems visibles
+  fireEvent.change(screen.getByLabelText("Filtrar Descripción"), { target: { value: "concreto" } });
+  fireEvent.click(screen.getByLabelText(/Marcar todas las líneas/i));
+  expect(await screen.findByText(/2 líneas marcadas/i)).toBeTruthy();
+});
+
+test("cambiar el filtro no arrastra al lote las filas que dejaron de verse", async () => {
+  render(<TablaConControl items={itemsCuatro()} />);
+  fireEvent.click(screen.getByLabelText(/Marcar todas las líneas/i)); // marca las 4
+  expect(await screen.findByText(/4 líneas marcadas/i)).toBeTruthy();
+  // filtrar para dejar 1 visible: las otras 3 siguen en `marcadas` pero ya no cuentan
+  fireEvent.change(screen.getByLabelText("Filtrar Descripción"), { target: { value: "clase d" } });
+  expect(await screen.findByText(/1 línea marcada/i)).toBeTruthy();
+});
+
+test("con readOnly no hay checkboxes", async () => {
+  render(<TablaConControl items={itemsCuatro()} readOnly />);
+  expect(screen.queryByLabelText(/Marcar todas las líneas/i)).toBeNull();
+});
 
 test("filtra por Descripción (contiene) ocultando las filas que no coinciden", async () => {
   await import("./TablaItems");

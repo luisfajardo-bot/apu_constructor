@@ -64,12 +64,52 @@ export default function TablaItems({
   const [cargandoDuplicar, setCargandoDuplicar] = useState<number | null>(null);
   const ultimoPedidoDuplicarRef = useRef<number | null>(null);
 
+  // Selección para las acciones en lote. Guarda seqs, no índices: la tabla se
+  // reordena y se filtra, y un índice dejaría de apuntar a la misma fila.
+  const [marcadas, setMarcadas] = useState<Set<number>>(new Set());
+  // Índice (dentro de `visible`) del último click sin Shift, para el rango.
+  // Va en un ref: lo lee el handler del click siguiente, no el render.
+  const ultimoIdxRef = useRef<number | null>(null);
+
   const nPorRevisar = items.filter((it) => REVISABLE.has(it.status)).length;
   const visible = control
     ? items
     : soloRevision
       ? items.filter((it) => REVISABLE.has(it.status))
       : items;
+
+  // Solo se actúa sobre lo que se está viendo: si el usuario marca filas y después
+  // cambia el filtro, las que se fueron no se tocan (y el contador no las cuenta).
+  const seleccionadas = visible.filter((it) => marcadas.has(it.seq)).map((it) => it.seq);
+  const haySeleccion = seleccionadas.length > 0;
+  // La selección solo existe con `control` (no en el armado en vivo, cuya tabla
+  // viene del stream) y con la corrida activa.
+  const seleccionable = control !== undefined && !readOnly;
+
+  function alternar(idx: number, seq: number, conShift: boolean) {
+    const desde = ultimoIdxRef.current;
+    if (conShift && desde !== null) {
+      const [a, b] = desde <= idx ? [desde, idx] : [idx, desde];
+      const rango = visible.slice(a, b + 1).map((it) => it.seq);
+      setMarcadas((prev) => new Set([...prev, ...rango]));
+      return;                                  // el ancla del rango no se mueve
+    }
+    ultimoIdxRef.current = idx;
+    setMarcadas((prev) => {
+      const s = new Set(prev);
+      if (s.has(seq)) s.delete(seq); else s.add(seq);
+      return s;
+    });
+  }
+
+  function marcarTodas(marcar: boolean) {
+    ultimoIdxRef.current = null;
+    setMarcadas((prev) => {
+      const s = new Set(prev);
+      for (const it of visible) { if (marcar) s.add(it.seq); else s.delete(it.seq); }
+      return s;
+    });
+  }
 
   async function toggleExpand(seq: number) {
     const actual = expandido[seq];
@@ -146,8 +186,8 @@ export default function TablaItems({
     }
   }
 
-  // Total columns = 1 (chevron) + 12 data cols = 13
-  const TOTAL_COLS = 13;
+  // 1 chevron + 12 columnas de datos, más la de selección cuando está activa.
+  const TOTAL_COLS = 13 + (seleccionable ? 1 : 0);
 
   return (
     <div className="flex flex-col gap-2">
@@ -176,12 +216,31 @@ export default function TablaItems({
             Limpiar filtros
           </button>
         )}
+        {seleccionable && (
+          <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              className="cursor-pointer"
+              aria-label="Marcar todas las líneas visibles"
+              checked={visible.length > 0 && seleccionadas.length === visible.length}
+              onChange={(e) => marcarTodas(e.target.checked)}
+            />
+            Marcar todas
+          </label>
+        )}
+        {haySeleccion && (
+          <span className="text-xs font-medium text-foreground">
+            {seleccionadas.length === 1
+              ? "1 línea marcada"
+              : `${seleccionadas.length} líneas marcadas`}
+          </span>
+        )}
       </div>
 
       {/* Dense table */}
       <Table>
         {control ? (
-          <CabeceraFiltros control={control} />
+          <CabeceraFiltros control={control} conSeleccion={seleccionable} />
         ) : (
           <TableHeader>
             <TableRow>
@@ -202,13 +261,25 @@ export default function TablaItems({
           </TableHeader>
         )}
         <TableBody>
-          {visible.map((it) => {
+          {visible.map((it, idx) => {
             const estado = expandido[it.seq];
             const abierto = estado !== undefined;
 
             return (
               <Fragment key={it.seq}>
                 <TableRow className="hover:bg-muted/40">
+                  {seleccionable && (
+                    <TableCell className="w-8 px-1 py-1">
+                      <input
+                        type="checkbox"
+                        className="cursor-pointer"
+                        aria-label={`Marcar ítem ${it.item}`}
+                        checked={marcadas.has(it.seq)}
+                        onChange={() => {}}
+                        onClick={(e) => alternar(idx, it.seq, e.shiftKey)}
+                      />
+                    </TableCell>
+                  )}
                   {/* Chevron control */}
                   <TableCell className="w-6 px-1 py-1">
                     <button

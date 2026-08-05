@@ -323,7 +323,9 @@ def confirmar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
 
     `apu_codigo=None` confirma el APU que cada ítem ya tiene (sin reasignar);
     con `apu_codigo` se le asigna ese APU (codigo+turno) a todos los seqs.
-    Devuelve la vista de la corrida, o None si la corrida no existe.
+    Devuelve la vista de la corrida, o None si la corrida no existe, o si
+    ninguno de los seqs pedidos existe en ella (pedir una lista vacía no
+    cuenta: ahí no se pidió ningún seq inexistente, se pidió nada).
 
     Es la primitiva: `confirmar_item` es el caso de un solo seq. Un solo
     Assembler para todo el lote (su PricingEngine cachea, y el camino de
@@ -337,6 +339,7 @@ def confirmar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
         raise CorridaCongelada(corrida_id)
     assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False),
                           lista_id=meta.lista_precios_id)
+    seqs_pedidos = list(seqs)   # Iterable: consumirlo dos veces no es seguro
     # Dos pasadas. La primera resuelve (fila, código, turno) y valida que el APU
     # exista, SIN escribir: con un código que no existe, reassemble_with_choice
     # produce una composición vacía y el ítem queda costeado en $0 (regla de
@@ -347,10 +350,12 @@ def confirmar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
     # actual" llaman sin él —, así que no se puede exigir.
     trabajo: list[tuple[int, CorridaItemRow, str, str]] = []
     validados: set[tuple[str, str]] = set()
-    for seq in seqs:
+    encontrados = 0
+    for seq in seqs_pedidos:
         row = alm.corridas.get_item(corrida_id, seq)
         if row is None:
             continue                      # seq ajeno a la corrida: se saltea
+        encontrados += 1
         codigo = apu_codigo or row.apu_codigo
         if not codigo:
             continue                      # nada que confirmar (evita el $0)
@@ -360,6 +365,12 @@ def confirmar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
                 raise ValueError(f"No existe el APU {codigo} ({turno}).")
             validados.add((codigo, turno))   # una consulta por par distinto, no por fila
         trabajo.append((seq, row, codigo, turno))
+    # Ningún seq de los pedidos existe: no hay nada que informar y el llamador
+    # pidió algo que no está. Devolver None deja que el endpoint conteste 404,
+    # que es lo que confirmar_item hizo siempre para un seq inexistente. Con la
+    # lista vacía no aplica: pedir nada no es pedir algo que no existe.
+    if seqs_pedidos and encontrados == 0:
+        return None
     for seq, row, codigo, turno in trabajo:
         ens = assembler.reassemble_with_choice(row.item, codigo, turno)
         alm.corridas.actualizar_eleccion(
@@ -373,14 +384,9 @@ def confirmar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
 def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
                    shift: Optional[str] = None) -> Optional[dict]:
     """Un solo ítem. Wrapper sobre `confirmar_items` para que confirmar-uno y
-    confirmar-muchos no se puedan separar con el tiempo.
-
-    Chequea el ítem antes de delegar: `confirmar_items` saltea (no falla) un seq
-    que no existe -correcto para el lote, que puede pedir seqs viejos ya
-    vueltos a barajar-, pero el endpoint de un solo ítem siempre devolvió 404
-    en ese caso (`get_item is None` -> None -> 404 en rutas.py)."""
-    if alm.corridas.get_item(corrida_id, seq) is None:
-        return None
+    confirmar-muchos no se puedan separar con el tiempo. `confirmar_items`
+    devuelve None cuando ese seq no existe en la corrida (además de cuando la
+    corrida no existe), así que el 404 del endpoint sale gratis del lote."""
     return confirmar_items(alm, corrida_id, [seq], apu_codigo, shift or None)
 
 

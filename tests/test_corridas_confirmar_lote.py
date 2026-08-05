@@ -111,6 +111,25 @@ def test_corrida_congelada_rechaza_el_lote(tmp_path):
         svc.confirmar_items(alm, cid, [0], apu_codigo="A2", shift="DIURNO")
 
 
+def test_congelada_y_seq_inexistente_lanza_congelada_no_none(tmp_path):
+    """El orden de los chequeos importa: congelada se decide ANTES que "existe
+    el seq", incluso si el seq pedido no existe. 409, no 404."""
+    alm, sc = _alm(tmp_path)
+    cid = _corrida(alm, sc)
+    svc.congelar(alm, cid)
+    with pytest.raises(svc.CorridaCongelada):
+        svc.confirmar_items(alm, cid, [999], apu_codigo="A2", shift="DIURNO")
+
+
+def test_lote_con_todos_los_seqs_inexistentes_devuelve_none(tmp_path):
+    alm, sc = _alm(tmp_path)
+    cid = _corrida(alm, sc)
+    antes = _estado(alm, cid)
+    assert svc.confirmar_items(alm, cid, [997, 998, 999], apu_codigo="A2",
+                               shift="DIURNO") is None
+    assert _estado(alm, cid) == antes
+
+
 def test_confirmar_item_sigue_funcionando_igual(tmp_path):
     """El wrapper de 1 seq no cambia de comportamiento."""
     alm, sc = _alm(tmp_path)
@@ -140,6 +159,18 @@ def test_endpoint_confirmar_item_seq_inexistente_404(tmp_path):
     cli = cliente(create_app(almacen=alm), rol="admin")
     r = cli.post(f"/api/corridas/{cid}/items/999/confirmar",
                  json={"apu_codigo": "A2", "shift": "DIURNO"})
+    assert r.status_code == 404
+
+
+def test_endpoint_confirmar_lote_todos_los_seqs_inexistentes_404(tmp_path):
+    from apu_tool.servicio.app import create_app
+    from tests.conftest import cliente
+
+    alm, sc = _alm(tmp_path)
+    cid = _corrida(alm, sc)
+    cli = cliente(create_app(almacen=alm), rol="admin")
+    r = cli.post(f"/api/corridas/{cid}/items/confirmar-lote",
+                 json={"seqs": [997, 998, 999], "apu_codigo": "A2", "shift": "DIURNO"})
     assert r.status_code == 404
 
 

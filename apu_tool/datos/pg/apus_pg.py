@@ -183,6 +183,14 @@ class ApusPg:
         return ([Apu(r["codigo"], r["nombre"], r["unidad"], r["shift"], r["grupo"])
                  for r in rows], int(total))
 
+    def grupos(self) -> list[str]:
+        """Grupos en uso por algún APU. Espejo de apus_db.py::grupos."""
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT grupo FROM apus.apus "
+                "WHERE grupo IS NOT NULL AND TRIM(grupo) <> '' ORDER BY grupo").fetchall()
+        return [r["grupo"] for r in rows]
+
     def search_apus(self, texto: str, limit: int = 20) -> list[Apu]:
         like = f"%{texto.strip()}%"
         with self.cx.connection() as conn:

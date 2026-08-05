@@ -121,3 +121,11 @@ def test_migracion_agrega_tipo_y_ref_shift(tmp_path):
     d.init_schema()  # 2ª vez: no falla
     comps = d.get_components("A1", "DIURNO")
     assert len(comps) == 1 and comps[0].tipo == "insumo"
+
+
+def test_grupos_distintos_sin_vacios(apus):
+    apus.crear_apu(Apu("G1", "PISO", "M2", "DIURNO", "PAVIMENTOS"), [])
+    apus.crear_apu(Apu("G2", "ANDEN", "M2", "DIURNO", "PAVIMENTOS"), [])
+    apus.crear_apu(Apu("G3", "TUBO", "ML", "DIURNO", "REDES DE ACUEDUCTO"), [])
+    # A1 (de la fixture) tiene grupo '' y no debe aparecer
+    assert apus.grupos() == ["PAVIMENTOS", "REDES DE ACUEDUCTO"]

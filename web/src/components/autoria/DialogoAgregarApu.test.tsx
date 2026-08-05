@@ -11,10 +11,12 @@ vi.mock("@/api/autoria", () => ({
               unidad: "M3", grupo: "G", n_componentes: 2, costo_unitario: 0 }],
     total: 1, limit: 15, offset: 0,
   })),
+  getGruposApu: vi.fn(async () => ["PAVIMENTOS", "REDES DE ACUEDUCTO"]),
 }));
 vi.mock("@/api/insumos", () => ({
   listarInsumos: vi.fn(async () => ({ items: [], total: 0, limit: 15, offset: 0 })),
 }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const inicialDemo = {
   codigo: "100", turno: "DIURNO", nombre: "APU DEMO", unidad: "M3", grupo: "G",
@@ -263,4 +265,88 @@ test("modo duplicar NO pisa el código tipeado si listarApus resuelve después (
     await new Promise((r) => setTimeout(r, 0));
   });
   expect(screen.getByDisplayValue("9999")).toBeTruthy();
+});
+
+test("Grupo es un select con el vocabulario del backend", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(<DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}} />);
+  const sel = await screen.findByLabelText("Grupo");
+  expect(sel.tagName).toBe("SELECT");
+  await waitFor(() =>
+    expect(screen.getByRole("option", { name: "PAVIMENTOS" })).toBeTruthy());
+  expect(screen.queryByRole("option", { name: "REDES DE ACUEDUCTO" })).toBeTruthy();
+});
+
+test("editar un APU con un grupo fuera del vocabulario lo conserva como opción", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(
+    <DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}}
+      modo="editar" inicial={{ ...inicialDemo, grupo: "NA" }} />,
+  );
+  const sel = (await screen.findByLabelText("Grupo")) as HTMLSelectElement;
+  await waitFor(() => expect(sel.value).toBe("NA"));
+  expect(screen.getByRole("option", { name: "NA" })).toBeTruthy();
+});
+
+test("'+ nuevo grupo' no se muestra sin permiso de Admin", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(<DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}} />);
+  await screen.findByLabelText("Grupo");
+  expect(screen.queryByText("+ nuevo grupo")).toBeNull();
+});
+
+test("un Admin crea un grupo y queda elegido", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  const spy = vi.spyOn(window, "prompt").mockReturnValue("  OBRA NUEVA SL7  ");
+  render(
+    <DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}} puedeCrearGrupo />,
+  );
+  const sel = (await screen.findByLabelText("Grupo")) as HTMLSelectElement;
+  fireEvent.click(screen.getByText("+ nuevo grupo"));
+  await waitFor(() => expect(sel.value).toBe("OBRA NUEVA SL7"));   // recortado
+  expect(screen.getByRole("option", { name: "OBRA NUEVA SL7" })).toBeTruthy();
+  spy.mockRestore();
+});
+
+test("cancelar el prompt no cambia el grupo", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  const spy = vi.spyOn(window, "prompt").mockReturnValue(null);
+  render(
+    <DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}} puedeCrearGrupo />,
+  );
+  const sel = (await screen.findByLabelText("Grupo")) as HTMLSelectElement;
+  fireEvent.click(screen.getByText("+ nuevo grupo"));
+  expect(sel.value).toBe("");
+  spy.mockRestore();
+});
+
+test("si falla el vocabulario de grupos, en modo crear el select queda en el placeholder y avisa con un toast", async () => {
+  const { getGruposApu } = await import("@/api/autoria");
+  const { toast } = await import("sonner");
+  vi.mocked(getGruposApu).mockRejectedValueOnce(new Error("network"));
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(<DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}} />);
+
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  const sel = screen.getByLabelText("Grupo") as HTMLSelectElement;
+  expect(sel.value).toBe("");                          // sin vocabulario, sigue en el placeholder
+  const boton = screen.getByRole("button", { name: /Crear APU/i }) as HTMLButtonElement;
+  expect(boton.disabled).toBe(true);                   // Guardar sigue bloqueado, no colgado en silencio
+  // `mockRejectedValueOnce` ya deja el mock en su comportamiento normal para los tests vecinos.
+});
+
+test("'+ nuevo grupo' con una variante de ortografía reusa el grupo del vocabulario en vez de duplicarlo", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  const spy = vi.spyOn(window, "prompt").mockReturnValue("pavimentos");
+  render(
+    <DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}} puedeCrearGrupo />,
+  );
+  const sel = (await screen.findByLabelText("Grupo")) as HTMLSelectElement;
+  // Esperar el vocabulario cargado antes de crear el grupo nuevo: si el vocabulario
+  // sigue vacío, la comparación normalizada no encuentra nada que reusar.
+  await waitFor(() => expect(screen.getByRole("option", { name: "PAVIMENTOS" })).toBeTruthy());
+  fireEvent.click(screen.getByText("+ nuevo grupo"));
+  await waitFor(() => expect(sel.value).toBe("PAVIMENTOS"));   // ortografía del vocabulario, no "pavimentos"
+  expect(screen.getAllByRole("option", { name: "PAVIMENTOS" }).length).toBe(1);   // sin variante duplicada
+  spy.mockRestore();
 });

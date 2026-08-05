@@ -42,6 +42,10 @@ export function listarApus(params: ListarApusParams = {}): Promise<ListaApus> {
   return apiGet<ListaApus>(`/apus${buildQuery(params)}`);
 }
 
+export function getGruposApu(): Promise<string[]> {
+  return apiGet<string[]>("/apus/grupos");
+}
+
 export function getApuDetalle(codigo: string, turno: string): Promise<ApuDetalle> {
   // `codigo` puede tener espacios (p.ej. "9593 N") → encodeURIComponent.
   return apiGet<ApuDetalle>(

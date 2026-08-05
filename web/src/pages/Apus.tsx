@@ -38,7 +38,7 @@ function clave(a: ApuResumen): string {
 export default function Apus() {
   const { perfil } = useAuth();
   const puedeEditar = puede(perfil?.rol, "editor");
-  const puedeBorrar = puede(perfil?.rol, "admin");
+  const esAdmin = puede(perfil?.rol, "admin");
   const [q, setQ] = useState("");
   const [inputQ, setInputQ] = useState("");
   const [turno, setTurno] = useState("");
@@ -265,7 +265,7 @@ export default function Apus() {
                             puedeEditar={puedeEditar}
                             onEditar={() => setEditarDetalle(estado)}
                             onDuplicar={() => setDuplicarDetalle(estado)}
-                            puedeBorrar={puedeBorrar}
+                            puedeBorrar={esAdmin}
                             onBorrar={() => setBorrarDetalle(estado)}
                           />
                         )}
@@ -295,6 +295,7 @@ export default function Apus() {
             open={agregarOpen}
             onOpenChange={setAgregarOpen}
             onCreado={recargar}
+            puedeCrearGrupo={esAdmin}
           />
           <DialogoImportarApus
             open={importarOpen}
@@ -308,6 +309,7 @@ export default function Apus() {
             onCreado={recargar}
             modo="editar"
             inicial={editarDetalle}
+            puedeCrearGrupo={esAdmin}
           />
           <DialogoAgregarApu
             key={duplicarDetalle ? `dup-${duplicarDetalle.codigo}@@${duplicarDetalle.turno}` : "nuevo-dup"}
@@ -316,6 +318,7 @@ export default function Apus() {
             onCreado={recargar}
             modo="duplicar"
             inicial={duplicarDetalle}
+            puedeCrearGrupo={esAdmin}
           />
           <DialogoBorrarApu
             apu={borrarDetalle}

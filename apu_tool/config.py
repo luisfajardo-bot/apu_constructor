@@ -49,6 +49,25 @@ SHIFT_NOCTURNO = "NOCTURNO"
 # Cualquier fuente que NO sea pública se trata como interna.
 PUBLIC_PRICE_SOURCES = {"PRECIO IDU"}
 
+# Vocabulario base de grupos (capítulos de obra) para el desplegable de Grupo del APU.
+# El vocabulario real que se sirve es esta lista UNIÓN los grupos que ya usa algún APU
+# (ver servicio/apus.py::grupos): así un Admin crea un grupo nuevo simplemente usándolo,
+# sin tabla ni migración, y un grupo mal escrito desaparece cuando ningún APU lo usa.
+GRUPOS_APU_BASE: tuple[str, ...] = (
+    "PAVIMENTOS",
+    "REDES DE ACUEDUCTO",
+    "REDES DE ALCANTARILLADO Y DRENAJE",
+    "REDES ELÉCTRICAS",
+    "REDES TELEFÓNICAS Y DATOS",
+    "CONCRETO Y ACERO PARA ESTRUCTURAS",
+    "DEMOLICIONES",
+    "EXCAVACIONES",
+    "RELLENOS Y CAPAS GRANULARES",
+    "ANDENES Y SARDINELES",
+    "SEÑALIZACIÓN",
+    "MOBILIARIO URBANO Y PAISAJISMO",
+)
+
 
 def classify_price_source(fuente: str) -> str:
     """Clasifica una fuente de precio como 'publico' o 'interno' (confidencial)."""

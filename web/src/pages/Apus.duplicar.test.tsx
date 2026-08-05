@@ -22,6 +22,7 @@ vi.mock("@/api/autoria", () => ({
   crearApu: vi.fn(async () => ({})),
   editarApu: vi.fn(async () => ({})),
   borrarApu: vi.fn(async () => {}),
+  getGruposApu: vi.fn(async () => ["PAVIMENTOS", "REDES DE ACUEDUCTO"]),
 }));
 vi.mock("@/api/insumos", () => ({
   listarInsumos: vi.fn(async () => ({ items: [], total: 0, limit: 15, offset: 0 })),

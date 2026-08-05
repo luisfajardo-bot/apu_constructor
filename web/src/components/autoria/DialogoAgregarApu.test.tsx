@@ -11,6 +11,7 @@ vi.mock("@/api/autoria", () => ({
               unidad: "M3", grupo: "G", n_componentes: 2, costo_unitario: 0 }],
     total: 1, limit: 15, offset: 0,
   })),
+  getGruposApu: vi.fn(async () => ["PAVIMENTOS", "REDES DE ACUEDUCTO"]),
 }));
 vi.mock("@/api/insumos", () => ({
   listarInsumos: vi.fn(async () => ({ items: [], total: 0, limit: 15, offset: 0 })),
@@ -263,4 +264,25 @@ test("modo duplicar NO pisa el código tipeado si listarApus resuelve después (
     await new Promise((r) => setTimeout(r, 0));
   });
   expect(screen.getByDisplayValue("9999")).toBeTruthy();
+});
+
+test("Grupo es un select con el vocabulario del backend", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(<DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}} />);
+  const sel = await screen.findByLabelText("Grupo");
+  expect(sel.tagName).toBe("SELECT");
+  await waitFor(() =>
+    expect(screen.getByRole("option", { name: "PAVIMENTOS" })).toBeTruthy());
+  expect(screen.queryByRole("option", { name: "REDES DE ACUEDUCTO" })).toBeTruthy();
+});
+
+test("editar un APU con un grupo fuera del vocabulario lo conserva como opción", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(
+    <DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}}
+      modo="editar" inicial={{ ...inicialDemo, grupo: "NA" }} />,
+  );
+  const sel = (await screen.findByLabelText("Grupo")) as HTMLSelectElement;
+  await waitFor(() => expect(sel.value).toBe("NA"));
+  expect(screen.getByRole("option", { name: "NA" })).toBeTruthy();
 });

@@ -15,7 +15,7 @@ import type {
   LineaComposicion,
   ApuResumen,
 } from "@/lib/tipos";
-import { crearApu, editarApu, listarApus } from "@/api/autoria";
+import { crearApu, editarApu, listarApus, getGruposApu } from "@/api/autoria";
 import { listarInsumos } from "@/api/insumos";
 import { baseDe, codigoSugerido, nombreEsDistinto } from "@/lib/duplicarApu";
 import { cop } from "@/lib/moneda";
@@ -118,6 +118,7 @@ export function DialogoAgregarApu({
   // quedaría fijado al valor que tenía cuando se creó ese efecto.
   const codigoTocadoRef = useRef(false);
   const [ocupados, setOcupados] = useState<string[]>([]);
+  const [grupos, setGrupos] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open || !inicial) return;
@@ -177,6 +178,24 @@ export function DialogoAgregarApu({
     };
   }, [open, modo, inicial]);
 
+  // Vocabulario de grupos. Si falla, el select queda con el grupo actual como única
+  // opción: se puede guardar sin cambiarlo, pero no inventar uno nuevo.
+  useEffect(() => {
+    if (!open) return;
+    let cancelado = false;
+    (async () => {
+      try {
+        const gs = await getGruposApu();
+        if (!cancelado) setGrupos(gs);
+      } catch {
+        /* sin vocabulario: queda el grupo actual */
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [open]);
+
   function setCabecera<K extends keyof Cabecera>(k: K, v: string) {
     setCab((prev) => ({ ...prev, [k]: v }));
   }
@@ -188,6 +207,7 @@ export function DialogoAgregarApu({
       setGuardando(false);
       codigoTocadoRef.current = false;
       setOcupados([]);
+      setGrupos([]);
     }
     onOpenChange(v);
   }
@@ -214,6 +234,11 @@ export function DialogoAgregarApu({
     cab.nombre.trim() !== "" &&
     cab.unidad.trim() !== "" &&
     cab.grupo.trim() !== "";
+
+  // El grupo actual va SIEMPRE entre las opciones aunque no esté en el vocabulario:
+  // si no, abrir un APU viejo con grupo 'NA' le cambiaría el grupo sin querer.
+  const opcionesGrupo =
+    cab.grupo && !grupos.includes(cab.grupo) ? [cab.grupo, ...grupos] : grupos;
 
   const duplicando = modo === "duplicar" && inicial !== null && inicial !== undefined;
   // La copia necesita nombre propio e identidad propia; si no, no distinguió nada.
@@ -329,11 +354,23 @@ export function DialogoAgregarApu({
           </label>
           <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted-foreground">Grupo</span>
-            <input
+            <select
+              aria-label="Grupo"
               className={inputCls}
               value={cab.grupo}
               onChange={(e) => setCabecera("grupo", e.target.value)}
-            />
+            >
+              {/* Placeholder deshabilitado: `cabeceraValida` ya exige grupo no vacío,
+                  así que el guardado sigue bloqueado hasta que se elija uno. */}
+              <option value="" disabled>
+                Elegí un grupo…
+              </option>
+              {opcionesGrupo.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
 

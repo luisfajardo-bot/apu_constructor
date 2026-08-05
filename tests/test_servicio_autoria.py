@@ -324,3 +324,25 @@ def test_componentes_de_sube_al_piso_un_historico_en_cero(tmp_path):
         alm, [{"insumo_codigo": "100", "rendimiento": 2.0}],
         "DIURNO", hist={"100": 0.0})
     assert comps[0].precio_unitario_hist == 1.0
+
+
+def test_editar_apu_conserva_el_historico_de_los_componentes(tmp_path):
+    """Antes, editar un APU ponía precio_unitario_hist=0.0 en TODOS sus componentes
+    y tiraba a $0 las líneas cuyo insumo es huérfano/sin tarifa en catálogo."""
+    alm = _alm(tmp_path)
+    alm.apus.insert_apus([Apu("C3", "BASE GRANULAR", "M3", "DIURNO", "PAV")])
+    alm.apus.insert_components([
+        ApuComponent("C3", "DIURNO", "100", "CEMENTO GRIS", "KG", 2.0, 900.0),
+        ApuComponent("C3", "DIURNO", "999", "INSUMO HUERFANO", "UN", 1.0, 75000.0),
+    ])
+
+    autoria.editar_apu(alm, "C3", "DIURNO", {"nombre": "BASE GRANULAR B",
+        "unidad": "M3", "grupo": "PAV",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 3.0},
+                        {"insumo_codigo": "999", "rendimiento": 1.0,
+                         "insumo_nombre": "INSUMO HUERFANO", "unidad": "UN"}]})
+
+    comps = {c.insumo_codigo: c for c in alm.apus.get_components("C3", "DIURNO")}
+    assert comps["100"].precio_unitario_hist == 900.0      # heredado, no borrado
+    assert comps["999"].precio_unitario_hist == 75000.0    # el huérfano conserva su respaldo
+    assert comps["100"].rendimiento == 3.0                 # la edición sí se aplicó

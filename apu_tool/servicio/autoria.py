@@ -159,11 +159,12 @@ def editar_apu(alm: Almacen, codigo: str, shift: str, datos: dict, actor=None) -
     if not nombre:
         raise ValueError("El nombre es obligatorio.")
     existentes = alm.apus.get_components(codigo, shift)
-    previos: dict[str, tuple[str, str]] = {}
-    for e in existentes:
-        if e.insumo_codigo not in previos or e.tipo == "apu":
-            previos[e.insumo_codigo] = (e.tipo, e.ref_shift)
-    comps = _componentes_de(alm, datos.get("componentes", []) or [], shift, previos=previos)
+    # Hereda marcas de sub-APU Y precio histórico de respaldo: editar el rendimiento
+    # de un insumo no debe tirar a $0 las líneas cuyo insumo es huérfano o no tiene
+    # tarifa en el catálogo.
+    previos, hist = _mapas_de_componentes(existentes)
+    comps = _componentes_de(alm, datos.get("componentes", []) or [], shift,
+                            previos=previos, hist=hist)
     antes = {"nombre": previo.nombre, "unidad": previo.unidad, "grupo": previo.grupo,
              "n_componentes": len(existentes)}
     apu = Apu(codigo=codigo, nombre=nombre, unidad=str(datos.get("unidad", "") or ""),

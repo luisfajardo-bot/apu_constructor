@@ -53,6 +53,7 @@ export default function Apus() {
   const [agregarOpen, setAgregarOpen] = useState(false);
   const [importarOpen, setImportarOpen] = useState(false);
   const [editarDetalle, setEditarDetalle] = useState<ApuDetalle | null>(null);
+  const [duplicarDetalle, setDuplicarDetalle] = useState<ApuDetalle | null>(null);
   const [borrarDetalle, setBorrarDetalle] = useState<ApuDetalle | null>(null);
 
   const cargar = useCallback(async () => {
@@ -263,6 +264,7 @@ export default function Apus() {
                             detalle={estado}
                             puedeEditar={puedeEditar}
                             onEditar={() => setEditarDetalle(estado)}
+                            onDuplicar={() => setDuplicarDetalle(estado)}
                             puedeBorrar={puedeBorrar}
                             onBorrar={() => setBorrarDetalle(estado)}
                           />
@@ -307,6 +309,14 @@ export default function Apus() {
             modo="editar"
             inicial={editarDetalle}
           />
+          <DialogoAgregarApu
+            key={duplicarDetalle ? `dup-${duplicarDetalle.codigo}@@${duplicarDetalle.turno}` : "nuevo-dup"}
+            open={duplicarDetalle !== null}
+            onOpenChange={(v) => { if (!v) setDuplicarDetalle(null); }}
+            onCreado={recargar}
+            modo="duplicar"
+            inicial={duplicarDetalle}
+          />
           <DialogoBorrarApu
             apu={borrarDetalle}
             onOpenChange={(v) => { if (!v) setBorrarDetalle(null); }}
@@ -322,12 +332,14 @@ function DetalleApu({
   detalle,
   puedeEditar,
   onEditar,
+  onDuplicar,
   puedeBorrar,
   onBorrar,
 }: {
   detalle: ApuDetalle;
   puedeEditar: boolean;
   onEditar: () => void;
+  onDuplicar: () => void;
   puedeBorrar: boolean;
   onBorrar: () => void;
 }) {
@@ -343,6 +355,11 @@ function DetalleApu({
             {puedeEditar && (
               <Button size="xs" variant="outline" onClick={onEditar}>
                 Editar
+              </Button>
+            )}
+            {puedeEditar && (
+              <Button size="xs" variant="outline" onClick={onDuplicar}>
+                Duplicar
               </Button>
             )}
             {puedeBorrar && (

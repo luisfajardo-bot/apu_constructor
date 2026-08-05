@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 36 planes, 48 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 42 planes, 48 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -80,10 +80,16 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 36 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-08-05 | [[Planes/2026-08-05-duplicar-apu|Duplicar un APU a partir de otro — Implementation Plan]] |
 | 2026-08-03 | [[Planes/2026-08-03-rediseno-interfaz-web|Rediseño visual de la interfaz web — plan de implementación]] |
 | 2026-08-03 | [[Planes/2026-08-03-dialogo-texto-sin-prompt|Un modal propio en lugar de `window.prompt()` — Implementation Plan]] |
 | 2026-07-31 | [[Planes/2026-07-31-ensure-seeded-almacen-inyectado|`ensure_seeded` sobre el almacén inyectado — Implementation Plan]] |
+| 2026-07-27 | [[Planes/2026-07-27-ocultar-insumos-duplicados-apu|Ocultar del catálogo de insumos los códigos duplicados de APU — Implementation Plan]] |
 | 2026-07-27 | [[Planes/2026-07-27-listas-precios-np|Listas de precios para APUs de NP — Implementation Plan]] |
+| 2026-07-24 | [[Planes/2026-07-24-vault-obsidian|Vault de Obsidian auto-mantenida — Implementation Plan]] |
+| 2026-07-24 | [[Planes/2026-07-24-redondeo-multiplicaciones|Redondeo a la unidad en multiplicaciones — Implementation Plan]] |
+| 2026-07-24 | [[Planes/2026-07-24-mapa-arquitectura|Corrección de docs de arquitectura + mapa auto-generado de módulos — Implementation Plan]] |
+| 2026-07-23 | [[Planes/2026-07-23-nombre-corridas|Nombre/alias para corridas — Implementation Plan]] |
 | 2026-07-14 | [[Planes/2026-07-14-costo-editable-apu|Costo editable en el armador de APUs — Implementation Plan]] |
 | 2026-07-10 | [[Planes/2026-07-10-costeo-cero-alertas|Costeo en $0 nunca mudo + regla "nada en 0" — Plan de implementación]] |
 | 2026-07-09 | [[Planes/2026-07-09-columnas-unitarias-corrida|Columnas unitarias en la tabla de corrida — Implementation Plan]] |

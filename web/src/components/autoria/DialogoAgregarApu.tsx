@@ -35,6 +35,10 @@ interface DialogoAgregarApuProps {
   modo?: "crear" | "editar" | "duplicar";
   /** APU base: el que se edita, o el que se duplica. */
   inicial?: ApuDetalle | null;
+  /** Rol Admin: habilita crear un grupo nuevo. El rol NO se lee con useAuth() acá
+   *  porque `useAuth` lanza fuera de <AuthProvider> (lib/auth.tsx:68) y este diálogo
+   *  se monta sin provider en los tests. */
+  puedeCrearGrupo?: boolean;
 }
 
 interface FilaComp {
@@ -108,6 +112,7 @@ export function DialogoAgregarApu({
   onCreado,
   modo = "crear",
   inicial = null,
+  puedeCrearGrupo = false,
 }: DialogoAgregarApuProps) {
   const [cab, setCab] = useState<Cabecera>(CABECERA_VACIA);
   const [filas, setFilas] = useState<FilaComp[]>([nuevaFila()]);
@@ -198,6 +203,16 @@ export function DialogoAgregarApu({
 
   function setCabecera<K extends keyof Cabecera>(k: K, v: string) {
     setCab((prev) => ({ ...prev, [k]: v }));
+  }
+
+  // Un grupo nuevo no se persiste solo: queda elegido y se guarda con el APU. Si el
+  // usuario cancela el diálogo, no se creó nada, que es lo correcto.
+  function nuevoGrupo() {
+    const nombre = window.prompt("Nombre del grupo nuevo (capítulo de obra)");
+    const limpio = (nombre ?? "").trim();
+    if (!limpio) return;
+    setGrupos((prev) => (prev.includes(limpio) ? prev : [...prev, limpio].sort()));
+    setCabecera("grupo", limpio);
   }
 
   function handleOpenChange(v: boolean) {
@@ -371,6 +386,15 @@ export function DialogoAgregarApu({
                 </option>
               ))}
             </select>
+            {puedeCrearGrupo && (
+              <button
+                type="button"
+                className="self-start text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                onClick={nuevoGrupo}
+              >
+                + nuevo grupo
+              </button>
+            )}
           </label>
         </div>
 

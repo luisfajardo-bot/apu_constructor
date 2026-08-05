@@ -286,3 +286,35 @@ test("editar un APU con un grupo fuera del vocabulario lo conserva como opción"
   await waitFor(() => expect(sel.value).toBe("NA"));
   expect(screen.getByRole("option", { name: "NA" })).toBeTruthy();
 });
+
+test("'+ nuevo grupo' no se muestra sin permiso de Admin", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  render(<DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}} />);
+  await screen.findByLabelText("Grupo");
+  expect(screen.queryByText("+ nuevo grupo")).toBeNull();
+});
+
+test("un Admin crea un grupo y queda elegido", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  const spy = vi.spyOn(window, "prompt").mockReturnValue("  OBRA NUEVA SL7  ");
+  render(
+    <DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}} puedeCrearGrupo />,
+  );
+  const sel = (await screen.findByLabelText("Grupo")) as HTMLSelectElement;
+  fireEvent.click(screen.getByText("+ nuevo grupo"));
+  await waitFor(() => expect(sel.value).toBe("OBRA NUEVA SL7"));   // recortado
+  expect(screen.getByRole("option", { name: "OBRA NUEVA SL7" })).toBeTruthy();
+  spy.mockRestore();
+});
+
+test("cancelar el prompt no cambia el grupo", async () => {
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  const spy = vi.spyOn(window, "prompt").mockReturnValue(null);
+  render(
+    <DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}} puedeCrearGrupo />,
+  );
+  const sel = (await screen.findByLabelText("Grupo")) as HTMLSelectElement;
+  fireEvent.click(screen.getByText("+ nuevo grupo"));
+  expect(sel.value).toBe("");
+  spy.mockRestore();
+});

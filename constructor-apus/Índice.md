@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 43 planes, 50 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 44 planes, 50 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -84,6 +84,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 43 plane
 | --- | --- |
 | 2026-08-05 | [[Planes/2026-08-05-grupos-apu-desplegable|Grupo del APU como desplegable — Plan de implementación]] |
 | 2026-08-05 | [[Planes/2026-08-05-duplicar-apu|Duplicar un APU a partir de otro — Implementation Plan]] |
+| 2026-08-05 | [[Planes/2026-08-05-asignar-apu-en-lote|Asignar / confirmar APU en lote — Plan de implementación]] |
 | 2026-08-03 | [[Planes/2026-08-03-rediseno-interfaz-web|Rediseño visual de la interfaz web — plan de implementación]] |
 | 2026-08-03 | [[Planes/2026-08-03-dialogo-texto-sin-prompt|Un modal propio en lugar de `window.prompt()` — Implementation Plan]] |
 | 2026-07-31 | [[Planes/2026-07-31-ensure-seeded-almacen-inyectado|`ensure_seeded` sobre el almacén inyectado — Implementation Plan]] |

@@ -60,3 +60,21 @@ test("agrupa filas de un lote aunque estén intercaladas", async () => {
   expect([idxFila1, idxFila2].sort((a, b) => a - b)).toEqual([idxCab + 1, idxCab + 2]);
   expect(idxIntercalada === -1 || idxIntercalada > idxCab + 2).toBe(true);
 });
+
+test("un apu.crear duplicado muestra de qué APU salió", async () => {
+  const mod = await import("@/api/auditoria");
+  vi.spyOn(mod, "listarAuditoria").mockResolvedValue({
+    items: [
+      {
+        id: 5, ts: "2026-08-04T09:00:00Z", user_id: "u1", user_email: "a@obra.co",
+        rol: "editor", accion: "apu.crear", entidad_tipo: "apu", entidad_id: "3454-2",
+        antes: null, despues: { codigo: "3454-2", turno: "DIURNO" },
+        contexto: { origen: "duplicado", de: "3454", de_turno: "DIURNO" },
+      },
+    ],
+    total: 1, limit: 200, offset: 0,
+  });
+  const { default: Auditoria } = await import("./Auditoria");
+  render(<Auditoria />);
+  await waitFor(() => expect(screen.getByText(/duplicado de 3454 \(DIURNO\)/)).toBeTruthy());
+});

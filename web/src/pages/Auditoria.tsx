@@ -21,6 +21,27 @@ function resumen(v: Record<string, unknown> | null): string {
   return Object.entries(v).map(([k, val]) => `${k}: ${val}`).join(", ");
 }
 
+/** Para un `apu.crear` que nació como duplicado, de qué APU salió (código y turno). */
+function origenDuplicado(f: EventoAuditoria): string | null {
+  if (f.accion !== "apu.crear" || f.contexto?.origen !== "duplicado") return null;
+  const de = f.contexto?.de;
+  if (typeof de !== "string" || !de) return null;
+  const turno = f.contexto?.de_turno;
+  return `duplicado de ${de}${typeof turno === "string" && turno ? ` (${turno})` : ""}`;
+}
+
+/** Celda "Antes → Después", con el origen del duplicado si aplica. Comparte el
+ * mismo formato entre filas sueltas y filas dentro de un lote. */
+function CeldaResumen({ ev }: { ev: EventoAuditoria }) {
+  const dup = origenDuplicado(ev);
+  return (
+    <td className="px-2 py-1 text-muted-foreground truncate max-w-0">
+      {resumen(ev.antes)} → {resumen(ev.despues)}
+      {dup && <span className="text-foreground"> · {dup}</span>}
+    </td>
+  );
+}
+
 type Bloque =
   | { tipo: "fila"; ev: EventoAuditoria }
   | { tipo: "lote"; loteId: string; filas: EventoAuditoria[] };
@@ -159,9 +180,7 @@ export default function Auditoria() {
                     </td>
                     <td className="px-2 py-1"><Badge variant="secondary">{f.accion}</Badge></td>
                     <td className="px-2 py-1 text-muted-foreground">{f.entidad_tipo} #{f.entidad_id}</td>
-                    <td className="px-2 py-1 text-muted-foreground truncate max-w-0">
-                      {resumen(f.antes)} → {resumen(f.despues)}
-                    </td>
+                    <CeldaResumen ev={f} />
                   </tr>
                 );
               }
@@ -202,9 +221,7 @@ export default function Auditoria() {
                       </td>
                       <td className="px-2 py-1"><Badge variant="secondary">{f.accion}</Badge></td>
                       <td className="px-2 py-1 text-muted-foreground">{f.entidad_tipo} #{f.entidad_id}</td>
-                      <td className="px-2 py-1 text-muted-foreground truncate max-w-0">
-                        {resumen(f.antes)} → {resumen(f.despues)}
-                      </td>
+                      <CeldaResumen ev={f} />
                     </tr>
                   ))}
                 </Fragment>

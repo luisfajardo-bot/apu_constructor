@@ -125,6 +125,29 @@ def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str,
     return comps
 
 
+def _origen_duplicado(alm: Almacen, dup: dict | None, codigo: str, turno: str,
+                      nombre: str) -> tuple[dict | None, dict | None, tuple[str, str] | None]:
+    """Valida un alta que es copia de otro APU y devuelve `(previos, hist, origen)`.
+
+    Sin `dup` devuelve `(None, None, None)` y `crear_apu` se comporta como un alta
+    normal. La copia debe tener identidad propia y nombre propio: si no, el usuario
+    creería que duplicó cuando en realidad no distinguió nada."""
+    if not dup:
+        return None, None, None
+    cod_o = str(dup.get("codigo", "") or "").strip()
+    turno_o = str(dup.get("turno", "") or "").strip().upper()
+    origen = alm.apus.get_apu(cod_o, turno_o)
+    if origen is None:
+        raise ValueError("El APU de origen ya no existe.")
+    if (codigo, turno) == (cod_o, turno_o):
+        raise ValueError(
+            "La copia necesita un código o un turno distinto al del APU de origen.")
+    if normalizar(nombre) == normalizar(origen.nombre):
+        raise ValueError("El nombre debe ser distinto al del APU de origen.")
+    previos, hist = _mapas_de_componentes(alm.apus.get_components(cod_o, turno_o))
+    return previos, hist, (cod_o, turno_o)
+
+
 def crear_apu(alm: Almacen, datos: dict, actor=None) -> dict:
     codigo = str(datos.get("codigo", "") or "").strip()
     nombre = str(datos.get("nombre", "") or "").strip()
@@ -133,16 +156,21 @@ def crear_apu(alm: Almacen, datos: dict, actor=None) -> dict:
         raise ValueError("Código y nombre son obligatorios.")
     if turno not in (config.SHIFT_DIURNO, config.SHIFT_NOCTURNO):
         raise ValueError("El turno debe ser DIURNO o NOCTURNO.")
-    comps = _componentes_de(alm, datos.get("componentes", []) or [], turno)
+    previos, hist, origen = _origen_duplicado(
+        alm, datos.get("duplicado_de"), codigo, turno, nombre)
+    comps = _componentes_de(alm, datos.get("componentes", []) or [], turno,
+                            previos=previos, hist=hist)
     apu = Apu(codigo=codigo, nombre=nombre, unidad=str(datos.get("unidad", "") or ""),
               shift=turno, grupo=str(datos.get("grupo", "") or ""))
+    contexto = ({"origen": "duplicado", "de": origen[0], "de_turno": origen[1]}
+                if origen else {"origen": "individual"})
     with alm.transaccion("apus") as conn:
         alm.apus.crear_apu(apu, comps, conn=conn)
         registrar_auditoria(
             alm, conn, actor, "apu.crear", "apu", codigo, antes=None,
             despues={"codigo": codigo, "turno": turno, "nombre": nombre,
                      "unidad": apu.unidad, "grupo": apu.grupo, "n_componentes": len(comps)},
-            contexto={"origen": "individual"})
+            contexto=contexto)
     return {"codigo": codigo, "turno": turno, "nombre": nombre,
             "unidad": apu.unidad, "grupo": apu.grupo, "n_componentes": len(comps)}
 

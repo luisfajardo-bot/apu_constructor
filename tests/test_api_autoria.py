@@ -3,7 +3,7 @@ import io
 import openpyxl
 
 from apu_tool.datos.almacen import Almacen
-from apu_tool.nucleo.models import Apu, Insumo
+from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
 from apu_tool.servicio.app import create_app
 from tests.conftest import cliente
 
@@ -187,3 +187,32 @@ def test_editar_borrar_gating_por_rol(tmp_path):
     assert editor.put("/api/apus/A1/DIURNO", json=body).status_code == 200   # editor edita
     assert editor.delete("/api/apus/A1/DIURNO").status_code == 403           # editor NO borra
     assert consulta.put("/api/apus/A1/DIURNO", json=body).status_code == 403 # consulta NO edita
+
+
+def test_crear_apu_duplicado_endpoint(tmp_path):
+    cli, alm = _cli(tmp_path)
+    alm.apus.insert_apus([Apu("3454", "MEZCLA MD12", "M3", "DIURNO", "PAV")])
+    alm.apus.insert_components([
+        ApuComponent("3454", "DIURNO", "100", "CEMENTO GRIS", "KG", 2.0, 900.0)])
+
+    r = cli.post("/api/apus/crear", json={
+        "codigo": "3454-2", "turno": "DIURNO", "nombre": "MEZCLA MD13",
+        "unidad": "M3", "grupo": "PAV",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}],
+        "duplicado_de": {"codigo": "3454", "turno": "DIURNO"}})
+    assert r.status_code == 200, r.text
+    assert r.json()["codigo"] == "3454-2"
+    comps = alm.apus.get_components("3454-2", "DIURNO")
+    assert comps[0].precio_unitario_hist == 900.0        # heredado
+
+    # nombre igual al del origen -> 400
+    assert cli.post("/api/apus/crear", json={
+        "codigo": "3454-3", "turno": "DIURNO", "nombre": "MEZCLA MD12",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}],
+        "duplicado_de": {"codigo": "3454", "turno": "DIURNO"}}).status_code == 400
+
+    # origen inexistente -> 400
+    assert cli.post("/api/apus/crear", json={
+        "codigo": "3454-4", "turno": "DIURNO", "nombre": "OTRA",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}],
+        "duplicado_de": {"codigo": "NOPE", "turno": "DIURNO"}}).status_code == 400

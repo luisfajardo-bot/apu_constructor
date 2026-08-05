@@ -51,6 +51,12 @@ class ComponenteIn(BaseModel):
     ref_shift: str = ""          # turno del sub-APU si tipo == 'apu'
 
 
+class DuplicadoDeIn(BaseModel):
+    """APU del que sale una copia. Presente solo cuando el alta es un duplicado."""
+    codigo: str
+    turno: str
+
+
 class ApuNuevoIn(BaseModel):
     codigo: str
     turno: str
@@ -58,6 +64,7 @@ class ApuNuevoIn(BaseModel):
     unidad: str = ""
     grupo: str = ""
     componentes: list[ComponenteIn] = []
+    duplicado_de: Optional[DuplicadoDeIn] = None   # None = alta normal
 
 
 class ApuEditIn(BaseModel):

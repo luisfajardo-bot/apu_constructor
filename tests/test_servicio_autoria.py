@@ -346,3 +346,105 @@ def test_editar_apu_conserva_el_historico_de_los_componentes(tmp_path):
     assert comps["100"].precio_unitario_hist == 900.0      # heredado, no borrado
     assert comps["999"].precio_unitario_hist == 75000.0    # el huérfano conserva su respaldo
     assert comps["100"].rendimiento == 3.0                 # la edición sí se aplicó
+
+
+# ------------------------------------------------------------------- duplicado
+def _apu_origen(alm):
+    """APU de origen con un insumo normal y uno huérfano (con histórico real)."""
+    alm.apus.insert_apus([Apu("3454", "MEZCLA MD12", "M3", "DIURNO", "PAV")])
+    alm.apus.insert_components([
+        ApuComponent("3454", "DIURNO", "100", "CEMENTO GRIS", "KG", 2.0, 900.0),
+        ApuComponent("3454", "DIURNO", "999", "MEZCLA MD12", "M3", 1.0, 480000.0),
+    ])
+
+
+def test_duplicar_hereda_historico_y_deja_el_insumo_nuevo_en_el_piso(tmp_path):
+    alm = _alm(tmp_path)
+    _apu_origen(alm)
+    out = autoria.crear_apu(alm, {
+        "codigo": "3454-2", "turno": "DIURNO", "nombre": "MEZCLA MD13",
+        "unidad": "M3", "grupo": "PAV",
+        "componentes": [
+            {"insumo_codigo": "100", "rendimiento": 2.0},
+            {"insumo_codigo": "888", "rendimiento": 1.0,
+             "insumo_nombre": "MEZCLA MD13", "unidad": "M3"}],
+        "duplicado_de": {"codigo": "3454", "turno": "DIURNO"}})
+    assert out["codigo"] == "3454-2" and out["n_componentes"] == 2
+    comps = {c.insumo_codigo: c for c in alm.apus.get_components("3454-2", "DIURNO")}
+    assert comps["100"].precio_unitario_hist == 900.0    # heredado del origen
+    assert comps["888"].precio_unitario_hist == 1.0      # insumo nuevo -> piso
+    # el origen queda intacto
+    assert len(alm.apus.get_components("3454", "DIURNO")) == 2
+
+
+def test_duplicar_conserva_las_marcas_de_subapu_del_origen(tmp_path):
+    alm = _alm(tmp_path)
+    _apu_origen(alm)
+    alm.apus.set_componente_subapu("3454", "DIURNO", 0, "NOCTURNO")
+    autoria.crear_apu(alm, {
+        "codigo": "3454-2", "turno": "DIURNO", "nombre": "MEZCLA MD13",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}],   # sin 'tipo'
+        "duplicado_de": {"codigo": "3454", "turno": "DIURNO"}})
+    comps = alm.apus.get_components("3454-2", "DIURNO")
+    assert comps[0].tipo == "apu" and comps[0].ref_shift == "NOCTURNO"
+
+
+def test_duplicar_origen_inexistente_lanza(tmp_path):
+    alm = _alm(tmp_path)
+    with pytest.raises(ValueError, match="origen ya no existe"):
+        autoria.crear_apu(alm, {"codigo": "X", "turno": "DIURNO", "nombre": "X",
+            "componentes": [{"insumo_codigo": "100", "rendimiento": 1.0}],
+            "duplicado_de": {"codigo": "NOPE", "turno": "DIURNO"}})
+
+
+def test_duplicar_con_la_misma_identidad_lanza(tmp_path):
+    alm = _alm(tmp_path)
+    _apu_origen(alm)
+    with pytest.raises(ValueError, match="distinto al del APU de origen"):
+        autoria.crear_apu(alm, {"codigo": "3454", "turno": "DIURNO", "nombre": "OTRO",
+            "componentes": [{"insumo_codigo": "100", "rendimiento": 1.0}],
+            "duplicado_de": {"codigo": "3454", "turno": "DIURNO"}})
+
+
+def test_duplicar_con_el_mismo_nombre_lanza(tmp_path):
+    """Comparación normalizada: espacios, mayúsculas y puntuación no cuentan como cambio."""
+    alm = _alm(tmp_path)
+    _apu_origen(alm)
+    for nombre in ("MEZCLA MD12", "  mezcla   md12 ", "MEZCLA MD12."):
+        with pytest.raises(ValueError, match="nombre debe ser distinto"):
+            autoria.crear_apu(alm, {"codigo": "3454-2", "turno": "DIURNO",
+                "nombre": nombre,
+                "componentes": [{"insumo_codigo": "100", "rendimiento": 1.0}],
+                "duplicado_de": {"codigo": "3454", "turno": "DIURNO"}})
+
+
+def test_duplicar_destino_existente_lanza(tmp_path):
+    alm = _alm(tmp_path)
+    _apu_origen(alm)
+    alm.apus.insert_apus([Apu("3454-2", "YA ESTABA", "M3", "DIURNO", "PAV")])
+    with pytest.raises(ValueError):
+        autoria.crear_apu(alm, {"codigo": "3454-2", "turno": "DIURNO", "nombre": "MD13",
+            "componentes": [{"insumo_codigo": "100", "rendimiento": 1.0}],
+            "duplicado_de": {"codigo": "3454", "turno": "DIURNO"}})
+
+
+def test_duplicar_deja_rastro_en_auditoria(tmp_path):
+    alm = _alm(tmp_path)
+    _apu_origen(alm)
+    autoria.crear_apu(alm, {"codigo": "3454-2", "turno": "DIURNO", "nombre": "MEZCLA MD13",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}],
+        "duplicado_de": {"codigo": "3454", "turno": "DIURNO"}})
+    eventos, _ = alm.auditoria.listar(limit=50, offset=0)
+    creacion = [e for e in eventos if e["accion"] == "apu.crear"][0]
+    assert creacion["contexto"]["origen"] == "duplicado"
+    assert creacion["contexto"]["de"] == "3454"
+    assert creacion["contexto"]["de_turno"] == "DIURNO"
+
+
+def test_crear_apu_sin_duplicado_de_sigue_marcando_origen_individual(tmp_path):
+    alm = _alm(tmp_path)
+    autoria.crear_apu(alm, {"codigo": "B2", "turno": "DIURNO", "nombre": "PISO",
+        "componentes": [{"insumo_codigo": "100", "rendimiento": 2.0}]})
+    eventos, _ = alm.auditoria.listar(limit=50, offset=0)
+    creacion = [e for e in eventos if e["accion"] == "apu.crear"][0]
+    assert creacion["contexto"]["origen"] == "individual"

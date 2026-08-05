@@ -30,3 +30,38 @@ def test_totales_cuenta_items_con_alerta():
     ens = [_ensamble(0.0, 0.0), _ensamble(10.0, 10.0)]
     tot = _totales(ens, [_Row(), _Row()])
     assert tot["n_alertas_costeo"] == 1
+
+
+# --------------------------------------------------- piso de $1 vs. alerta de $0
+def test_componente_huerfano_creado_por_web_alerta_por_cruce_no_por_cero(tmp_path):
+    """Con el piso de $1 (Task 1), un componente huérfano deja de reportar el
+    genérico 'en $0' -que tapaba el motivo real- y reporta el motivo accionable
+    del cruce ('sin insumo en catálogo'). Sigue alertando, solo cambia el motivo."""
+    from apu_tool.datos.almacen import Almacen
+    from apu_tool.dominio.alertas import alertas_costeo
+    from apu_tool.dominio.pricing import PricingEngine
+    from apu_tool.servicio import autoria
+
+    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
+                  corridas_path=tmp_path / "c.db")
+    alm.init_schema()
+    # "999" no existe en el catálogo -> cruce huérfano al costear.
+    autoria.crear_apu(alm, {"codigo": "H1", "turno": "DIURNO", "nombre": "HUERFANO",
+        "unidad": "UN", "grupo": "G",
+        "componentes": [{"insumo_codigo": "999", "rendimiento": 1.0,
+                         "insumo_nombre": "NO EXISTE", "unidad": "UN"}]})
+    comps = alm.apus.get_components("H1", "DIURNO")
+    assert comps[0].precio_unitario_hist == 1.0            # el piso quedó guardado
+
+    costed, total = PricingEngine(alm).cost_apu("H1", "DIURNO")
+    assert costed[0].calidad_cruce == "huerfano"            # confirma el escenario
+    item = LicitacionItem(item="1", descripcion="HUERFANO", unidad="UN", cantidad=1.0,
+                          precio_contractual=1.0, shift="DIURNO")
+    ens = AssembledApu(item=item, apu_codigo="H1", apu_nombre="HUERFANO", unidad="UN",
+                       shift="DIURNO", componentes=costed, costo_unitario=total,
+                       status=MatchStatus.AUTO, confianza=1.0)
+
+    motivos = alertas_costeo(ens)
+    assert motivos, "el componente huérfano debe seguir alertando"
+    assert any("sin insumo en catálogo" in m for m in motivos)
+    assert not any("en $0" in m for m in motivos)

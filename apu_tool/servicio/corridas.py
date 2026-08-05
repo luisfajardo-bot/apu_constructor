@@ -256,6 +256,9 @@ def detalle_item(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
     return {
         "seq": row.seq, "descripcion": row.item.descripcion,
         "apu_codigo": row.apu_codigo, "apu_nombre": row.apu_nombre,
+        # turno del APU asignado: lo necesita "duplicar este APU y usarlo aquí"
+        # para leer el APU de origen de la biblioteca (la identidad es código+turno).
+        "apu_turno": row.shift,
         "status": row.status, "explicacion": row.explicacion,
         "candidatos": row.candidatos,
         "composicion": [{

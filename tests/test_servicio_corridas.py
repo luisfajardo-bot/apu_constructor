@@ -54,6 +54,7 @@ def test_detalle_confirmar_y_cuadro(tmp_path):
 
     det = corridas.detalle_item(alm, cid, 0)
     assert det["apu_codigo"] == "A1"
+    assert det["apu_turno"] == "DIURNO"      # lo necesita "duplicar y usar aquí"
     assert det["composicion"][0]["precio_unitario"] == 350000.0
 
     vista = corridas.confirmar_item(alm, cid, 0, apu_codigo="A2")

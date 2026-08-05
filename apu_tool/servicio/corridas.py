@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
@@ -316,25 +316,65 @@ def renombrar_corrida(alm: Almacen, corrida_id: int, nombre: str) -> Optional[di
     return vista_corrida(alm, corrida_id)
 
 
-def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
-                   shift: Optional[str] = None) -> Optional[dict]:
+def confirmar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
+                    apu_codigo: Optional[str] = None,
+                    shift: Optional[str] = None) -> Optional[dict]:
+    """Confirma varios ítems de una corrida en UN solo recosteo.
+
+    `apu_codigo=None` confirma el APU que cada ítem ya tiene (sin reasignar);
+    con `apu_codigo` se le asigna ese APU (codigo+turno) a todos los seqs.
+    Devuelve la vista de la corrida, o None si la corrida no existe.
+
+    Es la primitiva: `confirmar_item` es el caso de un solo seq. Un solo
+    Assembler para todo el lote (su PricingEngine cachea, y el camino de
+    confirmar no toca matcher/retriever, que son perezosos), y un solo
+    vista_corrida al final en vez de uno por ítem.
+    """
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:
         return None
     if meta.modo == "congelada":
         raise CorridaCongelada(corrida_id)
-    row = alm.corridas.get_item(corrida_id, seq)
-    if row is None:
-        return None
     assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False),
                           lista_id=meta.lista_precios_id)
-    ens = assembler.reassemble_with_choice(row.item, apu_codigo, shift or row.shift)
-    alm.corridas.actualizar_eleccion(
-        corrida_id, seq, status=MatchStatus.CONFIRMED.value, apu_codigo=ens.apu_codigo,
-        apu_nombre=ens.apu_nombre, unidad=ens.unidad, shift=ens.shift, origen=ens.origen,
-        confianza=ens.confianza, explicacion=ens.explicacion,
-        componentes=_estructura(ens.componentes))
+    # Dos pasadas. La primera resuelve (fila, código, turno) y valida que el APU
+    # exista, SIN escribir: con un código que no existe, reassemble_with_choice
+    # produce una composición vacía y el ítem queda costeado en $0 (regla de
+    # negocio: nada en $0 en silencio). Validando antes, un código inválido falla
+    # sin dejar el lote a medio aplicar.
+    # El turno se resuelve POR FILA (`shift or row.shift`): confirmar sin turno es
+    # un camino real y usado — el botón "Elegir" de los candidatos y "Confirmar APU
+    # actual" llaman sin él —, así que no se puede exigir.
+    trabajo: list[tuple[int, object, str, str]] = []
+    validados: set[tuple[str, str]] = set()
+    for seq in seqs:
+        row = alm.corridas.get_item(corrida_id, seq)
+        if row is None:
+            continue                      # seq ajeno a la corrida: se saltea
+        codigo = apu_codigo or row.apu_codigo
+        if not codigo:
+            continue                      # nada que confirmar (evita el $0)
+        turno = shift or row.shift
+        if (codigo, turno) not in validados:
+            if alm.apus.get_apu(codigo, turno) is None:
+                raise ValueError(f"No existe el APU {codigo} ({turno}).")
+            validados.add((codigo, turno))   # una consulta por par distinto, no por fila
+        trabajo.append((seq, row, codigo, turno))
+    for seq, row, codigo, turno in trabajo:
+        ens = assembler.reassemble_with_choice(row.item, codigo, turno)
+        alm.corridas.actualizar_eleccion(
+            corrida_id, seq, status=MatchStatus.CONFIRMED.value, apu_codigo=ens.apu_codigo,
+            apu_nombre=ens.apu_nombre, unidad=ens.unidad, shift=ens.shift, origen=ens.origen,
+            confianza=ens.confianza, explicacion=ens.explicacion,
+            componentes=_estructura(ens.componentes))
     return vista_corrida(alm, corrida_id)
+
+
+def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
+                   shift: Optional[str] = None) -> Optional[dict]:
+    """Un solo ítem. Wrapper sobre `confirmar_items` para que confirmar-uno y
+    confirmar-muchos no se puedan separar con el tiempo."""
+    return confirmar_items(alm, corrida_id, [seq], apu_codigo, shift or None)
 
 
 def listar_corridas(alm: Almacen) -> list[dict]:

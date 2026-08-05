@@ -33,8 +33,8 @@ from apu_tool.servicio.dependencias import get_almacen
 from apu_tool.servicio import limites
 from pydantic import BaseModel
 from apu_tool.servicio.esquemas import (
-    ApuEditIn, ApuNuevoIn, CambiosIn, ConfirmarIn, EstadoIn, InsumoNuevoIn, ListaPreciosIn,
-    RolIn, StatusOut, UsuarioInvitarIn)
+    ApuEditIn, ApuNuevoIn, CambiosIn, ConfirmarIn, ConfirmarLoteIn, EstadoIn, InsumoNuevoIn,
+    ListaPreciosIn, RolIn, StatusOut, UsuarioInvitarIn)
 
 
 class CarpetaIn(BaseModel):
@@ -274,6 +274,22 @@ def confirmar(cid: int, seq: int, body: ConfirmarIn,
                             detail="La corrida está congelada; actívala para modificar.")
     if v is None:
         raise HTTPException(status_code=404, detail="Ítem no encontrado.")
+    return v
+
+
+@router.post("/corridas/{cid}/items/confirmar-lote")
+def confirmar_lote(cid: int, body: ConfirmarLoteIn,
+                   alm: Almacen = Depends(get_almacen),
+                   _: object = Depends(requiere_rol("consulta"))):
+    try:
+        v = svc.confirmar_items(alm, cid, body.seqs, body.apu_codigo, body.shift)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para modificar.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v
 
 

@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 43 planes, 49 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 43 planes, 50 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -28,6 +28,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 43 plane
 | Fecha | Título |
 | --- | --- |
 | 2026-08-05 | [[Specs/2026-08-05-grupos-apu-desplegable-design|Grupo del APU como desplegable (vocabulario cerrado)]] |
+| 2026-08-05 | [[Specs/2026-08-05-asignar-apu-en-lote-design|Asignar / confirmar APU en lote desde la corrida]] |
 | 2026-08-04 | [[Specs/2026-08-04-piso-match-fallback-design|Diseño — piso de similaridad para el fallback determinístico]] |
 | 2026-08-04 | [[Specs/2026-08-04-duplicar-apu-design|Diseño — Duplicar un APU a partir de otro (variantes: MD12 → MD13)]] |
 | 2026-08-03 | [[Specs/2026-08-03-rediseno-interfaz-web-design|Diseño — rediseño visual de la interfaz web ("instrumento de medición")]] |

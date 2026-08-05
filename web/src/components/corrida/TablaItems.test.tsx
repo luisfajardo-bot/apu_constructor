@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import TablaItems from "./TablaItems";
 import { useCorridaTabla } from "@/lib/corridaTabla";
@@ -302,4 +302,72 @@ test("regresión: con puedeEditar={false}, 'Confirmar APU actual' sigue visible 
   const boton = await screen.findByRole("button", { name: /Confirmar APU actual/i });
   fireEvent.click(boton);
   await waitFor(() => expect(confirmar).toHaveBeenCalledWith(1, 0, "111", undefined));
+});
+
+test("duplicar en dos filas distintas: gana el pedido más reciente, no el que resuelve último", async () => {
+  const { getItem } = await import("@/api/corridas");
+  const { getApuDetalle } = await import("@/api/autoria");
+
+  // Dos filas con orígenes distinguibles (código y nombre) para poder afirmar
+  // cuál quedó mostrado en el diálogo.
+  vi.mocked(getItem)
+    .mockImplementationOnce(async () => ({
+      seq: 0, descripcion: "Item A", apu_codigo: "3454", apu_turno: "DIURNO",
+      apu_nombre: "MEZCLA MD12", status: "matched", explicacion: "",
+      candidatos: [], composicion: [], costo_unitario: 0,
+    }))
+    .mockImplementationOnce(async () => ({
+      seq: 1, descripcion: "Item B", apu_codigo: "7788", apu_turno: "DIURNO",
+      apu_nombre: "BASE GRANULAR", status: "matched", explicacion: "",
+      candidatos: [], composicion: [], costo_unitario: 0,
+    }));
+
+  // Diferidos: controlamos a mano el orden de resolución (al revés del orden
+  // de los clicks) para reproducir la carrera del hallazgo.
+  let resolverA: ((v: unknown) => void) | null = null;
+  let resolverB: ((v: unknown) => void) | null = null;
+  vi.mocked(getApuDetalle)
+    .mockImplementationOnce(() => new Promise((res) => { resolverA = res as (v: unknown) => void; }))
+    .mockImplementationOnce(() => new Promise((res) => { resolverB = res as (v: unknown) => void; }));
+
+  const items = [
+    { ...ITEM, seq: 0, apu_codigo: "3454" },
+    { ...ITEM, seq: 1, apu_codigo: "7788" },
+  ];
+  render(<TablaItems corridaId={1} items={items} onConfirmado={() => {}} puedeEditar />);
+
+  const chevrones = screen.getAllByLabelText("Expandir fila");
+  fireEvent.click(chevrones[0]);
+  fireEvent.click(chevrones[1]);
+
+  await waitFor(() =>
+    expect(screen.getAllByRole("button", { name: /Duplicar este APU/i })).toHaveLength(2),
+  );
+  const botones = screen.getAllByRole("button", { name: /Duplicar este APU/i });
+  fireEvent.click(botones[0]); // pide duplicar A (seq 0) primero
+  fireEvent.click(botones[1]); // pide duplicar B (seq 1) después — este es el pedido vigente
+
+  // Resuelve al revés de los clicks: A (el pedido viejo) llega DESPUÉS que B.
+  // `waitFor` daría un falso positivo aquí (ver DialogoAgregarApu.test.tsx): el
+  // primer chequeo sin lanzar corta antes de que el setState de la promesa
+  // termine de propagar. Por eso se resuelve y se drena la cola de microtasks
+  // dentro de `act`, y se afirma después con un `expect` plano.
+  await act(async () => {
+    resolverB!({
+      codigo: "7788", turno: "DIURNO", nombre: "BASE GRANULAR", unidad: "M3",
+      grupo: "PAV", costo_unitario: 100000, composicion: [],
+    });
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  await act(async () => {
+    resolverA!({
+      codigo: "3454", turno: "DIURNO", nombre: "MEZCLA MD12", unidad: "M3",
+      grupo: "PAV", costo_unitario: 480000, composicion: [],
+    });
+    await new Promise((r) => setTimeout(r, 0));
+  });
+
+  // Gana el pedido más reciente (B), aunque el de A haya resuelto después.
+  expect(screen.getByText(/Duplicar APU 7788/)).toBeTruthy();
+  expect(screen.queryByText(/Duplicar APU 3454/)).toBeNull();
 });

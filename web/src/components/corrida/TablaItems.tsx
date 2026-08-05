@@ -1,4 +1,4 @@
-import { useState, Fragment } from "react";
+import { useState, useRef, Fragment } from "react";
 import { toast } from "sonner";
 import {
   Table,
@@ -54,10 +54,15 @@ export default function TablaItems({
   // Duplicar el APU de un ítem: se lee el APU real de la biblioteca (la composición
   // del ítem es la costeada y no trae las marcas de sub-APU).
   const [duplicar, setDuplicar] = useState<{ seq: number; origen: ApuDetalle } | null>(null);
-  // `seq` cuyo fetch de "abrir duplicar" está en vuelo, para deshabilitar SU botón
-  // y evitar que dos fetches en carrera pisen el estado `duplicar` con la fila
-  // equivocada (ver Fix 4 del review).
+  // `seq` cuyo fetch de "abrir duplicar" está en vuelo, para deshabilitar SU botón.
+  // Es un escalar: solo frena el doble click en la MISMA fila. Para la carrera
+  // entre filas distintas (pedir duplicar en A y luego en B antes de que A
+  // resuelva) hace falta saber cuál fue el ÚLTIMO pedido, y eso no puede vivir
+  // en el estado: la closure async de `abrirDuplicar` vería el valor viejo (ya
+  // pasó con `codigoTocado` en este mismo archivo/feature). Por eso el pedido
+  // más reciente vive en un ref.
   const [cargandoDuplicar, setCargandoDuplicar] = useState<number | null>(null);
+  const ultimoPedidoDuplicarRef = useRef<number | null>(null);
 
   const nPorRevisar = items.filter((it) => REVISABLE.has(it.status)).length;
   const visible = control
@@ -112,11 +117,16 @@ export default function TablaItems({
   }
 
   async function abrirDuplicar(seq: number, codigo: string, turno: string) {
+    ultimoPedidoDuplicarRef.current = seq;
     setCargandoDuplicar(seq);
     try {
       const origen = await getApuDetalle(codigo, turno);
+      // Si mientras esperábamos el usuario pidió duplicar otra fila, este
+      // resultado ya quedó superado: no lo mostramos (ganaría el pedido viejo).
+      if (ultimoPedidoDuplicarRef.current !== seq) return;
       setDuplicar({ seq, origen });
     } catch {
+      if (ultimoPedidoDuplicarRef.current !== seq) return;
       toast.error("No se pudo leer el APU de origen.");
     } finally {
       setCargandoDuplicar(null);

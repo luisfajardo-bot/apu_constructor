@@ -1,4 +1,5 @@
 import { useState, Fragment } from "react";
+import { toast } from "sonner";
 import {
   Table,
   TableBody,
@@ -12,10 +13,12 @@ import EstadoBadge from "@/components/corrida/EstadoBadge";
 import SubApuBadge from "@/components/SubApuBadge";
 import BuscadorApu from "@/components/corrida/BuscadorApu";
 import CabeceraFiltros from "@/components/corrida/CabeceraFiltros";
+import { DialogoAgregarApu } from "@/components/autoria/DialogoAgregarApu";
 import { cop, pct } from "@/lib/moneda";
 import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
 import { getItem, confirmar } from "@/api/corridas";
-import type { ItemCuadro, DetalleItem, CorridaDetalle } from "@/lib/tipos";
+import { getApuDetalle } from "@/api/autoria";
+import type { ItemCuadro, DetalleItem, CorridaDetalle, ApuDetalle } from "@/lib/tipos";
 import type { ControlCorridaTabla } from "@/lib/corridaTabla";
 
 interface TablaItemsProps {
@@ -24,6 +27,8 @@ interface TablaItemsProps {
   onConfirmado: (corridaActualizada: CorridaDetalle) => void;
   readOnly?: boolean;
   control?: ControlCorridaTabla;
+  /** Rol editor: habilita crear un APU nuevo (duplicar) desde la corrida. */
+  puedeEditar?: boolean;
 }
 
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
@@ -36,6 +41,7 @@ export default function TablaItems({
   onConfirmado,
   readOnly = false,
   control,
+  puedeEditar = false,
 }: TablaItemsProps) {
   // Con `control`, el padre ya entrega las filas filtradas/ordenadas y controla
   // "Solo revisión". Sin `control` (modo vivo), se mantiene el filtro local de hoy.
@@ -45,6 +51,9 @@ export default function TablaItems({
   const [expandido, setExpandido] = useState<Record<number, EstadoExpansion | undefined>>({});
   const [confirmando, setConfirmando] = useState<string | null>(null);
   const [errorConfirm, setErrorConfirm] = useState<Record<number, string>>({});
+  // Duplicar el APU de un ítem: se lee el APU real de la biblioteca (la composición
+  // del ítem es la costeada y no trae las marcas de sub-APU).
+  const [duplicar, setDuplicar] = useState<{ seq: number; origen: ApuDetalle } | null>(null);
 
   const nPorRevisar = items.filter((it) => REVISABLE.has(it.status)).length;
   const visible = control
@@ -72,7 +81,13 @@ export default function TablaItems({
     }
   }
 
-  async function handleConfirmar(seq: number, apuCodigo: string, shift?: string) {
+  /** Devuelve true si el ítem quedó reasignado. Los llamadores que no lo necesiten
+   *  pueden ignorar el valor (el tipo de `onConfirmar` declara `void`). */
+  async function handleConfirmar(
+    seq: number,
+    apuCodigo: string,
+    shift?: string,
+  ): Promise<boolean> {
     setConfirmando(apuCodigo + "@" + seq);
     setErrorConfirm((prev) => ({ ...prev, [seq]: "" }));
     try {
@@ -80,13 +95,38 @@ export default function TablaItems({
       // Colapsar la fila y refrescar el detalle para mostrar nuevo estado
       setExpandido((prev) => ({ ...prev, [seq]: undefined }));
       onConfirmado(corridaActualizada);
+      return true;
     } catch (err) {
       setErrorConfirm((prev) => ({
         ...prev,
         [seq]: err instanceof Error ? err.message : "Error al confirmar",
       }));
+      return false;
     } finally {
       setConfirmando(null);
+    }
+  }
+
+  async function abrirDuplicar(seq: number, codigo: string, turno: string) {
+    try {
+      const origen = await getApuDetalle(codigo, turno);
+      setDuplicar({ seq, origen });
+    } catch {
+      toast.error("No se pudo leer el APU de origen.");
+    }
+  }
+
+  async function duplicado(seq: number, codigo: string, turno: string) {
+    setDuplicar(null);
+    // El APU YA está creado. Si la reasignación falla, hay que decirlo: dejar el
+    // toast de éxito o el silencio sugeriría que no pasó nada.
+    const ok = await handleConfirmar(seq, codigo, turno);
+    if (ok) {
+      toast.success(`APU ${codigo} creado y asignado al ítem.`);
+    } else {
+      toast.error(
+        `APU ${codigo} creado; no se pudo asignar al ítem — asignalo con Cambiar APU.`,
+      );
     }
   }
 
@@ -231,6 +271,8 @@ export default function TablaItems({
                           errorConfirm={errorConfirm[it.seq]}
                           onConfirmar={handleConfirmar}
                           readOnly={readOnly}
+                          puedeDuplicar={puedeEditar && !readOnly}
+                          onDuplicar={abrirDuplicar}
                         />
                       )}
                     </TableCell>
@@ -251,6 +293,17 @@ export default function TablaItems({
           )}
         </TableBody>
       </Table>
+
+      {duplicar && (
+        <DialogoAgregarApu
+          key={`dup-${duplicar.origen.codigo}@@${duplicar.origen.turno}@@${duplicar.seq}`}
+          open
+          onOpenChange={(v) => { if (!v) setDuplicar(null); }}
+          onCreado={(codigo, turno) => duplicado(duplicar.seq, codigo, turno)}
+          modo="duplicar"
+          inicial={duplicar.origen}
+        />
+      )}
     </div>
   );
 }
@@ -264,6 +317,8 @@ interface DetalleExpandidoProps {
   errorConfirm: string | undefined;
   onConfirmar: (seq: number, apuCodigo: string, shift?: string) => void;
   readOnly: boolean;
+  puedeDuplicar: boolean;
+  onDuplicar: (seq: number, codigo: string, turno: string) => void;
 }
 
 function DetalleExpandido({
@@ -273,6 +328,8 @@ function DetalleExpandido({
   errorConfirm,
   onConfirmar,
   readOnly,
+  puedeDuplicar,
+  onDuplicar,
 }: DetalleExpandidoProps) {
   const esRevisable = REVISABLE.has(detalle.status);
 
@@ -355,6 +412,18 @@ function DetalleExpandido({
             disabled={confirmando !== null || readOnly}
             onElegir={(apu) => onConfirmar(seq, apu.codigo, apu.turno)}
           />
+          {puedeDuplicar && detalle.apu_codigo && (
+            <div className="mt-2">
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={confirmando !== null}
+                onClick={() => onDuplicar(seq, detalle.apu_codigo, detalle.apu_turno)}
+              >
+                Duplicar este APU y usarlo aquí
+              </Button>
+            </div>
+          )}
         </section>
       )}
 

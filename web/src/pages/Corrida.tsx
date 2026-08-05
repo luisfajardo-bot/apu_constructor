@@ -8,6 +8,8 @@ import { cop, pct } from "@/lib/moneda";
 import { fmtDuracion } from "@/lib/tiempo";
 import { useArmadoVivo } from "@/lib/armado";
 import { useCorridaTabla } from "@/lib/corridaTabla";
+import { useAuth } from "@/lib/auth";
+import { puede } from "@/components/rutas";
 import type { CorridaDetalle, ItemCuadro, Totales } from "@/lib/tipos";
 
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
@@ -31,6 +33,7 @@ export default function Corrida() {
   const corridaId = Number(id);
   const vivo = useArmadoVivo();
   const live = vivo.corridaId === corridaId && vivo.estado === "armando";
+  const { perfil } = useAuth();
 
   const [corrida, setCorrida] = useState<CorridaDetalle | null>(null);
   const [cargando, setCargando] = useState(true);
@@ -204,6 +207,7 @@ export default function Corrida() {
         onConfirmado={(c) => setCorrida(c)}
         readOnly={data.modo === "congelada"}
         control={live ? undefined : control}
+        puedeEditar={puede(perfil?.rol, "editor")}
       />
     </div>
   );

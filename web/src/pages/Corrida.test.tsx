@@ -6,6 +6,8 @@ vi.mock("@/lib/armado", () => ({
   useArmadoVivo: () => ({ corridaId: null, estado: "idle", filas: [], total: 0 }),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+// Corrida ahora usa useAuth() para calcular `puedeEditar` (rol -> TablaItems).
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ perfil: { rol: "editor" } }) }));
 
 function fila(p: Record<string, unknown>) {
   return {

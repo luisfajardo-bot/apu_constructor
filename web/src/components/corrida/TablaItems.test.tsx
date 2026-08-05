@@ -5,7 +5,8 @@ import { useCorridaTabla } from "@/lib/corridaTabla";
 
 vi.mock("@/api/corridas", () => ({
   getItem: vi.fn(async () => ({
-    seq: 0, descripcion: "Concreto", apu_codigo: "111", apu_nombre: "APU VIEJO",
+    seq: 0, descripcion: "Concreto", apu_codigo: "111", apu_turno: "DIURNO",
+    apu_nombre: "APU VIEJO",
     status: "matched", explicacion: "", candidatos: [], composicion: [], costo_unitario: 0,
   })),
   confirmar: vi.fn(async () => ({
@@ -19,7 +20,22 @@ vi.mock("@/api/autoria", () => ({
               unidad: "M3", grupo: "G", n_componentes: 2 }],
     total: 1, limit: 15, offset: 0,
   })),
+  getApuDetalle: vi.fn(async () => ({
+    codigo: "3454", turno: "DIURNO", nombre: "MEZCLA MD12", unidad: "M3", grupo: "PAV",
+    costo_unitario: 480000,
+    composicion: [{
+      insumo_codigo: "999", insumo_nombre: "MEZCLA MD12", unidad: "M3",
+      rendimiento: 1, precio_unitario: 480000, fuente_precio: "PRECIO IDU",
+      costo: 480000, calidad_cruce: "exacto",
+    }],
+  })),
+  crearApu: vi.fn(async () => ({})),
+  editarApu: vi.fn(async () => ({})),
 }));
+vi.mock("@/api/insumos", () => ({
+  listarInsumos: vi.fn(async () => ({ items: [], total: 0, limit: 15, offset: 0 })),
+}));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const ITEM = {
   seq: 0, item: "1", descripcion: "Concreto", unidad: "M3", cantidad: 10,
@@ -172,4 +188,74 @@ test("muestra el unitario contractual y el costo unitario en la fila", async () 
   // cop(): "$" + toLocaleString("es-CO"), sin espacio ni decimales
   expect(screen.getByText("$1.234")).toBeTruthy();
   expect(screen.getByText("$567")).toBeTruthy();
+});
+
+test("con rol editor, el ítem ofrece duplicar el APU y usarlo aquí", async () => {
+  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} puedeEditar />);
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  expect(
+    await screen.findByRole("button", { name: /Duplicar este APU/i }),
+  ).toBeTruthy();
+});
+
+test("sin rol editor no ofrece duplicar", async () => {
+  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} />);
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await screen.findByText(/Cambiar APU/i);
+  expect(screen.queryByRole("button", { name: /Duplicar este APU/i })).toBeNull();
+});
+
+test("en corrida congelada no ofrece duplicar", async () => {
+  render(
+    <TablaItems
+      corridaId={1}
+      items={[ITEM]}
+      onConfirmado={() => {}}
+      puedeEditar
+      readOnly
+    />,
+  );
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  expect(screen.queryByRole("button", { name: /Duplicar este APU/i })).toBeNull();
+});
+
+test("al crear la copia, el ítem queda reasignado al APU nuevo", async () => {
+  const { confirmar } = await import("@/api/corridas");
+  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} puedeEditar />);
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  fireEvent.click(await screen.findByRole("button", { name: /Duplicar este APU/i }));
+  // el diálogo abre precargado desde la biblioteca
+  fireEvent.change(await screen.findByDisplayValue("MEZCLA MD12"), {
+    target: { value: "MEZCLA MD13" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Crear APU/i }));
+  await waitFor(() =>
+    expect(confirmar).toHaveBeenCalledWith(1, ITEM.seq, "3454-2", "DIURNO"));
+});
+
+test("si el APU se crea pero la reasignación falla, el toast lo dice (no sugiere que no pasó nada)", async () => {
+  const { confirmar } = await import("@/api/corridas");
+  const { toast } = await import("sonner");
+  vi.mocked(confirmar).mockRejectedValueOnce(new Error("fallo de red"));
+  // Los mocks de este archivo no se resetean entre tests: limpiamos el historial
+  // del toast para que el "no llamado con X" de abajo mire solo este test.
+  vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.error).mockClear();
+  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} puedeEditar />);
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  fireEvent.click(await screen.findByRole("button", { name: /Duplicar este APU/i }));
+  fireEvent.change(await screen.findByDisplayValue("MEZCLA MD12"), {
+    target: { value: "MEZCLA MD13" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Crear APU/i }));
+  // El APU quedó creado (llamó confirmar con el código sugerido) pero la
+  // reasignación al ítem falló: el toast tiene que decir ambas cosas, no solo
+  // reportar el error como si nada se hubiera creado.
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "APU 3454-2 creado; no se pudo asignar al ítem — asignalo con Cambiar APU.",
+    ));
+  expect(toast.success).not.toHaveBeenCalledWith(
+    expect.stringContaining("asignado al ítem"),
+  );
 });

@@ -1,4 +1,4 @@
-﻿// Helpers puros para duplicar un APU. Aislados para testearlos sin montar la UI,
+// Helpers puros para duplicar un APU. Aislados para testearlos sin montar la UI,
 // igual que costoApu.ts / validacionApu.ts.
 
 /** Convención de la empresa: el APU nocturno lleva el código con sufijo " N". */

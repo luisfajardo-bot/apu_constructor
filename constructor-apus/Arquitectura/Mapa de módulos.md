@@ -29,6 +29,7 @@ flowchart TD
 | --- | --- |
 | `models.py` | Estructuras de datos del dominio. |
 | `redondeo.py` | Redondeo a la unidad (peso) en multiplicaciones monetarias. |
+| `relevancia.py` | Orden por relevancia de una búsqueda por texto (capa núcleo, sin dependencias). |
 | `texto.py` | Normalización de texto compartida (capa núcleo, sin dependencias). |
 
 ## datos/ — persistencia (incluye datos/pg/, backend Postgres)

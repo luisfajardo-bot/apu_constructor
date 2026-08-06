@@ -61,6 +61,7 @@ intento_plan/
 │   ├── nucleo/                    ── KERNEL COMPARTIDO
 │   │   ├── models.py              #   dataclasses puras (Insumo, Apu, DePriced*)
 │   │   ├── redondeo.py            #   redondeo a la unidad en multiplicaciones monetarias
+│   │   ├── relevancia.py          #   orden por relevancia de una búsqueda + similarity
 │   │   └── texto.py               #   normalización de texto compartida
 │   │
 │   ├── datos/                     ── NIVEL 01 · plataforma de datos

@@ -6,52 +6,19 @@ nombres de los APUs históricos, filtrando por turno. Devuelve candidatos
 ordenados por similaridad. La decisión sobre los dudosos la toma luego la IA o el
 usuario (ver assemble.py).
 
-Algoritmo: normalización (mayúsculas, sin tildes, sin stopwords) + combinación de
-similaridad de secuencia (difflib) y similaridad de tokens (Jaccard). Sin
-dependencias externas para que corra en cualquier máquina.
+Algoritmo: normalización + combinación de similaridad de secuencia (difflib) y de
+tokens (Jaccard). Vive en `nucleo/relevancia.py` (lo comparte la búsqueda por
+relevancia de la web) y se reexporta acá.
 """
 from __future__ import annotations
 
-from difflib import SequenceMatcher
-from functools import lru_cache
-
 from apu_tool import config
 from apu_tool.nucleo.models import LicitacionItem, MatchCandidate, MatchResult, MatchStatus
-from apu_tool.nucleo.texto import normalizar as _normalizar
 
-_STOPWORDS = {
-    "de", "la", "el", "los", "las", "del", "y", "o", "en", "para", "por", "con",
-    "incluye", "incluido", "no", "un", "una", "a", "e", "su", "al", "segun",
-    "tipo", "obra", "ml", "m2", "m3", "und", "un",
-}
-
-
-@lru_cache(maxsize=20000)
-def normalize(text: str) -> str:
-    return _normalizar(text)
-
-
-def _tokens(text: str) -> frozenset[str]:
-    return frozenset(
-        t for t in normalize(text).split() if t and t.lower() not in _STOPWORDS
-    )
-
-
-def similarity(a: str, b: str) -> float:
-    """Similaridad 0..1 combinando secuencia y tokens."""
-    na, nb = normalize(a), normalize(b)
-    if not na or not nb:
-        return 0.0
-    if na == nb:
-        return 1.0
-    seq = SequenceMatcher(None, na, nb).ratio()
-    ta, tb = _tokens(a), _tokens(b)
-    if ta and tb:
-        jaccard = len(ta & tb) / len(ta | tb)
-    else:
-        jaccard = 0.0
-    # Peso mayor a tokens: el orden de palabras varía mucho en obra civil.
-    return 0.4 * seq + 0.6 * jaccard
+# `similarity`, `normalize` y `_tokens` viven en núcleo (utilidades puras de texto, la
+# misma razón que `normalizar`). Se reexportan acá porque compose.py, cruce.py y los
+# tests de matching las importan de este módulo desde antes de la mudanza.
+from apu_tool.nucleo.relevancia import _tokens, normalize, similarity  # noqa: F401
 
 
 class Matcher:

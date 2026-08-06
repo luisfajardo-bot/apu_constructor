@@ -68,6 +68,7 @@ matching, modelo de IA, clasificación de precios.
 |--------|-----------------|
 | `models.py`   | tipos del dominio; vistas `DePriced*` SIN dinero |
 | `redondeo.py` | redondeo a la unidad (peso) en multiplicaciones monetarias |
+| `relevancia.py` | orden por relevancia de una búsqueda + scorer `similarity` |
 | `texto.py`    | normalización de texto compartida |
 
 ### `apu_tool/datos/` — persistencia (**toda** la persistencia pasa por aquí)

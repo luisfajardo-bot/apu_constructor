@@ -65,10 +65,14 @@ código inexistente produce una composición vacía y el ítem queda **costeado 
 que es exactamente lo que prohíbe la regla "nada en $0". Al vivir la validación en
 la primitiva compartida, los dos caminos quedan cubiertos con un solo guard.
 
-Con `apu_codigo` explícito el `shift` es **obligatorio**: si viene vacío se lanza
-`ValueError` (400), porque sin él no hay par (código, turno) que validar y el APU
-podría no existir para ese turno. `BuscadorApu` siempre entrega los dos. Con
-`apu_codigo=None` el shift de cada fila sale de la propia fila.
+El `shift` NUNCA es obligatorio, ni con `apu_codigo` explícito: cada fila resuelve
+su propio turno con `turno = shift or row.shift`. Exigirlo rompería llamadores
+reales que confirman sin turno — `rutas.py` lo recibe opcional desde el body
+(`ConfirmarIn`/`ConfirmarLoteIn`), y en el frontend tanto el botón *Elegir* de los
+candidatos como *Confirmar el APU actual* llaman sin él. `BuscadorApu` sí entrega
+siempre el par (código, turno), pero no es el único llamador. La validación usa
+el turno ya resuelto por fila (`codigo, turno` tal como quedó calculado), así que
+sigue cubierta sin necesitar que el llamador lo mande.
 
 ### Sin transacción para el lote
 

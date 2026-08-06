@@ -67,7 +67,7 @@ def test_apu_inexistente_no_toca_nada(tmp_path):
     alm, sc = _alm(tmp_path)
     cid = _corrida(alm, sc)
     antes = _estado(alm, cid)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"Fila 0"):    # incluye la fila que lo disparó
         svc.confirmar_items(alm, cid, [0, 1, 2], apu_codigo="NOEXISTE", shift="DIURNO")
     assert _estado(alm, cid) == antes
 
@@ -160,6 +160,22 @@ def test_endpoint_confirmar_item_seq_inexistente_404(tmp_path):
     r = cli.post(f"/api/corridas/{cid}/items/999/confirmar",
                  json={"apu_codigo": "A2", "shift": "DIURNO"})
     assert r.status_code == 404
+
+
+def test_endpoint_confirmar_item_apu_inexistente_400_con_motivo(tmp_path):
+    """El endpoint de un solo ítem tiene que traducir el ValueError de la validación
+    igual que el del lote: 400 con el código del APU en el detail, no el genérico
+    "Solicitud inválida." del handler global de app.py."""
+    from apu_tool.servicio.app import create_app
+    from tests.conftest import cliente
+
+    alm, sc = _alm(tmp_path)
+    cid = _corrida(alm, sc)
+    cli = cliente(create_app(almacen=alm), rol="admin")
+    r = cli.post(f"/api/corridas/{cid}/items/0/confirmar",
+                 json={"apu_codigo": "NOEXISTE", "shift": "DIURNO"})
+    assert r.status_code == 400
+    assert "NOEXISTE" in r.json()["detail"]
 
 
 def test_endpoint_confirmar_lote_todos_los_seqs_inexistentes_404(tmp_path):

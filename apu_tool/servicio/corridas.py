@@ -351,8 +351,13 @@ def confirmar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
     trabajo: list[tuple[int, CorridaItemRow, str, str]] = []
     validados: set[tuple[str, str]] = set()
     encontrados = 0
+    # Una sola consulta para toda la corrida (get_items, no get_item por seq): con
+    # Postgres lo caro es la latencia del viaje, no el tamaño del payload, y este
+    # dict evita pagar un round trip por fila marcada (era el N+1 que esta feature
+    # existe para evitar).
+    filas_por_seq = {r.seq: r for r in alm.corridas.get_items(corrida_id)}
     for seq in seqs_pedidos:
-        row = alm.corridas.get_item(corrida_id, seq)
+        row = filas_por_seq.get(seq)
         if row is None:
             continue                      # seq ajeno a la corrida: se saltea
         encontrados += 1
@@ -361,8 +366,14 @@ def confirmar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
             continue                      # nada que confirmar (evita el $0)
         turno = shift or row.shift
         if (codigo, turno) not in validados:
+            # Turno EXACTO a propósito, más estricto que el fallback de `_build`
+            # (assemble.py), que si el código existe con OTRO turno cae a ese turno
+            # en silencio. Ese autocorregido silencioso es justo la clase de sorpresa
+            # que "nada en $0" quiere evitar: costear con el turno equivocado sin que
+            # nadie se entere. Acá se prefiere fallar y que el usuario mande el turno
+            # correcto.
             if alm.apus.get_apu(codigo, turno) is None:
-                raise ValueError(f"No existe el APU {codigo} ({turno}).")
+                raise ValueError(f"Fila {seq}: no existe el APU {codigo} ({turno}).")
             validados.add((codigo, turno))   # una consulta por par distinto, no por fila
         trabajo.append((seq, row, codigo, turno))
     # Ningún seq de los pedidos existe: no hay nada que informar y el llamador

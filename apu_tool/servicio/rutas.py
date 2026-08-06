@@ -272,6 +272,8 @@ def confirmar(cid: int, seq: int, body: ConfirmarIn,
     except svc.CorridaCongelada:
         raise HTTPException(status_code=409,
                             detail="La corrida está congelada; actívala para modificar.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if v is None:
         raise HTTPException(status_code=404, detail="Ítem no encontrado.")
     return v

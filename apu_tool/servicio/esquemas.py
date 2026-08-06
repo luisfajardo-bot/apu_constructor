@@ -17,6 +17,12 @@ class ConfirmarIn(BaseModel):
     shift: Optional[str] = None
 
 
+class ConfirmarLoteIn(BaseModel):
+    seqs: list[int]
+    apu_codigo: Optional[str] = None
+    shift: Optional[str] = None
+
+
 class CambioIn(BaseModel):
     insumo_id: int
     precio: float

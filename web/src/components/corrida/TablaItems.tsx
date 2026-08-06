@@ -16,7 +16,7 @@ import CabeceraFiltros from "@/components/corrida/CabeceraFiltros";
 import { DialogoAgregarApu } from "@/components/autoria/DialogoAgregarApu";
 import { cop, pct } from "@/lib/moneda";
 import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
-import { getItem, confirmar } from "@/api/corridas";
+import { getItem, confirmar, confirmarLote } from "@/api/corridas";
 import { getApuDetalle } from "@/api/autoria";
 import type { ItemCuadro, DetalleItem, CorridaDetalle, ApuDetalle } from "@/lib/tipos";
 import type { ControlCorridaTabla } from "@/lib/corridaTabla";
@@ -64,12 +64,60 @@ export default function TablaItems({
   const [cargandoDuplicar, setCargandoDuplicar] = useState<number | null>(null);
   const ultimoPedidoDuplicarRef = useRef<number | null>(null);
 
+  // Selección para las acciones en lote. Guarda seqs, no índices: la tabla se
+  // reordena y se filtra, y un índice dejaría de apuntar a la misma fila.
+  const [marcadas, setMarcadas] = useState<Set<number>>(new Set());
+  // Ancla del rango: guarda el SEQ, no el índice. Si el usuario cambia el filtro o
+  // el orden entre el click y el Shift+click, el índice viejo apuntaría a otra fila;
+  // el seq se resuelve contra el `visible` del momento.
+  const anclaSeqRef = useRef<number | null>(null);
+
   const nPorRevisar = items.filter((it) => REVISABLE.has(it.status)).length;
   const visible = control
     ? items
     : soloRevision
       ? items.filter((it) => REVISABLE.has(it.status))
       : items;
+
+  // Solo se actúa sobre lo que se está viendo: si el usuario marca filas y después
+  // cambia el filtro, las que se fueron no se tocan (y el contador no las cuenta).
+  const seleccionadas = visible.filter((it) => marcadas.has(it.seq)).map((it) => it.seq);
+  const haySeleccion = seleccionadas.length > 0;
+  // La selección solo existe con `control` (no en el armado en vivo, cuya tabla
+  // viene del stream) y con la corrida activa.
+  const seleccionable = control !== undefined && !readOnly;
+
+  function alternar(idx: number, seq: number, conShift: boolean) {
+    const desde = anclaSeqRef.current === null
+      ? -1
+      : visible.findIndex((it) => it.seq === anclaSeqRef.current);
+    if (conShift && desde >= 0) {
+      const [a, b] = desde <= idx ? [desde, idx] : [idx, desde];
+      const rango = visible.slice(a, b + 1).map((it) => it.seq);
+      setMarcadas((prev) => new Set([...prev, ...rango]));
+      return;                                  // el ancla del rango no se mueve
+    }
+    anclaSeqRef.current = seq;
+    setMarcadas((prev) => {
+      const s = new Set(prev);
+      if (s.has(seq)) s.delete(seq); else s.add(seq);
+      return s;
+    });
+  }
+
+  function marcarTodas(marcar: boolean) {
+    anclaSeqRef.current = null;
+    setMarcadas((prev) => {
+      const s = new Set(prev);
+      for (const it of visible) { if (marcar) s.add(it.seq); else s.delete(it.seq); }
+      return s;
+    });
+  }
+
+  function limpiarSeleccion() {
+    anclaSeqRef.current = null;
+    setMarcadas(new Set());
+  }
 
   async function toggleExpand(seq: number) {
     const actual = expandido[seq];
@@ -116,6 +164,36 @@ export default function TablaItems({
     }
   }
 
+  const [enLote, setEnLote] = useState(false);
+
+  /** `apu` undefined = confirmar el APU que cada línea ya tiene. */
+  async function accionLote(apu?: { codigo: string; turno: string }) {
+    // Sin APU explícito, las filas sin APU no tienen nada que confirmar: se filtran
+    // acá para no mandarle al backend seqs que va a saltear igual.
+    const objetivo = apu
+      ? seleccionadas
+      : visible.filter((it) => marcadas.has(it.seq) && it.apu_codigo).map((it) => it.seq);
+    if (objetivo.length === 0) {
+      toast.error("Ninguna de las líneas marcadas tiene APU para confirmar.");
+      return;
+    }
+    setEnLote(true);
+    try {
+      const actualizada = await confirmarLote(corridaId, objetivo, apu?.codigo, apu?.turno);
+      onConfirmado(actualizada);
+      limpiarSeleccion();
+      const n = objetivo.length;
+      toast.success(apu
+        ? `${apu.codigo} asignado a ${n} ${n === 1 ? "línea" : "líneas"}`
+        : `${n} ${n === 1 ? "línea confirmada" : "líneas confirmadas"}`);
+    } catch (e) {
+      // La selección NO se limpia: el usuario puede reintentar sin volver a marcar.
+      toast.error(e instanceof Error ? e.message : "No se pudo aplicar el cambio en lote.");
+    } finally {
+      setEnLote(false);
+    }
+  }
+
   async function abrirDuplicar(seq: number, codigo: string, turno: string) {
     ultimoPedidoDuplicarRef.current = seq;
     setCargandoDuplicar(seq);
@@ -146,8 +224,8 @@ export default function TablaItems({
     }
   }
 
-  // Total columns = 1 (chevron) + 12 data cols = 13
-  const TOTAL_COLS = 13;
+  // 1 chevron + 12 columnas de datos, más la de selección cuando está activa.
+  const TOTAL_COLS = 13 + (seleccionable ? 1 : 0);
 
   return (
     <div className="flex flex-col gap-2">
@@ -176,12 +254,31 @@ export default function TablaItems({
             Limpiar filtros
           </button>
         )}
+        {seleccionable && (
+          <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              className="cursor-pointer"
+              aria-label="Marcar todas las líneas visibles"
+              checked={visible.length > 0 && seleccionadas.length === visible.length}
+              onChange={(e) => marcarTodas(e.target.checked)}
+            />
+            Marcar todas
+          </label>
+        )}
+        {haySeleccion && (
+          <span className="text-xs font-medium text-foreground">
+            {seleccionadas.length === 1
+              ? "1 línea marcada"
+              : `${seleccionadas.length} líneas marcadas`}
+          </span>
+        )}
       </div>
 
       {/* Dense table */}
       <Table>
         {control ? (
-          <CabeceraFiltros control={control} />
+          <CabeceraFiltros control={control} conSeleccion={seleccionable} />
         ) : (
           <TableHeader>
             <TableRow>
@@ -202,13 +299,25 @@ export default function TablaItems({
           </TableHeader>
         )}
         <TableBody>
-          {visible.map((it) => {
+          {visible.map((it, idx) => {
             const estado = expandido[it.seq];
             const abierto = estado !== undefined;
 
             return (
               <Fragment key={it.seq}>
                 <TableRow className="hover:bg-muted/40">
+                  {seleccionable && (
+                    <TableCell className="w-8 px-1 py-1">
+                      <input
+                        type="checkbox"
+                        className="cursor-pointer"
+                        aria-label={`Marcar ítem ${it.item}`}
+                        checked={marcadas.has(it.seq)}
+                        onChange={() => {}}
+                        onClick={(e) => alternar(idx, it.seq, e.shiftKey)}
+                      />
+                    </TableCell>
+                  )}
                   {/* Chevron control */}
                   <TableCell className="w-6 px-1 py-1">
                     <button
@@ -310,6 +419,26 @@ export default function TablaItems({
           )}
         </TableBody>
       </Table>
+
+      {seleccionable && haySeleccion && (
+        <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t bg-background/95 px-2 py-2 backdrop-blur">
+          <span className="text-xs font-medium">
+            {seleccionadas.length} {seleccionadas.length === 1 ? "línea" : "líneas"}
+          </span>
+          <div className="min-w-[220px] flex-1">
+            <BuscadorApu
+              disabled={enLote}
+              onElegir={(apu) => accionLote({ codigo: apu.codigo, turno: apu.turno })}
+            />
+          </div>
+          <Button size="xs" variant="outline" disabled={enLote} onClick={() => accionLote()}>
+            {enLote ? "Aplicando…" : "Confirmar el APU actual"}
+          </Button>
+          <Button size="xs" variant="ghost" disabled={enLote} onClick={limpiarSeleccion}>
+            Limpiar
+          </Button>
+        </div>
+      )}
 
       {duplicar && (
         <DialogoAgregarApu

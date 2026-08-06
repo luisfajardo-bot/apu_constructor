@@ -53,6 +53,21 @@ export function confirmar(
   });
 }
 
+/** Confirma varias líneas de una vez. Sin `apu_codigo`, cada línea confirma el APU
+ *  que ya tiene. Devuelve la corrida recosteada (misma forma que `confirmar`). */
+export function confirmarLote(
+  id: number,
+  seqs: number[],
+  apu_codigo?: string,
+  shift?: string,
+): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/items/confirmar-lote`, {
+    seqs,
+    ...(apu_codigo !== undefined ? { apu_codigo } : {}),
+    ...(shift !== undefined ? { shift } : {}),
+  });
+}
+
 export function congelarCorrida(id: number): Promise<CorridaDetalle> {
   return apiPost<CorridaDetalle>(`/corridas/${id}/congelar`);
 }

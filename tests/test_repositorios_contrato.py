@@ -377,3 +377,60 @@ def test_list_apus_sin_q_no_cambia(repos):
     ])
     items, total = apus.list_apus()
     assert [a.codigo for a in items] == ["1000", "2000"] and total == 2
+
+
+def test_list_insumos_ordena_por_relevancia(repos):
+    """Mismo criterio que APUs: el que empieza con la palabra va primero, aunque su
+    código sea mayor."""
+    precios, _ = repos
+    precios.insert_insumos([
+        Insumo("1000", "TUBERIA PVC PARA ACUEDUCTO", "ML", "MATERIAL", 1000.0, "PRECIO IDU"),
+        Insumo("2000", "ACUEDUCTO DOMICILIARIO COMPLETO", "UN", "MATERIAL", 2000.0, "PRECIO IDU"),
+    ])
+    items, total = precios.list_insumos(q="acueducto")
+    assert [i.codigo for i in items] == ["2000", "1000"]
+    assert total == 2
+
+
+def test_list_insumos_dos_palabras_separadas(repos):
+    """Antes devolvía cero filas: el LIKE buscaba la frase literal."""
+    precios, _ = repos
+    precios.insert_insumos([
+        Insumo("1000", "TUBERIA PVC PARA ACUEDUCTO", "ML", "MATERIAL", 1000.0, "PRECIO IDU")])
+    items, total = precios.list_insumos(q="tuberia acueducto")
+    assert [i.codigo for i in items] == ["1000"] and total == 1
+
+
+def test_list_insumos_total_coincide_con_lo_devuelto(repos):
+    """El contador no puede decir 3 sobre una lista de 2."""
+    precios, _ = repos
+    precios.insert_insumos([
+        Insumo("1000", "ACUEDUCTO A", "UN", "MATERIAL", 100.0, "PRECIO IDU"),
+        Insumo("2000", "ACUEDUCTO B", "UN", "MATERIAL", 100.0, "PRECIO IDU"),
+        Insumo("3000", "CEMENTO GRIS", "KG", "MATERIAL", 100.0, "PRECIO IDU"),
+    ])
+    items, total = precios.list_insumos(q="acueducto", limit=100)
+    assert total == len(items) == 2
+
+
+def test_list_insumos_relevancia_convive_con_los_filtros(repos):
+    """`q` no puede desactivar `grupo` ni `fuente` (ni al revés)."""
+    precios, _ = repos
+    precios.insert_insumos([
+        Insumo("1000", "ACUEDUCTO A", "UN", "MATERIAL", 100.0, "PRECIO IDU"),
+        Insumo("2000", "ACUEDUCTO B", "UN", "EQUIPO", 100.0, "COSTO INTERNO"),
+    ])
+    items, total = precios.list_insumos(q="acueducto", grupo="EQUIPO")
+    assert [i.codigo for i in items] == ["2000"] and total == 1
+    items, total = precios.list_insumos(q="acueducto", fuente="PRECIO IDU")
+    assert [i.codigo for i in items] == ["1000"] and total == 1
+
+
+def test_list_insumos_sin_q_no_cambia(repos):
+    precios, _ = repos
+    precios.insert_insumos([
+        Insumo("2000", "B", "UN", "MATERIAL", 100.0, "PRECIO IDU"),
+        Insumo("1000", "A", "UN", "MATERIAL", 100.0, "PRECIO IDU"),
+    ])
+    items, total = precios.list_insumos()
+    assert [i.codigo for i in items] == ["1000", "2000"] and total == 2

@@ -280,11 +280,12 @@ Tests de la capa de datos (SQLite y el mirror de Postgres con el recetario local
 
 ## Orden de implementación
 
-1. **Fase 1 — presencia**: `presencia.py` + test, línea en `auth.py`, endpoint, cliente
-   y `Layout.tsx`. Independiente de todo lo demás.
-2. **Fase 2 — relevancia**: `nucleo/relevancia.py` + test primero; después la migración
-   `nombre_norm` con su backfill; después los cuatro `list_*`; al final los tests de
-   datos.
+1. **Fase 1 — presencia**: `presencia.py` + test, endpoint, cliente y `Layout.tsx`
+   (sin tocar `auth.py`: presencia no se acopla a la autenticación). Independiente de
+   todo lo demás.
+2. **Fase 2 — relevancia**: `nucleo/relevancia.py` + test primero; después los cuatro
+   `list_*` (filtro y orden en Python, sin migración ni columna `nombre_norm` nueva);
+   al final los tests de datos.
 
 Verificación antes de dar por terminado: `python -m pytest tests/ -q` completo
 (incluyendo Postgres con el recetario local), `npm run build` en `web/` (`tsc -b`, no

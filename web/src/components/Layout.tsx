@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
-import { FileSpreadsheet, Layers, Package, ScrollText, Users } from "lucide-react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { ChevronDown, FileSpreadsheet, Layers, Package, ScrollText, Users } from "lucide-react";
 import { getStatus } from "@/api/corridas";
 import { getPresencia } from "@/api/presencia";
 import type { StatusResponse, UsuarioEnLinea } from "@/lib/tipos";
@@ -89,12 +89,26 @@ export default function Layout() {
       : []),
   ];
 
+  const { pathname } = useLocation();
+  const [seccionesAbiertas, setSeccionesAbiertas] = useState(false);
+
+  // Navegar cierra el panel: si no, queda tapando la pantalla a la que acabás de entrar.
+  useEffect(() => setSeccionesAbiertas(false), [pathname]);
+
+  // Mismo criterio que NavLink: `end: false` (Corridas) matchea sus rutas anidadas
+  // (/corridas/7), el resto exige igualdad. Se busca de atrás para adelante para que
+  // gane el match más específico si algún día dos links comparten prefijo.
+  const activa = [...links].reverse().find(({ to, end }) =>
+    end ? pathname === to : pathname === to || pathname.startsWith(`${to}/`)
+  );
+  const IconoActiva = activa?.Icono ?? Layers;
+
   return (
     <div className="flex min-h-dvh flex-col text-[13px]">
       {/* La barra. `@container` para que las piezas cedan según el ancho que la barra
           tiene de verdad, no el del viewport. */}
-      <header className="@container shrink-0 border-b border-border bg-card">
-        <div className="flex h-[54px] items-stretch justify-between gap-5 px-[18px]">
+      <header className="@container relative shrink-0 border-b border-border bg-card">
+        <div className="flex min-h-[54px] flex-wrap items-stretch justify-between gap-5 px-[18px] @max-[560px]:py-2">
           <div className="flex min-w-0 items-stretch gap-1 @max-[700px]:overflow-x-auto">
             <span className="flex shrink-0 items-center gap-2.5 pr-3.5 whitespace-nowrap">
               <svg
@@ -115,14 +129,66 @@ export default function Layout() {
               </span>
             </span>
 
-            <nav aria-label="Secciones" className="flex items-stretch">
+            {/* Plegada, la barra tiene que seguir diciendo dónde estás: el botón muestra
+                la sección actual, no una hamburguesa. `hidden @max-[980px]:flex` — no
+                existe en la barra ancha.
+
+                ponytail: sin clic-afuera ni Esc — abierto queda abierto hasta que se
+                vuelve a tocar el botón. Upgrade si al usarlo molesta: el listener de
+                `mousedown` en `document` que ya existe en corrida/BuscadorApu.tsx. */}
+            <button
+              type="button"
+              aria-expanded={seccionesAbiertas}
+              aria-controls="barra-secciones"
+              onClick={() => setSeccionesAbiertas((abierto) => !abierto)}
+              className="hidden @max-[980px]:flex items-center gap-2 whitespace-nowrap rounded px-3 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+            >
+              <IconoActiva aria-hidden className="size-3.5 shrink-0 opacity-75" />
+              {/* El nombre accesible queda "Secciones: Insumos": dice QUÉ es el botón y
+                  además contiene el texto visible, que es lo que pide WCAG 2.5.3
+                  (Label in Name). Un `aria-label="Secciones"` pelado lo violaría, porque
+                  taparía la palabra que el usuario ve. */}
+              <span className="sr-only">Secciones: </span>
+              <span className="font-semibold text-foreground">
+                {activa?.label ?? "Secciones"}
+              </span>
+              <ChevronDown
+                aria-hidden
+                className={cn(
+                  "size-3.5 shrink-0 opacity-60 transition-transform",
+                  seccionesAbiertas && "rotate-180"
+                )}
+              />
+            </button>
+
+            <nav
+              id="barra-secciones"
+              aria-label="Secciones"
+              className={cn(
+                "flex items-stretch",
+                // En angosto deja de ser una fila de la barra y pasa a ser un panel
+                // colgado de ella. Los links se renderizan UNA sola vez: no hay copia
+                // ancha y copia angosta (dos copias romperían el guard de los 5 links).
+                "@max-[980px]:absolute @max-[980px]:left-0 @max-[980px]:top-full @max-[980px]:z-30",
+                "@max-[980px]:w-56 @max-[980px]:flex-col @max-[980px]:items-stretch",
+                "@max-[980px]:rounded-b @max-[980px]:border @max-[980px]:border-border",
+                "@max-[980px]:bg-card @max-[980px]:py-1 @max-[980px]:shadow-md",
+                // Ojo: cerrado se oculta SOLO con el modificador. Un `hidden` pelado
+                // haría desaparecer el <nav> en los tests, donde las container queries
+                // no existen, y se caerían los guards que ya hay.
+                seccionesAbiertas ? "@max-[980px]:flex" : "@max-[980px]:hidden"
+              )}
+            >
               {links.map(({ to, label, end, Icono, admin }, i) => (
                 <span key={to} className="flex items-stretch">
                   {/* Los de administración van detrás de un separador: no son parte
                       del trabajo diario y conviene que se lean como otro grupo. Se
                       dibuja en el primero del grupo, sea cual sea su posición. */}
                   {admin && !links[i - 1]?.admin && (
-                    <span aria-hidden className="my-4 w-px shrink-0 bg-hairline" />
+                    <span
+                      aria-hidden
+                      className="my-4 w-px shrink-0 bg-hairline @max-[980px]:my-1 @max-[980px]:h-px @max-[980px]:w-full"
+                    />
                   )}
                   <NavLink
                     to={to}
@@ -131,6 +197,7 @@ export default function Layout() {
                       cn(
                         "flex items-center gap-2 whitespace-nowrap border-b-2 px-3 -mb-px no-underline",
                         "hover:text-foreground [&>svg]:hover:opacity-100",
+                        "@max-[980px]:border-b-0 @max-[980px]:border-l-2 @max-[980px]:py-1.5",
                         isActive
                           ? "border-rail font-semibold text-foreground [&>svg]:text-rail [&>svg]:opacity-100"
                           : "border-transparent text-muted-foreground",
@@ -146,11 +213,12 @@ export default function Layout() {
           </div>
 
           {perfil && (
-            <div className="flex shrink-0 items-center gap-3.5">
-              {/* Orden de sacrificio al angostarse: primero el correo (decorativo),
-                  después estas lecturas (informativas), al final el nombre de la marca.
-                  La navegación no se oculta nunca. */}
-              <div className="flex items-stretch @max-[980px]:hidden">
+            <div className="flex items-center gap-3.5">
+              {/* Orden de sacrificio al angostarse: primero el correo (decorativo), después
+                  el nombre de la marca, y al final la barra se parte en dos filas. Las
+                  lecturas NO se esconden en ningún ancho — es el punto de la feature. Lo
+                  que se pliega es la navegación (ver el botón de secciones arriba). */}
+              <div className="flex items-stretch @max-[560px]:basis-full @max-[560px]:justify-between">
                 <Lectura etiqueta="En línea">
                   <span className="flex items-center gap-1.5" title={quienes}>
                     <span

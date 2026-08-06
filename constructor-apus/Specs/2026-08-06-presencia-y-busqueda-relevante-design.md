@@ -35,9 +35,8 @@ Se descartaron:
 
 ```
 apu_tool/servicio/presencia.py     (nuevo, sin DB)
-apu_tool/servicio/auth.py          (+1 línea en usuario_actual)
 apu_tool/servicio/rutas.py         (GET /api/presencia)
-web/src/api/…                      (cliente del endpoint)
+web/src/api/presencia.ts           (cliente del endpoint)
 web/src/components/Layout.tsx      (poll 45 s + una <Lectura> más en la barra)
 ```
 
@@ -52,9 +51,11 @@ def marcar(perfil, *, ahora: float | None = None) -> None
 def en_linea(*, ahora: float | None = None) -> list[dict]   # [{user_id, email, nombre}]
 ```
 
-- `marcar` se llama desde `auth.usuario_actual`, justo antes del `return perfil`: es el
-  único punto por donde pasa **todo** request autenticado, así que cualquier actividad
-  real (abrir una corrida, guardar un insumo) cuenta como presencia.
+- `marcar` se llama **dentro del propio endpoint** `GET /api/presencia`, no en
+  `auth.usuario_actual`. El latido ES el poll (abajo), así que marcar en el endpoint
+  alcanza y `auth.py` no se toca: presencia no se acopla a la autenticación, y el
+  endpoint queda testeable — los tests overridean la dependencia `usuario_actual`, así
+  que un `marcar` metido ahí adentro no se ejecutaría en ninguna prueba.
 - `en_linea` filtra `ts > ahora - VENTANA_S` y ordena por `nombre or email`.
 - `ahora` es parámetro inyectable para que el test no dependa del reloj.
 - Ceiling documentado en el módulo:
@@ -62,12 +63,13 @@ def en_linea(*, ahora: float | None = None) -> list[dict]   # [{user_id, email, 
 
 **Endpoint**
 
-`GET /api/presencia` con `Depends(requiere_rol("consulta"))`. Devuelve
-`{"en_linea": [{user_id, email, nombre}, ...]}`. No toca la DB: el `Almacen` no
-entra. No ve dinero (Invariante #1 intacto).
+`GET /api/presencia` con `Depends(requiere_rol("consulta"))`: `marcar(usuario)` y
+devuelve `{"en_linea": [{user_id, email, nombre}, ...]}`. No toca la DB: el `Almacen`
+no entra. No ve dinero (Invariante #1 intacto).
 
-**Latido = el propio poll.** No existe endpoint de latido: pedir la lista pasa por
-`usuario_actual`, que te marca presente. Un cliente, un timer, nada de estado extra.
+**Latido = el propio poll.** No existe endpoint de latido: pedir la lista te marca
+presente. Un cliente, un timer, nada de estado extra. Consecuencia buscada: siempre
+apareces en tu propia lista, así que nunca se ve vacía.
 
 **Frontend** (`Layout.tsx`)
 
@@ -134,9 +136,12 @@ donde ya vive `nucleo/texto.py`, que `datos/` importa hoy).
 def palabras(q: str) -> list[str]
     """normalizar(q).split() — las palabras de la consulta, sin vacías."""
 
-def nivel(nombre_norm: str, codigo: str, q_norm: str, palabras_q: list[str]) -> int
+def nivel(nombre, codigo, q_norm, palabras_q) -> int | None
+    """Nivel de coincidencia; None si no coinciden TODAS las palabras de la consulta."""
+
 def ordenar(filas, q, *, nombre_de, codigo_de) -> list
-    """Ordena por (nivel asc, score desc, codigo asc). Determinista."""
+    """Descarta las que no coinciden y ordena por (nivel asc, score desc, codigo asc).
+    Determinista. Con `q` vacía devuelve las filas tal cual."""
 
 def similarity(a, b) -> float   # movida desde dominio/matching.py (ver abajo)
 ```
@@ -171,48 +176,65 @@ importadores actuales (`compose.py` usa `similarity` y `_tokens`, `cruce.py` usa
 tocarlos, y un scorer puro es exactamente lo que va en núcleo — la misma
 de-duplicación que ya se hizo con `nucleo/texto.py::normalizar`.
 
-**El `WHERE`**: una palabra = un `LIKE`, todas en `AND`, cada una contra el nombre
-normalizado **o** el código:
+**APUs: el filtro por texto también se va a Python — sin columna nueva.**
+
+La tabla `apus` tiene ~1200 filas y el repo ya la lee entera en cada corrida
+(`apus_db.apu_index()` alimenta al `Matcher`). Así que con `q` presente, `list_apus`
+trae las filas (con `grupo` y `turno` filtrados en SQL, que es lo que narrowea barato) y
+`relevancia.ordenar` hace el filtro Y el orden:
+
+```
+list_apus(q=...) -> SELECT codigo,nombre,unidad,shift,grupo FROM apus [WHERE grupo/shift]
+                 -> relevancia.ordenar(...)   # AND por palabras + acentos + relevancia
+                 -> [offset:offset+limit], total = len(ordenados)
+```
+
+Esto **reemplaza la columna `nombre_norm` que el borrador de esta spec proponía
+agregar a `apus`**. Entrega exactamente lo mismo (`excavacion` encuentra "EXCAVACIÓN")
+y elimina: la migración dual-backend, el backfill, y los 7 sitios de escritura de la
+tabla `apus` (`insert_apus`, `_crear_apu`, `editar_apu` × 2 backends + `migracion_pg`)
+que había que acordarse de llenar — uno olvidado deja un APU invisible a la búsqueda,
+en silencio. Y cierra el TODO de `apus_db.py:188-190` **mejor** que la columna: el
+criterio deja de ser `LIKE` en SQLite vs `ILIKE` en Postgres y pasa a ser un solo
+código Python compartido, imposible de divergir.
+
+Costo: un `SELECT` de ~1200 filas × 5 columnas (~145 KB) por búsqueda de APU, contra
+dos queries hoy (`COUNT` + página). Un round-trip menos, más bytes — y en la
+optimización de corridas (merge `3fe2c46`) lo que dolía en Supabase eran los
+round-trips secuenciales, no el tamaño de la respuesta.
+
+**Insumos: el `WHERE` se queda en SQL** — 7167 filas visibles con JOIN a precios es
+demasiado para traer entero. Una palabra = un `LIKE`, todas en `AND`, cada una contra
+el nombre normalizado **o** el código (`nombre_norm` ya existe en `insumos`):
 
 ```sql
--- por cada palabra de q:
-(nombre_norm LIKE %palabra% OR UPPER(codigo) LIKE %palabra%)
+-- por cada palabra de q, en AND:
+(i.nombre_norm LIKE %palabra% OR UPPER(i.codigo) LIKE %palabra%)
 ```
 
-Reemplaza el `LIKE '%frase%'` actual en los cuatro sitios: `apus_db.list_apus`,
-`pg/apus_pg.list_apus`, `precios_db.list_insumos`, `pg/precios_pg.list_insumos`.
+Reemplaza el `LIKE '%frase%'` de `precios_db.py:385` y `pg/precios_pg.py:329`.
 
-**Paginación** (el ranking está en Python, así que hay que traer los candidatos):
+**Paginación de insumos:**
 
 ```
-COUNT(*) con el WHERE nuevo                      -> total (igual que hoy)
-  total <= config.RANK_MAX (2000):  traer todos -> ordenar() -> [offset:offset+limit]
-  total >  config.RANK_MAX:          camino de hoy (ORDER BY codigo, LIMIT/OFFSET en SQL)
+COUNT(*) con el WHERE nuevo
+  count <= relevancia.MAX_RANKEO (2000):  traer todos -> ordenar() -> [offset:offset+limit]
+                                          total = len(ordenados)
+  count >  relevancia.MAX_RANKEO:          camino de hoy (ORDER BY codigo, LIMIT/OFFSET en SQL)
+                                          total = count
 ```
 
 - El corte de 2000 es el guard de CPU y de transferencia. Solo lo cruzan consultas de
-  1–2 letras, donde el parecido es ruido de todas formas. APUs (1204 filas en total)
-  nunca lo cruza; Insumos (7167 visibles) solo con `q` genérica.
-- Round-trips idénticos a hoy: un `COUNT` + un `SELECT`.
-- **Sin `q` no cambia nada**: mismo SQL, mismo `ORDER BY codigo`, mismo costo. El
-  camino sin búsqueda no se toca.
-- `total` sigue siendo el `COUNT(*)` real, así que los contadores y la paginación de
-  las páginas de APUs e Insumos no cambian de significado.
-- Ceiling comentado: `# ponytail: arriba de RANK_MAX manda el orden por código; upgrade = índice de texto (pg_trgm / FTS5)`.
-
-**Migración `apus.nombre_norm`**
-
-- `ALTER TABLE ... ADD COLUMN IF NOT EXISTS nombre_norm TEXT` al boot, con el patrón
-  dual-backend que ya usaron `modo` / `snapshot_json` de corridas.
-- Backfill `UPDATE apus SET nombre_norm = ... WHERE nombre_norm IS NULL` — en Python,
-  con `nucleo.texto.normalizar`, para que sea el mismo criterio que Insumos (SQL no
-  quita tildes).
-- Las escrituras de APU (`seed`, `crear_apu`, `editar_apu`, importador) llenan la
-  columna. Se revisan todas en el plan: una escritura que no la llene deja un APU
-  invisible a la búsqueda.
-- Índice: no. 1204 filas, un `LIKE %x%` no lo usaría igual.
-- Cierra el TODO de `apus_db.py:188-190` y unifica el `LIKE`/`ILIKE` divergente entre
-  SQLite y Postgres.
+  1–2 letras, donde el parecido es ruido de todas formas.
+- `total = len(ordenados)` en el camino rankeado (no el `COUNT`): el `WHERE` de SQL es
+  un poco más laxo que el filtro de Python (`UPPER(codigo)` vs `normalizar(codigo)`),
+  y con dos fuentes de verdad el contador podría decir 41 sobre una lista de 40. Con
+  `len` siempre coinciden.
+- La constante vive en `nucleo/relevancia.py`, no en `config.py`: es un techo interno,
+  no una perilla de operación.
+- **Sin `q` no cambia nada**, ni en APUs ni en Insumos: mismo SQL, mismo
+  `ORDER BY codigo`, mismo costo, mismo `total`. El camino sin búsqueda no se toca.
+- Ceiling comentado: `# ponytail: arriba de MAX_RANKEO manda el orden por código; upgrade = índice de texto (pg_trgm / FTS5)`.
 
 ### Superficies afectadas
 
@@ -238,16 +260,22 @@ Tests de la capa de datos (SQLite y el mirror de Postgres con el recetario local
 `list_apus` / `list_insumos`:
 
 - con `q`: el primer resultado es el que empieza con la palabra, no el de código menor;
-- `total` sigue siendo el conteo real;
-- sin `q`: orden por código, sin cambios;
-- backfill: un APU con acentos existente queda encontrable por su nombre sin acentos.
+- `q` de dos palabras encuentra el APU/insumo que las tiene separadas;
+- un APU con tildes se encuentra escribiendo sin tildes (lo que antes fallaba);
+- `total` es coherente con la cantidad de filas devueltas al paginar;
+- sin `q`: orden por código y `total` idénticos a hoy;
+- los filtros que conviven con `q` (`grupo`, `turno` en APUs; `grupo`, `fuente`,
+  `clasificacion`, `sin_precio`, `lista_id` en insumos) siguen aplicando.
 
 ### Riesgo de regresión
 
 - Cambia el orden de resultados **solo** cuando hay `q`. Nada más cambia de forma
-  observable: mismos campos, mismo `total`, mismos filtros (`grupo`, `turno`, `fuente`,
-  `clasificacion`, `sin_precio`, `lista_id`), misma paginación.
-- El único cambio de datos es la columna nueva `nombre_norm` (aditiva, `NULL`-able).
+  observable: mismos campos, mismos filtros, misma paginación.
+- **Cero cambios de esquema y cero cambios de datos.** No hay migración que revisar en
+  producción antes de desplegar.
+- Mover `similarity` / `_tokens` / `normalize` a `nucleo/` es puro movimiento con
+  reexport: `compose.py`, `cruce.py` y los dos tests de matching importan igual. Los
+  tests de matching existentes son el guard de que el scorer no cambió.
 - La suite completa (647 tests) debe quedar verde, incluidos los de Postgres.
 
 ---

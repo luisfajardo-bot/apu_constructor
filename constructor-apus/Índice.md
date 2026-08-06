@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 44 planes, 50 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 45 planes, 51 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -27,6 +27,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 44 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-08-06 | [[Specs/2026-08-06-presencia-y-busqueda-relevante-design|Presencia en línea + búsqueda ordenada por relevancia]] |
 | 2026-08-05 | [[Specs/2026-08-05-grupos-apu-desplegable-design|Grupo del APU como desplegable (vocabulario cerrado)]] |
 | 2026-08-05 | [[Specs/2026-08-05-asignar-apu-en-lote-design|Asignar / confirmar APU en lote desde la corrida]] |
 | 2026-08-04 | [[Specs/2026-08-04-piso-match-fallback-design|Diseño — piso de similaridad para el fallback determinístico]] |
@@ -82,6 +83,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 44 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-08-06 | [[Planes/2026-08-06-presencia-y-busqueda-relevante|Presencia en línea + búsqueda por relevancia — Plan de implementación]] |
 | 2026-08-05 | [[Planes/2026-08-05-grupos-apu-desplegable|Grupo del APU como desplegable — Plan de implementación]] |
 | 2026-08-05 | [[Planes/2026-08-05-duplicar-apu|Duplicar un APU a partir de otro — Implementation Plan]] |
 | 2026-08-05 | [[Planes/2026-08-05-asignar-apu-en-lote|Asignar / confirmar APU en lote — Plan de implementación]] |

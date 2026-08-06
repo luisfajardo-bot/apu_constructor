@@ -54,7 +54,7 @@ lista licitación ──► matching ──► IA acotada (sin dinero) ──►
                                        └─► motor de precios ──► cuadro resumen (Excel)
 
 Interfaces sobre el mismo pipeline (dominio/pipeline.py):
-  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 47 endpoints) + web/ (React) para multiusuario
+  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 50 endpoints) + web/ (React) para multiusuario
 ```
 
 `apu_tool/config.py` es transversal, fuera de cualquier paquete: rutas, umbrales de
@@ -66,6 +66,7 @@ matching, modelo de IA, clasificación de precios.
 |--------|-----------------|
 | `models.py`   | tipos del dominio; vistas `DePriced*` SIN dinero |
 | `redondeo.py` | redondeo a la unidad (peso) en multiplicaciones monetarias |
+| `relevancia.py` | orden por relevancia de una búsqueda + scorer `similarity` |
 | `texto.py`    | normalización de texto compartida |
 
 ### `apu_tool/datos/` — persistencia (**toda** la persistencia pasa por aquí)
@@ -126,6 +127,7 @@ matching, modelo de IA, clasificación de precios.
 | `auditoria.py`         | servicio de auditoría (registro + lectura paginada) |
 | `supabase_admin.py`    | cliente de la Admin API de Supabase Auth |
 | `plantillas.py`        | plantillas `.xlsx` para importadores |
+| `presencia.py`         | quién está usando la app ahora (dict en memoria, sin DB) |
 
 ### `apu_tool/interfaz/` — puntos de entrada
 

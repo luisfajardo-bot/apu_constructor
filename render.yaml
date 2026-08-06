@@ -28,6 +28,9 @@ services:
         value: "15"
       - key: APU_RATELIMIT_ENABLED
         value: "true"
+      # Nota: si esto sube de 1, presencia (dict en memoria, por worker) degrada a una
+      # vista parcial — cada poll aterriza en un worker al azar y ve solo su porción
+      # de quién está conectado (ver apu_tool/servicio/presencia.py).
       - key: WEB_CONCURRENCY
         value: "1"
       - key: APU_DOCS_ENABLED

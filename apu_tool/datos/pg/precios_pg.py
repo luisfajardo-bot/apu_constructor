@@ -11,6 +11,7 @@ from typing import Iterable, Optional
 
 from apu_tool import config
 from apu_tool.datos.pg.conexion import Conexion, ejecutar_script
+from apu_tool.nucleo import relevancia
 from apu_tool.nucleo.models import Insumo, ListaPrecios
 from apu_tool.nucleo.texto import normalizar
 
@@ -326,9 +327,10 @@ class PreciosPg:
         if sin_precio:
             where.append("p.id IS NULL")
         if q:
-            where.append("(i.nombre_norm LIKE %s OR UPPER(i.codigo) LIKE %s)")
-            like = f"%{normalizar(q)}%"
-            params += [like, like]
+            # Una palabra = un LIKE, todas en AND (igual que precios_db.py).
+            for palabra in relevancia.palabras(q):
+                where.append("(i.nombre_norm LIKE %s OR UPPER(i.codigo) LIKE %s)")
+                params += [f"%{palabra}%", f"%{palabra}%"]
         if grupo:
             where.append("i.grupo = %s")
             params.append(grupo)
@@ -351,11 +353,24 @@ class PreciosPg:
                 f"(p.fuente IS NULL OR UPPER(p.fuente) NOT IN ({placeholders})))")
             params += [s.upper() for s in config.PUBLIC_PRICE_SOURCES]
         wsql = (" WHERE " + " AND ".join(where)) if where else ""
+        campos = "i.id, i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente"
         with self.cx.connection() as conn:
             total = conn.execute(f"SELECT COUNT(*) AS n {base}{wsql}", params).fetchone()["n"]
+            if q and int(total) <= relevancia.MAX_RANKEO:
+                # Rankear exige tener los candidatos en la mano. Arriba del techo se
+                # cae al orden por código (ver relevancia.MAX_RANKEO).
+                rows = conn.execute(
+                    f"SELECT {campos} {base}{wsql} ORDER BY i.codigo, i.id",
+                    params).fetchall()
+                ordenados = relevancia.ordenar(
+                    [self._fila_a_insumo(r) for r in rows], q,
+                    nombre_de=lambda i: i.nombre, codigo_de=lambda i: i.codigo)
+                # total = len(ordenados), no el COUNT: el WHERE de SQL es un poco más
+                # laxo que el filtro de Python (UPPER(codigo) vs normalizar(codigo)) y
+                # con dos fuentes de verdad el contador diría 41 sobre una lista de 40.
+                return ordenados[int(offset):int(offset) + int(limit)], len(ordenados)
             rows = conn.execute(
-                f"SELECT i.id, i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente "
-                f"{base}{wsql} ORDER BY i.codigo, i.id LIMIT %s OFFSET %s",
+                f"SELECT {campos} {base}{wsql} ORDER BY i.codigo, i.id LIMIT %s OFFSET %s",
                 params + [int(limit), int(offset)]).fetchall()
         return [self._fila_a_insumo(r) for r in rows], int(total)
 

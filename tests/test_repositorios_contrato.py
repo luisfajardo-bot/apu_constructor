@@ -316,3 +316,140 @@ def test_grupos_ignora_vacios_y_deduplica(repos):
     apus.crear_apu(Apu("Z2", "ANDEN", "M2", "DIURNO", "PAVIMENTOS"), [])
     apus.crear_apu(Apu("Z3", "SIN GRUPO", "M2", "DIURNO"), [])
     assert apus.grupos() == ["PAVIMENTOS"]
+
+
+def test_list_apus_ordena_por_relevancia(repos):
+    """Buscar "transporte" tiene que traer primero el que empieza con la palabra,
+    no el de código menor (que es lo que hacía el ORDER BY codigo)."""
+    _, apus = repos
+    apus.insert_apus([
+        Apu("1000", "SUMINISTRO Y TRANSPORTE DE TUBERIA", "ML", "DIURNO", "REDES"),
+        Apu("2000", "TRANSPORTE DE MATERIAL SOBRANTE", "M3", "DIURNO", "MOV"),
+        Apu("3000", "EXCAVACIÓN MECÁNICA", "M3", "DIURNO", "MOV"),
+    ])
+    items, total = apus.list_apus(q="transporte")
+    assert [a.codigo for a in items] == ["2000", "1000"]
+    assert total == 2
+
+
+def test_list_apus_encuentra_sin_tildes(repos):
+    """Antes fallaba: el LIKE iba contra `nombre` crudo, y encima con LIKE en SQLite
+    vs ILIKE en Postgres. Este test corre en los dos backends a propósito."""
+    _, apus = repos
+    apus.insert_apus([Apu("1000", "EXCAVACIÓN MECÁNICA", "M3", "DIURNO", "MOV")])
+    items, total = apus.list_apus(q="excavacion mecanica")
+    assert [a.codigo for a in items] == ["1000"]
+    assert total == 1
+
+
+def test_list_apus_dos_palabras_separadas(repos):
+    """Antes devolvía cero filas: el LIKE buscaba la frase literal."""
+    _, apus = repos
+    apus.insert_apus([
+        Apu("1000", "TRANSPORTE DE MATERIAL SOBRANTE", "M3", "DIURNO", "MOV")])
+    items, _ = apus.list_apus(q="transporte material")
+    assert [a.codigo for a in items] == ["1000"]
+
+
+def test_list_apus_respeta_grupo_turno_y_paginacion_con_q(repos):
+    _, apus = repos
+    apus.insert_apus([
+        Apu("1000", "TRANSPORTE A", "M3", "DIURNO", "MOV"),
+        Apu("2000", "TRANSPORTE B", "M3", "NOCTURNO", "MOV"),
+        Apu("3000", "TRANSPORTE C", "M3", "DIURNO", "REDES"),
+    ])
+    items, total = apus.list_apus(q="transporte", shift="DIURNO")
+    assert {a.codigo for a in items} == {"1000", "3000"} and total == 2
+    items, total = apus.list_apus(q="transporte", grupo="MOV")
+    assert {a.codigo for a in items} == {"1000", "2000"} and total == 2
+    pag1, total = apus.list_apus(q="transporte", limit=2, offset=0)
+    pag2, _ = apus.list_apus(q="transporte", limit=2, offset=2)
+    assert total == 3 and len(pag1) == 2 and len(pag2) == 1
+    assert not ({a.codigo for a in pag1} & {a.codigo for a in pag2})
+
+
+def test_list_apus_arriba_del_techo_degrada_a_orden_por_codigo(repos, monkeypatch):
+    """Pin del fallback arriba del techo, pero a través del repositorio real (no solo
+    del helper puro): con MAX_RANKEO=1 y varias filas que matchean al mismo nivel,
+    `similarity` no se calcula para ninguna -> el desempate cae a código ascendente,
+    NO al orden que daría el parecido (que pondría "TRANSPORTE A"/"TRANSPORTE B" antes
+    que "TRANSPORTE DE MATERIAL SOBRANTE", por ser más parecidas a la consulta)."""
+    from apu_tool.nucleo import relevancia
+    monkeypatch.setattr(relevancia, "MAX_RANKEO", 1)
+    _, apus = repos
+    apus.insert_apus([
+        Apu("2000", "TRANSPORTE DE MATERIAL SOBRANTE", "M3", "DIURNO", "MOV"),
+        Apu("1000", "TRANSPORTE A", "M3", "DIURNO", "MOV"),
+        Apu("3000", "TRANSPORTE B", "M3", "DIURNO", "MOV"),
+    ])
+    items, total = apus.list_apus(q="transporte")
+    assert [a.codigo for a in items] == ["1000", "2000", "3000"]
+    assert total == 3
+
+
+def test_list_apus_sin_q_no_cambia(repos):
+    """El camino sin búsqueda queda intacto: orden por código y total real."""
+    _, apus = repos
+    apus.insert_apus([
+        Apu("2000", "B", "M3", "DIURNO", "MOV"),
+        Apu("1000", "A", "M3", "DIURNO", "MOV"),
+    ])
+    items, total = apus.list_apus()
+    assert [a.codigo for a in items] == ["1000", "2000"] and total == 2
+
+
+def test_list_insumos_ordena_por_relevancia(repos):
+    """Mismo criterio que APUs: el que empieza con la palabra va primero, aunque su
+    código sea mayor."""
+    precios, _ = repos
+    precios.insert_insumos([
+        Insumo("1000", "TUBERIA PVC PARA ACUEDUCTO", "ML", "MATERIAL", 1000.0, "PRECIO IDU"),
+        Insumo("2000", "ACUEDUCTO DOMICILIARIO COMPLETO", "UN", "MATERIAL", 2000.0, "PRECIO IDU"),
+    ])
+    items, total = precios.list_insumos(q="acueducto")
+    assert [i.codigo for i in items] == ["2000", "1000"]
+    assert total == 2
+
+
+def test_list_insumos_dos_palabras_separadas(repos):
+    """Antes devolvía cero filas: el LIKE buscaba la frase literal."""
+    precios, _ = repos
+    precios.insert_insumos([
+        Insumo("1000", "TUBERIA PVC PARA ACUEDUCTO", "ML", "MATERIAL", 1000.0, "PRECIO IDU")])
+    items, total = precios.list_insumos(q="tuberia acueducto")
+    assert [i.codigo for i in items] == ["1000"] and total == 1
+
+
+def test_list_insumos_total_coincide_con_lo_devuelto(repos):
+    """El contador no puede decir 3 sobre una lista de 2."""
+    precios, _ = repos
+    precios.insert_insumos([
+        Insumo("1000", "ACUEDUCTO A", "UN", "MATERIAL", 100.0, "PRECIO IDU"),
+        Insumo("2000", "ACUEDUCTO B", "UN", "MATERIAL", 100.0, "PRECIO IDU"),
+        Insumo("3000", "CEMENTO GRIS", "KG", "MATERIAL", 100.0, "PRECIO IDU"),
+    ])
+    items, total = precios.list_insumos(q="acueducto", limit=100)
+    assert total == len(items) == 2
+
+
+def test_list_insumos_relevancia_convive_con_los_filtros(repos):
+    """`q` no puede desactivar `grupo` ni `fuente` (ni al revés)."""
+    precios, _ = repos
+    precios.insert_insumos([
+        Insumo("1000", "ACUEDUCTO A", "UN", "MATERIAL", 100.0, "PRECIO IDU"),
+        Insumo("2000", "ACUEDUCTO B", "UN", "EQUIPO", 100.0, "COSTO INTERNO"),
+    ])
+    items, total = precios.list_insumos(q="acueducto", grupo="EQUIPO")
+    assert [i.codigo for i in items] == ["2000"] and total == 1
+    items, total = precios.list_insumos(q="acueducto", fuente="PRECIO IDU")
+    assert [i.codigo for i in items] == ["1000"] and total == 1
+
+
+def test_list_insumos_sin_q_no_cambia(repos):
+    precios, _ = repos
+    precios.insert_insumos([
+        Insumo("2000", "B", "UN", "MATERIAL", 100.0, "PRECIO IDU"),
+        Insumo("1000", "A", "UN", "MATERIAL", 100.0, "PRECIO IDU"),
+    ])
+    items, total = precios.list_insumos()
+    assert [i.codigo for i in items] == ["1000", "2000"] and total == 2

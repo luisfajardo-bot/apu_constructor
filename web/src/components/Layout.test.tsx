@@ -12,6 +12,14 @@ import Layout from "./Layout";
 vi.mock("@/api/corridas", () => ({
   getStatus: vi.fn(async () => ({ insumos: 7095, apus: 1204, ia: false })),
 }));
+vi.mock("@/api/presencia", () => ({
+  getPresencia: vi.fn(async () => ({
+    en_linea: [
+      { user_id: "u1", email: "a@obra.co", nombre: "Ana" },
+      { user_id: "u2", email: "beto@obra.co", nombre: "Beto" },
+    ],
+  })),
+}));
 let rol = "consulta";
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ perfil: { email: "a@obra.co", rol }, logout: vi.fn() }),
@@ -27,10 +35,10 @@ test("el link Usuarios solo aparece para Admin", async () => {
   expect(screen.getByText("Usuarios")).not.toBeNull();
 });
 
-test("las tres lecturas de estado van separadas, no en una frase", async () => {
+test("las cuatro lecturas de estado van separadas, no en una frase", async () => {
   // Antes era una sola cadena interpolada: "7095 insumos · 1204 APUs · IA: fallback".
-  // Para sacar un número había que leerla entera. Pasan a ser tres lecturas con su
-  // etiqueta y su valor, así que cada valor tiene que existir como nodo propio.
+  // Para sacar un número había que leerla entera. Pasan a ser lecturas separadas, cada
+  // una con su etiqueta y su valor, así que cada valor tiene que existir como nodo propio.
   rol = "editor";
   render(<MemoryRouter><Layout /></MemoryRouter>);
 
@@ -66,4 +74,39 @@ test("la navegación es un landmark, separada de las lecturas de estado", async 
   const nav = screen.getByRole("navigation");
   const destinos = within(nav).getAllByRole("link").map((a) => a.textContent);
   expect(destinos).toEqual(["Corridas", "Insumos", "APUs", "Usuarios", "Auditoría"]);
+});
+
+test("la barra muestra cuánta gente está en línea, y quién", async () => {
+  rol = "editor";
+  render(<MemoryRouter><Layout /></MemoryRouter>);
+
+  // El conteo es un nodo propio, como las otras lecturas.
+  const conteo = await screen.findByText("2");
+  expect(conteo).not.toBeNull();
+
+  // Los nombres van en el title: la barra es densa, no caben dos columnas de gente.
+  // El propio usuario (a@obra.co, el del mock de useAuth) queda marcado.
+  const titulo = conteo.closest("[title]")?.getAttribute("title") ?? "";
+  expect(titulo).toContain("Ana (vos)");
+  expect(titulo).toContain("Beto");
+});
+
+test("el poll de presencia se re-suscribe a visibilitychange y se limpia al desmontar", async () => {
+  // No agrega comportamiento nuevo al DOM: es un guard de ciclo de vida (el listener
+  // se registra al montar y se retira al desmontar), como el resto de esta suite.
+  rol = "editor";
+  const addSpy = vi.spyOn(document, "addEventListener");
+  const removeSpy = vi.spyOn(document, "removeEventListener");
+
+  const { unmount } = render(<MemoryRouter><Layout /></MemoryRouter>);
+  await screen.findByText("2"); // espera el primer poll, para no desmontar a mitad de camino
+
+  expect(addSpy).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+  const [, handler] = addSpy.mock.calls.find(([evento]) => evento === "visibilitychange")!;
+
+  unmount();
+  expect(removeSpy).toHaveBeenCalledWith("visibilitychange", handler);
+
+  addSpy.mockRestore();
+  removeSpy.mockRestore();
 });

@@ -160,6 +160,15 @@ export interface StatusResponse {
   ia: boolean;
 }
 
+export interface UsuarioEnLinea {
+  email: string;
+  nombre: string;
+}
+
+export interface PresenciaResponse {
+  en_linea: UsuarioEnLinea[];
+}
+
 export interface CorridaCreada {
   id: number;
   resumen: Totales;

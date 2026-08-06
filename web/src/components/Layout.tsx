@@ -56,9 +56,13 @@ export default function Layout() {
     };
     pedir();
     const t = setInterval(pedir, 45_000);
+    // Volver a la pestaña no espera el resto del intervalo: sin esto, la lectura
+    // queda desactualizada hasta 45 s (y los demás no te vieron hasta 90 s).
+    document.addEventListener("visibilitychange", pedir);
     return () => {
       vivo = false;
       clearInterval(t);
+      document.removeEventListener("visibilitychange", pedir);
     };
   }, []);
 

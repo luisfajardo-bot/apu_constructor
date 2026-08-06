@@ -161,7 +161,6 @@ export interface StatusResponse {
 }
 
 export interface UsuarioEnLinea {
-  user_id: string;
   email: string;
   nombre: string;
 }

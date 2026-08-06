@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request, UploadFile)
+from fastapi import (APIRouter, Depends, File, Form, HTTPException, Query, Request,
+                      UploadFile)
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from openpyxl.utils.exceptions import InvalidFileException
 
@@ -407,7 +408,7 @@ def _asegurar_biblioteca(alm: Almacen) -> None:
 @router.get("/insumos")
 def listar_insumos(q: Optional[str] = None, grupo: Optional[str] = None,
                    fuente: Optional[str] = None, clasificacion: Optional[str] = None,
-                   limit: int = 100, offset: int = 0,
+                   limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
                    lista: Optional[int] = None, sin_precio: bool = False,
                    alm: Almacen = Depends(get_almacen),
                    _: object = Depends(requiere_rol("consulta"))):
@@ -503,7 +504,8 @@ def crear_insumo(body: InsumoNuevoIn, alm: Almacen = Depends(get_almacen),
 
 @router.get("/apus")
 def listar_apus(q: Optional[str] = None, grupo: Optional[str] = None,
-                turno: Optional[str] = None, limit: int = 100, offset: int = 0,
+                turno: Optional[str] = None, limit: int = Query(100, ge=1, le=500),
+                offset: int = Query(0, ge=0),
                 lista: Optional[int] = None,
                 alm: Almacen = Depends(get_almacen),
                 _: object = Depends(requiere_rol("consulta"))):

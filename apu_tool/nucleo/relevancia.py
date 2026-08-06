@@ -68,7 +68,8 @@ def palabras(q: str | None) -> list[str]:
 def nivel(nombre: str, codigo: str, q_norm: str, palabras_q: list[str]) -> int | None:
     """Dónde aparece lo buscado. Menor = más relevante. None = no coincide.
 
-    Los niveles 0-2 miran la consulta como FRASE; del 3 en adelante manda el AND por
+    Los niveles 0-1 miran la consulta como FRASE en nombre Y código; el nivel 2 la
+    mira como frase pero solo en el nombre. Del 3 en adelante manda el AND por
     palabras (todas tienen que aparecer, en cualquier orden). El truco de rodear con
     espacios (`f" {n} "`) da el borde de palabra gratis, sin regex.
     """
@@ -98,15 +99,23 @@ def ordenar(filas: list, q: str | None, *, nombre_de, codigo_de) -> list:
     if not ps:
         return list(filas)
     q_norm = " ".join(ps)
-    con_score = len(filas) <= MAX_RANKEO
-    clasificadas = []
+    # El techo se mide sobre lo que YA coincidió, no sobre `filas` de entrada: para
+    # insumos el llamador ya filtró por SQL así que casi coinciden, pero para APUs
+    # `filas` es la tabla completa (solo grupo/turno se filtran en SQL) — medir el
+    # techo ahí haría que CUALQUIER búsqueda de APUs perdiera el desempate por
+    # parecido en cuanto la tabla creciera, aunque la búsqueda solo matchee 6 filas.
+    coincidencias = []
     for fila in filas:
         nombre, codigo = nombre_de(fila), codigo_de(fila)
         niv = nivel(nombre, codigo, q_norm, ps)
         if niv is None:
             continue
-        score = similarity(q_norm, nombre) if con_score else 0.0
-        clasificadas.append((niv, -score, normalize(codigo), fila))
+        coincidencias.append((niv, normalize(codigo), nombre, fila))
+    con_score = len(coincidencias) <= MAX_RANKEO
+    clasificadas = [
+        (niv, -(similarity(q_norm, nombre) if con_score else 0.0), cod, fila)
+        for niv, cod, nombre, fila in coincidencias
+    ]
     # key=x[:3] y no la tupla entera: si empatan los tres criterios, comparar las filas
     # entre sí sería un TypeError (Apu/Insumo no son ordenables).
     clasificadas.sort(key=lambda x: x[:3])

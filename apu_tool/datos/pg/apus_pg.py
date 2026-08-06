@@ -172,7 +172,8 @@ class ApusPg:
             # un solo criterio para los dos backends. ~1200 filas.
             with self.cx.connection() as conn:
                 rows = conn.execute(
-                    f"SELECT codigo, nombre, unidad, shift, grupo FROM apus.apus{wsql}",
+                    f"SELECT codigo, nombre, unidad, shift, grupo FROM apus.apus{wsql} "
+                    f"ORDER BY codigo, shift",
                     params).fetchall()
             todos = [Apu(r["codigo"], r["nombre"], r["unidad"], r["shift"], r["grupo"])
                      for r in rows]

@@ -201,7 +201,8 @@ class ApusDB:
             # ~1200 filas y el repo ya la lee entera en cada corrida (apu_index).
             with self.connect() as conn:
                 rows = conn.execute(
-                    f"SELECT codigo, nombre, unidad, shift, grupo FROM apus{wsql}",
+                    f"SELECT codigo, nombre, unidad, shift, grupo FROM apus{wsql} "
+                    f"ORDER BY codigo, shift",
                     params).fetchall()
             todos = [Apu(r["codigo"], r["nombre"], r["unidad"], r["shift"], r["grupo"])
                      for r in rows]

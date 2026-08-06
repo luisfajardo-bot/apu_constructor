@@ -32,8 +32,7 @@ def test_pedir_la_lista_te_deja_en_la_lista(tmp_path):
     cli = TestClient(_app(tmp_path, ana))
     r = cli.get("/api/presencia")
     assert r.status_code == 200
-    assert r.json() == {"en_linea": [
-        {"user_id": "u1", "email": "ana@obra.co", "nombre": "Ana"}]}
+    assert r.json() == {"en_linea": [{"email": "ana@obra.co", "nombre": "Ana"}]}
 
 
 def test_dos_usuarios_se_ven_entre_si(tmp_path):

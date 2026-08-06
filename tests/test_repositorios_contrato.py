@@ -368,6 +368,25 @@ def test_list_apus_respeta_grupo_turno_y_paginacion_con_q(repos):
     assert not ({a.codigo for a in pag1} & {a.codigo for a in pag2})
 
 
+def test_list_apus_arriba_del_techo_degrada_a_orden_por_codigo(repos, monkeypatch):
+    """Pin del fallback arriba del techo, pero a través del repositorio real (no solo
+    del helper puro): con MAX_RANKEO=1 y varias filas que matchean al mismo nivel,
+    `similarity` no se calcula para ninguna -> el desempate cae a código ascendente,
+    NO al orden que daría el parecido (que pondría "TRANSPORTE A"/"TRANSPORTE B" antes
+    que "TRANSPORTE DE MATERIAL SOBRANTE", por ser más parecidas a la consulta)."""
+    from apu_tool.nucleo import relevancia
+    monkeypatch.setattr(relevancia, "MAX_RANKEO", 1)
+    _, apus = repos
+    apus.insert_apus([
+        Apu("2000", "TRANSPORTE DE MATERIAL SOBRANTE", "M3", "DIURNO", "MOV"),
+        Apu("1000", "TRANSPORTE A", "M3", "DIURNO", "MOV"),
+        Apu("3000", "TRANSPORTE B", "M3", "DIURNO", "MOV"),
+    ])
+    items, total = apus.list_apus(q="transporte")
+    assert [a.codigo for a in items] == ["1000", "2000", "3000"]
+    assert total == 3
+
+
 def test_list_apus_sin_q_no_cambia(repos):
     """El camino sin búsqueda queda intacto: orden por código y total real."""
     _, apus = repos

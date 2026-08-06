@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { FileSpreadsheet, Layers, Package, ScrollText, Users } from "lucide-react";
 import { getStatus } from "@/api/corridas";
-import type { StatusResponse } from "@/lib/tipos";
+import { getPresencia } from "@/api/presencia";
+import type { StatusResponse, UsuarioEnLinea } from "@/lib/tipos";
 import { useAuth } from "@/lib/auth";
 import { puede } from "@/components/rutas";
 import { Button } from "@/components/ui/button";
@@ -35,8 +36,39 @@ export default function Layout() {
       });
   }, []);
 
+  const [enLinea, setEnLinea] = useState<UsuarioEnLinea[] | null>(null);
+
+  // Presencia: un poll de 45 s contra una ventana de 90 s en el servidor (dos latidos
+  // de margen, así una petición perdida no apaga el punto). El poll ES el latido.
+  useEffect(() => {
+    let vivo = true;
+    const pedir = () => {
+      // Una pestaña de fondo no está "usando" la app: deja de latir y a los 90 s
+      // desaparece de la lista de los demás.
+      if (document.hidden) return;
+      getPresencia()
+        .then((r) => {
+          if (vivo) setEnLinea(r.en_linea);
+        })
+        .catch(() => {
+          /* sin backend — silencioso, se conserva la última lista */
+        });
+    };
+    pedir();
+    const t = setInterval(pedir, 45_000);
+    return () => {
+      vivo = false;
+      clearInterval(t);
+    };
+  }, []);
+
   // Mientras carga, un guion por lectura. Antes decía "cargando…" en el chip entero.
   const num = (n: number | undefined) => (n === undefined ? "—" : n.toLocaleString("es-CO"));
+
+  // Los nombres en el title: la barra es densa y no caben dos columnas de gente.
+  const quienes = (enLinea ?? [])
+    .map((u) => `${u.nombre || u.email}${u.email === perfil?.email ? " (vos)" : ""}`)
+    .join("\n");
 
   const esAdmin = puede(perfil?.rol, "admin");
   // `admin` marca el grupo, en vez de deducirlo de la posición: con un `i === 3` el
@@ -115,6 +147,15 @@ export default function Layout() {
                   después estas lecturas (informativas), al final el nombre de la marca.
                   La navegación no se oculta nunca. */}
               <div className="flex items-stretch @max-[980px]:hidden">
+                <Lectura etiqueta="En línea">
+                  <span className="flex items-center gap-1.5" title={quienes}>
+                    <span
+                      aria-hidden
+                      className="size-[5px] shrink-0 rounded-full bg-margen-pos"
+                    />
+                    {enLinea ? enLinea.length : "—"}
+                  </span>
+                </Lectura>
                 <Lectura etiqueta="Insumos">{num(status?.insumos)}</Lectura>
                 <Lectura etiqueta="APUs">{num(status?.apus)}</Lectura>
                 <Lectura etiqueta="IA">

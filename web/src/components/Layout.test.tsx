@@ -12,6 +12,14 @@ import Layout from "./Layout";
 vi.mock("@/api/corridas", () => ({
   getStatus: vi.fn(async () => ({ insumos: 7095, apus: 1204, ia: false })),
 }));
+vi.mock("@/api/presencia", () => ({
+  getPresencia: vi.fn(async () => ({
+    en_linea: [
+      { user_id: "u1", email: "a@obra.co", nombre: "Ana" },
+      { user_id: "u2", email: "beto@obra.co", nombre: "Beto" },
+    ],
+  })),
+}));
 let rol = "consulta";
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ perfil: { email: "a@obra.co", rol }, logout: vi.fn() }),
@@ -66,4 +74,19 @@ test("la navegación es un landmark, separada de las lecturas de estado", async 
   const nav = screen.getByRole("navigation");
   const destinos = within(nav).getAllByRole("link").map((a) => a.textContent);
   expect(destinos).toEqual(["Corridas", "Insumos", "APUs", "Usuarios", "Auditoría"]);
+});
+
+test("la barra muestra cuánta gente está en línea, y quién", async () => {
+  rol = "editor";
+  render(<MemoryRouter><Layout /></MemoryRouter>);
+
+  // El conteo es un nodo propio, como las otras lecturas.
+  const conteo = await screen.findByText("2");
+  expect(conteo).not.toBeNull();
+
+  // Los nombres van en el title: la barra es densa, no caben dos columnas de gente.
+  // El propio usuario (a@obra.co, el del mock de useAuth) queda marcado.
+  const titulo = conteo.closest("[title]")?.getAttribute("title") ?? "";
+  expect(titulo).toContain("Ana (vos)");
+  expect(titulo).toContain("Beto");
 });

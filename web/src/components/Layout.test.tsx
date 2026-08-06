@@ -37,8 +37,8 @@ test("el link Usuarios solo aparece para Admin", async () => {
 
 test("las cuatro lecturas de estado van separadas, no en una frase", async () => {
   // Antes era una sola cadena interpolada: "7095 insumos · 1204 APUs · IA: fallback".
-  // Para sacar un número había que leerla entera. Pasan a ser tres lecturas con su
-  // etiqueta y su valor, así que cada valor tiene que existir como nodo propio.
+  // Para sacar un número había que leerla entera. Pasan a ser lecturas separadas, cada
+  // una con su etiqueta y su valor, así que cada valor tiene que existir como nodo propio.
   rol = "editor";
   render(<MemoryRouter><Layout /></MemoryRouter>);
 

@@ -27,6 +27,7 @@ from apu_tool.servicio.carpetas import CarpetaInvalida, CarpetaNoVacia
 from apu_tool.servicio import insumos as insumos_svc
 from apu_tool.servicio import listas as listas_svc
 from apu_tool.servicio import plantillas as plantillas_svc
+from apu_tool.servicio import presencia as presencia_svc
 from apu_tool.servicio import usuarios as usuarios_svc
 from apu_tool.servicio.auth import requiere_rol
 from apu_tool.servicio.dependencias import get_almacen
@@ -68,6 +69,16 @@ def get_admin_supabase() -> AdminSupabase:
 @router.get("/yo")
 def yo(usuario=Depends(requiere_rol("consulta"))):
     return {"email": usuario.email, "rol": usuario.rol, "nombre": usuario.nombre}
+
+
+@router.get("/presencia")
+def presencia(usuario=Depends(requiere_rol("consulta"))):
+    """Quién está usando la app ahora. Pedirla te marca presente: el latido es el
+    poll del frontend (cada 45 s), no hay endpoint de latido aparte.
+
+    No recibe el Almacen a propósito: esto no toca la DB."""
+    presencia_svc.marcar(usuario)
+    return {"en_linea": presencia_svc.en_linea()}
 
 
 @router.get("/health")

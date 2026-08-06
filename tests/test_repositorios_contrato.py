@@ -316,3 +316,64 @@ def test_grupos_ignora_vacios_y_deduplica(repos):
     apus.crear_apu(Apu("Z2", "ANDEN", "M2", "DIURNO", "PAVIMENTOS"), [])
     apus.crear_apu(Apu("Z3", "SIN GRUPO", "M2", "DIURNO"), [])
     assert apus.grupos() == ["PAVIMENTOS"]
+
+
+def test_list_apus_ordena_por_relevancia(repos):
+    """Buscar "transporte" tiene que traer primero el que empieza con la palabra,
+    no el de código menor (que es lo que hacía el ORDER BY codigo)."""
+    _, apus = repos
+    apus.insert_apus([
+        Apu("1000", "SUMINISTRO Y TRANSPORTE DE TUBERIA", "ML", "DIURNO", "REDES"),
+        Apu("2000", "TRANSPORTE DE MATERIAL SOBRANTE", "M3", "DIURNO", "MOV"),
+        Apu("3000", "EXCAVACIÓN MECÁNICA", "M3", "DIURNO", "MOV"),
+    ])
+    items, total = apus.list_apus(q="transporte")
+    assert [a.codigo for a in items] == ["2000", "1000"]
+    assert total == 2
+
+
+def test_list_apus_encuentra_sin_tildes(repos):
+    """Antes fallaba: el LIKE iba contra `nombre` crudo, y encima con LIKE en SQLite
+    vs ILIKE en Postgres. Este test corre en los dos backends a propósito."""
+    _, apus = repos
+    apus.insert_apus([Apu("1000", "EXCAVACIÓN MECÁNICA", "M3", "DIURNO", "MOV")])
+    items, total = apus.list_apus(q="excavacion mecanica")
+    assert [a.codigo for a in items] == ["1000"]
+    assert total == 1
+
+
+def test_list_apus_dos_palabras_separadas(repos):
+    """Antes devolvía cero filas: el LIKE buscaba la frase literal."""
+    _, apus = repos
+    apus.insert_apus([
+        Apu("1000", "TRANSPORTE DE MATERIAL SOBRANTE", "M3", "DIURNO", "MOV")])
+    items, _ = apus.list_apus(q="transporte material")
+    assert [a.codigo for a in items] == ["1000"]
+
+
+def test_list_apus_respeta_grupo_turno_y_paginacion_con_q(repos):
+    _, apus = repos
+    apus.insert_apus([
+        Apu("1000", "TRANSPORTE A", "M3", "DIURNO", "MOV"),
+        Apu("2000", "TRANSPORTE B", "M3", "NOCTURNO", "MOV"),
+        Apu("3000", "TRANSPORTE C", "M3", "DIURNO", "REDES"),
+    ])
+    items, total = apus.list_apus(q="transporte", shift="DIURNO")
+    assert {a.codigo for a in items} == {"1000", "3000"} and total == 2
+    items, total = apus.list_apus(q="transporte", grupo="MOV")
+    assert {a.codigo for a in items} == {"1000", "2000"} and total == 2
+    pag1, total = apus.list_apus(q="transporte", limit=2, offset=0)
+    pag2, _ = apus.list_apus(q="transporte", limit=2, offset=2)
+    assert total == 3 and len(pag1) == 2 and len(pag2) == 1
+    assert not ({a.codigo for a in pag1} & {a.codigo for a in pag2})
+
+
+def test_list_apus_sin_q_no_cambia(repos):
+    """El camino sin búsqueda queda intacto: orden por código y total real."""
+    _, apus = repos
+    apus.insert_apus([
+        Apu("2000", "B", "M3", "DIURNO", "MOV"),
+        Apu("1000", "A", "M3", "DIURNO", "MOV"),
+    ])
+    items, total = apus.list_apus()
+    assert [a.codigo for a in items] == ["1000", "2000"] and total == 2

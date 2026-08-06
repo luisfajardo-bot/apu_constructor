@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
 from apu_tool import config
+from apu_tool.nucleo import relevancia
 from apu_tool.nucleo.models import (
     Apu, ApuComponent, DePricedApu, DePricedComponent,
 )
@@ -185,14 +186,7 @@ class ApusDB:
     def list_apus(self, q: Optional[str] = None, grupo: Optional[str] = None,
                   shift: Optional[str] = None, limit: int = 100,
                   offset: int = 0) -> tuple[list[Apu], int]:
-        # NOTA: la búsqueda por nombre aquí usa LIKE (SQLite); en apus_pg.py usa ILIKE (Postgres).
-        # Esto puede divergir en acentos. El insumo_search usa nombre_norm para unificar; APU
-        # seguirá LIKE/ILIKE hasta añadir apus.nombre_norm (mejora futura).
         where, params = [], []
-        if q:
-            where.append("(nombre LIKE ? OR codigo LIKE ?)")
-            like = f"%{q.strip()}%"
-            params += [like, like]
         if grupo:
             where.append("grupo = ?")
             params.append(grupo)
@@ -200,6 +194,20 @@ class ApusDB:
             where.append("shift = ?")
             params.append(shift)
         wsql = (" WHERE " + " AND ".join(where)) if where else ""
+        if (q or "").strip():
+            # El filtro por texto y el orden van en Python (nucleo/relevancia.py): así
+            # "excavacion" encuentra "EXCAVACIÓN" y el criterio es UNO para SQLite y
+            # Postgres, en vez del LIKE-vs-ILIKE que divergía en acentos. La tabla tiene
+            # ~1200 filas y el repo ya la lee entera en cada corrida (apu_index).
+            with self.connect() as conn:
+                rows = conn.execute(
+                    f"SELECT codigo, nombre, unidad, shift, grupo FROM apus{wsql}",
+                    params).fetchall()
+            todos = [Apu(r["codigo"], r["nombre"], r["unidad"], r["shift"], r["grupo"])
+                     for r in rows]
+            ordenados = relevancia.ordenar(todos, q, nombre_de=lambda a: a.nombre,
+                                           codigo_de=lambda a: a.codigo)
+            return ordenados[int(offset):int(offset) + int(limit)], len(ordenados)
         with self.connect() as conn:
             total = conn.execute(f"SELECT COUNT(*) FROM apus{wsql}", params).fetchone()[0]
             rows = conn.execute(

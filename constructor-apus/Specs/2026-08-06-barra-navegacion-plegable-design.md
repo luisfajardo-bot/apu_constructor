@@ -62,23 +62,37 @@ Las cuentas que fijan los dos cortes nuevos:
 
 ## El desplegable
 
-`<details>` / `<summary>` **nativo**, sin JS de apertura:
+Un `<button>` con `aria-expanded` más el `<nav>` que ya existe. **No** `<details>` /
+`<summary>`: se evaluó primero y no sirve acá.
 
-- `<summary>` ya es enfocable, responde a Enter y Espacio, y expone el estado
-  expandido/colapsado a lectores de pantalla sin `aria-*` a mano.
-- El `<summary>` muestra el ícono de la sección actual + su nombre + un chevron. Si
-  ninguna ruta calza (no debería pasar dentro del Layout autenticado), dice `Secciones`.
-- Adentro, las 5 secciones en columna, conservando el separador del grupo Admin que ya
-  se dibuja hoy y la marca de la sección activa.
+**Por qué no `<details>`.** Su contenido no se renderiza mientras el elemento no tenga
+`open`, y eso no se puede revertir con CSS de forma confiable (Chrome lo implementa con
+`content-visibility` sobre `::details-content`; otros motores, con un slot del shadow
+tree del navegador). Este diseño necesita exactamente lo contrario: que el mismo `<nav>`
+esté visible **sin** estar "abierto" cuando la barra es ancha. Para conseguirlo habría
+que mantener `open` en `true` por JS con un `matchMedia` y un listener — más código que
+no usar el elemento nativo, y con un techo de fragilidad que depende del motor. Cuando
+el elemento nativo pelea contra el requisito, usarlo sale más caro que no usarlo.
+
+Entonces:
+
+- **Botón:** `hidden @max-[980px]:flex`, con `aria-expanded={abierto}` y `aria-controls`
+  apuntando al `id` del `<nav>`. Muestra el ícono de la sección actual + su nombre + un
+  chevron. Si ninguna ruta calza (no debería pasar dentro del Layout autenticado), dice
+  `Secciones`.
+- **Panel:** el propio `<nav>`, con las 5 secciones en columna, conservando el separador
+  del grupo Admin que ya se dibuja hoy y la marca de la sección activa.
 - La sección actual se calcula desde `useLocation().pathname` con el mismo criterio que
   `NavLink`: el link con `end: false` (Corridas) matchea también sus rutas anidadas
   (`/corridas/123`), los demás exigen igualdad.
+- Es un `<button>` de verdad, así que el foco, Enter y Espacio salen gratis; lo único que
+  hay que declarar a mano es `aria-expanded`.
 
-**Cierre:** un `useEffect` sobre `location.pathname` cierra el `<details>` al navegar.
+**Cierre:** un `useEffect` sobre `location.pathname` cierra el panel al navegar.
 
-**No se agrega listener de clic-afuera.** `<details>` no lo trae, y sin él el panel
-queda abierto hasta que se vuelve a tocar el `<summary>`. Comentario `ponytail:` con el
-techo y el upgrade: el repo ya tiene ese patrón hecho a mano en
+**No se agrega listener de clic-afuera ni cierre con Esc.** Sin eso, el panel queda
+abierto hasta que se vuelve a tocar el botón. Comentario `ponytail:` con el techo y el
+upgrade: el repo ya tiene el patrón de clic-afuera hecho a mano en
 `web/src/components/corrida/BuscadorApu.tsx` (listener de `mousedown` en `document`) si
 al probarlo en el navegador molesta.
 
@@ -95,12 +109,15 @@ inline a panel absoluto por container query:
 que el repo ya usa (`Layout.tsx:98,113,153,180`), nunca con un `@min-[…]` sin precedente
 acá:
 
-- el `<summary>`: `hidden @max-[980px]:flex` — no existe en la barra ancha, aparece al
+- el botón: `hidden @max-[980px]:flex` — no existe en la barra ancha, aparece al
   angostarse;
 - el `<nav>`: clases base para la fila inline, más `@max-[980px]:absolute
   @max-[980px]:top-full @max-[980px]:flex-col …`, y la visibilidad en angosto sale del
   estado abierto/cerrado (`@max-[980px]:flex` vs `@max-[980px]:hidden`) aplicado con el
-  helper `cn` que el archivo ya importa;
+  helper `cn` que el archivo ya importa. Ojo: cerrado se oculta **solo** con el
+  modificador `@max-[…]`, nunca con un `hidden` pelado — si no, en los tests (donde las
+  container queries no existen) el `<nav>` desaparecería y se caería el guard de los
+  5 links;
 - las dos filas de <560px: `flex-wrap` en el contenedor de la barra y
   `@max-[560px]:basis-full @max-[560px]:justify-between` en el grupo de lecturas, para
   que caiga entero a la segunda fila y se reparta a lo ancho.

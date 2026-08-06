@@ -70,7 +70,7 @@ export default function TablaItems({
   // Ancla del rango: guarda el SEQ, no el índice. Si el usuario cambia el filtro o
   // el orden entre el click y el Shift+click, el índice viejo apuntaría a otra fila;
   // el seq se resuelve contra el `visible` del momento.
-  const ancorSeqRef = useRef<number | null>(null);
+  const anclaSeqRef = useRef<number | null>(null);
 
   const nPorRevisar = items.filter((it) => REVISABLE.has(it.status)).length;
   const visible = control
@@ -88,16 +88,16 @@ export default function TablaItems({
   const seleccionable = control !== undefined && !readOnly;
 
   function alternar(idx: number, seq: number, conShift: boolean) {
-    const desde = ancorSeqRef.current === null
+    const desde = anclaSeqRef.current === null
       ? -1
-      : visible.findIndex((it) => it.seq === ancorSeqRef.current);
+      : visible.findIndex((it) => it.seq === anclaSeqRef.current);
     if (conShift && desde >= 0) {
       const [a, b] = desde <= idx ? [desde, idx] : [idx, desde];
       const rango = visible.slice(a, b + 1).map((it) => it.seq);
       setMarcadas((prev) => new Set([...prev, ...rango]));
       return;                                  // el ancla del rango no se mueve
     }
-    ancorSeqRef.current = seq;
+    anclaSeqRef.current = seq;
     setMarcadas((prev) => {
       const s = new Set(prev);
       if (s.has(seq)) s.delete(seq); else s.add(seq);
@@ -106,7 +106,7 @@ export default function TablaItems({
   }
 
   function marcarTodas(marcar: boolean) {
-    ancorSeqRef.current = null;
+    anclaSeqRef.current = null;
     setMarcadas((prev) => {
       const s = new Set(prev);
       for (const it of visible) { if (marcar) s.add(it.seq); else s.delete(it.seq); }
@@ -115,7 +115,7 @@ export default function TablaItems({
   }
 
   function limpiarSeleccion() {
-    ancorSeqRef.current = null;
+    anclaSeqRef.current = null;
     setMarcadas(new Set());
   }
 
@@ -185,7 +185,7 @@ export default function TablaItems({
       const n = objetivo.length;
       toast.success(apu
         ? `${apu.codigo} asignado a ${n} ${n === 1 ? "línea" : "líneas"}`
-        : `${n} ${n === 1 ? "línea" : "líneas"} confirmadas`);
+        : `${n} ${n === 1 ? "línea confirmada" : "líneas confirmadas"}`);
     } catch (e) {
       // La selección NO se limpia: el usuario puede reintentar sin volver a marcar.
       toast.error(e instanceof Error ? e.message : "No se pudo aplicar el cambio en lote.");

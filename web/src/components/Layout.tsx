@@ -96,9 +96,8 @@ export default function Layout() {
   useEffect(() => setSeccionesAbiertas(false), [pathname]);
 
   // Mismo criterio que NavLink: `end: false` (Corridas) matchea sus rutas anidadas
-  // (/corridas/7), el resto exige igualdad. Se busca de atrás para adelante para que
-  // gane el match más específico si algún día dos links comparten prefijo.
-  const activa = [...links].reverse().find(({ to, end }) =>
+  // (/corridas/7), el resto exige igualdad.
+  const activa = links.find(({ to, end }) =>
     end ? pathname === to : pathname === to || pathname.startsWith(`${to}/`)
   );
   const IconoActiva = activa?.Icono ?? Layers;
@@ -109,7 +108,7 @@ export default function Layout() {
           tiene de verdad, no el del viewport. */}
       <header className="@container relative shrink-0 border-b border-border bg-card">
         <div className="flex min-h-[54px] flex-wrap items-stretch justify-between gap-5 px-[18px] @max-[560px]:py-2">
-          <div className="flex min-w-0 items-stretch gap-1 @max-[700px]:overflow-x-auto">
+          <div className="flex min-w-0 items-stretch gap-1">
             <span className="flex shrink-0 items-center gap-2.5 pr-3.5 whitespace-nowrap">
               <svg
                 viewBox="0 0 16 16"

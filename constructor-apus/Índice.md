@@ -17,6 +17,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 48 plane
 ## Runbooks
 
 - [[Runbooks/runbook-correo-resend-smtp|Runbook — Correo transaccional con Resend + Supabase (SMTP)]]
+- [[Runbooks/runbook-login-google|Runbook — Login con Google (Supabase Auth)]]
 
 ## Otros
 

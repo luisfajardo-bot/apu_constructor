@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS insumos (
     UNIQUE (codigo, nombre_norm)
 );
 CREATE INDEX IF NOT EXISTS idx_insumo_cod ON insumos(codigo);
+CREATE INDEX IF NOT EXISTS idx_insumo_nombre_norm ON insumos(nombre_norm);
 
 -- Una lista = una tarifa. La id 1 es SIEMPRE 'Principal' (la siembra init_schema).
 CREATE TABLE IF NOT EXISTS lista_precios (

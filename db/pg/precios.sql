@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS precios.insumos (
     UNIQUE (codigo, nombre_norm)
 );
 CREATE INDEX IF NOT EXISTS idx_insumo_cod ON precios.insumos(codigo);
+CREATE INDEX IF NOT EXISTS idx_insumo_nombre_norm ON precios.insumos(nombre_norm);
 
 ALTER TABLE precios.insumos ADD COLUMN IF NOT EXISTS oculto BOOLEAN NOT NULL DEFAULT FALSE;
 

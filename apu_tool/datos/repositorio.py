@@ -65,6 +65,15 @@ class RepositorioPrecios(Protocol):
     def todos_no_ocultos(self) -> list[tuple[int, str, str]]:
         """(id, codigo, nombre) de todos los insumos con oculto=false."""
         ...
+    def identidades_en_conflicto(self, codigo: str,
+                                 nombre_norm: str) -> list[tuple[str, str, bool]]:
+        """`(codigo, nombre, oculto)` de los insumos cuyo código O `nombre_norm` coincide.
+
+        Los dos lados del chequeo de duplicados del alta (`servicio/autoria.py`) en una
+        sola consulta. Incluye los ocultos a propósito: `get_candidatos` no filtra
+        `oculto`, o sea que el motor de precios los ve, y un código repetido con uno
+        oculto deja el cruce igual de ambiguo que con uno visible."""
+        ...
     def search_insumos(self, texto: str, limit: int = 20) -> list[Insumo]: ...
     def search_insumos_por_palabras(self, palabras: list[str],
                                     limit: int = 60) -> list[Insumo]: ...

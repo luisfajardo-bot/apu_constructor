@@ -7,6 +7,7 @@ import os
 import pytest
 
 from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
+from apu_tool.nucleo.texto import normalizar
 from apu_tool.datos.repositorio import RepositorioPrecios, RepositorioApus
 
 
@@ -453,3 +454,29 @@ def test_list_insumos_sin_q_no_cambia(repos):
     ])
     items, total = precios.list_insumos()
     assert [i.codigo for i in items] == ["1000", "2000"] and total == 2
+
+
+def test_identidades_en_conflicto_por_codigo_y_por_nombre(repos):
+    p, _a = repos
+    p.insert_insumos([
+        Insumo("100", "CEMENTO GRIS", "KG", "MAT", 1000, "PRECIO IDU"),
+        Insumo("200", "ARENA DE PEÑA", "M3", "MAT", 50000, "PRECIO IDU")])
+    # choca por código, aunque el nombre no tenga nada que ver
+    assert p.identidades_en_conflicto("100", normalizar("OTRA COSA")) == [
+        ("100", "CEMENTO GRIS", False)]
+    # choca por nombre normalizado: tildes y caso plegados
+    assert p.identidades_en_conflicto("999", normalizar("arena de peña")) == [
+        ("200", "ARENA DE PEÑA", False)]
+    # no choca con nada
+    assert p.identidades_en_conflicto("999", normalizar("NADA QUE VER")) == []
+
+
+def test_identidades_en_conflicto_incluye_los_ocultos(repos):
+    """El motor de precios ve los ocultos (get_candidatos no filtra `oculto`), así que
+    un código repetido con uno oculto deja el cruce ambiguo igual que con uno visible."""
+    p, _a = repos
+    p.insert_insumos([Insumo("300", "TRANSPORTE DE MATERIAL", "M3K", "TRA", 500, "PRECIO IDU")])
+    iid = p.get_candidatos("300")[0].id
+    p.set_oculto(iid, True)
+    assert p.identidades_en_conflicto("300", normalizar("X")) == [
+        ("300", "TRANSPORTE DE MATERIAL", True)]

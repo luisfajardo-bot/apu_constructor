@@ -230,6 +230,17 @@ class PreciosDB:
                 "SELECT id, codigo, nombre FROM insumos WHERE oculto = 0").fetchall()
         return [(r["id"], r["codigo"], r["nombre"]) for r in rows]
 
+    def identidades_en_conflicto(self, codigo: str,
+                                 nombre_norm: str) -> list[tuple[str, str, bool]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT codigo, nombre, oculto FROM insumos "
+                "WHERE codigo = ? OR nombre_norm = ? ORDER BY id",
+                (str(codigo), nombre_norm)).fetchall()
+        # `oculto` es INTEGER en SQLite y BOOLEAN en Postgres: se normaliza acá para que
+        # el contrato devuelva lo mismo en los dos backends.
+        return [(r["codigo"], r["nombre"], bool(r["oculto"])) for r in rows]
+
     # ---- listas de precios ----
     @staticmethod
     def _limpiar_nombre_lista(nombre: str) -> str:

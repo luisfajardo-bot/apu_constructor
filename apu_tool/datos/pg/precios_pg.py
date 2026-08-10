@@ -176,6 +176,15 @@ class PreciosPg:
                 "SELECT id, codigo, nombre FROM precios.insumos WHERE oculto = FALSE").fetchall()
         return [(r["id"], r["codigo"], r["nombre"]) for r in rows]
 
+    def identidades_en_conflicto(self, codigo: str,
+                                 nombre_norm: str) -> list[tuple[str, str, bool]]:
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT codigo, nombre, oculto FROM precios.insumos "
+                "WHERE codigo = %s OR nombre_norm = %s ORDER BY id",
+                (str(codigo), nombre_norm)).fetchall()
+        return [(r["codigo"], r["nombre"], bool(r["oculto"])) for r in rows]
+
     # ---- listas de precios ----
     @staticmethod
     def _limpiar_nombre_lista(nombre: str) -> str:

@@ -142,10 +142,15 @@ antes de aprobar el merge — si están mal, la feature abre una puerta que no d
   backend**: GoTrue rechaza el signup implícito con algo como *«Signups not allowed for
   this instance»*, y la adopción por email de este runbook nunca alcanza a correr.
 - **La tensión, dicha directamente:** con signups cerrados (el valor que este proyecto
-  quiere), la adopción por email SOLO puede ayudar a los invitados cuya identidad de
-  Google Supabase sí vincula automáticamente al `user_id` que ya tenían (linking por
-  email, ver "Qué esperar la primera vez" más abajo). Al resto —un `user_id`
-  genuinamente nuevo— GoTrue los bloquea antes de que el código de adopción los vea. El
+  quiere), la adopción por email queda restringida a un caso residual: cuando el usuario
+  de Auth **ya existe** pero con un `user_id` distinto al que quedó guardado en
+  `perfiles` — por ejemplo los usuarios que se borraron y recrearon en la limpieza de
+  duplicados de producción. Ojo con el caso que **no** es: si Supabase vincula la
+  identidad de Google al mismo `user_id` que ya estaba, la adopción **nunca corre**,
+  porque `alm.perfiles.get(user_id)` acierta y el perfil de siempre sigue aplicando
+  (`apu_tool/servicio/auth.py:208-210`, y ver "Qué esperar la primera vez" más abajo).
+  Y a un `user_id` genuinamente nuevo GoTrue lo bloquea antes de que el código de
+  adopción lo vea. El
   remedio para ese caso **no es la adopción**: es la vía manual, el Admin arreglando el
   usuario a mano en el dashboard de Supabase (ver "Si algo falla" más abajo). No hay un
   ajuste de este toggle que resuelva ambos casos a la vez sin abrir signups públicos.
@@ -161,8 +166,9 @@ antes de aprobar el merge — si están mal, la feature abre una puerta que no d
 - Si Supabase crea un `user_id` **nuevo** (el caso típico: al invitado nunca le
   pusieron contraseña, solo lo invitaron): el backend adopta el perfil existente por
   email y lo re-clava a ese `user_id` nuevo. Queda un registro
-  `usuario.vincular_identidad` en **Auditoría** (`/auditoria`, solo Admin) — ahí se ve
-  cuál de los dos casos ocurrió.
+  `usuario.vincular_identidad` en **Auditoría** (`/auditoria`, solo Admin): que la fila
+  exista o no es lo que te dice cuál de los dos casos ocurrió. (La **señal** que la
+  permitió va en el `contexto` de esa fila, que la página no muestra; ver más abajo.)
 
 ### Antes de aprobar el merge: leer el token con tus propios ojos
 
@@ -216,11 +222,18 @@ vinculado que en este login entró por contraseña **también** muestra `"google
 prueba que la guarda vaya a pasar: sigue haciendo falta decodificar el `access_token`
 (pasos 1-5) para ver `amr`. No hay atajo.
 
-Una vez desplegado, hay una forma cómoda de confirmar la señal después, sin repetir
-este paso a mano: cada adopción por email deja una fila `usuario.vincular_identidad` en
-**Auditoría** (`/auditoria`, solo Admin) con la señal exacta que la disparó (`amr:oauth`
-o `app_metadata:google`, ver más abajo). Sirve para confirmar que la guarda está viva
-después del hecho, pero no reemplaza este paso ANTES del merge: sin la verificación de
+Una vez desplegado hay una forma de confirmar la señal después, sin repetir este paso a
+mano: cada adopción por email deja una fila `usuario.vincular_identidad` cuyo `contexto`
+guarda la señal exacta que la disparó (`amr:oauth` o `app_metadata:google`).
+
+**Ojo con dónde mirarla:** la página **Auditoría** (`/auditoria`, solo Admin) muestra la
+fila pero **no** renderiza el `contexto` para esta acción (`web/src/pages/Auditoria.tsx`
+solo pinta `antes → despues`). Para ver la señal hay que mirar el JSON de
+`GET /api/auditoria`, donde el campo sí viaja. O sea: la página te dice **que** hubo una
+adopción; el JSON te dice **por qué señal** se permitió.
+
+Sirve para confirmar que la guarda está viva después del hecho, pero no reemplaza este
+paso ANTES del merge: sin la verificación de
 los pasos 1-5, un fail-closed que deniega a todos los invitados por Google no deja
 ninguna fila en auditoría que lo delate (no hay adopción que registrar si nadie logra
 entrar).

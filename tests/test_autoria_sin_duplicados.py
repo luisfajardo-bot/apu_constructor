@@ -2,6 +2,9 @@
 
 Spec: docs/superpowers/specs/2026-08-10-sin-duplicados-alta-design.md
 """
+import io
+
+import openpyxl
 import pytest
 
 from apu_tool.datos.almacen import Almacen
@@ -108,3 +111,49 @@ def test_apu_nombre_repetido_en_el_mismo_turno_rechaza(tmp_path):
     with pytest.raises(ValueError):
         autoria.crear_apu(alm, _apu_nuevo("3010 N", "DIURNO",
                                           "EXCAVACION MANUAL EN MATERIAL COMUN"))
+
+
+# --------------------------------------------------------------- import insumos
+def _excel_insumos(filas):
+    """Excel con las columnas que lee `_filas_insumos`."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["codigo", "nombre", "unidad", "grupo", "precio", "fuente"])
+    for f in filas:
+        ws.append(f)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_import_insumos_codigo_tomado_va_a_conflicto(tmp_path):
+    alm = _alm(tmp_path)
+    contenido = _excel_insumos([["10014", "ESTABILIZACION CON RAJON", "M3", "SUB", 7000, "PRECIO IDU"]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "x.xlsx")
+    assert prev["crear"] == []
+    assert len(prev["conflicto"]) == 1
+    assert "10014" in prev["conflicto"][0]["motivo"]
+    res = autoria.aplicar_importar_insumos(alm, contenido, "x.xlsx")
+    assert res["creados"] == 0
+
+
+def test_import_insumos_dos_filas_del_mismo_codigo_la_segunda_es_conflicto(tmp_path):
+    """Sin el chequeo contra el propio archivo, el preview diría "crear 2" y el aplicar
+    crearía 1 con un error: el preview mentiría."""
+    alm = _alm(tmp_path)
+    contenido = _excel_insumos([
+        ["7777", "GRAVA COMUN", "M3", "MAT", 8000, "PRECIO IDU"],
+        ["7777", "OTRA COSA DISTINTA", "M3", "MAT", 9000, "PRECIO IDU"]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "x.xlsx")
+    assert len(prev["crear"]) == 1 and len(prev["conflicto"]) == 1
+    res = autoria.aplicar_importar_insumos(alm, contenido, "x.xlsx")
+    assert res["creados"] == 1 and res["errores"] == []
+
+
+def test_import_insumos_el_gemelo_nocturno_del_archivo_si_se_crea(tmp_path):
+    alm = _alm(tmp_path)
+    contenido = _excel_insumos([
+        ["8888", "GRAVA COMUN", "M3", "MAT", 8000, "PRECIO IDU"],
+        ["8888 N", "GRAVA COMUN", "M3", "MAT", 9000, "PRECIO IDU"]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "x.xlsx")
+    assert len(prev["crear"]) == 2 and prev["conflicto"] == []

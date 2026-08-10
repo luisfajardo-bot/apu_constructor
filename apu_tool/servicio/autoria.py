@@ -435,16 +435,27 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
                              lista_id: Optional[int] = None) -> dict:
     """Upsert por fila CONTRA `lista_id` (None = Principal). Con nombre: identidad
     código+nombre (crea o actualiza). Sin nombre: actualiza precio por código (único),
-    o marca ambigua/no encontrada."""
-    crear, actualizar, ambigua, no_encontrada, invalida = [], [], [], [], []
+    o marca ambigua/no encontrada. Lo que crearía un duplicado va a 'conflicto'."""
+    crear, actualizar, ambigua, no_encontrada, invalida, conflicto = [], [], [], [], [], []
+    # Filas que este mismo archivo ya va a crear, con la forma de
+    # `identidades_en_conflicto`: así una fila choca contra las anteriores del archivo
+    # con exactamente la misma regla (incluida la excepción del gemelo nocturno).
+    reclamadas: list[tuple[str, str, bool]] = []
     for f in _filas_insumos(contenido, nombre_archivo):
         cod, nom = f["codigo"], f["nombre"]
         if not cod:
             invalida.append(f)
         elif nom:
             match = _match_identidad(alm, cod, nom, lista_id)
-            (_upsert_o_invalida(match, f, actualizar, invalida) if match
-             else crear.append(f))
+            if match:
+                _upsert_o_invalida(match, f, actualizar, invalida)
+                continue
+            motivo = _conflicto_insumo(alm, cod, nom, extra=reclamadas)
+            if motivo:
+                conflicto.append({**f, "motivo": motivo})
+            else:
+                crear.append(f)
+                reclamadas.append((cod, nom, False))
         else:
             cands = alm.precios.get_candidatos(cod, lista_id=lista_id)
             if len(cands) == 1:
@@ -455,7 +466,7 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
             else:
                 no_encontrada.append({"codigo": cod})
     return {"crear": crear, "actualizar": actualizar, "ambigua": ambigua,
-            "no_encontrada": no_encontrada, "invalida": invalida}
+            "no_encontrada": no_encontrada, "invalida": invalida, "conflicto": conflicto}
 
 
 def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,

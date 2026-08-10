@@ -150,11 +150,11 @@ Qué significa el resultado:
   provider de Google en Supabase — y, tal como está, **todos** los invitados que
   entren por Google van a quedar en 403 aunque el resto de la config esté perfecta.
 
-*(Atajo sin decodificar nada a mano: en devtools → React DevTools, inspeccionar el
-estado de `useAuth()` — el objeto de sesión de supabase-js trae
-`session.user.app_metadata` ya parseado. Sirve para mirar `provider`/`providers`, pero
-`amr` solo vive en el JWT, así que para confirmar `amr` específicamente sí hay que
-decodificar el token.)*
+*(Atajo sin decodificar nada a mano: en devtools → React DevTools, buscar en el árbol
+de componentes el nodo **`AuthProvider`** e inspeccionar su Context/estado — ahí vive
+la `sesion`, y el objeto de sesión de supabase-js trae `session.user.app_metadata` ya
+parseado. Sirve para mirar `provider`/`providers`, pero `amr` solo vive en el JWT, así
+que para confirmar `amr` específicamente sí hay que decodificar el token.)*
 
 ---
 
@@ -182,15 +182,33 @@ decodificar el token.)*
 Dos comportamientos no obvios que trae esta feature. No son bugs — son intencionales —
 pero si no se conocen, muerden.
 
-**No desactivar el perfil del correo que está en `APU_ADMIN_EMAILS`.** Antes de esta
-feature, un correo en `APU_ADMIN_EMAILS` (env de Render) con un `user_id` nuevo recibía
-automáticamente un perfil admin nuevo (el bootstrap). Ahora, si YA existe un perfil de
-ese correo pero está `inactivo`, la adopción no corre (ver arriba) y el bootstrap
-tampoco entra a tallar — el flujo se corta antes de llegar ahí. Resultado: el dueño de
-la app se queda afuera de su propia app, sin break-glass. Si el perfil del admin de
-bootstrap queda desactivado por error, hay que reactivarlo a mano en
-`seguridad.perfiles` (o pedirle a otro Admin activo que lo reactive desde
-**Usuarios**).
+**Desactivar el perfil de alguien listado en `APU_ADMIN_EMAILS` NO lo revoca.** El
+bootstrap de `resolver_perfil` (`apu_tool/servicio/auth.py:149-165`) es incondicional:
+dispara cada vez que no hay perfil resuelto **para el `user_id` de esa sesión**, sin
+mirar por qué está vacío. Con un `user_id` nuevo (justo lo que puede traer un login
+con Google) y un perfil viejo con ese email en estado `inactivo`, la adopción por
+email no lo re-clava (perfil inactivo, ver arriba) — pero eso deja `p` en `None`, y el
+bootstrap entra igual: si el email sigue en `APU_ADMIN_EMAILS`, crea un perfil admin
+**nuevo y activo** bajo ese `user_id` nuevo, sin excepción, dejando el perfil viejo
+inactivo como fila huérfana. Verificado ejecutando `resolver_perfil` contra un
+`Almacen` de prueba: perfil admin inactivo + su email en `APU_ADMIN_EMAILS` + `user_id`
+nuevo → vuelve un `Perfil(rol="admin", estado="activo")` para ese `user_id` nuevo.
+
+En corto: **desactivar el perfil no alcanza para sacarle el acceso a alguien de
+`APU_ADMIN_EMAILS`** — si esa persona conserva acceso a su cuenta de Google, se
+auto-reinstala como admin en el siguiente login. Para revocar de verdad hacen falta
+**las dos cosas**: sacar el email de `APU_ADMIN_EMAILS` en las variables de entorno de
+Render, **y** dejar (o poner) su perfil en `inactivo`. Con el email todavía en la lista
+pero el perfil inactivo, el bootstrap lo re-admite igual (es exactamente el caso de
+arriba); con el perfil todavía activo pero el email ya fuera de la lista, la adopción
+por email lo re-clava igual porque el perfil sigue activo. Ambas cosas verificadas por
+ejecución.
+
+El corolario tranquilizador es el mismo hecho visto al revés: el dueño de la app
+**no** puede quedar afuera de su propia app por desactivar su perfil por error —
+mientras su email siga en `APU_ADMIN_EMAILS`, el bootstrap se lo vuelve a dar en el
+siguiente login. `APU_ADMIN_EMAILS` (env de Render) sigue siendo el break-glass real;
+no hace falta tocar `seguridad.perfiles` a mano para recuperarlo.
 
 **Si se borra un usuario en Supabase Auth, desactivar su perfil en la app.** La app no
 tiene forma de borrar un perfil (solo desactivarlo), pero en Supabase Auth sí se han

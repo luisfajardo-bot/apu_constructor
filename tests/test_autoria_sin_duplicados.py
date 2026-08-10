@@ -61,5 +61,7 @@ def test_gemelo_nocturno_puede_repetir_el_nombre(tmp_path):
 
 def test_el_mensaje_del_nombre_sugiere_el_codigo_nocturno(tmp_path):
     alm = _alm(tmp_path)
-    with pytest.raises(ValueError, match="7777 N"):
+    # La sugerencia tiene que ser la base del insumo EXISTENTE (4859), no la del que
+    # se intenta crear (7777): es el código que la excepción del gemelo sí acepta.
+    with pytest.raises(ValueError, match="4859 N"):
         autoria.crear_insumo(alm, _nuevo("7777", "BORDE CONTENEDOR DE RAICES A 70"))

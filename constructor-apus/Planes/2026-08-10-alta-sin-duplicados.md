@@ -309,7 +309,7 @@ def _conflicto_insumo(alm: Almacen, codigo: str, nombre: str,
             por_nombre = por_nombre or c
     if por_nombre:
         return (f"Ese nombre ya lo usa el insumo {por_nombre}. "
-                f"Si es la tarifa nocturna, usa el código {_base_codigo(cod)} N.")
+                f"Si es la tarifa nocturna, usa el código {_base_codigo(por_nombre)} N.")
     return None
 ```
 

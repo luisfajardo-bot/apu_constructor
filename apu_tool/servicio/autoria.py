@@ -14,7 +14,7 @@ from __future__ import annotations
 import csv
 import io
 from dataclasses import replace
-from typing import Optional
+from typing import Optional, Sequence
 
 import openpyxl
 
@@ -34,6 +34,70 @@ from apu_tool.servicio.subapus import (
 PISO_HIST = 1.0
 
 
+# ------------------------------------------------ unicidad de código y de nombre
+# Regla del alta: ni el código ni el nombre se repiten. La excepción es el par
+# nocturno, que comparte nombre A PROPÓSITO: el insumo "4859 N" es la tarifa de noche
+# del "4859" y se llama igual (hay ~500 pares así en la base, y 499 pares
+# DIURNO/NOCTURNO entre los APUs). Ver
+# docs/superpowers/specs/2026-08-10-sin-duplicados-alta-design.md
+#
+# El `seed` NO pasa por acá, y es a propósito: el histórico trae 652 códigos
+# repetidos y tiene que poder seguir cargándose.
+
+
+def _base_codigo(codigo: str) -> str:
+    """El código sin la marca nocturna: "4859 N" -> "4859". Idempotente.
+
+    OJO: a diferencia de `baseDe()` en web/src/lib/duplicarApu.ts, esto NO quita el
+    sufijo de copia "-2". Si lo quitara, un "3454-2" podría reclamar el nombre del
+    "3454" y la excepción dejaría de significar "el gemelo nocturno" para significar
+    "cualquier copia"."""
+    c = str(codigo or "").strip()
+    return c[:-2].rstrip() if c.upper().endswith(" N") else c
+
+
+def _es_gemelo_nocturno(codigo_nuevo: str, codigo_existente: str) -> bool:
+    """True si los dos códigos son el par día/noche del mismo trabajo ("4859" y
+    "4859 N"), el único caso en que se permite repetir el nombre."""
+    a, b = str(codigo_nuevo or "").strip(), str(codigo_existente or "").strip()
+    return (a.upper() != b.upper()
+            and _base_codigo(a).upper() == _base_codigo(b).upper())
+
+
+def _corto(texto: str, n: int = 60) -> str:
+    """Nombre recortado para el mensaje: los del catálogo pasan de 200 caracteres y
+    el mensaje termina en un toast."""
+    t = " ".join(str(texto or "").split())
+    return t if len(t) <= n else t[:n - 1].rstrip() + "…"
+
+
+def _conflicto_insumo(alm: Almacen, codigo: str, nombre: str,
+                      extra: Sequence[tuple[str, str, bool]] = ()) -> Optional[str]:
+    """El motivo en español si el alta choca con un insumo existente, o None.
+
+    Devuelve el motivo y no un bool porque el mismo texto lo usan el 400 del
+    formulario y el balde `conflicto` del preview del import: se escribe una vez.
+
+    `extra` son filas `(codigo, nombre, oculto)` que todavía no están en la base pero
+    ya se van a crear —las filas anteriores del mismo Excel—, para que el preview no
+    diga "crear 2" cuando el aplicar va a crear 1."""
+    cod = str(codigo or "").strip()
+    nn = normalizar(nombre)
+    filas = list(alm.precios.identidades_en_conflicto(cod, nn))
+    filas += [r for r in extra if r[0] == cod or normalizar(r[1]) == nn]
+    por_nombre = None
+    for c, nom, oculto in filas:
+        if c == cod:
+            que = "un insumo oculto:" if oculto else "el insumo"
+            return f"El código {cod} ya lo usa {que} «{_corto(nom)}»."
+        if normalizar(nom) == nn and not _es_gemelo_nocturno(cod, c):
+            por_nombre = por_nombre or c
+    if por_nombre:
+        return (f"Ese nombre ya lo usa el insumo {por_nombre}. "
+                f"Si es la tarifa nocturna, usa el código {_base_codigo(cod)} N.")
+    return None
+
+
 # ----------------------------------------------------------------- individual
 def crear_insumo(alm: Almacen, datos: dict, actor=None, lista_id: Optional[int] = None) -> dict:
     codigo = str(datos.get("codigo", "") or "").strip()
@@ -43,6 +107,10 @@ def crear_insumo(alm: Almacen, datos: dict, actor=None, lista_id: Optional[int] 
     precio = _to_float(datos.get("precio"))
     if precio <= 0:
         raise ValueError(MSG_PRECIO_POSITIVO)
+    # Después de las validaciones locales: si el payload es basura no vale un viaje a la base.
+    motivo = _conflicto_insumo(alm, codigo, nombre)
+    if motivo:
+        raise ValueError(motivo)
     ins = Insumo(codigo=codigo, nombre=nombre,
                  unidad=str(datos.get("unidad", "") or ""),
                  grupo=str(datos.get("grupo", "") or ""),

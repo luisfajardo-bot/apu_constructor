@@ -184,13 +184,16 @@ test explícito.
 
 ## Frontend
 
-**Nada que cambiar en los formularios.** `DialogoAgregarInsumo.tsx:88-90` y
-`DialogoAgregarApu.tsx:308-310` ya hacen `toast.error(msg)` con el detalle del 400.
+`DialogoAgregarInsumo.tsx:88-90` y `DialogoAgregarApu.tsx:308-310` ya hacen
+`toast.error(msg)` con el detalle del 400, así que el 400 queda como red de todos modos.
 
-Se descartó el aviso en vivo mientras se escribe: exigiría un endpoint nuevo que
-reimplemente la regla completa —incluidos ocultos y la excepción nocturna—, porque
-`GET /api/insumos` filtra `oculto = 0` y diría "libre" donde el servidor va a rechazar.
-Dos implementaciones de la misma regla es justo la forma de que se desincronicen.
+**Addendum 2026-08-10: el aviso sale en vivo, debajo del campo.** El diseño original
+esperaba al guardado. Lo que se descartó —y sigue descartado— es un chequeo que
+**reimplemente** la regla en el frontend: `GET /api/insumos` filtra `oculto = 0`, así que
+diría "libre" donde el servidor rechaza, y dos implementaciones de la misma regla es justo
+la forma de que se desincronicen. Un endpoint que llama **al mismo** `_conflicto_insumo` /
+`_conflicto_apu` que usa el guardado no tiene ese problema: es la misma respuesta, solo
+antes. Ver "Aviso en vivo" más abajo.
 
 Los diálogos de import sí muestran el balde nuevo:
 
@@ -200,6 +203,50 @@ Los diálogos de import sí muestran el balde nuevo:
   `web/src/components/autoria/DialogoImportarApus.tsx`: una sección más, con el mismo
   tratamiento visual que `invalida` / `ya_existe`, mostrando el motivo por fila. El
   botón de aplicar sigue contando solo `crear`.
+
+## Aviso en vivo (addendum)
+
+El motivo aparece **debajo del campo culpable** mientras se escribe, sin esperar al botón.
+Los dos diálogos ya envuelven cada input en un `<label className="flex flex-col gap-1">`,
+así que el `<p className="text-xs text-destructive">` va dentro del mismo label, después
+del `<input>` — el patrón que `DialogoAgregarApu.tsx:562-576` ya usa para el rendimiento
+inválido y para las reglas de la copia.
+
+**Una regla, dos formas.** Para saber **qué campo** señalar, los helpers se parten en dos
+sin duplicar nada:
+
+```
+_conflicto_insumo_detalle(alm, codigo, nombre, extra=()) -> Optional[tuple[str, str]]  # (campo, motivo)
+_conflicto_insumo(alm, codigo, nombre, extra=()) -> Optional[str]                      # devuelve solo el motivo
+```
+
+La regla vive **una vez**, en la función `_detalle`; la de siempre queda como envoltorio de
+una línea, así que los 6 llamadores existentes (los dos formularios y los dos imports) no
+se tocan. Igual para `_conflicto_apu`. `campo` es `"codigo"` o `"nombre"`.
+
+**Endpoints** (rol `consulta`, solo lectura):
+
+- `GET /api/insumos/conflicto?codigo=&nombre=` → `{"campo": "codigo"|"nombre"|null, "motivo": str|null}`
+- `GET /api/apus/conflicto?codigo=&turno=&nombre=` → lo mismo
+
+Van declarados **junto a `/insumos/grupos` y `/insumos/fuentes`, antes de `/insumos/{id}`**:
+FastAPI resuelve en orden de declaración y `/insumos/{id}` con `id: int` devolvería 422 al
+intentar parsear `"conflicto"` como entero. `/apus/conflicto` no colisiona con
+`/apus/{codigo}/{turno}` (dos segmentos).
+
+**Comportamiento en la pantalla:**
+
+- Se consulta con debounce de 400 ms tras dejar de escribir, no en cada tecla. Sin
+  dependencia nueva: `useEffect` + `setTimeout`.
+- Solo con código **y** nombre no vacíos: preguntar por un formulario a medio llenar daría
+  falsos avisos mientras se teclea.
+- **El botón de guardar se deshabilita** cuando hay conflicto: la respuesta sale de la misma
+  regla que aplicaría el servidor, así que es autoritativa.
+- **Falla abierta:** mientras la consulta está en vuelo, o si falla la red, no se bloquea
+  nada. El 400 del guardado sigue siendo la red de seguridad.
+- **En modo editar no corre.** `editar_apu` no aplica la regla (está fuera de alcance, ver
+  Alcance), así que avisar de algo que el servidor va a aceptar sería mentir. Sí corre al
+  crear y al duplicar.
 
 ## Mensajes (van al usuario, en español)
 

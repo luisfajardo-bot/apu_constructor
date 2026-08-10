@@ -60,8 +60,11 @@ de una función pura y testeable, `identidad_verificada(claims)`, que vive en el
 
 **Esa función NO lee `claims["user_metadata"]["email_verified"].`** `user_metadata` es
 `auth.users.raw_user_meta_data`, y ese bolsillo lo escribe el **propio usuario** con
-`supabase.auth.updateUser({ data: {...} })` usando la anon key pública — la misma
-llamada que ya hace `web/src/pages/DefinirClave.tsx`. GoTrue no filtra llaves
+`supabase.auth.updateUser({ data: {...} })` usando la anon key pública. (`updateUser`
+ya está en manos del cliente en esta app: `web/src/pages/DefinirClave.tsx:20` lo llama
+con `{ password }`. La forma `{ data }` es la que escribe `user_metadata`, y no hace
+falta que la app la use para que cualquiera pueda llamarla con la misma anon key.)
+GoTrue no filtra llaves
 reservadas dentro de `data`, así que cualquiera puede poner `email_verified: true` en su
 propio token con un refresh. Este repo ya tenía escrito como invariante cumplido
 *«`user_metadata` nunca usado para authz»* (`docs/auditoria-codigo-2026-07-01.md:125`,

@@ -98,6 +98,31 @@ def _conflicto_insumo(alm: Almacen, codigo: str, nombre: str,
     return None
 
 
+def _conflicto_apu(alm: Almacen, codigo: str, turno: str, nombre: str,
+                   index: Optional[list[tuple[str, str, str]]] = None) -> Optional[str]:
+    """El motivo en español si el alta de APU choca, o None.
+
+    `index` es el resultado de `alm.apus.apu_index()` ya leído. Los imports lo leen UNA
+    vez y lo pasan en cada vuelta —y le van agregando los APUs que aceptan, para que el
+    archivo se vea a sí mismo con la misma regla—. Sin eso, un Excel de 200 APUs haría
+    200 viajes de 1182 filas a Postgres, justo lo contrario de la optimización de
+    round-trips que ya está en producción."""
+    cod = str(codigo or "").strip()
+    nn = normalizar(nombre)
+    filas = alm.apus.apu_index() if index is None else index
+    por_nombre = None
+    for c, nom, sh in filas:
+        if c == cod:
+            pista = (f" Si es el nocturno, usa {_base_codigo(cod)} N."
+                     if turno == config.SHIFT_NOCTURNO and sh != turno else "")
+            return f"El código {cod} ya lo usa el APU {sh} «{_corto(nom)}».{pista}"
+        if normalizar(nom) == nn and not (_es_gemelo_nocturno(cod, c) and sh != turno):
+            por_nombre = por_nombre or (c, sh)
+    if por_nombre:
+        return f"Ese nombre ya lo usa el APU {por_nombre[0]} en turno {por_nombre[1]}."
+    return None
+
+
 # ----------------------------------------------------------------- individual
 def crear_insumo(alm: Almacen, datos: dict, actor=None, lista_id: Optional[int] = None) -> dict:
     codigo = str(datos.get("codigo", "") or "").strip()
@@ -199,7 +224,16 @@ def _origen_duplicado(alm: Almacen, dup: dict | None, codigo: str, turno: str,
 
     Sin `dup` devuelve `(None, None, None)` y `crear_apu` se comporta como un alta
     normal. La copia debe tener identidad propia y nombre propio: si no, el usuario
-    creería que duplicó cuando en realidad no distinguió nada."""
+    creería que duplicó cuando en realidad no distinguió nada.
+
+    # ponytail: duplicar sigue exigiendo un nombre distinto, y `codigoSugerido` del
+    # frontend propone "3454-2 N" en vez de "3454 N" — o sea que el gemelo nocturno con
+    # el MISMO nombre no se puede crear duplicando, hay que usar el alta normal. Es el
+    # comportamiento de antes de la regla de unicidad, no una regresión, pero es el
+    # camino que la gente intenta primero. Upgrade si molesta: que `codigoSugerido`
+    # proponga `base + " N"` cuando cambia el turno y ese código está libre, y que este
+    # guard y `nombreEsDistinto` deleguen la excepción en `_es_gemelo_nocturno`.
+    """
     if not dup:
         return None, None, None
     cod_o = str(dup.get("codigo", "") or "").strip()
@@ -226,6 +260,9 @@ def crear_apu(alm: Almacen, datos: dict, actor=None) -> dict:
         raise ValueError("El turno debe ser DIURNO o NOCTURNO.")
     previos, hist, origen = _origen_duplicado(
         alm, datos.get("duplicado_de"), codigo, turno, nombre)
+    motivo = _conflicto_apu(alm, codigo, turno, nombre)
+    if motivo:
+        raise ValueError(motivo)
     comps = _componentes_de(alm, datos.get("componentes", []) or [], turno,
                             previos=previos, hist=hist)
     apu = Apu(codigo=codigo, nombre=nombre, unidad=str(datos.get("unidad", "") or ""),

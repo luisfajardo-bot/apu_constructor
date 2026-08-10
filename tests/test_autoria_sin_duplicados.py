@@ -65,3 +65,46 @@ def test_el_mensaje_del_nombre_sugiere_el_codigo_nocturno(tmp_path):
     # se intenta crear (7777): es el código que la excepción del gemelo sí acepta.
     with pytest.raises(ValueError, match="4859 N"):
         autoria.crear_insumo(alm, _nuevo("7777", "BORDE CONTENEDOR DE RAICES A 70"))
+
+
+# ------------------------------------------------------------------------- APUs
+def _alm_apus(tmp_path):
+    alm = _alm(tmp_path)
+    alm.apus.insert_apus([Apu("3010", "EXCAVACION MANUAL EN MATERIAL COMUN", "M3",
+                              "DIURNO", "EXCAVACIONES Y RELLENOS")])
+    return alm
+
+
+def _apu_nuevo(codigo, turno, nombre):
+    return {"codigo": codigo, "turno": turno, "nombre": nombre, "unidad": "M3",
+            "grupo": "EXCAVACIONES Y RELLENOS", "componentes": []}
+
+
+def test_apu_codigo_repetido_en_el_otro_turno_rechaza(tmp_path):
+    """Hoy la identidad es (código, turno), así que 3010 NOCTURNO se creaba al lado del
+    DIURNO con el código pelado — el mismo bug que ya se arregló en el importador."""
+    alm = _alm_apus(tmp_path)
+    with pytest.raises(ValueError, match="3010 N"):
+        autoria.crear_apu(alm, _apu_nuevo("3010", "NOCTURNO", "OTRO NOMBRE CUALQUIERA"))
+
+
+def test_apu_gemelo_nocturno_puede_repetir_el_nombre(tmp_path):
+    alm = _alm_apus(tmp_path)
+    out = autoria.crear_apu(alm, _apu_nuevo("3010 N", "NOCTURNO",
+                                            "EXCAVACION MANUAL EN MATERIAL COMUN"))
+    assert out["codigo"] == "3010 N" and out["turno"] == "NOCTURNO"
+
+
+def test_apu_nombre_repetido_con_codigo_sin_relacion_rechaza(tmp_path):
+    alm = _alm_apus(tmp_path)
+    with pytest.raises(ValueError, match="3010"):
+        autoria.crear_apu(alm, _apu_nuevo("9999", "NOCTURNO",
+                                          "EXCAVACION MANUAL EN MATERIAL COMUN"))
+
+
+def test_apu_nombre_repetido_en_el_mismo_turno_rechaza(tmp_path):
+    """El gemelo es del OTRO turno. Mismo nombre, mismo turno, sigue siendo duplicado."""
+    alm = _alm_apus(tmp_path)
+    with pytest.raises(ValueError):
+        autoria.crear_apu(alm, _apu_nuevo("3010 N", "DIURNO",
+                                          "EXCAVACION MANUAL EN MATERIAL COMUN"))

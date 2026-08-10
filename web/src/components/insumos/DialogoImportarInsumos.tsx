@@ -150,6 +150,11 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
             <Seccion titulo="No encontradas (sin nombre, código inexistente)">
               <Tabla cols={["Código"]} filas={prev.no_encontrada.map((n) => [n.codigo])} />
             </Seccion>
+            <Seccion titulo="En conflicto (no se crean)">
+              <Tabla cols={["Código", "Nombre", "Motivo"]}
+                     filas={(prev.conflicto ?? []).map((c) => [
+                       c.codigo || "—", c.nombre || "—", c.motivo])} />
+            </Seccion>
             <Seccion titulo="Inválidas">
               <Tabla cols={["Código", "Nombre", "Motivo"]}
                      filas={prev.invalida.map((f) => [

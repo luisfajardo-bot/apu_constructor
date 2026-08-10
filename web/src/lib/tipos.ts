@@ -205,12 +205,20 @@ export interface ImportAmbiguo {
   candidatos: { id: number; nombre: string }[];
 }
 
+export interface ImportConflicto {
+  codigo: string;
+  nombre: string;
+  turno?: string;   // solo en el import de APUs
+  motivo: string;
+}
+
 export interface ImportInsumosUpsertPreview {
   crear: InsumoImportFila[];
   actualizar: CambioPreview[];
   ambigua: ImportAmbiguo[];
   no_encontrada: { codigo: string }[];
   invalida: InsumoImportFila[];
+  conflicto?: ImportConflicto[];
 }
 
 export interface ImportUpsertResultado {
@@ -313,6 +321,7 @@ export interface VinculoSubApu {
 export interface ImportApusPreview {
   crear: ApuResumen[];
   ya_existe: ApuResumen[];
+  conflicto?: ImportConflicto[];
   subapus: VinculoSubApu[];
 }
 

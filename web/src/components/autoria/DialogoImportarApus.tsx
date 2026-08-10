@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { ApuResumen, VinculoSubApu } from "@/lib/tipos";
+import type { ApuResumen, ImportConflicto, VinculoSubApu } from "@/lib/tipos";
 import { previewImportarApus, aplicarImportarApus, descargarPlantillaApus } from "@/api/autoria";
 
 interface DialogoImportarApusProps {
@@ -21,7 +21,13 @@ interface DialogoImportarApusProps {
 type EstadoDial =
   | { fase: "idle" }
   | { fase: "cargando" }
-  | { fase: "preview"; crear: ApuResumen[]; ya_existe: ApuResumen[]; subapus: VinculoSubApu[] }
+  | {
+      fase: "preview";
+      crear: ApuResumen[];
+      ya_existe: ApuResumen[];
+      conflicto: ImportConflicto[];
+      subapus: VinculoSubApu[];
+    }
   | { fase: "aplicando" };
 
 export function DialogoImportarApus({
@@ -62,6 +68,7 @@ export function DialogoImportarApus({
         fase: "preview",
         crear: res.crear ?? [],
         ya_existe: res.ya_existe ?? [],
+        conflicto: res.conflicto ?? [],
         subapus: res.subapus ?? [],
       });
     } catch (e: unknown) {
@@ -114,6 +121,7 @@ export function DialogoImportarApus({
   const enAplicando = estado.fase === "aplicando";
   const crear = enPreview ? estado.crear : [];
   const yaExiste = enPreview ? estado.ya_existe : [];
+  const conflicto = enPreview ? estado.conflicto : [];
   const subapus = enPreview ? estado.subapus : [];
 
   return (
@@ -159,6 +167,7 @@ export function DialogoImportarApus({
             <SeccionSubApus vinculos={subapus} />
             <SeccionApus titulo="A crear" filas={crear} />
             <SeccionApus titulo="Ya existen" filas={yaExiste} />
+            <SeccionConflictos filas={conflicto} />
           </div>
         )}
 
@@ -240,6 +249,34 @@ function SeccionApus({ titulo, filas }: { titulo: string; filas: ApuResumen[] })
       ) : (
         <p className="text-xs text-muted-foreground">Ninguno</p>
       )}
+    </div>
+  );
+}
+
+function SeccionConflictos({ filas }: { filas: ImportConflicto[] }) {
+  if (filas.length === 0) return null;
+  return (
+    <div>
+      <p className="text-xs font-semibold mb-1">
+        En conflicto{" "}
+        <span className="font-normal text-muted-foreground">({filas.length})</span>
+        <span className="ml-2 font-normal text-muted-foreground">
+          — no se crean: el código o el nombre ya están en uso
+        </span>
+      </p>
+      <div className="overflow-x-auto overflow-y-auto max-h-40 border rounded">
+        <table className="w-full text-xs border-collapse">
+          <tbody>
+            {filas.map((f, i) => (
+              <tr key={`${f.codigo}-${i}`} className="even:bg-muted/10">
+                <td className="px-2 py-0.5 font-mono">{f.codigo}</td>
+                <td className="px-2 py-0.5 text-muted-foreground">({f.turno})</td>
+                <td className="px-2 py-0.5 align-top break-words">{f.motivo}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

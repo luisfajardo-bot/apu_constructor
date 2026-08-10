@@ -65,4 +65,25 @@ describe("DialogoImportarInsumos", () => {
     const form = aplicarImportarInsumos.mock.calls[0][0] as FormData;
     expect(form.get("lista_id")).toBe("7");
   });
+
+  it("muestra las filas en conflicto con su motivo y no las cuenta para aplicar", async () => {
+    previewImportarInsumos.mockResolvedValue({
+      crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+      conflicto: [{
+        codigo: "10014", nombre: "ESTABILIZACION CON RAJON",
+        motivo: "El código 10014 ya lo usa el insumo «USO DEL PENETROMETRO».",
+      }],
+    });
+    render(
+      <DialogoImportarInsumos
+        open onOpenChange={() => {}} listaId={7} listaNombre="NP Calle 13" onAplicado={() => {}}
+      />
+    );
+    seleccionarArchivo();
+
+    expect(await screen.findByText(/En conflicto/i)).toBeTruthy();
+    expect(screen.getByText(/ya lo usa el insumo/i)).toBeTruthy();
+    // el botón cuenta crear + actualizar: las filas en conflicto no lo habilitan
+    expect((screen.getByText("Aplicar (0)") as HTMLButtonElement).disabled).toBe(true);
+  });
 });

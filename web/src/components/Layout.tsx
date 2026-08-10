@@ -106,7 +106,7 @@ export default function Layout() {
     <div className="flex min-h-dvh flex-col text-[13px]">
       {/* La barra. `@container` para que las piezas cedan según el ancho que la barra
           tiene de verdad, no el del viewport. */}
-      <header className="@container relative shrink-0 border-b border-border bg-card">
+      <header className="@container relative z-40 shrink-0 border-b border-border bg-card">
         <div className="flex min-h-[54px] flex-wrap items-stretch justify-between gap-5 px-[18px] @max-[560px]:py-2">
           <div className="flex min-w-0 items-stretch gap-1">
             <span className="flex shrink-0 items-center gap-2.5 pr-3.5 whitespace-nowrap">
@@ -140,7 +140,7 @@ export default function Layout() {
               aria-expanded={seccionesAbiertas}
               aria-controls="barra-secciones"
               onClick={() => setSeccionesAbiertas((abierto) => !abierto)}
-              className="hidden @max-[980px]:flex items-center gap-2 whitespace-nowrap rounded px-3 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+              className="hidden @max-[980px]:flex items-center gap-2 whitespace-nowrap rounded px-3 text-muted-foreground hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
             >
               <IconoActiva aria-hidden className="size-3.5 shrink-0 opacity-75" />
               {/* El nombre accesible queda "Secciones: Insumos": dice QUÉ es el botón y
@@ -169,7 +169,7 @@ export default function Layout() {
                 // colgado de ella. Los links se renderizan UNA sola vez: no hay copia
                 // ancha y copia angosta (dos copias romperían el guard de los 5 links).
                 "@max-[980px]:absolute @max-[980px]:left-0 @max-[980px]:top-full @max-[980px]:z-30",
-                "@max-[980px]:w-56 @max-[980px]:flex-col @max-[980px]:items-stretch",
+                "@max-[980px]:w-56 @max-[980px]:flex-col",
                 "@max-[980px]:rounded-b @max-[980px]:border @max-[980px]:border-border",
                 "@max-[980px]:bg-card @max-[980px]:py-1 @max-[980px]:shadow-md",
                 // Ojo: cerrado se oculta SOLO con el modificador. Un `hidden` pelado
@@ -179,7 +179,7 @@ export default function Layout() {
               )}
             >
               {links.map(({ to, label, end, Icono, admin }, i) => (
-                <span key={to} className="flex items-stretch">
+                <span key={to} className="flex items-stretch @max-[980px]:flex-col">
                   {/* Los de administración van detrás de un separador: no son parte
                       del trabajo diario y conviene que se lean como otro grupo. Se
                       dibuja en el primero del grupo, sea cual sea su posición. */}
@@ -196,7 +196,7 @@ export default function Layout() {
                       cn(
                         "flex items-center gap-2 whitespace-nowrap border-b-2 px-3 -mb-px no-underline",
                         "hover:text-foreground [&>svg]:hover:opacity-100",
-                        "@max-[980px]:border-b-0 @max-[980px]:border-l-2 @max-[980px]:py-1.5",
+                        "@max-[980px]:border-b-0 @max-[980px]:mb-0 @max-[980px]:border-l-2 @max-[980px]:py-1.5",
                         isActive
                           ? "border-rail font-semibold text-foreground [&>svg]:text-rail [&>svg]:opacity-100"
                           : "border-transparent text-muted-foreground",
@@ -212,7 +212,7 @@ export default function Layout() {
           </div>
 
           {perfil && (
-            <div className="flex items-center gap-3.5">
+            <div className="flex flex-wrap items-center gap-3.5">
               {/* Orden de sacrificio al angostarse: primero el correo (decorativo), después
                   el nombre de la marca, y al final la barra se parte en dos filas. Las
                   lecturas NO se esconden en ningún ancho — es el punto de la feature. Lo

@@ -49,7 +49,7 @@ queries: ceden según el ancho real de la barra, no del viewport.
 | <1180 | se va el correo (decorativo) | ya existe |
 | **<980** | **la navegación se pliega al desplegable** | nuevo (antes acá morían las lecturas) |
 | <700 | se va el nombre "Armador de APUs" | ya existe |
-| **<560** | **la barra se parte en dos filas**: marca + desplegable + rol + sesión arriba, las 4 lecturas abajo a lo ancho | nuevo |
+| **<560** | **la barra se parte en filas**: marca + botón de sección, las 4 lecturas a lo ancho, rol + Cerrar sesión — el número exacto de filas no es el punto, es que nada se esconde ni se corta | nuevo |
 
 Las cuentas que fijan los dos cortes nuevos:
 
@@ -57,8 +57,9 @@ Las cuentas que fijan los dos cortes nuevos:
   Cerrar sesión ~90px, la marca ~160px, más los `gap`. Con la navegación desplegada en
   línea eso pasa de 980px: de ahí el primer corte.
 - Sin el nombre de la marca (que ya se va a <700px) el resto convive hasta ~560px. Abajo
-  de eso no hay ancho que reparta, y ahí la barra crece de 54px a dos filas en vez de
-  esconder algo. Es la única forma honesta de cumplir "siempre visibles" en 390px.
+  de eso no hay ancho que reparta, y ahí la barra crece de 54px a varias filas en vez de
+  esconder algo (marca + botón / las 4 lecturas / rol + sesión). Es la única forma
+  honesta de cumplir "siempre visibles" en 390px.
 
 ## El desplegable
 
@@ -102,8 +103,8 @@ No hay una versión ancha y otra angosta en el DOM. El mismo `<nav>` cambia de f
 inline a panel absoluto por container query:
 
 - ancho: `flex-row`, inline en la barra, como hoy;
-- angosto: `absolute` bajo la barra, `flex-col`, oculto salvo que el `<details>` esté
-  abierto.
+- angosto: `absolute` bajo la barra, `flex-col`, oculto salvo que el panel esté abierto
+  (estado `seccionesAbiertas`).
 
 **Cómo se expresa, sin inventar variantes:** todo se hace con el modificador `@max-[…]`
 que el repo ya usa (`Layout.tsx:98,113,153,180`), nunca con un `@min-[…]` sin precedente
@@ -118,9 +119,13 @@ acá:
   modificador `@max-[…]`, nunca con un `hidden` pelado — si no, en los tests (donde las
   container queries no existen) el `<nav>` desaparecería y se caería el guard de los
   5 links;
-- las dos filas de <560px: `flex-wrap` en el contenedor de la barra y
-  `@max-[560px]:basis-full @max-[560px]:justify-between` en el grupo de lecturas, para
-  que caiga entero a la segunda fila y se reparta a lo ancho.
+- las filas de <560px: `@max-[560px]:basis-full @max-[560px]:justify-between` en el grupo
+  de lecturas, **más `flex-wrap` en su padre directo** (el grupo del usuario), no solo en
+  el contenedor de la barra. Esto último es lo que se pasó por alto la primera vez: un
+  contenedor con `flex-wrap` solo puede partir entre sus **hijos directos**, y el grupo de
+  lecturas es un nieto. Sin el `flex-wrap` del padre, el `basis-full` no puede bajar las
+  lecturas a una fila propia, la fila no baja de su min-content (~458px) y en 390px
+  desborda con scroll horizontal — justo lo que esta feature promete evitar.
 
 Dos razones, y la segunda es la que manda:
 
@@ -131,7 +136,7 @@ Dos razones, y la segunda es la que manda:
    "Auditoría"]`). Dos copias del menú lo romperían con 10, y ese test es el guard de
    que la navegación siga siendo un landmark navegable con lector de pantalla.
 
-El `<summary>` es un `<summary>`, no un link, así que no cuenta para ese test.
+El botón de sección es un `<button>`, no un link, así que no cuenta para ese test.
 
 ## Qué se puede testear y qué no
 
@@ -141,18 +146,23 @@ test puede afirmar de verdad:
 
 Testeable (y se testea):
 
-- el `<summary>` existe y dice el nombre de la sección actual (`/insumos` → "Insumos");
+- el botón de sección existe y dice el nombre de la sección actual (`/insumos` →
+  "Insumos");
 - en una ruta anidada (`/corridas/7`) dice "Corridas" (el caso `end: false`);
 - el `<nav>` sigue teniendo exactamente 5 links para un admin, en orden — el test
   anti-regresión que ya existe, sin tocarlo;
-- al cambiar de ruta el `<details>` queda cerrado;
+- al cambiar de ruta el panel queda cerrado (`seccionesAbiertas` vuelve a `false`);
 - los 4 tests de Layout que ya existen siguen pasando sin cambios de aserción.
 
 NO testeable acá, y por lo tanto **se verifica en el navegador antes de pedir el push**:
 
 - que a <980px la navegación efectivamente se pliegue y las lecturas se queden;
-- que a <560px la barra se parta en dos filas;
-- que el panel abierto no tape contenido ni se corte.
+- que en ancho de celular (375-430px) la barra se parta en filas sin que nada quede
+  fuera de pantalla ni aparezca scroll horizontal en el documento;
+- que el panel abierto no tape contenido ni se corte, ni lo tape a él el encabezado
+  pegajoso de las tablas;
+- **en qué anchos exactos** pasa cada cosa: los números de esta spec son cuentas del
+  modelo de caja con anchos de texto estimados, y los cortes reales se leen del DevTools.
 
 Esto es explícito por la lección del branch de `DialogoTexto`: 145 tests verdes taparon
 un modal que se cerraba solo en el navegador. En cambios de UI el navegador va antes del

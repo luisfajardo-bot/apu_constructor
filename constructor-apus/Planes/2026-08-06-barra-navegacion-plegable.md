@@ -226,21 +226,29 @@ El `<header>` de `Layout.tsx:96` necesita `relative` para que el `absolute` del 
               <div className="flex items-stretch @max-[560px]:basis-full @max-[560px]:justify-between">
 ```
 
-Y para que ese `basis-full` pueda caer a una segunda fila, el contenedor de la barra (`Layout.tsx:97`) necesita `flex-wrap`, y el bloque del usuario (`Layout.tsx:149`) deja de ser `shrink-0` rígido:
+Y para que ese `basis-full` pueda caer a una fila propia, hacen falta **dos** `flex-wrap`, no uno. El contenedor de la barra (`Layout.tsx:97`) necesita el suyo para partir entre marca+nav y el bloque del usuario — pero ese `flex-wrap` solo puede partir entre SUS hijos directos. El grupo de lecturas es un **nieto** de la barra (hijo del bloque del usuario, no de la barra), así que el `basis-full` no tiene dónde caer si el bloque del usuario mismo (`Layout.tsx:149`) no es también `flex-wrap`: sin ese segundo `flex-wrap`, lecturas + rol + Cerrar sesión quedan forzados en una sola fila que se desborda del viewport en un teléfono. Además, el bloque del usuario deja de ser `shrink-0` rígido:
 
 ```tsx
         <div className="flex min-h-[54px] flex-wrap items-stretch justify-between gap-5 px-[18px] @max-[560px]:py-2">
 ```
 
-(el `h-[54px]` fijo pasa a `min-h-[54px]`: con dos filas la barra tiene que poder crecer)
+```tsx
+            <div className="flex flex-wrap items-center gap-3.5">
+```
 
-> **Ojo con dónde parte de verdad la segunda fila.** `flex-wrap` hace que la barra se
-> parta donde el contenido deja de caber, no en un ancho que elijamos: con el nombre de
-> la marca ya fuera (<700px), la cuenta da que va a partir sola alrededor de **~665px**.
-> El `@max-[560px]:basis-full` no crea el corte, **garantiza el piso**: abajo de 560px las
-> lecturas caen enteras a la segunda fila y se reparten a lo ancho, en vez de quedar
-> apretadas o cortadas. En Task 2 hay que **anotar el ancho real** en que se ve partir, no
-> forzarlo a 560: si parte antes y se ve bien, está bien.
+(el `h-[54px]` fijo de la barra pasa a `min-h-[54px]`: con varias filas tiene que poder crecer)
+
+> **Ojo con dónde parte de verdad cada fila.** `flex-wrap` hace que cada contenedor se
+> parta donde SU contenido deja de caber, no en un ancho que elijamos: con el nombre de
+> la marca ya fuera (<700px), la cuenta gruesa de clases da que la barra completa
+> (marca+nav contra el bloque del usuario) empieza a partir alrededor de **~800px**, no
+> ~665px como decía una versión anterior de esta nota — la cuenta a mano tiene margen de
+> error real (advances de texto estimados a ±10%). El `@max-[560px]:basis-full` no crea el
+> corte, **garantiza el piso**: abajo de 560px las lecturas caen enteras a su propia fila
+> dentro del bloque del usuario y se reparten a lo ancho, en vez de quedar apretadas o
+> cortadas. **Los anchos exactos se leen del DevTools, no se calculan**: en Task 2 hay que
+> anotar el ancho real en que se ve partir cada contenedor, no forzarlo a 560 ni confiar
+> en esta cuenta.
 
 **3f. El comentario del orden de sacrificio** (`Layout.tsx:150-152`) queda al revés de la verdad. Reemplazarlo por:
 
@@ -292,11 +300,13 @@ Usar el modo responsive del navegador (o arrastrar la ventana) y comprobar, en e
 | 1100px | Se fue el correo. Todo lo demás igual, sin botón. |
 | 900px | **Aparece el botón** con el ícono y el nombre de la sección actual. Las secciones ya no están en fila. **Las 4 lecturas siguen visibles** (esto es lo que antes desaparecía). |
 | 650px | Se fue el nombre "Armador de APUs". Botón y lecturas siguen. |
-| 400px | La barra está en dos filas: arriba logo + botón + rol + Cerrar sesión; abajo las 4 lecturas repartidas a lo ancho. Nada tapado, nada cortado. |
+| 400px | La barra queda en varias filas (marca + botón, después las 4 lecturas a lo ancho, después rol + Cerrar sesión — el número exacto no es el punto). Nada tapado, nada cortado, nada fuera del viewport. |
 
-Y anotar **el ancho exacto en que se ve partir en dos filas**: el `flex-wrap` parte donde
-el contenido deja de caber (la cuenta da ~665px), y el `@max-[560px]` es solo el piso
-garantizado. Si parte antes de 560 y se ve bien, está bien — es el dato que hay que
+Y anotar **el ancho exacto en que se ve partir cada contenedor**: el `flex-wrap` parte
+donde el contenido deja de caber (la cuenta gruesa da ~800px para la barra completa, pero
+es una estimación con margen de error — el número real se lee del DevTools), y el
+`@max-[560px]` es solo el piso garantizado. Si parte antes de 560 y se ve bien, está bien —
+es el dato que hay que
 reportar, no un problema que haya que forzar.
 
 - [ ] **Step 4: Verificar el panel a 900px**

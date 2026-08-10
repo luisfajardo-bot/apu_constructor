@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { expect, test, vi } from "vitest";
 // El import va ARRIBA, fuera de los `test`. Adentro (`await import("./Layout")`) el
@@ -109,4 +109,57 @@ test("el poll de presencia se re-suscribe a visibilitychange y se limpia al desm
 
   addSpy.mockRestore();
   removeSpy.mockRestore();
+});
+
+test("el botón de secciones dice en qué sección estás", async () => {
+  // Plegada, la barra tiene que seguir diciendo dónde estás — que es lo que en la
+  // barra ancha hace el subrayado del NavLink.
+  rol = "editor";
+  render(
+    <MemoryRouter initialEntries={["/insumos"]}>
+      <Layout />
+    </MemoryRouter>
+  );
+  const boton = screen.getByRole("button", { name: /secciones/i });
+  expect(boton.textContent).toContain("Insumos");
+  expect(boton.getAttribute("aria-expanded")).toBe("false");
+});
+
+test("en una ruta anidada el botón muestra la sección padre", async () => {
+  // Corridas es el único link con end: false, así que /corridas/7 sigue siendo
+  // «Corridas». Sin esto, entrar a una corrida dejaría el botón en «Secciones».
+  rol = "editor";
+  render(
+    <MemoryRouter initialEntries={["/corridas/7"]}>
+      <Layout />
+    </MemoryRouter>
+  );
+  expect(screen.getByRole("button", { name: /secciones/i }).textContent).toContain(
+    "Corridas"
+  );
+});
+
+test("el botón de secciones abre y cierra el panel", async () => {
+  // jsdom no implementa container queries, así que acá no se puede comprobar que el
+  // panel esté oculto: lo que se fija es el estado que la CSS consume (aria-expanded).
+  rol = "editor";
+  render(
+    <MemoryRouter initialEntries={["/insumos"]}>
+      <Layout />
+    </MemoryRouter>
+  );
+  const boton = screen.getByRole("button", { name: /secciones/i });
+
+  fireEvent.click(boton);
+  expect(boton.getAttribute("aria-expanded")).toBe("true");
+
+  // Navegar cierra el panel: si no, queda tapando la pantalla a la que acabás de entrar.
+  fireEvent.click(screen.getByRole("link", { name: /APUs/ }));
+  expect(boton.getAttribute("aria-expanded")).toBe("false");
+
+  // El panel que el botón controla es el <nav>, no un menú aparte: un segundo menú
+  // duplicaría los links y rompería el guard de los 5 destinos.
+  expect(boton.getAttribute("aria-controls")).toBe(
+    screen.getByRole("navigation").getAttribute("id")
+  );
 });

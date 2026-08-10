@@ -6,7 +6,7 @@ import pytest
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Perfil
-from apu_tool.servicio.auth import ErrorAuth, resolver_perfil
+from apu_tool.servicio.auth import ErrorAuth, identidad_verificada, resolver_perfil
 
 
 def _alm(tmp_path, monkeypatch):
@@ -58,10 +58,15 @@ def test_dos_perfiles_con_el_mismo_email_no_se_adivina(tmp_path, monkeypatch):
 
 
 def test_perfil_adoptado_inactivo_no_se_cuela(tmp_path, monkeypatch):
+    """Un perfil inactivo no se adopta: no se re-clava una fila muerta. Cae en el mismo
+    403 de "no invitado" de siempre (no en "Usuario inactivo.", porque nunca llegó a
+    resolverse ningún perfil), y el perfil viejo queda intacto, sin moverse."""
     alm = _alm(tmp_path, monkeypatch)
     alm.perfiles.upsert(Perfil("viejo", "ana@obra.co", "editor", "inactivo"))
-    with pytest.raises(ErrorAuth, match="inactivo"):
+    with pytest.raises(ErrorAuth, match="no invitado"):
         resolver_perfil(alm, "nuevo", "ana@obra.co", True)
+    assert alm.perfiles.get("viejo").estado == "inactivo"   # intacto, no se movió
+    assert alm.perfiles.get("nuevo") is None
 
 
 def test_email_con_otro_caso_y_espacios_igual_adopta(tmp_path, monkeypatch):
@@ -81,3 +86,19 @@ def test_sin_perfil_y_sin_ser_admin_sigue_denegando(tmp_path, monkeypatch):
     alm = _alm(tmp_path, monkeypatch)
     with pytest.raises(ErrorAuth):
         resolver_perfil(alm, "ajeno", "ajeno@gmail.com", True)
+
+
+@pytest.mark.parametrize("claims, esperado", [
+    # El ataque que rompía la guarda vieja: user_metadata lo escribe el propio usuario
+    # con la anon key (updateUser({data})), así que declararse verificado ahí no cuenta.
+    ({"user_metadata": {"email_verified": True}}, False),
+    ({"amr": [{"method": "oauth"}]}, True),
+    ({"amr": [{"method": "password"}]}, False),
+    ({"app_metadata": {"providers": ["google"]}}, True),
+    ({"app_metadata": {"provider": "email"}}, False),
+    ({}, False),
+    ({"amr": "no-es-lista"}, False),           # claim con forma inesperada: no revienta
+    ({"app_metadata": None}, False),           # idem
+])
+def test_identidad_verificada_ignora_user_metadata_y_exige_proveedor_externo(claims, esperado):
+    assert identidad_verificada(claims) is esperado

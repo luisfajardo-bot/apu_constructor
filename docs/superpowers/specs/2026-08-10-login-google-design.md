@@ -44,31 +44,59 @@ login por contraseña; el flujo de invitación, que no cambia.
 ```
 perfil = perfiles.get(user_id)
 si perfil is None:
-    si email_verificado(claims)  Y  perfiles.get_por_email(email) tiene EXACTAMENTE UNO:
+    si identidad_verificada(claims)  Y  perfiles.get_por_email(email) tiene EXACTAMENTE UNO  Y  ese perfil está activo:
         perfiles.reasignar_user_id(viejo_user_id, user_id)
         auditoría "usuario.vincular_identidad"
-        seguir por el camino normal (si estado != activo → ErrorAuth "Usuario inactivo.")
+        seguir por el camino normal (relee el perfil; si estado != activo → ErrorAuth "Usuario inactivo.")
     si no:
         como hoy: bootstrap admin por APU_ADMIN_EMAILS, o ErrorAuth "no invitado"
 ```
 
 `resolver_perfil` recibe hoy `(alm, user_id, email)`. Necesita un cuarto parámetro
-`email_verificado: bool` en vez de leer los claims adentro: la función es testeable sin
-red justamente porque no sabe de JWTs, y eso se conserva. `usuario_actual` lo saca de
-`claims.get("user_metadata", {}).get("email_verified")`.
+`identidad_verificada: bool` en vez de leer los claims adentro: la función es testeable
+sin red justamente porque no sabe de JWTs, y eso se conserva. `usuario_actual` lo saca
+de una función pura y testeable, `identidad_verificada(claims)`, que vive en el mismo
+`auth.py`.
 
-### Las tres guardas, cada una por una razón
+**Esa función NO lee `claims["user_metadata"]["email_verified"].`** `user_metadata` es
+`auth.users.raw_user_meta_data`, y ese bolsillo lo escribe el **propio usuario** con
+`supabase.auth.updateUser({ data: {...} })` usando la anon key pública — la misma
+llamada que ya hace `web/src/pages/DefinirClave.tsx`. GoTrue no filtra llaves
+reservadas dentro de `data`, así que cualquiera puede poner `email_verified: true` en su
+propio token con un refresh. Este repo ya tenía escrito como invariante cumplido
+*«`user_metadata` nunca usado para authz»* (`docs/auditoria-codigo-2026-07-01.md:125`,
+`docs/auditoria-codigo-2026-07-08.md:16`); una versión anterior de este spec lo rompió.
 
-- **Email verificado.** Sin esto, alguien que se registre con
-  `luisfajardo@indugravas.com` y no confirme el correo se apropia del perfil de Admin.
-  Google manda `email_verified: true` siempre; un signup sin confirmar, no.
+`identidad_verificada(claims)` lee en cambio **solo** claims que pone GoTrue y el
+usuario no puede escribir:
+
+- `claims["amr"]`: los métodos de autenticación de ESTA sesión
+  (`[{method, timestamp}]`). Señal preferida: `method == "oauth"` para cualquier login
+  social, incluido Google.
+- `claims["app_metadata"]["provider"/"providers"]`: los proveedores vinculados a la
+  cuenta. Solo se cambian con la service_role (nunca desde el cliente). Respaldo si el
+  token no trae `amr`.
+
+Fail-closed: si el token no trae ninguna de las dos señales, no se adopta y el Admin lo
+arregla a mano.
+
+### Las guardas, cada una por una razón
+
+- **Identidad verificada por un proveedor externo** (no `user_metadata`, ver arriba).
+  Sin esto, alguien que se registre con `luisfajardo@indugravas.com` y declare su propio
+  `email_verified` se apropia del perfil de Admin.
 - **Exactamente un perfil con ese email.** `perfiles.email` **no** es `UNIQUE`
   (`db/seguridad.sql:3`) y la memoria del proyecto ya registra usuarios duplicados en
   producción. Con dos perfiles del mismo correo no se adivina: 403, y lo arregla un
   Admin.
-- **Se re-clava, no se duplica.** `user_id` es la PK de `perfiles`; crear un segundo
-  perfil dejaría dos filas del mismo correo y descuadraría el guard del último Admin
-  activo (`_GUARD` cuenta filas).
+- **El perfil candidato tiene que estar activo.** No re-clava una fila muerta (perfiles
+  huérfanos de usuarios borrados en Supabase existen en producción), y así la puerta
+  nueva no toca nada en el caso que de todos modos termina denegando.
+- **Se re-clava, no se duplica**, y se relee después del `UPDATE` en vez de asumir que
+  movió la fila. `user_id` es la PK de `perfiles`; crear un segundo perfil dejaría dos
+  filas del mismo correo y descuadraría el guard del último Admin activo (`_GUARD`
+  cuenta filas); y si el `UPDATE` movió 0 filas, releer devuelve `None` en vez de un
+  `Perfil` fabricado con el rol de otro para una fila que no existe.
 
 El email se compara en minúsculas y sin espacios, igual que `invitar` (`usuarios.py:23`)
 y que `config.admin_emails()`.
@@ -146,18 +174,25 @@ Van a `docs/runbook-login-google.md`, con el formato del runbook de Resend:
 
 - perfil ya existente por `user_id` → se devuelve, sin adopción y sin auditoría (el
   camino de siempre no cambia);
-- sin perfil, email verificado, **un** perfil con ese email → adopta: el perfil queda con
-  el `user_id` nuevo, el viejo ya no resuelve, y hay un registro
+- sin perfil, identidad verificada, **un** perfil activo con ese email → adopta: el
+  perfil queda con el `user_id` nuevo, el viejo ya no resuelve, y hay un registro
   `usuario.vincular_identidad`;
-- sin perfil, email verificado, perfil adoptado con `estado='inactivo'` → `ErrorAuth`
-  "Usuario inactivo" (no se cuela por la puerta nueva);
-- sin perfil, email **no** verificado → `ErrorAuth` "no invitado", y el perfil ajeno
-  queda intacto (este es el test de la escalada de privilegios);
-- sin perfil, email verificado, **dos** perfiles con ese email → `ErrorAuth`, sin tocar
-  ninguno;
-- email verificado que coincide con `APU_ADMIN_EMAILS` y **sin** perfil previo → sigue
-  el bootstrap admin de hoy;
+- sin perfil, identidad verificada, perfil candidato con `estado='inactivo'` → no
+  adopta nada, cae en el mismo `ErrorAuth` "no invitado" de siempre, y el perfil viejo
+  queda intacto sin moverse (nunca hubo perfil que "estuviera inactivo" para esa
+  sesión: no llegó a resolverse ninguno);
+- identidad **no** verificada → `ErrorAuth` "no invitado", y el perfil ajeno queda
+  intacto (este es el test de la escalada de privilegios);
+- sin perfil, identidad verificada, **dos** perfiles con ese email → `ErrorAuth`, sin
+  tocar ninguno;
+- identidad verificada que coincide con `APU_ADMIN_EMAILS` y **sin** perfil previo →
+  sigue el bootstrap admin de hoy;
 - comparación de email insensible a mayúsculas y espacios;
+- `identidad_verificada(claims)` como función pura, con dicts de claims falsos: el caso
+  central es `{"user_metadata": {"email_verified": True}}` → **False** (el ataque que
+  rompía la guarda vieja); además `amr` con método `oauth`/`password`, `app_metadata`
+  con `provider`/`providers`, claims vacíos, y formas inesperadas (`amr` que no es
+  lista, `app_metadata` en `None`) que no deben reventar;
 - `get_por_email` / `reasignar_user_id` dan lo mismo en SQLite y en Postgres: van a
   `tests/test_perfiles_contrato.py`, que ya corre el contrato del repo contra los dos
   backends.

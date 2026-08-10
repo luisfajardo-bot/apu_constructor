@@ -58,7 +58,6 @@ def obtener_claims(token: str) -> dict:
 
 
 import datetime as _dt
-from dataclasses import replace
 from typing import Optional
 
 from fastapi import Depends, Request, HTTPException
@@ -70,42 +69,85 @@ from apu_tool.servicio.dependencias import get_almacen
 
 RANGO = {"consulta": 1, "editor": 2, "admin": 3}
 
+# Proveedores externos cuya verificación de identidad aceptamos para adoptar un
+# perfil por email. Solo Google está habilitado en Supabase hoy.
+_PROVEEDORES_CONFIABLES = {"google"}
+_METODOS_PROVEEDOR = {"oauth"}
+
+
+def identidad_verificada(claims: dict) -> bool:
+    """True si un proveedor externo (Google) respalda esta identidad.
+
+    Lee SOLO claims que pone GoTrue y el usuario no puede escribir:
+
+    - `amr`: los métodos de autenticación de ESTA sesión, `[{method, timestamp}]`.
+      Es la señal más precisa, y es la que se prefiere.
+    - `app_metadata.provider(s)`: los proveedores vinculados a la cuenta. Solo se
+      cambian con la service_role. Es el respaldo si el token no trae `amr`.
+
+    NUNCA lee `user_metadata`: ese bolsillo lo escribe el propio usuario con
+    `updateUser({data})` y la anon key pública, así que no sirve para autorizar.
+    Es un invariante de este repo (ver docs/auditoria-codigo-2026-07-01.md).
+    """
+    amr = claims.get("amr") or []
+    if any(isinstance(m, dict) and m.get("method") in _METODOS_PROVEEDOR for m in amr):
+        return True
+    app = claims.get("app_metadata") or {}
+    provs = app.get("providers") or ([app["provider"]] if app.get("provider") else [])
+    return any(p in _PROVEEDORES_CONFIABLES for p in provs)
+
 
 def _adoptar_por_email(alm: Almacen, user_id: str, email: str) -> Optional[Perfil]:
-    """Re-clava a `user_id` el perfil de ese email, si hay EXACTAMENTE uno. None si no.
+    """Re-clava a `user_id` el perfil de ese email, si hay EXACTAMENTE uno y está activo.
 
     Es lo que permite que un invitado entre con Google cuando Supabase le entrega un
-    `user_id` distinto al que creó la invitación. El llamador ya verificó que el email
-    viene verificado por el proveedor: sin eso, alguien que se registre con el correo de
-    otro y no lo confirme se quedaría con su perfil (y con su rol).
+    `user_id` distinto al que creó la invitación. El llamador ya verificó que la
+    identidad viene respaldada por un proveedor externo: sin eso, alguien que declare su
+    propio `user_metadata.email_verified = true` (algo que puede hacer con la anon key,
+    sin que nadie lo confirme) se quedaría con el perfil de otro y su rol.
 
     Con dos perfiles del mismo email no se adivina: devuelve None y el llamador deniega.
-    `perfiles.email` no es UNIQUE y en producción ya hubo usuarios duplicados."""
+    `perfiles.email` no es UNIQUE y en producción ya hubo usuarios duplicados.
+
+    Un perfil inactivo no se adopta: no tiene sentido re-clavar una fila muerta (en
+    producción hay perfiles huérfanos de usuarios borrados en Supabase), y así esta
+    puerta no toca nada en el caso que de todos modos va a terminar denegando (cae en
+    el mismo 403 de "no invitado" de siempre)."""
+    email = (email or "").strip().lower()
+    if not email:
+        return None
     candidatos = alm.perfiles.get_por_email(email)
     if len(candidatos) != 1:
         return None
     viejo = candidatos[0]
+    if viejo.estado != "activo":
+        return None
     with alm.transaccion("seguridad") as conn:
         alm.perfiles.reasignar_user_id(viejo.user_id, user_id, conn=conn)
         registrar_auditoria(alm, conn, None, "usuario.vincular_identidad", "usuario",
                             user_id, antes={"user_id": viejo.user_id, "email": viejo.email},
                             despues={"user_id": user_id, "email": viejo.email,
                                      "rol": viejo.rol})
-    return replace(viejo, user_id=user_id)
+    # Se relee en vez de construir con dataclasses.replace: si el UPDATE movió 0 filas
+    # (rowcount ignorado por reasignar_user_id), esto devuelve None y la puerta deniega,
+    # en vez de fabricar un Perfil con el rol de la víctima para una fila que no existe.
+    return alm.perfiles.get(user_id)
 
 
 def resolver_perfil(alm: Almacen, user_id: str, email: str,
-                    email_verificado: bool = False) -> Perfil:
+                    identidad_verificada: bool = False) -> Perfil:
     """Devuelve el Perfil activo del usuario; bootstrap admin por APU_ADMIN_EMAILS.
 
-    `email_verificado` es lo que dice el proveedor de identidad (Google siempre manda
-    true). Solo con eso en true se intenta la adopción por email. El default es False
-    para que la ausencia de prueba nunca adopte nada.
+    `identidad_verificada` es true solo si un proveedor externo (Google) respalda esta
+    sesión — la arma la función `identidad_verificada()` de este mismo módulo a partir
+    de los claims del JWT (`amr`/`app_metadata`, nunca `user_metadata`). Solo con eso en
+    true se intenta la adopción por email. El default es False para que la ausencia de
+    prueba nunca adopte nada.
 
     Lanza ErrorAuth si el usuario está inactivo o no está autorizado (no invitado).
     """
     p = alm.perfiles.get(user_id)
-    if p is None and email_verificado:
+    if p is None and identidad_verificada:
         p = _adoptar_por_email(alm, user_id, email)
     if p is not None:
         if p.estado != "activo":
@@ -139,12 +181,8 @@ def usuario_actual(request: Request, alm: Almacen = Depends(get_almacen)) -> Per
         raise HTTPException(status_code=401, detail=str(e))
     user_id = claims.get("sub", "")
     email = claims.get("email", "")
-    # Lo pone el proveedor de identidad: Google manda true; un signup por contraseña sin
-    # confirmar, no. Es la única prueba de que el email es suyo, y de eso depende la
-    # adopción por email de resolver_perfil.
-    verificado = bool((claims.get("user_metadata") or {}).get("email_verified"))
     try:
-        return resolver_perfil(alm, user_id, email, verificado)
+        return resolver_perfil(alm, user_id, email, identidad_verificada(claims))
     except ErrorAuth as e:
         raise HTTPException(status_code=403, detail=str(e))
 

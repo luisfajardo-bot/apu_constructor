@@ -214,9 +214,15 @@ export default function Layout() {
           {perfil && (
             <div className="flex flex-wrap items-center gap-3.5">
               {/* Orden de sacrificio al angostarse: primero el correo (decorativo), después
-                  el nombre de la marca, y al final la barra se parte en dos filas. Las
+                  el nombre de la marca, y al final la barra se parte en filas (en ancho de
+                  celular quedan tres: marca + botón / las lecturas / rol + sesión). Las
                   lecturas NO se esconden en ningún ancho — es el punto de la feature. Lo
-                  que se pliega es la navegación (ver el botón de secciones arriba). */}
+                  que se pliega es la navegación (ver el botón de secciones arriba).
+
+                  El `flex-wrap` de este grupo es lo que permite que el `basis-full` de las
+                  lecturas baje a una fila propia: un contenedor flex solo parte entre sus
+                  HIJOS DIRECTOS, y el de la barra tiene a las lecturas como nieto. Sin esto
+                  la fila no bajaba de ~458px y desbordaba con scroll horizontal en 390px. */}
               <div className="flex items-stretch @max-[560px]:basis-full @max-[560px]:justify-between">
                 <Lectura etiqueta="En línea">
                   <span className="flex items-center gap-1.5" title={quienes}>

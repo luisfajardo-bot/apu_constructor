@@ -75,29 +75,73 @@ _PROVEEDORES_CONFIABLES = {"google"}
 _METODOS_PROVEEDOR = {"oauth"}
 
 
+def _proveedores_de_cuenta(claims: dict) -> list[str]:
+    """Proveedores vinculados a la CUENTA según `app_metadata`, validados como `str`.
+
+    Solo cambia con la service_role (nunca desde el cliente): describe la cuenta, no
+    la sesión que está entrando ahora mismo."""
+    app = claims.get("app_metadata")
+    if not isinstance(app, dict):
+        return []
+    providers = app.get("providers")
+    if not isinstance(providers, list):
+        provider = app.get("provider")
+        providers = [provider] if isinstance(provider, str) else []
+    return [p for p in providers if isinstance(p, str)]
+
+
+def _senal_identidad(claims: dict) -> Optional[str]:
+    """Etiqueta de qué señal respalda ESTA sesión, o None si ninguna es confiable.
+
+    Única fuente de la lógica: `identidad_verificada()` se define en términos de esta
+    función, así que agregar la etiqueta (para auditoría) no duplica la política.
+
+    - Exige SIEMPRE un proveedor confiable vinculado a la cuenta (`app_metadata`). Sin
+      eso, no hay nada que respalde la identidad, sin importar qué traiga `amr`.
+    - Si la sesión trae `amr` como una lista NO vacía, ESTRECHA lo anterior: exige que
+      alguno de sus métodos sea un método de proveedor externo (`oauth`). Una cuenta con
+      Google vinculado que entró por contraseña (`amr=[{"method": "password"}]`) no
+      cuenta como respaldada por Google, aunque `app_metadata.providers` incluya
+      `"google"` — y una entrada de `amr` con forma inesperada (`method` que no es
+      `str`) tampoco matchea, así que tampoco cuenta: no es lo mismo que "sin amr".
+    - Solo si `amr` viene vacío o ausente (no una lista NO vacía) se queda con la sola
+      señal de cuenta.
+    """
+    confiables = [p for p in _proveedores_de_cuenta(claims) if p in _PROVEEDORES_CONFIABLES]
+    if not confiables:
+        return None
+    amr = claims.get("amr")
+    if isinstance(amr, list) and amr:
+        metodos = [m.get("method") for m in amr if isinstance(m, dict)]
+        de_proveedor = [m for m in metodos if isinstance(m, str) and m in _METODOS_PROVEEDOR]
+        if not de_proveedor:
+            return None
+        return f"amr:{de_proveedor[0]}"
+    return f"app_metadata:{confiables[0]}"
+
+
 def identidad_verificada(claims: dict) -> bool:
-    """True si un proveedor externo (Google) respalda esta identidad.
+    """True si un proveedor externo confiable (Google) respalda ESTA sesión.
 
-    Lee SOLO claims que pone GoTrue y el usuario no puede escribir:
+    Lee solo claims que pone GoTrue y el usuario no puede escribir:
 
-    - `amr`: los métodos de autenticación de ESTA sesión, `[{method, timestamp}]`.
-      Es la señal más precisa, y es la que se prefiere.
     - `app_metadata.provider(s)`: los proveedores vinculados a la cuenta. Solo se
-      cambian con la service_role. Es el respaldo si el token no trae `amr`.
+      cambian con la service_role. Es condición NECESARIA: sin un proveedor
+      confiable acá, no hay nada que respalde la identidad.
+    - `amr`: los métodos de autenticación de ESTA sesión (`[{method, timestamp}]`).
+      Estrecha lo anterior: una cuenta con Google vinculado que entró por
+      contraseña NO cuenta como respaldada por Google. Si el token no trae `amr`,
+      queda solo la señal de cuenta.
 
     NUNCA lee `user_metadata`: ese bolsillo lo escribe el propio usuario con
-    `updateUser({data})` y la anon key pública, así que no sirve para autorizar.
-    Es un invariante de este repo (ver docs/auditoria-codigo-2026-07-01.md).
+    `updateUser({data})` y la anon key pública, así que no sirve para autorizar
+    (invariante del repo: docs/auditoria-codigo-2026-07-01.md).
     """
-    amr = claims.get("amr") or []
-    if any(isinstance(m, dict) and m.get("method") in _METODOS_PROVEEDOR for m in amr):
-        return True
-    app = claims.get("app_metadata") or {}
-    provs = app.get("providers") or ([app["provider"]] if app.get("provider") else [])
-    return any(p in _PROVEEDORES_CONFIABLES for p in provs)
+    return _senal_identidad(claims) is not None
 
 
-def _adoptar_por_email(alm: Almacen, user_id: str, email: str) -> Optional[Perfil]:
+def _adoptar_por_email(alm: Almacen, user_id: str, email: str,
+                       senal: Optional[str] = None) -> Optional[Perfil]:
     """Re-clava a `user_id` el perfil de ese email, si hay EXACTAMENTE uno y está activo.
 
     Es lo que permite que un invitado entre con Google cuando Supabase le entrega un
@@ -112,7 +156,11 @@ def _adoptar_por_email(alm: Almacen, user_id: str, email: str) -> Optional[Perfi
     Un perfil inactivo no se adopta: no tiene sentido re-clavar una fila muerta (en
     producción hay perfiles huérfanos de usuarios borrados en Supabase), y así esta
     puerta no toca nada en el caso que de todos modos va a terminar denegando (cae en
-    el mismo 403 de "no invitado" de siempre)."""
+    el mismo 403 de "no invitado" de siempre).
+
+    `senal` es la etiqueta de `_senal_identidad()` (p.ej. "amr:oauth"), solo para dejar
+    registro en la auditoría de qué prueba disparó la adopción; no cambia la decisión.
+    """
     email = (email or "").strip().lower()
     if not email:
         return None
@@ -123,19 +171,24 @@ def _adoptar_por_email(alm: Almacen, user_id: str, email: str) -> Optional[Perfi
     if viejo.estado != "activo":
         return None
     with alm.transaccion("seguridad") as conn:
-        alm.perfiles.reasignar_user_id(viejo.user_id, user_id, conn=conn)
+        movido = alm.perfiles.reasignar_user_id(viejo.user_id, user_id, conn=conn)
+        if not movido:
+            # El UPDATE no movió ninguna fila (carrera con otra adopción concurrente,
+            # p.ej. varias llamadas en paralelo tras un login): no hay nada que auditar
+            # y la puerta deniega, fail-closed, en vez de fabricar un Perfil o dejar
+            # una fila de auditoría de un vínculo que no ocurrió.
+            return None
         registrar_auditoria(alm, conn, None, "usuario.vincular_identidad", "usuario",
                             user_id, antes={"user_id": viejo.user_id, "email": viejo.email},
                             despues={"user_id": user_id, "email": viejo.email,
-                                     "rol": viejo.rol})
-    # Se relee en vez de construir con dataclasses.replace: si el UPDATE movió 0 filas
-    # (rowcount ignorado por reasignar_user_id), esto devuelve None y la puerta deniega,
-    # en vez de fabricar un Perfil con el rol de la víctima para una fila que no existe.
+                                     "rol": viejo.rol},
+                            contexto={"email_sesion": email, "senal": senal})
     return alm.perfiles.get(user_id)
 
 
 def resolver_perfil(alm: Almacen, user_id: str, email: str,
-                    identidad_verificada: bool = False) -> Perfil:
+                    identidad_verificada: bool = False,
+                    senal_identidad: Optional[str] = None) -> Perfil:
     """Devuelve el Perfil activo del usuario; bootstrap admin por APU_ADMIN_EMAILS.
 
     `identidad_verificada` es true solo si un proveedor externo (Google) respalda esta
@@ -144,11 +197,17 @@ def resolver_perfil(alm: Almacen, user_id: str, email: str,
     true se intenta la adopción por email. El default es False para que la ausencia de
     prueba nunca adopte nada.
 
+    `senal_identidad` es la etiqueta de auditoría de esa misma prueba (`_senal_identidad()`,
+    p.ej. "amr:oauth"); parámetro opcional puramente informativo, para que la fila de
+    auditoría diga QUÉ señal disparó la adopción sin que esta función tenga que saber de
+    JWTs. El default `None` no cambia el comportamiento de llamadas existentes con 3 o 4
+    argumentos (los tests de este módulo la siguen llamando así).
+
     Lanza ErrorAuth si el usuario está inactivo o no está autorizado (no invitado).
     """
     p = alm.perfiles.get(user_id)
     if p is None and identidad_verificada:
-        p = _adoptar_por_email(alm, user_id, email)
+        p = _adoptar_por_email(alm, user_id, email, senal_identidad)
     if p is not None:
         if p.estado != "activo":
             raise ErrorAuth("Usuario inactivo.")
@@ -181,8 +240,9 @@ def usuario_actual(request: Request, alm: Almacen = Depends(get_almacen)) -> Per
         raise HTTPException(status_code=401, detail=str(e))
     user_id = claims.get("sub", "")
     email = claims.get("email", "")
+    senal = _senal_identidad(claims)
     try:
-        return resolver_perfil(alm, user_id, email, identidad_verificada(claims))
+        return resolver_perfil(alm, user_id, email, senal is not None, senal)
     except ErrorAuth as e:
         raise HTTPException(status_code=403, detail=str(e))
 

@@ -71,12 +71,12 @@ class PerfilesDB:
                 ((email or "").strip().lower(),)).fetchall()
         return [self._fila(r) for r in rows]
 
-    def reasignar_user_id(self, viejo: str, nuevo: str, conn=None) -> None:
+    def reasignar_user_id(self, viejo: str, nuevo: str, conn=None) -> bool:
         sql = "UPDATE perfiles SET user_id=? WHERE user_id=?"
         if conn is not None:
-            conn.execute(sql, (nuevo, viejo)); return
+            return conn.execute(sql, (nuevo, viejo)).rowcount > 0
         with self.connect() as c:
-            c.execute(sql, (nuevo, viejo))
+            return c.execute(sql, (nuevo, viejo)).rowcount > 0
 
     def set_rol(self, user_id: str, rol: str, conn=None) -> None:
         if conn is not None:

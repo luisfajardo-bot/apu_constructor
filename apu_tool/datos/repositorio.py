@@ -218,12 +218,17 @@ class RepositorioPerfiles(Protocol):
         el repositorio."""
         ...
 
-    def reasignar_user_id(self, viejo: str, nuevo: str, conn=None) -> None:
-        """Mueve un perfil a otro `user_id` (misma fila, nueva PK).
+    def reasignar_user_id(self, viejo: str, nuevo: str, conn=None) -> bool:
+        """Mueve un perfil a otro `user_id` (misma fila, nueva PK). Devuelve si aplicó.
 
         Es lo que hace la adopción por email cuando Supabase entrega un `user_id`
         nuevo para un usuario ya invitado. Se mueve y no se duplica: dos filas del
-        mismo email descuadrarían el guard del último Admin activo, que cuenta filas."""
+        mismo email descuadrarían el guard del último Admin activo, que cuenta filas.
+
+        Devuelve `True` solo si el UPDATE movió una fila (`viejo` existía). El llamador
+        (`_adoptar_por_email`) audita solo si esto da `True`: sin eso, una carrera (p.ej.
+        varias llamadas paralelas tras un login) escribiría N filas de auditoría para un
+        solo vínculo real."""
         ...
 
     def listar(self) -> list[Perfil]: ...

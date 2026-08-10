@@ -97,8 +97,19 @@ def test_get_por_email_puede_devolver_varios(repo):
 
 def test_reasignar_user_id_mueve_el_perfil(repo):
     repo.upsert(Perfil("viejo", "ana@obra.co", "editor", "activo", "Ana"))
-    repo.reasignar_user_id("viejo", "nuevo")
+    assert repo.reasignar_user_id("viejo", "nuevo") is True
     assert repo.get("viejo") is None
     p = repo.get("nuevo")
     assert p.email == "ana@obra.co" and p.rol == "editor" and p.nombre == "Ana"
     assert len(repo.listar()) == 1        # se movió, no se duplicó
+
+
+def test_reasignar_user_id_inexistente_no_mueve_nada(repo):
+    """Un `user_id` que no existe no mueve ninguna fila: `False`, y sin efectos.
+
+    Es la base del arreglo del auditoría-fantasma: `_adoptar_por_email` solo escribe
+    `usuario.vincular_identidad` si esto da `True` (ver auth.py)."""
+    repo.upsert(Perfil("otro", "otro@obra.co", "consulta", "activo"))
+    assert repo.reasignar_user_id("noexiste", "nuevo") is False
+    assert repo.get("nuevo") is None
+    assert len(repo.listar()) == 1

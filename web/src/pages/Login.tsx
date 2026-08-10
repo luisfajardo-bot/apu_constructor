@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Lock, Mail } from "lucide-react";
 import { toast } from "sonner";
@@ -15,6 +15,26 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [verClave, setVerClave] = useState(false);
+
+  useEffect(() => {
+    // `signInWithOAuth` navega a Google, así que casi nunca devuelve un `error` (ver
+    // `conGoogle`); si Google o Supabase rechazan el intento (provider sin habilitar,
+    // redirect URI mal configurado, el usuario cancela el consentimiento), el error
+    // real vuelve en el hash o el query de ESTE redirect (`#error=...` o
+    // `?error=...`), y sin leerlo acá el usuario aterriza en /login sin ningún mensaje.
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const query = new URLSearchParams(window.location.search);
+    const descripcion = hash.get("error_description") || query.get("error_description");
+    const codigo = hash.get("error") || query.get("error");
+    if (descripcion || codigo) {
+      toast.error(descripcion || codigo || "No se pudo ingresar con Google.");
+      // Limpia el hash/query para que el error no reaparezca al recargar la página.
+      const url = new URL(window.location.href);
+      url.hash = "";
+      url.search = "";
+      window.history.replaceState(null, "", url.toString());
+    }
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();

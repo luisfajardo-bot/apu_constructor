@@ -157,3 +157,50 @@ def test_import_insumos_el_gemelo_nocturno_del_archivo_si_se_crea(tmp_path):
         ["8888 N", "GRAVA COMUN", "M3", "MAT", 9000, "PRECIO IDU"]])
     prev = autoria.preview_importar_insumos(alm, contenido, "x.xlsx")
     assert len(prev["crear"]) == 2 and prev["conflicto"] == []
+
+
+# ------------------------------------------------------------------ import APUs
+def _excel_apus(cabeceras):
+    """Hoja 'APUS' del formato del histórico. `cabeceras` son (codigo, turno, nombre, unidad).
+
+    Columnas: actividad(0) cod_idu(1) unidad(2) insumo(3) cod(4) und(5)
+              rendimiento(6) inv(7) precio(8) costo(9) turno(10)   — ver seed.APUS_COLS.
+    Cada APU lleva un componente para que no quede vacío."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "APUS"
+    ws.append(["ACTIVIDAD", "COD IDU", "UN", "INSUMO", "COD", "UND", "RENDIMIENTO",
+               "INV", "PRECIO", "COSTO", "TURNO"])
+    for codigo, turno, nombre, unidad in cabeceras:
+        ws.append([nombre, codigo, unidad, "", "", "", "", "", "", "", turno])
+        ws.append(["", "", "", "CEMENTO", "100", "KG", 1.0, "", 900, "", ""])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+
+def test_import_apus_el_par_diurno_nocturno_del_historico_sigue_entrando(tmp_path):
+    """LA no-regresión: el importador convierte el nocturno en "3010 N" antes de
+    cualquier chequeo (no choca por código) y el nombre repetido cae en la excepción
+    del gemelo. Los 499 pares del histórico tienen que seguir importándose."""
+    alm = _alm(tmp_path)                     # biblioteca de APUs vacía
+    contenido = _excel_apus([
+        ("3010", "DIURNO", "EXCAVACION MANUAL", "M3"),
+        ("3010", "NOCTURNO", "EXCAVACION MANUAL", "M3")])
+    prev = autoria.preview_importar_apus(alm, contenido)
+    assert len(prev["crear"]) == 2 and prev["conflicto"] == []
+    res = autoria.aplicar_importar_apus(alm, contenido)
+    assert res["creados"] == 2 and res["errores"] == []
+    assert alm.apus.get_apu("3010", "DIURNO") is not None
+    assert alm.apus.get_apu("3010 N", "NOCTURNO") is not None
+
+
+def test_import_apus_nombre_de_otro_apu_va_a_conflicto(tmp_path):
+    alm = _alm_apus(tmp_path)                # ya tiene 3010 DIURNO "EXCAVACION MANUAL EN MATERIAL COMUN"
+    contenido = _excel_apus([
+        ("9999", "DIURNO", "EXCAVACION MANUAL EN MATERIAL COMUN", "M3")])
+    prev = autoria.preview_importar_apus(alm, contenido)
+    assert prev["crear"] == [] and len(prev["conflicto"]) == 1
+    res = autoria.aplicar_importar_apus(alm, contenido)
+    assert res["creados"] == 0 and len(res["errores"]) == 1

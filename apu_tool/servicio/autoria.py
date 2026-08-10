@@ -557,29 +557,43 @@ def _parse_apus(contenido: bytes):
 
 def preview_importar_apus(alm: Almacen, contenido: bytes) -> dict:
     apus, comps_por = _parse_apus(contenido)
-    crear, ya_existe, crear_apus = [], [], []
+    index = alm.apus.apu_index()          # UNA lectura para todo el archivo
+    crear, ya_existe, conflicto, crear_apus = [], [], [], []
     for a in apus:
         info = {"codigo": a.codigo, "turno": a.shift, "nombre": a.nombre,
                 "unidad": a.unidad, "grupo": a.grupo,
                 "n_componentes": len(comps_por.get((a.codigo, a.shift), []))}
         if alm.apus.get_apu(a.codigo, a.shift):
             ya_existe.append(info)
-        else:
-            crear.append(info)
-            crear_apus.append(a)
+            continue
+        motivo = _conflicto_apu(alm, a.codigo, a.shift, a.nombre, index=index)
+        if motivo:
+            conflicto.append({**info, "motivo": motivo})
+            continue
+        crear.append(info)
+        crear_apus.append(a)
+        index.append((a.codigo, a.nombre, a.shift))   # el archivo se ve a sí mismo
     subapus = detectar_subapus_lote(alm, apus, comps_por, solo=crear_apus)
-    return {"crear": crear, "ya_existe": ya_existe, "subapus": subapus}
+    return {"crear": crear, "ya_existe": ya_existe, "conflicto": conflicto,
+            "subapus": subapus}
 
 
 def aplicar_importar_apus(alm: Almacen, contenido: bytes, actor=None) -> dict:
     apus, comps_por = _parse_apus(contenido)
     mapa = mapa_codigos_apu(alm, apus)
     nombres = nombres_apu(alm, apus)
+    # `aplicar` no usa los baldes del preview: recorre los APUs parseados. Sin este
+    # chequeo acá, las filas en conflicto se crearían igual.
+    index = alm.apus.apu_index()
     creados, subapus_marcados, errores = 0, 0, []
     lote = nuevo_lote()
     for a in apus:
         if alm.apus.get_apu(a.codigo, a.shift):
             continue                                   # ya existe: no se pisa
+        motivo = _conflicto_apu(alm, a.codigo, a.shift, a.nombre, index=index)
+        if motivo:
+            errores.append({"codigo": a.codigo, "turno": a.shift, "error": motivo})
+            continue
         try:
             comps = comps_por.get((a.codigo, a.shift), [])
             comps, n_sub = marcar_comps_subapu(comps, a.shift, mapa, nombres)
@@ -593,6 +607,7 @@ def aplicar_importar_apus(alm: Almacen, contenido: bytes, actor=None) -> dict:
                     contexto={"origen": "import", "lote_id": lote})
             creados += 1
             subapus_marcados += n_sub
+            index.append((a.codigo, a.nombre, a.shift))
         except ValueError as e:
             errores.append({"codigo": a.codigo, "turno": a.shift, "error": str(e)})
     return {"creados": creados, "subapus_marcados": subapus_marcados, "errores": errores}

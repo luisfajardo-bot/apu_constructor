@@ -11,12 +11,21 @@ vi.mock("@/api/autoria", () => ({
   crearInsumo: (...a: unknown[]) => crearInsumo(...a),
 }));
 
+// El aviso en vivo llama a este mismo endpoint (ver apu_tool/servicio/rutas.py::
+// conflicto_insumo): mockeado acá para que los tests no golpeen la red real.
+const conflictoInsumo = vi.fn();
+vi.mock("@/api/insumos", () => ({
+  conflictoInsumo: (...a: unknown[]) => conflictoInsumo(...a),
+}));
+
 beforeEach(() => {
   crearInsumo.mockReset();
   crearInsumo.mockResolvedValue({
     id: 1, codigo: "C1", nombre: "CEMENTO GRIS", unidad: "KG", grupo: "MAT",
     precio: 100, fuente: "PRECIO IDU", clasificacion: "publico", sin_precio: false,
   });
+  conflictoInsumo.mockReset();
+  conflictoInsumo.mockResolvedValue({ campo: null, motivo: null });
 });
 
 function llenarFormulario() {
@@ -51,5 +60,39 @@ describe("DialogoAgregarInsumo", () => {
     await waitFor(() => expect(crearInsumo).toHaveBeenCalled());
     const body = crearInsumo.mock.calls[0][0] as { lista_id?: number };
     expect(body.lista_id).toBe(1);
+  });
+
+  it("con un conflicto de código, el motivo aparece y bloquea Crear insumo", async () => {
+    conflictoInsumo.mockResolvedValue({
+      campo: "codigo",
+      motivo: "El código C1 ya lo usa el insumo «CEMENTO GRIS».",
+    });
+    render(
+      <DialogoAgregarInsumo open onOpenChange={() => {}} listaId={1} onCreado={() => {}} />
+    );
+    llenarFormulario();
+
+    await waitFor(
+      () => expect(conflictoInsumo).toHaveBeenCalledWith("C1", "CEMENTO GRIS"),
+      { timeout: 2000 },
+    );
+    await screen.findByText("El código C1 ya lo usa el insumo «CEMENTO GRIS».");
+    const boton = screen.getByText("Crear insumo") as HTMLButtonElement;
+    expect(boton.disabled).toBeTruthy();
+  });
+
+  it("si la consulta de conflicto falla, no bloquea el formulario (falla abierta)", async () => {
+    conflictoInsumo.mockRejectedValue(new Error("network"));
+    render(
+      <DialogoAgregarInsumo open onOpenChange={() => {}} listaId={1} onCreado={() => {}} />
+    );
+    llenarFormulario();
+
+    await waitFor(
+      () => expect(conflictoInsumo).toHaveBeenCalledWith("C1", "CEMENTO GRIS"),
+      { timeout: 2000 },
+    );
+    const boton = screen.getByText("Crear insumo") as HTMLButtonElement;
+    expect(boton.disabled).toBeFalsy();
   });
 });

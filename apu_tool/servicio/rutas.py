@@ -433,6 +433,20 @@ def insumos_fuentes(lista: Optional[int] = None, alm: Almacen = Depends(get_alma
     return alm.precios.fuentes(lista_id=lista)
 
 
+@router.get("/insumos/conflicto")
+def conflicto_insumo(codigo: str = "", nombre: str = "",
+                     alm: Almacen = Depends(get_almacen),
+                     _: object = Depends(requiere_rol("consulta"))):
+    """Chequeo previo del alta: el MISMO motivo que devolvería el 400 al guardar.
+
+    Existe para que el diálogo avise debajo del campo mientras se escribe, sin una
+    segunda implementación de la regla que se pueda desincronizar. Declarado ANTES de
+    `/insumos/{insumo_id}` (que parsea `id: int`): si no, `/insumos/conflicto`
+    intentaría resolverse ahí y daría 422."""
+    d = autoria.conflicto_insumo_detalle(alm, codigo, nombre) if codigo and nombre else None
+    return {"campo": d[0] if d else None, "motivo": d[1] if d else None}
+
+
 @router.get("/insumos/{insumo_id}")
 def insumo_detalle(insumo_id: int, lista: Optional[int] = None,
                    alm: Almacen = Depends(get_almacen),
@@ -517,6 +531,16 @@ def listar_apus(q: Optional[str] = None, grupo: Optional[str] = None,
 def apus_grupos(alm: Almacen = Depends(get_almacen),
                 _: object = Depends(requiere_rol("consulta"))):
     return apus_svc.grupos(alm)
+
+
+@router.get("/apus/conflicto")
+def conflicto_apu(codigo: str = "", turno: str = "", nombre: str = "",
+                  alm: Almacen = Depends(get_almacen),
+                  _: object = Depends(requiere_rol("consulta"))):
+    """Chequeo previo del alta de APU: el MISMO motivo que devolvería el 400 al
+    guardar (ver `conflicto_insumo` arriba: misma razón de ser)."""
+    d = autoria.conflicto_apu_detalle(alm, codigo, turno, nombre) if codigo and nombre else None
+    return {"campo": d[0] if d else None, "motivo": d[1] if d else None}
 
 
 @router.post("/apus/crear")

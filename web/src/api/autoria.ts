@@ -9,6 +9,7 @@ import type {
   ListaApus,
   ImportApusPreview,
   ImportResultado,
+  ConflictoAlta,
 } from "@/lib/tipos";
 
 // ─── Insumos: crear individual ─────────────────────────────────────────────────
@@ -25,6 +26,8 @@ export interface ListarApusParams {
   turno?: string;
   limit?: number;
   offset?: number;
+  codigo?: string;
+  nombre?: string;
 }
 
 function buildQuery(params: ListarApusParams): string {
@@ -34,6 +37,8 @@ function buildQuery(params: ListarApusParams): string {
   if (params.turno !== undefined) qs.set("turno", params.turno);
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  if (params.codigo !== undefined) qs.set("codigo", params.codigo);
+  if (params.nombre !== undefined) qs.set("nombre", params.nombre);
   const str = qs.toString();
   return str ? `?${str}` : "";
 }
@@ -55,6 +60,16 @@ export function getApuDetalle(codigo: string, turno: string): Promise<ApuDetalle
 
 export function crearApu(body: ApuNuevo): Promise<ApuResumen> {
   return apiPost<ApuResumen>("/apus/crear", body);
+}
+
+// Chequeo en vivo del alta: mismo endpoint que arma el 400 al guardar
+// (ver `conflictoInsumo` en @/api/insumos: misma razón de ser).
+export function conflictoApu(
+  codigo: string,
+  turno: string,
+  nombre: string,
+): Promise<ConflictoAlta> {
+  return apiGet<ConflictoAlta>(`/apus/conflicto${buildQuery({ codigo, turno, nombre })}`);
 }
 
 export function editarApu(

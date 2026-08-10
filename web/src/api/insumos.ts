@@ -5,6 +5,7 @@ import type {
   CambiosAplicados,
   ImportInsumosUpsertPreview,
   ImportUpsertResultado,
+  ConflictoAlta,
 } from "@/lib/tipos";
 
 export interface ListarInsumosParams {
@@ -16,6 +17,8 @@ export interface ListarInsumosParams {
   offset?: number;
   lista?: number;
   sin_precio?: boolean;
+  codigo?: string;
+  nombre?: string;
 }
 
 function buildQuery(params: ListarInsumosParams): string {
@@ -28,6 +31,8 @@ function buildQuery(params: ListarInsumosParams): string {
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   if (params.lista !== undefined) qs.set("lista", String(params.lista));
   if (params.sin_precio) qs.set("sin_precio", "true");
+  if (params.codigo !== undefined) qs.set("codigo", params.codigo);
+  if (params.nombre !== undefined) qs.set("nombre", params.nombre);
   const str = qs.toString();
   return str ? `?${str}` : "";
 }
@@ -68,4 +73,11 @@ export function aplicarImportarInsumos(form: FormData): Promise<ImportUpsertResu
 
 export function descargarPlantillaInsumos(): Promise<void> {
   return descargarArchivo("/insumos/importar/plantilla", "plantilla_insumos.xlsx");
+}
+
+// Chequeo en vivo del alta: llama al MISMO endpoint que arma el 400 al guardar
+// (ver `apu_tool/servicio/rutas.py::conflicto_insumo`), para que el aviso mientras
+// se escribe y el rechazo al guardar sean la misma regla, nunca dos.
+export function conflictoInsumo(codigo: string, nombre: string): Promise<ConflictoAlta> {
+  return apiGet<ConflictoAlta>(`/insumos/conflicto${buildQuery({ codigo, nombre })}`);
 }

@@ -10,6 +10,8 @@ import pytest
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Apu, Insumo
 from apu_tool.servicio import autoria
+from apu_tool.servicio.app import create_app
+from tests.conftest import cliente
 
 
 def _alm(tmp_path):
@@ -224,3 +226,69 @@ def test_import_apus_nombre_de_otro_apu_va_a_conflicto(tmp_path):
     assert prev["crear"] == [] and len(prev["conflicto"]) == 1
     res = autoria.aplicar_importar_apus(alm, contenido)
     assert res["creados"] == 0 and len(res["errores"]) == 1
+
+
+# --------------------------------------------------- chequeo en vivo (endpoints)
+# El endpoint no reimplementa la regla: llama al mismo `conflicto_insumo_detalle` /
+# `conflicto_apu_detalle` que usa el alta. El test que de verdad importa es el
+# último: que el motivo del endpoint sea el mismo string que el ValueError del 400.
+
+def _cli(alm):
+    return cliente(create_app(almacen=alm), rol="consulta")
+
+
+def test_endpoint_conflicto_insumo_por_codigo(tmp_path):
+    alm = _alm(tmp_path)
+    cli = _cli(alm)
+    r = cli.get("/api/insumos/conflicto", params={"codigo": "10014", "nombre": "OTRA COSA"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["campo"] == "codigo"
+    assert "10014" in body["motivo"]
+
+
+def test_endpoint_conflicto_insumo_por_nombre(tmp_path):
+    alm = _alm(tmp_path)
+    cli = _cli(alm)
+    r = cli.get("/api/insumos/conflicto",
+               params={"codigo": "7777", "nombre": "BORDE CONTENEDOR DE RAICES A 70"})
+    assert r.status_code == 200
+    assert r.json()["campo"] == "nombre"
+
+
+def test_endpoint_conflicto_insumo_gemelo_nocturno_libre(tmp_path):
+    """4859 N con el nombre del 4859: es la excepción, no hay conflicto."""
+    alm = _alm(tmp_path)
+    cli = _cli(alm)
+    r = cli.get("/api/insumos/conflicto",
+               params={"codigo": "4859 N", "nombre": "BORDE CONTENEDOR DE RAICES A 70"})
+    assert r.status_code == 200
+    assert r.json() == {"campo": None, "motivo": None}
+
+
+def test_endpoint_conflicto_insumo_formulario_a_medias_no_revienta(tmp_path):
+    alm = _alm(tmp_path)
+    cli = _cli(alm)
+    r = cli.get("/api/insumos/conflicto", params={"codigo": "10014", "nombre": ""})
+    assert r.status_code == 200
+    assert r.json() == {"campo": None, "motivo": None}
+
+
+def test_endpoint_conflicto_apu_por_codigo_en_el_otro_turno(tmp_path):
+    alm = _alm_apus(tmp_path)
+    cli = _cli(alm)
+    r = cli.get("/api/apus/conflicto",
+               params={"codigo": "3010", "turno": "NOCTURNO", "nombre": "OTRO NOMBRE CUALQUIERA"})
+    assert r.status_code == 200
+    assert r.json()["campo"] == "codigo"
+
+
+def test_endpoint_conflicto_es_el_mismo_motivo_que_el_400_del_alta(tmp_path):
+    """El test que importa: si esto se desincroniza, el aviso en vivo miente."""
+    alm = _alm(tmp_path)
+    cli = _cli(alm)
+    r = cli.get("/api/insumos/conflicto", params={"codigo": "10014", "nombre": "OTRA COSA"})
+    motivo_endpoint = r.json()["motivo"]
+    with pytest.raises(ValueError) as exc:
+        autoria.crear_insumo(alm, _nuevo("10014", "OTRA COSA"))
+    assert motivo_endpoint == str(exc.value)

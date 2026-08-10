@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +9,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { crearInsumo } from "@/api/autoria";
+import { conflictoInsumo } from "@/api/insumos";
+import type { ConflictoAlta } from "@/lib/tipos";
 
 interface DialogoAgregarInsumoProps {
   open: boolean;
@@ -46,6 +48,7 @@ export function DialogoAgregarInsumo({
 }: DialogoAgregarInsumoProps) {
   const [c, setC] = useState<Campos>(VACIO);
   const [guardando, setGuardando] = useState(false);
+  const [conflicto, setConflicto] = useState<ConflictoAlta | null>(null);
 
   function set<K extends keyof Campos>(k: K, v: string) {
     setC((prev) => ({ ...prev, [k]: v }));
@@ -55,9 +58,35 @@ export function DialogoAgregarInsumo({
     if (!v) {
       setC(VACIO);
       setGuardando(false);
+      setConflicto(null);
     }
     onOpenChange(v);
   }
+
+  // Aviso en vivo: mismo chequeo que hace el 400 al guardar (ver @/api/insumos),
+  // con debounce para no consultar en cada tecla. Falla abierta: un error de red
+  // limpia el aviso y no bloquea el formulario, el 400 del guardado es la red.
+  useEffect(() => {
+    const codigo = c.codigo.trim();
+    const nombre = c.nombre.trim();
+    if (!codigo || !nombre) {
+      setConflicto(null);
+      return;
+    }
+    let cancelado = false;
+    const t = setTimeout(async () => {
+      try {
+        const res = await conflictoInsumo(codigo, nombre);
+        if (!cancelado) setConflicto(res);
+      } catch {
+        if (!cancelado) setConflicto(null);
+      }
+    }, 400);
+    return () => {
+      cancelado = true;
+      clearTimeout(t);
+    };
+  }, [c.codigo, c.nombre]);
 
   const precioNum = Number(c.precio);
   const precioValido = c.precio.trim() !== "" && Number.isFinite(precioNum) && precioNum >= 0;
@@ -67,7 +96,8 @@ export function DialogoAgregarInsumo({
     c.unidad.trim() !== "" &&
     c.grupo.trim() !== "" &&
     c.fuente.trim() !== "" &&
-    precioValido;
+    precioValido &&
+    conflicto?.motivo == null;
 
   async function guardar() {
     if (!valido) return;
@@ -108,6 +138,9 @@ export function DialogoAgregarInsumo({
               onChange={(e) => set("codigo", e.target.value)}
               autoFocus
             />
+            {conflicto?.campo === "codigo" && (
+              <span className="text-destructive">{conflicto.motivo}</span>
+            )}
           </label>
           <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted-foreground">Unidad</span>
@@ -124,6 +157,9 @@ export function DialogoAgregarInsumo({
               value={c.nombre}
               onChange={(e) => set("nombre", e.target.value)}
             />
+            {conflicto?.campo === "nombre" && (
+              <span className="text-destructive">{conflicto.motivo}</span>
+            )}
           </label>
           <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted-foreground">Grupo</span>

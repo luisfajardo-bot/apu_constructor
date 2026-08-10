@@ -71,12 +71,16 @@ def _corto(texto: str, n: int = 60) -> str:
     return t if len(t) <= n else t[:n - 1].rstrip() + "…"
 
 
-def _conflicto_insumo(alm: Almacen, codigo: str, nombre: str,
-                      extra: Sequence[tuple[str, str, bool]] = ()) -> Optional[str]:
-    """El motivo en español si el alta choca con un insumo existente, o None.
+def conflicto_insumo_detalle(alm: Almacen, codigo: str, nombre: str,
+                             extra: Sequence[tuple[str, str, bool]] = ()
+                             ) -> Optional[tuple[str, str]]:
+    """`(campo, motivo)` si el alta choca con un insumo existente, o None. `campo` es
+    "codigo" o "nombre": qué campo hay que señalar en el formulario.
 
-    Devuelve el motivo y no un bool porque el mismo texto lo usan el 400 del
-    formulario y el balde `conflicto` del preview del import: se escribe una vez.
+    Pública porque el endpoint de chequeo en vivo (`GET /insumos/conflicto`) la llama
+    directo, para que el aviso debajo del campo y el 400 del guardado sean la MISMA
+    regla. `_conflicto_insumo` es el envoltorio que devuelve solo el motivo, para los
+    llamadores que no necesitan saber qué campo señalar.
 
     `extra` son filas `(codigo, nombre, oculto)` que todavía no están en la base pero
     ya se van a crear —las filas anteriores del mismo Excel—, para que el preview no
@@ -89,7 +93,7 @@ def _conflicto_insumo(alm: Almacen, codigo: str, nombre: str,
     for c, nom, oculto in filas:
         if c == cod:
             que = "un insumo oculto:" if oculto else "el insumo"
-            return f"El código {cod} ya lo usa {que} «{_corto(nom)}»."
+            return "codigo", f"El código {cod} ya lo usa {que} «{_corto(nom)}»."
         if normalizar(nom) == nn and not _es_gemelo_nocturno(cod, c):
             por_nombre = por_nombre or c
     if por_nombre:
@@ -100,13 +104,29 @@ def _conflicto_insumo(alm: Almacen, codigo: str, nombre: str,
         # gemelo que comparte el nombre— sí viene.
         libre = not any(c == cod_noc for c, _, _ in filas)
         pista = f" Si es la tarifa nocturna, usa el código {cod_noc}." if libre else ""
-        return f"Ese nombre ya lo usa el insumo {por_nombre}.{pista}"
+        return "nombre", f"Ese nombre ya lo usa el insumo {por_nombre}.{pista}"
     return None
 
 
-def _conflicto_apu(alm: Almacen, codigo: str, turno: str, nombre: str,
-                   index: Optional[list[tuple[str, str, str]]] = None) -> Optional[str]:
-    """El motivo en español si el alta de APU choca, o None.
+def _conflicto_insumo(alm: Almacen, codigo: str, nombre: str,
+                      extra: Sequence[tuple[str, str, bool]] = ()) -> Optional[str]:
+    """El motivo en español si el alta choca con un insumo existente, o None.
+
+    Devuelve el motivo y no un bool porque el mismo texto lo usan el 400 del
+    formulario y el balde `conflicto` del preview del import: se escribe una vez."""
+    d = conflicto_insumo_detalle(alm, codigo, nombre, extra)
+    return d[1] if d else None
+
+
+def conflicto_apu_detalle(alm: Almacen, codigo: str, turno: str, nombre: str,
+                          index: Optional[list[tuple[str, str, str]]] = None
+                          ) -> Optional[tuple[str, str]]:
+    """`(campo, motivo)` si el alta de APU choca, o None. `campo` es "codigo" o "nombre".
+
+    Pública por la misma razón que `conflicto_insumo_detalle`: la llama el endpoint de
+    chequeo en vivo (`GET /apus/conflicto`), para que el aviso en vivo y el 400 del
+    guardado no se desincronicen. `_conflicto_apu` es el envoltorio que devuelve solo
+    el motivo.
 
     `index` es el resultado de `alm.apus.apu_index()` ya leído. Los imports lo leen UNA
     vez y lo pasan en cada vuelta —y le van agregando los APUs que aceptan, para que el
@@ -124,12 +144,19 @@ def _conflicto_apu(alm: Almacen, codigo: str, turno: str, nombre: str,
             libre = not any(fc == cod_noc for fc, _, _ in filas)
             pista = (f" Si es el nocturno, usa {cod_noc}."
                      if turno == config.SHIFT_NOCTURNO and sh != turno and libre else "")
-            return f"El código {cod} ya lo usa el APU {sh} «{_corto(nom)}».{pista}"
+            return "codigo", f"El código {cod} ya lo usa el APU {sh} «{_corto(nom)}».{pista}"
         if normalizar(nom) == nn and not (_es_gemelo_nocturno(cod, c) and sh != turno):
             por_nombre = por_nombre or (c, sh)
     if por_nombre:
-        return f"Ese nombre ya lo usa el APU {por_nombre[0]} en turno {por_nombre[1]}."
+        return "nombre", f"Ese nombre ya lo usa el APU {por_nombre[0]} en turno {por_nombre[1]}."
     return None
+
+
+def _conflicto_apu(alm: Almacen, codigo: str, turno: str, nombre: str,
+                   index: Optional[list[tuple[str, str, str]]] = None) -> Optional[str]:
+    """El motivo en español si el alta de APU choca, o None."""
+    d = conflicto_apu_detalle(alm, codigo, turno, nombre, index)
+    return d[1] if d else None
 
 
 # ----------------------------------------------------------------- individual

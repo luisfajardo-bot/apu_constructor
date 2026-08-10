@@ -229,6 +229,13 @@ export interface ImportUpsertResultado {
 
 // ─── Autoría de la base — agregar insumos y APUs ───────────────────────────────
 
+// Chequeo en vivo (mientras se escribe) del alta de insumo/APU: el mismo motivo
+// que devolvería el 400 al guardar, la MISMA regla expuesta en dos formas.
+export interface ConflictoAlta {
+  campo: "codigo" | "nombre" | null;
+  motivo: string | null;
+}
+
 export interface InsumoNuevo {
   codigo: string;
   nombre: string;

@@ -14,8 +14,9 @@ import type {
   ApuDetalle,
   LineaComposicion,
   ApuResumen,
+  ConflictoAlta,
 } from "@/lib/tipos";
-import { crearApu, editarApu, listarApus, getGruposApu } from "@/api/autoria";
+import { crearApu, editarApu, listarApus, getGruposApu, conflictoApu } from "@/api/autoria";
 import { listarInsumos } from "@/api/insumos";
 import { baseDe, codigoSugerido, nombreEsDistinto, normalizarNombre } from "@/lib/duplicarApu";
 import { cop } from "@/lib/moneda";
@@ -124,6 +125,7 @@ export function DialogoAgregarApu({
   const codigoTocadoRef = useRef(false);
   const [ocupados, setOcupados] = useState<string[]>([]);
   const [grupos, setGrupos] = useState<string[]>([]);
+  const [conflicto, setConflicto] = useState<ConflictoAlta | null>(null);
 
   useEffect(() => {
     if (!open || !inicial) return;
@@ -206,6 +208,37 @@ export function DialogoAgregarApu({
     };
   }, [open]);
 
+  // Aviso en vivo: mismo chequeo que hace el 400 al guardar (ver @/api/autoria), con
+  // debounce para no consultar en cada tecla. No corre en modo editar: `editar_apu`
+  // no aplica la regla de unicidad, así que avisar de un choque que el servidor va a
+  // aceptar sería mentirle al usuario. Falla abierta: un error de red limpia el
+  // aviso y no bloquea el formulario, el 400 del guardado es la red de seguridad.
+  useEffect(() => {
+    if (!open || modo === "editar") {
+      setConflicto(null);
+      return;
+    }
+    const codigo = cab.codigo.trim();
+    const nombre = cab.nombre.trim();
+    if (!codigo || !nombre) {
+      setConflicto(null);
+      return;
+    }
+    let cancelado = false;
+    const t = setTimeout(async () => {
+      try {
+        const res = await conflictoApu(codigo, cab.turno, nombre);
+        if (!cancelado) setConflicto(res);
+      } catch {
+        if (!cancelado) setConflicto(null);
+      }
+    }, 400);
+    return () => {
+      cancelado = true;
+      clearTimeout(t);
+    };
+  }, [open, modo, cab.codigo, cab.turno, cab.nombre]);
+
   function setCabecera<K extends keyof Cabecera>(k: K, v: string) {
     setCab((prev) => ({ ...prev, [k]: v }));
   }
@@ -236,6 +269,7 @@ export function DialogoAgregarApu({
       codigoTocadoRef.current = false;
       setOcupados([]);
       setGrupos([]);
+      setConflicto(null);
     }
     onOpenChange(v);
   }
@@ -261,7 +295,8 @@ export function DialogoAgregarApu({
     cab.turno.trim() !== "" &&
     cab.nombre.trim() !== "" &&
     cab.unidad.trim() !== "" &&
-    cab.grupo.trim() !== "";
+    cab.grupo.trim() !== "" &&
+    conflicto?.motivo == null;
 
   // El grupo actual va SIEMPRE entre las opciones aunque no esté en el vocabulario:
   // si no, abrir un APU viejo con grupo 'NA' le cambiaría el grupo sin querer.
@@ -339,6 +374,9 @@ export function DialogoAgregarApu({
               autoFocus
               disabled={modo === "editar"}
             />
+            {conflicto?.campo === "codigo" && (
+              <span className="text-xs text-destructive mt-1">{conflicto.motivo}</span>
+            )}
           </label>
           <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted-foreground">Turno</span>
@@ -379,6 +417,9 @@ export function DialogoAgregarApu({
               value={cab.nombre}
               onChange={(e) => setCabecera("nombre", e.target.value)}
             />
+            {conflicto?.campo === "nombre" && (
+              <span className="text-xs text-destructive mt-1">{conflicto.motivo}</span>
+            )}
           </label>
           <div className="flex flex-col gap-1 text-xs">
             <label className="flex flex-col gap-1 text-xs">

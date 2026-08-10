@@ -58,6 +58,8 @@ def obtener_claims(token: str) -> dict:
 
 
 import datetime as _dt
+from dataclasses import replace
+from typing import Optional
 
 from fastapi import Depends, Request, HTTPException
 
@@ -69,12 +71,42 @@ from apu_tool.servicio.dependencias import get_almacen
 RANGO = {"consulta": 1, "editor": 2, "admin": 3}
 
 
-def resolver_perfil(alm: Almacen, user_id: str, email: str) -> Perfil:
+def _adoptar_por_email(alm: Almacen, user_id: str, email: str) -> Optional[Perfil]:
+    """Re-clava a `user_id` el perfil de ese email, si hay EXACTAMENTE uno. None si no.
+
+    Es lo que permite que un invitado entre con Google cuando Supabase le entrega un
+    `user_id` distinto al que creó la invitación. El llamador ya verificó que el email
+    viene verificado por el proveedor: sin eso, alguien que se registre con el correo de
+    otro y no lo confirme se quedaría con su perfil (y con su rol).
+
+    Con dos perfiles del mismo email no se adivina: devuelve None y el llamador deniega.
+    `perfiles.email` no es UNIQUE y en producción ya hubo usuarios duplicados."""
+    candidatos = alm.perfiles.get_por_email(email)
+    if len(candidatos) != 1:
+        return None
+    viejo = candidatos[0]
+    with alm.transaccion("seguridad") as conn:
+        alm.perfiles.reasignar_user_id(viejo.user_id, user_id, conn=conn)
+        registrar_auditoria(alm, conn, None, "usuario.vincular_identidad", "usuario",
+                            user_id, antes={"user_id": viejo.user_id, "email": viejo.email},
+                            despues={"user_id": user_id, "email": viejo.email,
+                                     "rol": viejo.rol})
+    return replace(viejo, user_id=user_id)
+
+
+def resolver_perfil(alm: Almacen, user_id: str, email: str,
+                    email_verificado: bool = False) -> Perfil:
     """Devuelve el Perfil activo del usuario; bootstrap admin por APU_ADMIN_EMAILS.
+
+    `email_verificado` es lo que dice el proveedor de identidad (Google siempre manda
+    true). Solo con eso en true se intenta la adopción por email. El default es False
+    para que la ausencia de prueba nunca adopte nada.
 
     Lanza ErrorAuth si el usuario está inactivo o no está autorizado (no invitado).
     """
     p = alm.perfiles.get(user_id)
+    if p is None and email_verificado:
+        p = _adoptar_por_email(alm, user_id, email)
     if p is not None:
         if p.estado != "activo":
             raise ErrorAuth("Usuario inactivo.")
@@ -107,8 +139,12 @@ def usuario_actual(request: Request, alm: Almacen = Depends(get_almacen)) -> Per
         raise HTTPException(status_code=401, detail=str(e))
     user_id = claims.get("sub", "")
     email = claims.get("email", "")
+    # Lo pone el proveedor de identidad: Google manda true; un signup por contraseña sin
+    # confirmar, no. Es la única prueba de que el email es suyo, y de eso depende la
+    # adopción por email de resolver_perfil.
+    verificado = bool((claims.get("user_metadata") or {}).get("email_verified"))
     try:
-        return resolver_perfil(alm, user_id, email)
+        return resolver_perfil(alm, user_id, email, verificado)
     except ErrorAuth as e:
         raise HTTPException(status_code=403, detail=str(e))
 

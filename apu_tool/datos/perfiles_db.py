@@ -64,6 +64,20 @@ class PerfilesDB:
             rows = conn.execute("SELECT * FROM perfiles ORDER BY email").fetchall()
         return [self._fila(r) for r in rows]
 
+    def get_por_email(self, email: str) -> list[Perfil]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM perfiles WHERE lower(trim(email)) = ? ORDER BY user_id",
+                ((email or "").strip().lower(),)).fetchall()
+        return [self._fila(r) for r in rows]
+
+    def reasignar_user_id(self, viejo: str, nuevo: str, conn=None) -> None:
+        sql = "UPDATE perfiles SET user_id=? WHERE user_id=?"
+        if conn is not None:
+            conn.execute(sql, (nuevo, viejo)); return
+        with self.connect() as c:
+            c.execute(sql, (nuevo, viejo))
+
     def set_rol(self, user_id: str, rol: str, conn=None) -> None:
         if conn is not None:
             conn.execute("UPDATE perfiles SET rol=? WHERE user_id=?", (rol, user_id)); return

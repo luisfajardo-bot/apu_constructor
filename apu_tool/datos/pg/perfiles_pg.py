@@ -49,6 +49,21 @@ class PerfilesPg:
             rows = conn.execute("SELECT * FROM seguridad.perfiles ORDER BY email").fetchall()
         return [self._fila(r) for r in rows]
 
+    def get_por_email(self, email: str) -> list[Perfil]:
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM seguridad.perfiles WHERE lower(trim(email)) = %s "
+                "ORDER BY user_id",
+                ((email or "").strip().lower(),)).fetchall()
+        return [self._fila(r) for r in rows]
+
+    def reasignar_user_id(self, viejo: str, nuevo: str, conn=None) -> None:
+        sql = "UPDATE seguridad.perfiles SET user_id=%s WHERE user_id=%s"
+        if conn is not None:
+            conn.execute(sql, (nuevo, viejo)); return
+        with self.cx.connection() as c:
+            c.execute(sql, (nuevo, viejo))
+
     def set_rol(self, user_id: str, rol: str, conn=None) -> None:
         if conn is not None:
             conn.execute("UPDATE seguridad.perfiles SET rol=%s WHERE user_id=%s", (rol, user_id)); return

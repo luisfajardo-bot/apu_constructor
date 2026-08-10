@@ -74,3 +74,31 @@ def test_set_estado_protegido_bloquea_ultimo_admin(repo):
     repo.upsert(Perfil("u1", "a@obra.co", "admin", "activo"))
     assert repo.set_estado_protegido("u1", "inactivo") is False
     assert repo.get("u1").estado == "activo"
+
+
+def test_get_por_email_devuelve_lista(repo):
+    """Lista y no Optional a propósito: `perfiles.email` NO es UNIQUE, y esconder el
+    caso ambiguo es justo lo que no queremos (ver el spec)."""
+    repo.upsert(Perfil("u1", "ana@obra.co", "editor", "activo"))
+    assert [p.user_id for p in repo.get_por_email("ana@obra.co")] == ["u1"]
+    assert repo.get_por_email("nadie@obra.co") == []
+
+
+def test_get_por_email_ignora_caso_y_espacios(repo):
+    repo.upsert(Perfil("u1", "Ana@Obra.CO", "editor", "activo"))
+    assert len(repo.get_por_email("  ana@obra.co ")) == 1
+
+
+def test_get_por_email_puede_devolver_varios(repo):
+    repo.upsert(Perfil("u1", "ana@obra.co", "editor", "activo"))
+    repo.upsert(Perfil("u2", "ana@obra.co", "consulta", "activo"))
+    assert len(repo.get_por_email("ana@obra.co")) == 2
+
+
+def test_reasignar_user_id_mueve_el_perfil(repo):
+    repo.upsert(Perfil("viejo", "ana@obra.co", "editor", "activo", "Ana"))
+    repo.reasignar_user_id("viejo", "nuevo")
+    assert repo.get("viejo") is None
+    p = repo.get("nuevo")
+    assert p.email == "ana@obra.co" and p.rol == "editor" and p.nombre == "Ana"
+    assert len(repo.listar()) == 1        # se movió, no se duplicó

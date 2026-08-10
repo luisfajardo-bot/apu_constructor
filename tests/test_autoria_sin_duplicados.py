@@ -70,6 +70,16 @@ def test_el_mensaje_del_nombre_sugiere_el_codigo_nocturno(tmp_path):
         autoria.crear_insumo(alm, _nuevo("7777", "BORDE CONTENEDOR DE RAICES A 70"))
 
 
+def test_el_mensaje_del_nombre_no_sugiere_el_codigo_nocturno_si_ya_esta_tomado(tmp_path):
+    """Si "4859 N" ya existe, sugerirlo como salida mandaría al usuario a un segundo error."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("4859 N", "BORDE CONTENEDOR DE RAICES A 70", "ML", "SARD", 95000, "PRECIO IDU")])
+    with pytest.raises(ValueError) as exc:
+        autoria.crear_insumo(alm, _nuevo("7777", "BORDE CONTENEDOR DE RAICES A 70"))
+    assert "4859 N" not in str(exc.value)
+
+
 # ------------------------------------------------------------------------- APUs
 def _alm_apus(tmp_path):
     alm = _alm(tmp_path)
@@ -89,6 +99,16 @@ def test_apu_codigo_repetido_en_el_otro_turno_rechaza(tmp_path):
     alm = _alm_apus(tmp_path)
     with pytest.raises(ValueError, match="3010 N"):
         autoria.crear_apu(alm, _apu_nuevo("3010", "NOCTURNO", "OTRO NOMBRE CUALQUIERA"))
+
+
+def test_apu_no_sugiere_el_codigo_nocturno_si_ya_esta_tomado(tmp_path):
+    """Si "3010 N" ya existe, sugerirlo como salida mandaría al usuario a un segundo error."""
+    alm = _alm_apus(tmp_path)
+    alm.apus.insert_apus([Apu("3010 N", "OTRO APU DE NOCHE", "M3",
+                              "NOCTURNO", "EXCAVACIONES Y RELLENOS")])
+    with pytest.raises(ValueError) as exc:
+        autoria.crear_apu(alm, _apu_nuevo("3010", "NOCTURNO", "OTRO NOMBRE CUALQUIERA"))
+    assert "3010 N" not in str(exc.value)
 
 
 def test_apu_gemelo_nocturno_puede_repetir_el_nombre(tmp_path):
@@ -134,7 +154,7 @@ def test_import_insumos_codigo_tomado_va_a_conflicto(tmp_path):
     assert len(prev["conflicto"]) == 1
     assert "10014" in prev["conflicto"][0]["motivo"]
     res = autoria.aplicar_importar_insumos(alm, contenido, "x.xlsx")
-    assert res["creados"] == 0
+    assert res["creados"] == 0 and res["errores"] == []
 
 
 def test_import_insumos_dos_filas_del_mismo_codigo_la_segunda_es_conflicto(tmp_path):

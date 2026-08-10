@@ -93,8 +93,14 @@ def _conflicto_insumo(alm: Almacen, codigo: str, nombre: str,
         if normalizar(nom) == nn and not _es_gemelo_nocturno(cod, c):
             por_nombre = por_nombre or c
     if por_nombre:
-        return (f"Ese nombre ya lo usa el insumo {por_nombre}. "
-                f"Si es la tarifa nocturna, usa el código {_base_codigo(por_nombre)} N.")
+        cod_noc = f"{_base_codigo(por_nombre)} N"
+        # No sugerir un código ya tomado. Hueco conocido: si el gemelo existe con OTRO
+        # nombre no viene en `filas` (que solo trae coincidencias de código o de
+        # nombre), así que no se detecta; aceptable porque el caso frecuente —el
+        # gemelo que comparte el nombre— sí viene.
+        libre = not any(c == cod_noc for c, _, _ in filas)
+        pista = f" Si es la tarifa nocturna, usa el código {cod_noc}." if libre else ""
+        return f"Ese nombre ya lo usa el insumo {por_nombre}.{pista}"
     return None
 
 
@@ -113,8 +119,11 @@ def _conflicto_apu(alm: Almacen, codigo: str, turno: str, nombre: str,
     por_nombre = None
     for c, nom, sh in filas:
         if c == cod:
-            pista = (f" Si es el nocturno, usa {_base_codigo(cod)} N."
-                     if turno == config.SHIFT_NOCTURNO and sh != turno else "")
+            cod_noc = f"{_base_codigo(cod)} N"
+            # No sugerir un código que ya está tomado: mandaría al usuario a un segundo error.
+            libre = not any(fc == cod_noc for fc, _, _ in filas)
+            pista = (f" Si es el nocturno, usa {cod_noc}."
+                     if turno == config.SHIFT_NOCTURNO and sh != turno and libre else "")
             return f"El código {cod} ya lo usa el APU {sh} «{_corto(nom)}».{pista}"
         if normalizar(nom) == nn and not (_es_gemelo_nocturno(cod, c) and sh != turno):
             por_nombre = por_nombre or (c, sh)

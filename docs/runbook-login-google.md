@@ -41,10 +41,10 @@ abrir un hueco de seguridad en la adopción de perfiles. Fecha: 2026-08.
 ### 1. Google Cloud Console — crear el OAuth client
 - **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
 - Tipo de aplicación: **Web application**.
-- **Authorized JavaScript origins:**
-  - `https://armador-apus.onrender.com`
-  - `http://localhost:5173`
-- **Authorized redirect URIs:**
+- **Authorized JavaScript origins:** se pueden dejar **vacíos**. Este flujo no habla con
+  Google desde el navegador (la app va a Supabase, y Supabase a Google), así que Google
+  no valida el origen. Ponerlos no rompe nada, pero no es lo que falta si algo falla.
+- **Authorized redirect URIs:** el único campo que tiene que estar exacto —
   - `https://<project-ref>.supabase.co/auth/v1/callback`
   - (`<project-ref>` es el subdominio del proyecto Supabase: Settings → API en el
     dashboard de Supabase, o la env `SUPABASE_URL`/`SUPABASE_PROJECT_REF` en Render.)
@@ -65,7 +65,16 @@ abrir un hueco de seguridad en la adopción de perfiles. Fecha: 2026-08.
 - **Authentication → URL Configuration → Redirect URLs** → agregar (si no están ya de
   la config de correo, ver `docs/runbook-correo-resend-smtp.md`):
   - `https://armador-apus.onrender.com/**`
+  - `http://127.0.0.1:8000/**` ← **el de la prueba local de este runbook**
   - `http://localhost:5173/**`
+
+Los dos locales no son lo mismo y hacen falta los dos según cómo levantes la app:
+`python run_web.py` sirve `web/dist` en **`127.0.0.1:8000`** (es el modo en el que se
+hace la verificación de más abajo), mientras `npm run dev` levanta Vite en
+**`localhost:5173`**. El `redirectTo` que manda el botón es
+`${window.location.origin}/corridas`, o sea el origen exacto desde el que abriste la
+página: si ese origen no está en esta lista, Supabase ignora el `redirectTo` y te manda
+al **Site URL**, y la sesión termina en otra parte.
 
 ---
 
@@ -242,6 +251,31 @@ entrar).
 
 ## Si algo falla
 
+### Al hacer clic en "Continuar con Google" sale este JSON en pantalla
+
+```json
+{"code":400,"error_code":"validation_failed","msg":"Unsupported provider: provider is not enabled"}
+```
+
+Es **el paso 2 sin hacer** (o hecho sin apretar Save): el provider de Google no está
+habilitado en Supabase. Ojo con dónde aparece: es una respuesta de
+`hfjljzhgignngzooiwvl.supabase.co`, no de la app, así que el navegador se queda en el
+dominio de Supabase y el `toast` de error de `Login.tsx` nunca corre — no hay nada que
+arreglar en el código.
+
+La trampa del paso 2: el botón **Save** está **dentro** del panel de Google que se
+despliega, no arriba en la página. Sin apretarlo, el toggle se ve encendido y no queda
+guardado.
+
+Para comprobarlo sin pasar por la app, pídele la pregunta directa a Supabase:
+
+```bash
+curl -s "https://<project-ref>.supabase.co/auth/v1/authorize?provider=google"
+```
+
+Con el provider deshabilitado devuelve ese mismo JSON; habilitado, devuelve un redirect
+(302) hacia `accounts.google.com`.
+
 ### Un invitado ve "no autorizado" (403)
 1. Ir a **Usuarios** en el menú (solo Admin) o `GET /api/usuarios` → buscar su correo.
 2. **¿Hay dos perfiles con ese correo?** La adopción no adivina a propósito
@@ -255,7 +289,8 @@ entrar).
 - **No llega a la pantalla de Google / redirige a un error:** revisar que el
   Redirect URI en Google (paso 1) y el Client ID/Secret en Supabase (paso 2) coincidan
   exactamente, y que las Redirect URLs (paso 3) incluyan el origen desde el que se
-  está probando (`localhost:5173` en local, el dominio de Render en producción).
+  está probando (`127.0.0.1:8000` con `run_web.py`, `localhost:5173` con `npm run dev`,
+  el dominio de Render en producción).
 
 ### El invitado ve un error de Google/Supabase que dice algo como "Signups not allowed"
 Es la tensión de **Allow new users to sign up** (ver arriba), no un bug del código de
@@ -344,15 +379,15 @@ Usuarios en el mismo momento.**
 
 ```
 Authorized JavaScript origins (Google):
-  https://armador-apus.onrender.com
-  http://localhost:5173
+  (se pueden dejar vacios: este flujo no habla con Google desde el navegador)
 
-Authorized redirect URI (Google):
+Authorized redirect URI (Google)  <-- el unico que tiene que estar exacto:
   https://<project-ref>.supabase.co/auth/v1/callback
 
-Redirect URLs (Supabase → Authentication → URL Configuration):
+Redirect URLs (Supabase -> Authentication -> URL Configuration):
   https://armador-apus.onrender.com/**
-  http://localhost:5173/**
+  http://127.0.0.1:8000/**            <-- run_web.py (la prueba local de este runbook)
+  http://localhost:5173/**            <-- npm run dev
 ```
 
 `<project-ref>` es el subdominio del proyecto Supabase (Settings → API en el

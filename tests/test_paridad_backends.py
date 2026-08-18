@@ -7,6 +7,8 @@ import inspect
 
 from apu_tool.datos.precios_db import PreciosDB
 from apu_tool.datos.pg.precios_pg import PreciosPg
+from apu_tool.datos.corridas_db import CorridasDB
+from apu_tool.datos.pg.corridas_pg import CorridasPg
 from apu_tool.datos.repositorio import RepositorioPrecios
 
 # Métodos públicos que existen en un backend pero NO forman parte del contrato
@@ -75,3 +77,20 @@ def test_firmas_coinciden_con_el_protocol():
         p_protocol = list(inspect.signature(fn_protocol).parameters)
         assert p_sq == p_protocol, (
             f"{nombre}: implementación {p_sq} != Protocol {p_protocol}")
+
+
+# CorridasDB/CorridasPg no tenían ninguna red de paridad (a diferencia de Precios/Apus,
+# que sí la tienen arriba): CorridasPg.borrar_items (el método destructivo que trajo
+# "agregar líneas a la corrida") no corría contra ningún test en el repo. CorridasDB
+# también tiene `connect()` (conexión cruda sqlite3.Row), así que la misma exclusión
+# de _FUERA_DEL_CONTRATO aplica igual que en Precios.
+def test_mismos_metodos_publicos_corridas():
+    assert set(_publicos(CorridasDB)) == set(_publicos(CorridasPg))
+
+
+def test_mismos_nombres_de_parametros_corridas():
+    sq, pg = _publicos(CorridasDB), _publicos(CorridasPg)
+    for nombre in sorted(sq):
+        p_sq = list(inspect.signature(sq[nombre]).parameters)
+        p_pg = list(inspect.signature(pg[nombre]).parameters)
+        assert p_sq == p_pg, f"{nombre}: SQLite {p_sq} != Postgres {p_pg}"

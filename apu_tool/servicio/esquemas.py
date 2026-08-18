@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class StatusOut(BaseModel):
@@ -21,6 +21,24 @@ class ConfirmarLoteIn(BaseModel):
     seqs: list[int]
     apu_codigo: Optional[str] = None
     shift: Optional[str] = None
+
+
+class LineaNuevaIn(BaseModel):
+    """Una actividad que faltó en la corrida, cargada a mano."""
+    descripcion: str
+    unidad: str = ""
+    cantidad: float = Field(default=1.0, ge=0)
+    precio_contractual: float = Field(default=0.0, ge=0)
+    shift: Optional[str] = None    # None/vacío = el turno por defecto de la corrida
+    item: str = ""                 # nº de ítem del pliego; vacío = se numera solo
+
+
+class AgregarLineasIn(BaseModel):
+    lineas: list[LineaNuevaIn]
+
+
+class BorrarLineasIn(BaseModel):
+    seqs: list[int]
 
 
 class CambioIn(BaseModel):

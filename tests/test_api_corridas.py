@@ -289,3 +289,150 @@ def test_renombrar_corrida_requiere_editor(tmp_path):
     cli_editor = cliente(create_app(almacen=alm), rol="editor")
     r_editor = cli_editor.post(f"/api/corridas/{cid}/renombrar", json={"nombre": "Nuevo"})
     assert r_editor.status_code == 200 and r_editor.json()["nombre"] == "Nuevo"
+
+
+def _corrida_api(cli, tmp_path):
+    """Crea una corrida de 1 ítem por la API y devuelve su id."""
+    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
+    lic = _xlsx_lic(tmp_path)
+    with open(lic, "rb") as f:
+        r = cli.post("/api/corridas",
+                     data={"turno": "DIURNO", "use_ai": "false",
+                           "carpeta_id": str(obra["id"])},
+                     files={"archivo": ("lic.xlsx", f, _XLSX_MIME)})
+    assert r.status_code == 200, r.text
+    return r.json()["id"]
+
+
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _xlsx_faltantes(tmp_path):
+    """Excel con las líneas que faltaron: una nueva y una que ya está en la corrida."""
+    p = tmp_path / "faltantes.xlsx"
+    write_sample_licitacion(p, [
+        LicitacionItem(item="9", descripcion="Sardinel A-10", unidad="ML",
+                       cantidad=5.0, precio_contractual=40000.0, shift="DIURNO"),
+        LicitacionItem(item="10", descripcion="Concreto clase D", unidad="M3",
+                       cantidad=1.0, precio_contractual=400000.0, shift="NOCTURNO"),
+    ])
+    return p
+
+
+def test_api_agregar_linea_a_mano(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    cid = _corrida_api(cli, tmp_path)
+    r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": [
+        {"descripcion": "Concreto clase D", "unidad": "M3", "cantidad": 3.0,
+         "precio_contractual": 400000.0}]})
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    assert [f["seq"] for f in items] == [0, 1]
+    assert items[1]["apu_codigo"] == "A1" and items[1]["cantidad"] == 3.0
+
+
+def test_api_agregar_linea_sin_descripcion_es_400(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    cid = _corrida_api(cli, tmp_path)
+    r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": [{"descripcion": "  "}]})
+    assert r.status_code == 400
+
+
+def test_api_agregar_linea_turno_invalido_es_400(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    cid = _corrida_api(cli, tmp_path)
+    r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": [
+        {"descripcion": "Concreto clase D", "shift": "TARDE"}]})
+    assert r.status_code == 400
+    assert "Turno" in r.json()["detail"]
+
+
+def test_api_preview_y_importar_lineas(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    cid = _corrida_api(cli, tmp_path)
+    xls = _xlsx_faltantes(tmp_path)
+
+    with open(xls, "rb") as f:
+        prev = cli.post(f"/api/corridas/{cid}/items/preview",
+                        files={"archivo": ("faltantes.xlsx", f, _XLSX_MIME)})
+    assert prev.status_code == 200, prev.text
+    cuerpo = prev.json()
+    assert cuerpo["total"] == 2
+    assert [n["descripcion"] for n in cuerpo["nuevas"]] == ["Sardinel A-10"]
+    assert cuerpo["duplicadas"][0]["seq_existente"] == 0
+    assert len(cli.get(f"/api/corridas/{cid}").json()["items"]) == 1   # el preview no escribió
+
+    with open(xls, "rb") as f:
+        r = cli.post(f"/api/corridas/{cid}/items/importar",
+                     files={"archivo": ("faltantes.xlsx", f, _XLSX_MIME)})
+    assert r.status_code == 200, r.text
+    assert [f["seq"] for f in r.json()["items"]] == [0, 1, 2]
+
+
+def test_api_importar_archivo_corrupto_es_400(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    cid = _corrida_api(cli, tmp_path)
+    r = cli.post(f"/api/corridas/{cid}/items/importar",
+                 files={"archivo": ("malo.xlsx", b"no soy un excel", _XLSX_MIME)})
+    assert r.status_code == 400
+
+
+def test_api_agregar_en_corrida_congelada_es_409(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    cid = _corrida_api(cli, tmp_path)
+    assert cli.post(f"/api/corridas/{cid}/congelar").status_code == 200
+    r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": [
+        {"descripcion": "Concreto clase D"}]})
+    assert r.status_code == 409
+    b = cli.post(f"/api/corridas/{cid}/items/borrar", json={"seqs": [0]})
+    assert b.status_code == 409
+
+
+def test_api_borrar_lineas(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    cid = _corrida_api(cli, tmp_path)
+    cli.post(f"/api/corridas/{cid}/items", json={"lineas": [
+        {"descripcion": "Concreto clase D"}]})
+    r = cli.post(f"/api/corridas/{cid}/items/borrar", json={"seqs": [0]})
+    assert r.status_code == 200, r.text
+    assert [f["seq"] for f in r.json()["items"]] == [1]        # sin renumerar
+
+
+def test_api_corrida_inexistente_es_404(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    assert cli.post("/api/corridas/999/items",
+                    json={"lineas": [{"descripcion": "x"}]}).status_code == 404
+    assert cli.post("/api/corridas/999/items/borrar",
+                    json={"seqs": [0]}).status_code == 404
+
+
+def test_api_agregar_pasado_del_tope_es_400(tmp_path):
+    from apu_tool.servicio import corridas as svc
+    cli, _ = _cliente(tmp_path)
+    cid = _corrida_api(cli, tmp_path)
+    lineas = [{"descripcion": "Concreto clase D"}
+              for _ in range(svc.MAX_LINEAS_AGREGADAS + 1)]
+    r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": lineas})
+    assert r.status_code == 400
+    assert str(svc.MAX_LINEAS_AGREGADAS) in r.json()["detail"]
+    assert len(cli.get(f"/api/corridas/{cid}").json()["items"]) == 1   # no escribió nada
+
+
+def test_api_agregar_en_corrida_armando_es_400(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_api(cli, tmp_path)
+    alm.corridas.set_estado(cid, "armando")
+    r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": [
+        {"descripcion": "Concreto clase D"}]})
+    assert r.status_code == 400
+    assert "armando" in r.json()["detail"]
+    assert len(cli.get(f"/api/corridas/{cid}").json()["items"]) == 1
+
+
+def test_api_agregar_linea_con_cantidad_negativa_es_422(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    cid = _corrida_api(cli, tmp_path)
+    r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": [
+        {"descripcion": "Concreto clase D", "cantidad": -5}]})
+    assert r.status_code == 422        # pydantic rechaza antes del servicio
+    assert len(cli.get(f"/api/corridas/{cid}").json()["items"]) == 1

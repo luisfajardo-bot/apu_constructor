@@ -17,6 +17,10 @@ vi.mock("@/api/corridas", () => ({
     id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
     totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
   })),
+  borrarLineas: vi.fn(async () => ({
+    id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
+    totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
+  })),
 }));
 vi.mock("@/api/autoria", () => ({
   listarApus: vi.fn(async () => ({
@@ -489,4 +493,29 @@ test("duplicar en dos filas distintas: gana el pedido más reciente, no el que r
   // Gana el pedido más reciente (B), aunque el de A haya resuelto después.
   expect(screen.getByText(/Duplicar APU 7788/)).toBeTruthy();
   expect(screen.queryByText(/Duplicar APU 3454/)).toBeNull();
+});
+
+test("borra las líneas marcadas después de confirmar", async () => {
+  const { borrarLineas } = await import("@/api/corridas");
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  render(<TablaConControl items={itemsCuatro()} />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  fireEvent.click(screen.getByLabelText("Marcar ítem 3"));
+  fireEvent.click(await screen.findByText("Borrar"));
+
+  expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("2 líneas"));
+  await waitFor(() => expect(borrarLineas).toHaveBeenCalledWith(1, [0, 2]));
+  confirmSpy.mockRestore();
+});
+
+test("cancelar la confirmación no borra nada", async () => {
+  const { borrarLineas } = await import("@/api/corridas");
+  vi.mocked(borrarLineas).mockClear();
+  const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+  render(<TablaConControl items={itemsCuatro()} />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  fireEvent.click(await screen.findByText("Borrar"));
+
+  expect(borrarLineas).not.toHaveBeenCalled();
+  confirmSpy.mockRestore();
 });

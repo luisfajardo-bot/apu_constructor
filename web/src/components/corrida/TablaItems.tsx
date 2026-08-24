@@ -16,7 +16,7 @@ import CabeceraFiltros from "@/components/corrida/CabeceraFiltros";
 import { DialogoAgregarApu } from "@/components/autoria/DialogoAgregarApu";
 import { cop, pct } from "@/lib/moneda";
 import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
-import { getItem, confirmar, confirmarLote } from "@/api/corridas";
+import { getItem, confirmar, confirmarLote, borrarLineas } from "@/api/corridas";
 import { getApuDetalle } from "@/api/autoria";
 import type { ItemCuadro, DetalleItem, CorridaDetalle, ApuDetalle } from "@/lib/tipos";
 import type { ControlCorridaTabla } from "@/lib/corridaTabla";
@@ -189,6 +189,28 @@ export default function TablaItems({
     } catch (e) {
       // La selección NO se limpia: el usuario puede reintentar sin volver a marcar.
       toast.error(e instanceof Error ? e.message : "No se pudo aplicar el cambio en lote.");
+    } finally {
+      setEnLote(false);
+    }
+  }
+
+  /** Borrar es destructivo y no se deshace: se pregunta antes (igual que borrar
+   *  una corrida en Mis corridas). */
+  async function borrarSeleccionadas() {
+    const n = seleccionadas.length;
+    if (n === 0) return;
+    const mensaje = n === 1
+      ? "¿Borrar 1 línea de la corrida? No se puede deshacer."
+      : `¿Borrar ${n} líneas de la corrida? No se puede deshacer.`;
+    if (!window.confirm(mensaje)) return;
+    setEnLote(true);
+    try {
+      const actualizada = await borrarLineas(corridaId, seleccionadas);
+      onConfirmado(actualizada);
+      limpiarSeleccion();
+      toast.success(n === 1 ? "1 línea borrada" : `${n} líneas borradas`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo borrar las líneas.");
     } finally {
       setEnLote(false);
     }
@@ -433,6 +455,10 @@ export default function TablaItems({
           </div>
           <Button size="xs" variant="outline" disabled={enLote} onClick={() => accionLote()}>
             {enLote ? "Aplicando…" : "Confirmar el APU actual"}
+          </Button>
+          <Button size="xs" variant="destructive" disabled={enLote}
+                  onClick={borrarSeleccionadas}>
+            Borrar
           </Button>
           <Button size="xs" variant="ghost" disabled={enLote} onClick={limpiarSeleccion}>
             Limpiar

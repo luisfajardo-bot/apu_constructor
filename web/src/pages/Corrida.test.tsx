@@ -68,3 +68,33 @@ test("muestra la lista de precios de la corrida cuando no es Principal", async (
   await screen.findByText("Excavación");
   expect(screen.getByText("NP Calle 13")).toBeTruthy();
 });
+
+test("con la corrida armándose (otra pestaña/F5), el botón Agregar líneas no aparece", async () => {
+  const { default: Corrida } = await import("./Corrida");
+  const { getCorrida } = await import("@/api/corridas");
+  (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
+    ...CORRIDA,
+    estado: "armando",
+    modo: "activa",
+  });
+
+  render(<Corrida />);
+
+  await screen.findByText("Excavación");
+  expect(screen.queryByText("Agregar líneas")).toBeNull();
+});
+
+test("con la corrida en_revision, el botón Agregar líneas sí aparece", async () => {
+  const { default: Corrida } = await import("./Corrida");
+  const { getCorrida } = await import("@/api/corridas");
+  (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
+    ...CORRIDA,
+    estado: "en_revision",
+    modo: "activa",
+  });
+
+  render(<Corrida />);
+
+  await screen.findByText("Excavación");
+  expect(screen.getByText("Agregar líneas")).toBeTruthy();
+});

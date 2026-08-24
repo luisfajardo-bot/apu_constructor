@@ -6,6 +6,8 @@ import type {
   CorridaIniciada,
   CorridaResumen,
   DetalleItem,
+  LineaNueva,
+  PreviewLineas,
   Progreso,
 } from "@/lib/tipos";
 
@@ -66,6 +68,26 @@ export function confirmarLote(
     ...(apu_codigo !== undefined ? { apu_codigo } : {}),
     ...(shift !== undefined ? { shift } : {}),
   });
+}
+
+/** Qué se agregaría con este Excel (y qué ya está en la corrida). No escribe. */
+export function previewLineas(id: number, form: FormData): Promise<PreviewLineas> {
+  return apiPost<PreviewLineas>(`/corridas/${id}/items/preview`, form);
+}
+
+/** Agrega a la corrida las líneas del Excel. Devuelve la corrida recosteada. */
+export function importarLineas(id: number, form: FormData): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/items/importar`, form);
+}
+
+/** Agrega líneas cargadas a mano. Devuelve la corrida recosteada. */
+export function agregarLineas(id: number, lineas: LineaNueva[]): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/items`, { lineas });
+}
+
+/** Borra las líneas indicadas. No renumera: los seq que quedan no cambian. */
+export function borrarLineas(id: number, seqs: number[]): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/items/borrar`, { seqs });
 }
 
 export function congelarCorrida(id: number): Promise<CorridaDetalle> {

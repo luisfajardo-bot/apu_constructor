@@ -8,6 +8,7 @@ el equipo), pero nunca abre un camino hacia la IA.
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
@@ -23,6 +24,7 @@ from apu_tool.nucleo.models import (
     ApuComponent, AssembledApu, CostedComponent, CorridaItemRow, CorridaMeta,
     LicitacionItem, MatchStatus,
 )
+from apu_tool.nucleo.texto import normalizar
 from apu_tool.servicio.auditoria import registrar_auditoria
 
 
@@ -58,6 +60,30 @@ def _nombre_lista(alm: Almacen, lista_id: Optional[int]) -> str:
     return lista.nombre if lista else f"lista {lista_id}"
 
 
+def _armar_fila(assembler: Assembler, item: LicitacionItem,
+                seq: int) -> tuple[AssembledApu, CorridaItemRow]:
+    """Arma UNA línea y devuelve (ensamble costeado, fila lista para persistir).
+
+    Un solo `match()` por ítem: sus candidatos son los que se le muestran al usuario y
+    se reusan en `assemble_item()` para elegir el APU final (mismo resultado
+    determinístico, sin recalcular el matcher).
+
+    Es el camino ÚNICO del armado: lo usan el armado inicial (`construir_corrida_stream`)
+    y las líneas que se agregan después (`agregar_items`), para que no puedan divergir.
+    """
+    result = assembler.matcher.match(item)
+    candidatos = [{"apu_codigo": c.apu_codigo, "apu_nombre": c.apu_nombre,
+                   "score": c.score, "motivo": c.motivo}
+                  for c in result.candidatos]
+    ens = assembler.assemble_item(item, result)
+    fila = CorridaItemRow(
+        seq=seq, item=item, status=ens.status.value, apu_codigo=ens.apu_codigo,
+        apu_nombre=ens.apu_nombre, unidad=ens.unidad, shift=ens.shift,
+        origen=ens.origen, confianza=ens.confianza, explicacion=ens.explicacion,
+        componentes=_estructura(ens.componentes), candidatos=candidatos)
+    return ens, fila
+
+
 def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
                              turno_def: str, use_ai: Optional[bool],
                              carpeta_id: Optional[int] = None,
@@ -88,19 +114,7 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
     for seq, item in enumerate(items):
         i = seq + 1
         print(f"  [{i}/{total}] {item.descripcion[:60]}", flush=True)
-        # Un solo match por ítem: matcher.match() genera los candidatos para
-        # mostrar al usuario y se reusa en assemble_item() para elegir el APU final
-        # (mismo resultado determinístico, sin recalcular el matcher).
-        result = assembler.matcher.match(item)
-        candidatos = [{"apu_codigo": c.apu_codigo, "apu_nombre": c.apu_nombre,
-                       "score": c.score, "motivo": c.motivo}
-                      for c in result.candidatos]
-        ens = assembler.assemble_item(item, result)
-        fila = CorridaItemRow(
-            seq=seq, item=item, status=ens.status.value, apu_codigo=ens.apu_codigo,
-            apu_nombre=ens.apu_nombre, unidad=ens.unidad, shift=ens.shift,
-            origen=ens.origen, confianza=ens.confianza, explicacion=ens.explicacion,
-            componentes=_estructura(ens.componentes), candidatos=candidatos)
+        ens, fila = _armar_fila(assembler, item, seq)
         try:
             alm.corridas.agregar_item(corrida_id, fila)
         except CorridaEliminada:
@@ -129,6 +143,118 @@ def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
         if evento == "done":
             corrida_id = payload["id"]
     return corrida_id
+
+
+# Tope por operación al agregar líneas. Es una sola petición HTTP sin progreso, así
+# que la espera tiene que ser humana; con IA activada cada línea cuesta segundos.
+MAX_LINEAS_AGREGADAS = 100
+
+
+def preview_agregar(alm: Almacen, corrida_id: int,
+                    items: list[LicitacionItem]) -> Optional[dict]:
+    """Qué pasaría al agregar estas líneas, SIN escribir nada ni tocar el matcher.
+
+    `duplicadas` son las que ya están en la corrida por descripción normalizada, con el
+    seq de la línea existente. Es un AVISO: `agregar_items` las agrega igual, porque
+    saltearlas en silencio esconde el duplicado. None si la corrida no existe.
+    """
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    existentes: dict[str, int] = {}
+    for r in alm.corridas.get_items(corrida_id):
+        existentes.setdefault(normalizar(r.item.descripcion), r.seq)   # gana el primer seq
+    nuevas: list[dict] = []
+    duplicadas: list[dict] = []
+    for it in items:
+        fila = {"item": it.item, "descripcion": it.descripcion, "unidad": it.unidad,
+                "cantidad": it.cantidad, "precio_contractual": it.precio_contractual,
+                "shift": it.shift}
+        seq_existente = existentes.get(normalizar(it.descripcion))
+        if seq_existente is None:
+            nuevas.append(fila)
+        else:
+            duplicadas.append({**fila, "seq_existente": seq_existente})
+    return {"total": len(items), "nuevas": nuevas, "duplicadas": duplicadas,
+            "modo": meta.modo, "tope": MAX_LINEAS_AGREGADAS}
+
+
+def agregar_items(alm: Almacen, corrida_id: int,
+                  items: list[LicitacionItem]) -> Optional[dict]:
+    """Suma líneas a una corrida ya armada. Devuelve la vista; None si no existe.
+
+    Las líneas nuevas pasan por el MISMO camino que el armado inicial (`_armar_fila`),
+    con la `use_ai` y la lista de precios que la corrida guardó al crearse: una
+    actividad que faltó no puede costearse con otra tarifa que el resto de la corrida.
+
+    Lanza CorridaCongelada si está congelada (una foto inmutable no crece) y ValueError
+    si no llegó ninguna línea o si pasan de MAX_LINEAS_AGREGADAS.
+    """
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    if meta.modo == "congelada":
+        raise CorridaCongelada(corrida_id)
+    if meta.estado == "armando":
+        # El armador asigna los seq con enumerate() precalculado; agregar acá pediría
+        # el mismo seq y la fila duplicada entraría callada (corrida_item no tiene
+        # UNIQUE (corrida_id, seq)), duplicando la actividad en el cuadro.
+        raise ValueError("La corrida se está armando; esperá a que termine "
+                         "para agregar líneas.")
+    if not items:
+        raise ValueError("No hay líneas para agregar.")
+    if len(items) > MAX_LINEAS_AGREGADAS:
+        raise ValueError(f"Máximo {MAX_LINEAS_AGREGADAS} líneas por vez; "
+                         f"llegaron {len(items)}. Partí el archivo.")
+    assembler = Assembler(alm, advisor=ApuAdvisor(enabled=meta.use_ai),
+                          lista_id=meta.lista_precios_id)
+    # El seq sigue desde el máximo y los huecos que dejó un borrado NO se reusan: el
+    # seq es la clave del snapshot y de la URL del ítem.
+    # ponytail: se lee fuera de transacción, y corrida_item no tiene UNIQUE
+    # (corrida_id, seq) sino un índice; dos usuarios agregando en el mismo instante
+    # podrían pedir el mismo seq. Si llega a pasar, el arreglo es el índice UNIQUE.
+    siguiente = max((r.seq for r in alm.corridas.get_items(corrida_id)), default=-1) + 1
+    for k, item in enumerate(items):
+        seq = siguiente + k
+        if not (item.item or "").strip():
+            # Línea a mano sin nº de ítem: se numera sola (el lector de Excel ya
+            # numera por fila, así que esto solo aplica a la vía manual).
+            item = replace(item, item=str(seq + 1))
+        _ens, fila = _armar_fila(assembler, item, seq)
+        alm.corridas.agregar_item(corrida_id, fila)
+    if meta.estado == "finalizada":
+        # El cuadro emitido ya no describe la corrida: vuelve a revisión.
+        alm.corridas.set_estado(corrida_id, "en_revision")
+    return vista_corrida(alm, corrida_id)
+
+
+def borrar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
+                 actor=None) -> Optional[dict]:
+    """Borra líneas de una corrida: la válvula del "me equivoqué al agregar".
+
+    No renumera. Los seq que quedan siguen siendo los mismos (los snapshots y las URLs
+    de ítem no cambian de dueño) y un seq borrado no se reusa: `agregar_items` sigue
+    desde el máximo. Los seq ajenos a la corrida se saltean. Lanza CorridaCongelada si
+    está congelada; devuelve None si la corrida no existe.
+    """
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    if meta.modo == "congelada":
+        raise CorridaCongelada(corrida_id)
+    pedidos = {int(s) for s in seqs}
+    victimas = [r for r in alm.corridas.get_items(corrida_id) if r.seq in pedidos]
+    if victimas:
+        with alm.transaccion("corridas") as conn:
+            alm.corridas.borrar_items(corrida_id, [r.seq for r in victimas], conn=conn)
+            registrar_auditoria(
+                alm, conn, actor, "corrida.borrar_items", "corrida", corrida_id,
+                antes={"lineas": [{"seq": r.seq, "descripcion": r.item.descripcion}
+                                  for r in victimas]},
+                despues=None)
+        if meta.estado == "finalizada":
+            alm.corridas.set_estado(corrida_id, "en_revision")
+    return vista_corrida(alm, corrida_id)
 
 
 def _costear_row(alm: Almacen, row: CorridaItemRow,

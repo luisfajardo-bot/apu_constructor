@@ -26,6 +26,10 @@ web/dist/
 .env
 .env.*
 !.env.example
+# DSN de produccion guardado a mano. NO se llama .env a proposito: ese nombre lo
+# levantan solas la extension de Python de VS Code, direnv y compania, y con
+# DATABASE_URL en el entorno `Almacen` ignora los paths SQLite y escribe en la nube.
+secretos-prod.dsn.txt
 
 # Node en la raíz: NO va aquí (el frontend vive en web/). Evita arrastres accidentales.
 node_modules/

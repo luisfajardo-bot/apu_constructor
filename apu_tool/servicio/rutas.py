@@ -19,6 +19,7 @@ from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.licitacion import read_licitacion
 from apu_tool.dominio.pipeline import BibliotecaVacia, ensure_seeded, generate_sample
+from apu_tool.nucleo.models import LicitacionItem
 from apu_tool.servicio import apus as apus_svc
 from apu_tool.servicio import auditoria as auditoria_svc
 from apu_tool.servicio import autoria
@@ -35,8 +36,9 @@ from apu_tool.servicio.dependencias import get_almacen
 from apu_tool.servicio import limites
 from pydantic import BaseModel
 from apu_tool.servicio.esquemas import (
-    ApuEditIn, ApuNuevoIn, CambiosIn, ConfirmarIn, ConfirmarLoteIn, EstadoIn, InsumoNuevoIn,
-    ListaPreciosIn, RolIn, StatusOut, UsuarioInvitarIn)
+    AgregarLineasIn, ApuEditIn, ApuNuevoIn, BorrarLineasIn, CambiosIn, ConfirmarIn,
+    ConfirmarLoteIn, EstadoIn, InsumoNuevoIn, ListaPreciosIn, RolIn, StatusOut,
+    UsuarioInvitarIn)
 
 
 class CarpetaIn(BaseModel):
@@ -137,6 +139,27 @@ def eliminar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
     return {"eliminada": cid}
 
 
+def _items_del_upload(nombre: str, contenido: bytes, turno: str) -> list[LicitacionItem]:
+    """Bytes de una lista subida -> ítems de licitación. Traduce a 400 los fallos de
+    lectura (columna faltante, ítem sin turno, archivo que no es Excel)."""
+    suf = Path(nombre or "lic.xlsx").suffix or ".xlsx"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suf) as tmp:
+        tmp.write(contenido)
+        tmp_path = tmp.name
+    try:
+        items = read_licitacion(tmp_path, default_shift=turno, require_turno=True)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except (zipfile.BadZipFile, InvalidFileException):
+        raise HTTPException(status_code=400,
+                            detail="El archivo no es un Excel válido o está corrupto.")
+    finally:
+        os.unlink(tmp_path)
+    if not items:
+        raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
+    return items
+
+
 @router.post("/corridas")
 async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
                         use_ai: Optional[bool] = Form(None),
@@ -150,20 +173,7 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
         raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
     _validar_lista(alm, lista_id)
     _asegurar_biblioteca(alm)
-    suf = Path(archivo.filename or "lic.xlsx").suffix or ".xlsx"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suf) as tmp:
-        tmp.write(await archivo.read())
-        tmp_path = tmp.name
-    try:
-        items = read_licitacion(tmp_path, default_shift=turno, require_turno=True)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except (zipfile.BadZipFile, InvalidFileException):
-        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
-    finally:
-        os.unlink(tmp_path)
-    if not items:
-        raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
+    items = _items_del_upload(archivo.filename, await archivo.read(), turno)
     cid = svc.construir_corrida(alm, archivo.filename or "licitacion", items, turno, use_ai,
                                 carpeta_id=carpeta_id, nombre=nombre,
                                 lista_precios_id=lista_id)
@@ -214,20 +224,7 @@ async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
         raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
     _validar_lista(alm, lista_id)
     _asegurar_biblioteca(alm)
-    suf = Path(archivo.filename or "lic.xlsx").suffix or ".xlsx"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suf) as tmp:
-        tmp.write(await archivo.read())
-        tmp_path = tmp.name
-    try:
-        items = read_licitacion(tmp_path, default_shift=turno, require_turno=True)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except (zipfile.BadZipFile, InvalidFileException):
-        raise HTTPException(status_code=400, detail="El archivo no es un Excel válido o está corrupto.")
-    finally:
-        os.unlink(tmp_path)
-    if not items:
-        raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
+    items = _items_del_upload(archivo.filename, await archivo.read(), turno)
     gen = svc.construir_corrida_stream(alm, archivo.filename or "licitacion", items, turno,
                                        use_ai, carpeta_id=carpeta_id, nombre=nombre,
                                        lista_precios_id=lista_id)
@@ -302,6 +299,95 @@ def confirmar_lote(cid: int, body: ConfirmarLoteIn,
                             detail="La corrida está congelada; actívala para modificar.")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return v
+
+
+def _turno_valido(raw: Optional[str], default: str) -> str:
+    """DIURNO/NOCTURNO explícito; vacío cae al turno por defecto de la corrida.
+    El turno es parte de la clave del APU: un valor raro no se adivina, se rechaza."""
+    if raw is None or not str(raw).strip():
+        return default
+    turno = str(raw).strip().upper()
+    if turno not in (config.SHIFT_DIURNO, config.SHIFT_NOCTURNO):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Turno inválido: {raw}. Debe ser {config.SHIFT_DIURNO} "
+                   f"o {config.SHIFT_NOCTURNO}.")
+    return turno
+
+
+def _agregar_o_error(alm: Almacen, cid: int, items) -> dict:
+    """Traduce las excepciones de svc.agregar_items al contrato HTTP."""
+    try:
+        v = svc.agregar_items(alm, cid, items)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para modificar.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return v
+
+
+def _meta_o_404(alm: Almacen, cid: int):
+    meta = alm.corridas.get_corrida(cid)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return meta
+
+
+@router.post("/corridas/{cid}/items/preview")
+async def preview_lineas(cid: int, archivo: UploadFile = File(...),
+                         alm: Almacen = Depends(get_almacen),
+                         _: object = Depends(requiere_rol("consulta"))):
+    """Qué se agregaría con este Excel y qué ya está en la corrida. No escribe nada."""
+    meta = _meta_o_404(alm, cid)
+    items = _items_del_upload(archivo.filename, await archivo.read(), meta.turno_def)
+    return svc.preview_agregar(alm, cid, items)
+
+
+@router.post("/corridas/{cid}/items/importar")
+async def importar_lineas(cid: int, archivo: UploadFile = File(...),
+                          alm: Almacen = Depends(get_almacen),
+                          _: object = Depends(requiere_rol("consulta"))):
+    """Agrega a la corrida las líneas del Excel (solo las que faltaron)."""
+    meta = _meta_o_404(alm, cid)
+    items = _items_del_upload(archivo.filename, await archivo.read(), meta.turno_def)
+    return _agregar_o_error(alm, cid, items)
+
+
+@router.post("/corridas/{cid}/items")
+def agregar_lineas(cid: int, body: AgregarLineasIn,
+                   alm: Almacen = Depends(get_almacen),
+                   _: object = Depends(requiere_rol("consulta"))):
+    """Agrega líneas cargadas a mano."""
+    meta = _meta_o_404(alm, cid)
+    items = []
+    for linea in body.lineas:
+        desc = (linea.descripcion or "").strip()
+        if not desc:
+            raise HTTPException(status_code=400, detail="La descripción es obligatoria.")
+        items.append(LicitacionItem(
+            item=(linea.item or "").strip(), descripcion=desc,
+            unidad=(linea.unidad or "").strip(), cantidad=linea.cantidad or 1.0,
+            precio_contractual=linea.precio_contractual or 0.0,
+            shift=_turno_valido(linea.shift, meta.turno_def)))
+    return _agregar_o_error(alm, cid, items)
+
+
+@router.post("/corridas/{cid}/items/borrar")
+def borrar_lineas(cid: int, body: BorrarLineasIn,
+                  alm: Almacen = Depends(get_almacen),
+                  actor=Depends(requiere_rol("consulta"))):
+    """Borra las líneas indicadas. Los seq ajenos a la corrida se saltean."""
+    try:
+        v = svc.borrar_items(alm, cid, body.seqs, actor=actor)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para modificar.")
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v

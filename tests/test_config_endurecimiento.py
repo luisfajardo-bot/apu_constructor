@@ -1,4 +1,18 @@
+import os
+
 from apu_tool import config
+
+
+def test_los_tests_nunca_ven_la_database_url_del_entorno():
+    """Si esta prueba falla, un `pytest` en esta máquina le escribe a producción.
+
+    `db_backend()` devuelve 'postgres' con solo que exista DATABASE_URL, y ahí `Almacen`
+    ignora los paths SQLite del test. El fixture autouse `_nunca_postgres_del_entorno`
+    (tests/conftest.py) la borra; esto verifica que siga haciéndolo.
+    """
+    assert os.environ.get("DATABASE_URL") is None
+    assert os.environ.get("APU_DB_BACKEND") is None
+    assert config.db_backend() == "sqlite"
 
 
 def test_max_upload_mb_default(monkeypatch):

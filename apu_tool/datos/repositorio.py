@@ -214,6 +214,28 @@ class RepositorioPerfiles(Protocol):
     def reset(self) -> None: ...
     def get(self, user_id: str) -> Optional[Perfil]: ...
     def upsert(self, perfil: Perfil, conn=None) -> None: ...
+
+    def get_por_email(self, email: str) -> list[Perfil]:
+        """Perfiles con ese email (comparado en minúsculas y sin espacios).
+
+        Devuelve una LISTA porque `perfiles.email` no es UNIQUE: puede haber 0, 1 o
+        varios. Quien decide qué hacer con el caso ambiguo es `servicio/auth.py`, no
+        el repositorio."""
+        ...
+
+    def reasignar_user_id(self, viejo: str, nuevo: str, conn=None) -> bool:
+        """Mueve un perfil a otro `user_id` (misma fila, nueva PK). Devuelve si aplicó.
+
+        Es lo que hace la adopción por email cuando Supabase entrega un `user_id`
+        nuevo para un usuario ya invitado. Se mueve y no se duplica: dos filas del
+        mismo email descuadrarían el guard del último Admin activo, que cuenta filas.
+
+        Devuelve `True` solo si el UPDATE movió una fila (`viejo` existía). El llamador
+        (`_adoptar_por_email`) audita solo si esto da `True`: sin eso, una carrera (p.ej.
+        varias llamadas paralelas tras un login) escribiría N filas de auditoría para un
+        solo vínculo real."""
+        ...
+
     def listar(self) -> list[Perfil]: ...
     def set_rol(self, user_id: str, rol: str, conn=None) -> None: ...
     def set_estado(self, user_id: str, estado: str, conn=None) -> None: ...

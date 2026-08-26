@@ -63,8 +63,7 @@ test("el panel de marca dice qué es la app, sin inventar nada", () => {
   expect(screen.getByText(/uso interno/i)).not.toBeNull();
   expect(screen.getByText(/lo habilita un administrador/i)).not.toBeNull();
 
-  // Y nada de lo que la app no puede cumplir.
-  expect(screen.queryByText(/google/i)).toBeNull();
+  // Y nada de lo que la app no puede cumplir (Google sí: ver Login.test.tsx).
   expect(screen.queryByText(/crear cuenta|registrarse|sign up/i)).toBeNull();
   expect(screen.queryByText(/recordarme|remember/i)).toBeNull();
 });

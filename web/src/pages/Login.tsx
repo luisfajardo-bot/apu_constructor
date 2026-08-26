@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Lock, Mail } from "lucide-react";
 import { toast } from "sonner";
@@ -15,6 +15,26 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [verClave, setVerClave] = useState(false);
+
+  useEffect(() => {
+    // `signInWithOAuth` navega a Google, así que casi nunca devuelve un `error` (ver
+    // `conGoogle`); si Google o Supabase rechazan el intento (provider sin habilitar,
+    // redirect URI mal configurado, el usuario cancela el consentimiento), el error
+    // real vuelve en el hash o el query de ESTE redirect (`#error=...` o
+    // `?error=...`), y sin leerlo acá el usuario aterriza en /login sin ningún mensaje.
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const query = new URLSearchParams(window.location.search);
+    const descripcion = hash.get("error_description") || query.get("error_description");
+    const codigo = hash.get("error") || query.get("error");
+    if (descripcion || codigo) {
+      toast.error(descripcion || codigo || "No se pudo ingresar con Google.");
+      // Limpia el hash/query para que el error no reaparezca al recargar la página.
+      const url = new URL(window.location.href);
+      url.hash = "";
+      url.search = "";
+      window.history.replaceState(null, "", url.toString());
+    }
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -35,6 +55,16 @@ export default function Login() {
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
     if (error) toast.error(error.message);
     else toast.success("Te enviamos un correo para restablecer la contraseña.");
+  }
+
+  async function conGoogle() {
+    // El backend no cambia: el JWT de Supabase es el mismo venga de contraseña o de
+    // Google, y el acceso lo sigue habilitando la invitación de un Admin.
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: `${window.location.origin}/corridas` },
+    });
+    if (error) toast.error(error.message);
   }
 
   return (
@@ -116,10 +146,33 @@ export default function Login() {
         </Button>
       </form>
 
+      <div className="flex items-center gap-2.5">
+        <span className="h-px flex-1 bg-border" />
+        <span className="text-[11px] text-muted-foreground">o</span>
+        <span className="h-px flex-1 bg-border" />
+      </div>
+
+      <Button type="button" variant="outline" size="lg" className="w-full"
+              onClick={conGoogle} disabled={enviando}>
+        <IconoGoogle />
+        Continuar con Google
+      </Button>
+
       <p className="text-[11.5px] leading-relaxed text-muted-foreground">
         El acceso lo habilita un administrador. Si no puedes entrar, pídele que te invite o
         que reenvíe la invitación.
       </p>
     </MarcoIngreso>
+  );
+}
+
+function IconoGoogle() {
+  return (
+    <svg aria-hidden viewBox="0 0 24 24" className="size-4">
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.76h3.57c2.08-1.92 3.27-4.74 3.27-8.09Z" />
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.76c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23Z" />
+      <path fill="#FBBC05" d="M5.84 14.11a6.6 6.6 0 0 1 0-4.22V7.05H2.18a11 11 0 0 0 0 9.9l3.66-2.84Z" />
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.05l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38Z" />
+    </svg>
   );
 }

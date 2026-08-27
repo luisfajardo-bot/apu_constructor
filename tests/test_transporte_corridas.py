@@ -158,3 +158,48 @@ def test_la_corrida_alerta_el_componente_sin_clasificar(tmp_path):
     cid = _corrida(alm, metro)
     alertas = svc.vista_corrida(alm, cid)["items"][0]["alertas_costeo"]
     assert any("distancia del proyecto no aplicada" in a for a in alertas)
+
+
+def _alm_con_subapu(tmp_path):
+    """Como `_alm`, pero el 4390 usa el sub-APU 3017 (botadero) además de su propio
+    transporte: la distancia al botadero vive DENTRO del sub-APU."""
+    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
+                  corridas_path=tmp_path / "c.db")
+    alm.init_schema()
+    alm.precios.insert_insumos([
+        Insumo(codigo="7462", nombre="TRANSPORTE DE PETREOS", unidad="M3-KM",
+               grupo="TRANSPORTES", precio=1000.0, fuente_precio="COSTO INTERNO"),
+        Insumo(codigo="7231", nombre="DERECHOS DE BOTADERO", unidad="M3",
+               grupo="TRANSPORTES", precio=5000.0, fuente_precio="COSTO INTERNO")])
+    alm.apus.insert_apus([
+        Apu(codigo="4390", nombre="RELLENO", unidad="M3", shift="DIURNO", grupo="VIAS"),
+        Apu(codigo="3017", nombre="TRANSPORTE Y DISPOSICION FINAL DE ESCOMBROS",
+            unidad="M3", shift="DIURNO", grupo="TRANSPORTES")])
+    alm.apus.insert_components([
+        ApuComponent(apu_codigo="4390", shift="DIURNO", insumo_codigo="3017",
+                     insumo_nombre="TRANSPORTE Y DISPOSICION FINAL DE ESCOMBROS",
+                     unidad="M3", rendimiento=1.0, precio_unitario_hist=20000.0,
+                     tipo="apu", ref_shift="DIURNO"),
+        ApuComponent(apu_codigo="3017", shift="DIURNO", insumo_codigo="7231",
+                     insumo_nombre="DERECHOS DE BOTADERO", unidad="M3",
+                     rendimiento=1.3, precio_unitario_hist=5000.0),
+        # OJO: este componente queda SIN clasificar a propósito.
+        ApuComponent(apu_codigo="3017", shift="DIURNO", insumo_codigo="7462",
+                     insumo_nombre="TRANSPORTE DE PETREOS", unidad="M3-KM",
+                     rendimiento=20.0, precio_unitario_hist=1000.0)])
+    return alm
+
+
+def test_alerta_del_pendiente_de_un_subapu_menciona_el_subapu(tmp_path):
+    """Corrida en un proyecto con km_botadero definido y el acarreo del sub-APU sin
+    clasificar: el ítem tiene que alertar mencionando el sub-APU donde vive."""
+    alm = _alm_con_subapu(tmp_path)
+    metro = alm.carpetas.crear("Metro")
+    alm.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro, km_botadero=34))
+    items = [LicitacionItem(item="1", descripcion="RELLENO", unidad="M3", cantidad=1,
+                            precio_contractual=100000.0, shift="DIURNO")]
+    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False, carpeta_id=metro)
+    svc.confirmar_item(alm, cid, 0, "4390", "DIURNO")
+    alertas = svc.vista_corrida(alm, cid)["items"][0]["alertas_costeo"]
+    assert any("distancia del proyecto no aplicada" in a and "sub-APU 3017" in a
+              for a in alertas), alertas

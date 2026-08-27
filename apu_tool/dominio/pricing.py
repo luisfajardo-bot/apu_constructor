@@ -73,34 +73,46 @@ class PricingEngine:
         return self._cache[codigo]
 
     def sin_distancia(self, apu_codigo: str, shift: str) -> tuple[str, ...]:
-        """Componentes de acarreo que el proyecto no pudo reescalar en este APU
-        **ni en su árbol de sub-APUs**.
+        """Acarreos sin clasificar EN ESTE APU (no en su árbol).
 
-        El árbol importa: la distancia al botadero vive DENTRO del sub-APU de
-        escombros, así que un pendiente de ahí tiene que alertar en el ítem que lo
-        usa — si no, el ítem se costea con la distancia de la biblioteca y nadie se
-        entera. Recorre `_comp_cache`, que ya tiene el árbol del costeo."""
-        faltan: list[str] = []
-        vistos: set[tuple[str, str]] = set()
+        Es lo que se compara contra los componentes del ítem, así que tiene que ser
+        solo lo propio: un código que además viva en un sub-APU sin clasificar no
+        puede robarle la alerta a la línea de arriba, que quizá sí está bien."""
+        return self._sin_distancia.get((apu_codigo, shift), ())
+
+    def sin_distancia_en_subapus(self, apu_codigo: str,
+                                 shift: str) -> tuple[tuple[str, str], ...]:
+        """`(apu_del_sub, codigo)` de los acarreos sin clasificar que viven DENTRO del
+        árbol de sub-APUs de este APU (sin incluirlo a él).
+
+        La distancia al botadero vive dentro del sub-APU de escombros, así que su
+        pendiente tiene que alertar en el ítem que lo usa — y diciendo en qué APU
+        está, que es lo accionable. Recorre `_comp_cache`, que ya tiene el árbol."""
+        faltan: list[tuple[str, str]] = []
+        vistos: set[tuple[str, str]] = {(apu_codigo, shift)}
         pendiente = [(apu_codigo, shift)]
         while pendiente:
             clave = pendiente.pop()
-            if clave in vistos:                  # corta ciclos de sub-APUs
-                continue
-            vistos.add(clave)
-            faltan.extend(self._sin_distancia.get(clave, ()))
             for comp in self._comp_cache.get(clave, ()):
-                if (comp.tipo or "insumo") == "apu" and comp.insumo_codigo:
-                    pendiente.append((comp.insumo_codigo, comp.ref_shift or comp.shift))
+                if (comp.tipo or "insumo") != "apu" or not comp.insumo_codigo:
+                    continue
+                sub = (comp.insumo_codigo, comp.ref_shift or comp.shift)
+                if sub in vistos:                    # corta ciclos de sub-APUs
+                    continue
+                vistos.add(sub)
+                pendiente.append(sub)
+                faltan.extend((sub[0], cod) for cod in self._sin_distancia.get(sub, ()))
         # dedup preservando el orden de aparición
         return tuple(dict.fromkeys(faltan))
 
     def claves_cargadas(self) -> list[tuple[str, str]]:
         """(código, turno) de todo lo que hay en el caché de composiciones, incluido
         el cierre de sub-APUs que trajo `precargar`. Lo usa la tabla de impacto para
-        recorrer el árbol sin duplicar la BFS. Un APU sin composición (borrado o
-        inexistente) no cuenta: no hay árbol que recorrer ahí."""
-        return sorted(k for k, comps in self._comp_cache.items() if comps)
+        recorrer el árbol sin duplicar la BFS. Incluye claves con composición vacía
+        (APU borrado/inexistente o vaciado por el proyecto, p.ej. un peaje quitado
+        que era el único componente): el consumidor decide con la composición cruda
+        en la mano, no acá."""
+        return sorted(self._comp_cache.keys())
 
     @property
     def contexto(self):

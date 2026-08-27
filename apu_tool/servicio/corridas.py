@@ -133,7 +133,9 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
                             "descripcion": item.descripcion,
                             "fila": _vista_item(
                                 ens, seq, ens.status.value,
-                                assembler.pricing.sin_distancia(ens.apu_codigo or "", ens.shift))})
+                                assembler.pricing.sin_distancia(ens.apu_codigo or "", ens.shift),
+                                assembler.pricing.sin_distancia_en_subapus(
+                                    ens.apu_codigo or "", ens.shift))})
     duracion_ms = round((time.monotonic() - t0) * 1000)
     alm.corridas.set_estado(corrida_id, "en_revision")
     alm.corridas.set_duracion(corrida_id, duracion_ms)
@@ -212,7 +214,8 @@ def _assembled_desde_snapshot(row: CorridaItemRow, snap: dict) -> AssembledApu:
 
 
 def _vista_item(ens: AssembledApu, seq: int, status: str,
-                sin_distancia: tuple[str, ...] = ()) -> dict:
+                sin_distancia: tuple[str, ...] = (),
+                en_subapus: tuple[tuple[str, str], ...] = ()) -> dict:
     return {
         "seq": seq, "item": ens.item.item, "descripcion": ens.item.descripcion,
         "unidad": ens.unidad, "cantidad": ens.item.cantidad,
@@ -222,19 +225,24 @@ def _vista_item(ens: AssembledApu, seq: int, status: str,
         "costo_unitario": ens.costo_unitario, "margen_unitario": ens.margen_unitario,
         "margen_pct": ens.margen_pct, "contractual_total": ens.contractual_total,
         "costo_total": ens.costo_total, "margen_total": ens.margen_total,
-        "alertas_costeo": alertas_costeo(ens, sin_distancia),
+        "alertas_costeo": alertas_costeo(ens, sin_distancia, en_subapus),
     }
 
 
-def _ensamblar_corrida(alm: Almacen, meta, rows, pricing: PricingEngine) -> list[AssembledApu]:
+def _ensamblar_corrida(alm: Almacen, meta, rows, pricing: PricingEngine
+                       ) -> tuple[list[AssembledApu], dict[int, dict]]:
     """Ensambla los ítems de una corrida respetando el modo: congelada -> snapshot por
     ítem (con caída a costeo en vivo si falta el snapshot); activa -> costeo en vivo.
-    Camino ÚNICO compartido por vista_corrida y listar_corridas."""
+    Camino ÚNICO compartido por vista_corrida y listar_corridas.
+
+    Devuelve también los snapshots usados (vacío si la corrida está activa): ya los
+    leyó acá, así el llamador no vuelve a pedirlos (era un round-trip extra a
+    Postgres por cada lectura de una corrida congelada)."""
     if meta.modo == "congelada":
         snaps = alm.corridas.get_snapshots(meta.id)
         return [_assembled_desde_snapshot(r, snaps[r.seq]) if r.seq in snaps
-                else _costear_row(alm, r, pricing, meta.lista_precios_id) for r in rows]
-    return [_costear_row(alm, r, pricing, meta.lista_precios_id) for r in rows]
+                else _costear_row(alm, r, pricing, meta.lista_precios_id) for r in rows], snaps
+    return [_costear_row(alm, r, pricing, meta.lista_precios_id) for r in rows], {}
 
 
 def _totales(ensambles: list[AssembledApu], rows) -> dict:
@@ -257,14 +265,15 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
     pricing = PricingEngine(alm, lista_id=meta.lista_precios_id,
                             contexto=ctx)   # COMPARTIDO por la corrida
     pricing.precargar((r.apu_codigo, r.shift) for r in rows if r.apu_codigo)  # lote
-    ensambles = _ensamblar_corrida(alm, meta, rows, pricing)
+    ensambles, snaps_usados = _ensamblar_corrida(alm, meta, rows, pricing)
     # Una foto congelada ya se emitió: no tiene pendientes que avisar (evita ruido
     # sobre un costo que no se va a recalcular). Solo los ítems costeados EN VIVO
     # (activa, o congelada sin snapshot -> cae a _costear_row) llevan sin_distancia.
-    snaps = alm.corridas.get_snapshots(meta.id) if meta.modo == "congelada" else {}
     items = [_vista_item(ens, r.seq, r.status,
-                         () if r.seq in snaps
-                         else pricing.sin_distancia(r.apu_codigo or "", r.shift))
+                         () if r.seq in snaps_usados
+                         else pricing.sin_distancia(r.apu_codigo or "", r.shift),
+                         () if r.seq in snaps_usados
+                         else pricing.sin_distancia_en_subapus(r.apu_codigo or "", r.shift))
              for ens, r in zip(ensambles, rows)]
     return {
         "id": meta.id, "nombre": meta.nombre, "archivo": meta.archivo,
@@ -472,7 +481,8 @@ def listar_corridas(alm: Almacen) -> list[dict]:
             pricing = PricingEngine(alm, lista_id=meta.lista_precios_id,
                                     contexto=_contexto(alm, meta, ctx_cache))   # costea, su fila queda con None
             pricing.precargar((r.apu_codigo, r.shift) for r in rows if r.apu_codigo)
-            tot = _totales(_ensamblar_corrida(alm, meta, rows, pricing), rows)
+            ensambles, _ = _ensamblar_corrida(alm, meta, rows, pricing)
+            tot = _totales(ensambles, rows)
             fila.update(contractual=tot["contractual"], costo=tot["costo"],
                         margen=tot["margen"], margen_pct=tot["margen_pct"])
         except Exception:

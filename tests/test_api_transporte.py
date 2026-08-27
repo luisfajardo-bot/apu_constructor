@@ -128,3 +128,33 @@ def test_impacto_muestra_el_rendimiento_nuevo(tmp_path):
     assert fila["rendimiento_actual"] == 26.25
     assert fila["rendimiento_nuevo"] == 33.6
     assert fila["origen"] == "distancia"
+
+
+def test_impacto_incluye_el_peaje_quitado(tmp_path):
+    """Si el peaje era el ÚNICO componente de acarreo/peaje del APU, la composición
+    efectiva queda vacía — y aun así la fila tiene que seguir en la tabla de
+    impacto, con quitado=true y origen="distancia" (no "biblioteca": el proyecto
+    SÍ desvió esta fila, al excluirla)."""
+    from apu_tool.nucleo.models import LicitacionItem
+    from apu_tool.servicio import corridas as svc
+    cli, alm = _cli(tmp_path)
+    alm.apus.insert_apus([Apu(codigo="5000", nombre="TRANSPORTE PEAJE", unidad="GLB",
+                              shift="DIURNO", grupo="TRANSPORTES")])
+    alm.apus.insert_components([
+        ApuComponent(apu_codigo="5000", shift="DIURNO", insumo_codigo="INT3",
+                     insumo_nombre="PEAJE", unidad="GLB", rendimiento=1.0,
+                     precio_unitario_hist=8000.0)])
+    cid = alm.carpetas.crear("Metro")
+    corrida = svc.construir_corrida(
+        alm, "lic.xlsx",
+        [LicitacionItem(item="1", descripcion="PEAJE", unidad="GLB", cantidad=1,
+                        precio_contractual=8000.0, shift="DIURNO")],
+        "DIURNO", False, carpeta_id=cid)
+    svc.confirmar_item(alm, corrida, 0, "5000", "DIURNO")
+    r = cli.put(f"/api/carpetas/{cid}/transporte", json={"peaje_aplica": False})
+    assert r.status_code == 200, r.text
+    imp = cli.get(f"/api/carpetas/{cid}/transporte").json()["impacto"]
+    filas = [f for f in imp if f["apu_codigo"] == "5000"]
+    assert len(filas) == 1, imp
+    assert filas[0]["quitado"] is True
+    assert filas[0]["origen"] == "distancia"

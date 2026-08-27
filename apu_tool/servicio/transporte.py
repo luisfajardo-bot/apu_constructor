@@ -107,9 +107,15 @@ def _impacto(alm: Almacen, raiz: int) -> list[dict]:
         return []
     motor = PricingEngine(alm, contexto=ctx)
     motor.precargar(claves)
+    claves_cargadas = motor.claves_cargadas()                    # incluye sub-APUs
+    # UNA sola consulta en lote (en vez de un get_components por clave dentro del
+    # bucle): el repo ya la expone y PricingEngine._precargar_lote la usa igual.
+    crudos_por_clave = alm.apus.get_components_bulk(claves_cargadas)
     filas = []
-    for apu_codigo, shift in motor.claves_cargadas():            # incluye sub-APUs
-        crudos = alm.apus.get_components(apu_codigo, shift)
+    for apu_codigo, shift in claves_cargadas:
+        crudos = crudos_por_clave.get((apu_codigo, shift), [])
+        if not crudos:            # nada en la biblioteca: no hay nada que mostrar
+            continue
         efectivos = {(c.insumo_codigo, normalizar(c.insumo_nombre)): c
                      for c in motor.components(apu_codigo, shift)}
         pend = set(motor.sin_distancia(apu_codigo, shift))
@@ -119,6 +125,7 @@ def _impacto(alm: Almacen, raiz: int) -> list[dict]:
                 continue
             ef = efectivos.get((c.insumo_codigo, normalizar(c.insumo_nombre)))
             cls = ctx.clasificacion.get((apu_codigo, shift, c.insumo_codigo))
+            quitado = ef is None
             filas.append({
                 "apu_codigo": apu_codigo, "shift": shift,
                 "insumo_codigo": c.insumo_codigo, "insumo_nombre": c.insumo_nombre,
@@ -126,9 +133,12 @@ def _impacto(alm: Almacen, raiz: int) -> list[dict]:
                 "categoria": cls.categoria if cls else None,
                 "volumen": cls.volumen if cls else None,
                 "rendimiento_nuevo": ef.rendimiento if ef is not None else None,
-                "quitado": ef is None,
-                "origen": ("distancia" if ef is not None
-                           and ef.rendimiento != c.rendimiento else "biblioteca"),
+                "quitado": quitado,
+                # Un quitado (p.ej. el peaje excluido porque el proyecto no lo
+                # tiene) también es una desviación del proyecto: "biblioteca"
+                # sugeriría que no cambió nada, y sí cambió.
+                "origen": ("distancia" if quitado or (ef is not None
+                           and ef.rendimiento != c.rendimiento) else "biblioteca"),
                 "sin_clasificar": c.insumo_codigo in pend,
             })
     return filas

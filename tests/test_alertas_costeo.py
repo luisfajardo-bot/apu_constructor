@@ -82,5 +82,27 @@ def test_alerta_de_pendiente_que_vive_en_un_subapu():
     ens = AssembledApu(item=item, apu_codigo="4390", apu_nombre="RELLENO", unidad="M3",
                        shift="DIURNO", componentes=[sub], costo_unitario=26500,
                        status=MatchStatus.CONFIRMED, confianza=1.0)
-    motivos = alertas_costeo(ens, sin_distancia=("7462",))
-    assert motivos == ["7462: distancia del proyecto no aplicada (en un sub-APU)"]
+    motivos = alertas_costeo(ens, en_subapus=(("3017", "7462"),))
+    assert motivos == ["7462: distancia del proyecto no aplicada (en el sub-APU 3017)"]
+
+
+def test_el_codigo_repetido_no_confunde_las_dos_lineas():
+    """Arriba clasificado, abajo no: la alerta tiene que hablar del sub-APU y no
+    manchar la linea de arriba, que esta bien."""
+    from apu_tool.dominio.alertas import alertas_costeo
+    from apu_tool.nucleo.models import (
+        AssembledApu, CostedComponent, LicitacionItem, MatchStatus)
+    item = LicitacionItem(item="1", descripcion="RELLENO", unidad="M3", cantidad=1,
+                          precio_contractual=1000.0, shift="DIURNO")
+    arriba = CostedComponent(insumo_codigo="7462", insumo_nombre="TRANSPORTE DE PETREOS",
+                             unidad="M3-KM", rendimiento=33.6, precio_unitario=1000.0,
+                             fuente_precio="COSTO INTERNO", costo=33600)
+    sub = CostedComponent(insumo_codigo="3017", insumo_nombre="TTE ESCOMBROS",
+                          unidad="M3", rendimiento=1.0, precio_unitario=26500.0,
+                          fuente_precio="APU", costo=26500, calidad_cruce="apu",
+                          tipo="apu", ref_shift="DIURNO")
+    ens = AssembledApu(item=item, apu_codigo="4390", apu_nombre="RELLENO", unidad="M3",
+                       shift="DIURNO", componentes=[arriba, sub], costo_unitario=60100,
+                       status=MatchStatus.CONFIRMED, confianza=1.0)
+    motivos = alertas_costeo(ens, sin_distancia=(), en_subapus=(("3017", "7462"),))
+    assert motivos == ["7462: distancia del proyecto no aplicada (en el sub-APU 3017)"]

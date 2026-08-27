@@ -147,7 +147,9 @@ def test_precargar_no_cambia_el_resultado(tmp_path):
 
 def test_pendiente_dentro_del_subapu_alerta_en_el_item(tmp_path):
     """La distancia del botadero vive en el sub-APU: si esa fila no está clasificada,
-    el ítem que lo usa tiene que enterarse."""
+    el ítem que lo usa tiene que enterarse — por `sin_distancia_en_subapus`, no por
+    `sin_distancia`, que ahora es solo lo propio del APU (ver bug crítico: un código
+    repetido en dos niveles no puede robarle la alerta a la línea de arriba)."""
     alm = _alm(tmp_path)
     solo_4390 = {k: v for k, v in _clas().items() if k[0] == "4390"}
     ctx = ContextoProyecto(params=ParametrosProyecto(km_botadero=34, km_granulares=32),
@@ -155,7 +157,23 @@ def test_pendiente_dentro_del_subapu_alerta_en_el_item(tmp_path):
     motor = PricingEngine(alm, contexto=ctx)
     motor.cost_apu("4390", "DIURNO")
     assert motor.sin_distancia("3017", "DIURNO") == ("7462",)
-    assert motor.sin_distancia("4390", "DIURNO") == ("7462",)   # el del subárbol también
+    assert motor.sin_distancia("4390", "DIURNO") == ()              # lo propio: clasificado
+    assert motor.sin_distancia_en_subapus("4390", "DIURNO") == (("3017", "7462"),)
+
+
+def test_pendiente_propio_y_de_subapu_se_distinguen(tmp_path):
+    """El mismo código puede estar clasificado arriba y sin clasificar en el sub-APU:
+    la alerta no puede confundir una linea con la otra."""
+    alm = _alm(tmp_path)
+    solo_4390 = {k: v for k, v in _clas().items() if k[0] == "4390"}
+    ctx = ContextoProyecto(params=ParametrosProyecto(km_botadero=34, km_granulares=32),
+                           clasificacion=solo_4390)
+    motor = PricingEngine(alm, contexto=ctx)
+    motor.cost_apu("4390", "DIURNO")
+    assert motor.sin_distancia("4390", "DIURNO") == ()          # arriba está clasificado
+    assert motor.sin_distancia("3017", "DIURNO") == ("7462",)   # el del sub-APU, no
+    assert motor.sin_distancia_en_subapus("4390", "DIURNO") == (("3017", "7462"),)
+    assert motor.sin_distancia_en_subapus("3017", "DIURNO") == ()
 
 
 def test_un_ajuste_no_inventa_composicion_de_un_apu_inexistente(tmp_path):

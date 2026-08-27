@@ -21,37 +21,35 @@ _MOTIVO_CRUCE = {
 }
 
 
-def alertas_costeo(a: AssembledApu, sin_distancia: tuple[str, ...] = ()) -> list[str]:
+def alertas_costeo(a: AssembledApu, sin_distancia: tuple[str, ...] = (),
+                   en_subapus: tuple[tuple[str, str], ...] = ()) -> list[str]:
     """Motivos de revisión de costo del ítem. Lista vacía = sin alerta.
 
-    `sin_distancia`: códigos de componentes de acarreo que el proyecto NO pudo
-    reescalar por falta de clasificación (los reporta `PricingEngine.sin_distancia`).
-    Se avisa en vez de costear con la distancia equivocada en silencio."""
+    `sin_distancia`: acarreos de ESTE APU que el proyecto no pudo reescalar.
+    `en_subapus`: `(apu_del_sub, codigo)` de los que viven dentro de sus sub-APUs —
+    van aparte porque el mismo código puede estar bien clasificado arriba y sin
+    clasificar abajo, y en ese caso la línea de arriba no debe robarse la alerta.
+    """
     motivos: list[str] = []
     pendientes = set(sin_distancia)
-    reportados: set[str] = set()
     for c in a.componentes:
         etiqueta = f"{c.insumo_codigo} {c.insumo_nombre}".strip()
-        # Va ANTES de la regla del $0 para dar el motivo accionable en vez del genérico.
-        # Solo puede aparecer costeando contra una lista distinta de Principal, así que
-        # el camino histórico (Principal) queda idéntico.
         if c.calidad_cruce == CALIDAD_SIN_PRECIO_LISTA:
             motivos.append(f"{etiqueta}: sin precio en la lista")
         elif c.costo <= 0 or c.precio_unitario <= 0:        # regla dura: $0 siempre
             motivos.append(f"{etiqueta}: en $0")
         elif c.insumo_codigo in pendientes:
             motivos.append(f"{etiqueta}: distancia del proyecto no aplicada")
-            reportados.add(c.insumo_codigo)
         elif c.calidad_cruce in _MOTIVO_CRUCE:
             motivos.append(f"{etiqueta}: {_MOTIVO_CRUCE[c.calidad_cruce]}")
-    # Un pendiente que vive DENTRO de un sub-APU (el caso del botadero) no aparece
-    # entre los componentes del ítem, así que el bucle no lo ve. Sin esto, el ítem se
-    # costearía con la distancia de la biblioteca y nadie se enteraría.
-    for cod in sin_distancia:
-        if cod not in reportados:
-            motivos.append(f"{cod}: distancia del proyecto no aplicada (en un sub-APU)")
-            reportados.add(cod)
-    if not motivos and a.costo_unitario <= 0:               # ítem sin composición / sin costo
+    # Los pendientes de los sub-APUs no están entre los componentes del ítem (el
+    # botadero es el caso típico), así que el bucle de arriba no los ve. Se reportan
+    # con el APU donde viven: sin eso, el ítem se costearía con la distancia de la
+    # biblioteca y nadie se enteraría.
+    for apu_sub, cod in en_subapus:
+        motivos.append(f"{cod}: distancia del proyecto no aplicada "
+                       f"(en el sub-APU {apu_sub})")
+    if not motivos and a.costo_unitario <= 0:
         motivos.append("APU en $0 (sin composición o sin costo)")
     return motivos
 

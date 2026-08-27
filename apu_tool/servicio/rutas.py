@@ -29,14 +29,15 @@ from apu_tool.servicio import insumos as insumos_svc
 from apu_tool.servicio import listas as listas_svc
 from apu_tool.servicio import plantillas as plantillas_svc
 from apu_tool.servicio import presencia as presencia_svc
+from apu_tool.servicio import transporte as transporte_svc
 from apu_tool.servicio import usuarios as usuarios_svc
 from apu_tool.servicio.auth import requiere_rol
 from apu_tool.servicio.dependencias import get_almacen
 from apu_tool.servicio import limites
 from pydantic import BaseModel
 from apu_tool.servicio.esquemas import (
-    ApuEditIn, ApuNuevoIn, CambiosIn, ConfirmarIn, ConfirmarLoteIn, EstadoIn, InsumoNuevoIn,
-    ListaPreciosIn, RolIn, StatusOut, UsuarioInvitarIn)
+    ApuEditIn, ApuNuevoIn, CambiosIn, ClasificarIn, ConfirmarIn, ConfirmarLoteIn, EstadoIn,
+    InsumoNuevoIn, ListaPreciosIn, RolIn, StatusOut, TransporteParamsIn, UsuarioInvitarIn)
 
 
 class CarpetaIn(BaseModel):
@@ -709,3 +710,39 @@ def mover_corrida(cid: int, body: MoverCorridaIn, alm: Almacen = Depends(get_alm
     except CarpetaInvalida as e:
         raise HTTPException(status_code=400, detail=str(e))
     return svc.vista_corrida(alm, cid)
+
+
+# ---- transporte por proyecto ----
+@router.get("/carpetas/{carpeta_id}/transporte")
+def ver_transporte(carpeta_id: int, alm: Almacen = Depends(get_almacen),
+                   _: object = Depends(requiere_rol("consulta"))):
+    try:
+        return transporte_svc.ver(alm, carpeta_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.put("/carpetas/{carpeta_id}/transporte")
+def guardar_transporte(carpeta_id: int, body: TransporteParamsIn,
+                       alm: Almacen = Depends(get_almacen),
+                       actor=Depends(requiere_rol("editor"))):
+    try:
+        return transporte_svc.guardar(alm, carpeta_id, body.model_dump(), actor=actor)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/transporte/componentes")
+def listar_componentes_transporte(alm: Almacen = Depends(get_almacen),
+                                  _: object = Depends(requiere_rol("consulta"))):
+    return transporte_svc.listar_componentes(alm)
+
+
+@router.put("/transporte/componentes")
+def clasificar_transporte(body: ClasificarIn, alm: Almacen = Depends(get_almacen),
+                          actor=Depends(requiere_rol("editor"))):
+    try:
+        return transporte_svc.clasificar(
+            alm, [f.model_dump() for f in body.filas], actor=actor)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

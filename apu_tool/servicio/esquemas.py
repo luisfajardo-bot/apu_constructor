@@ -92,3 +92,25 @@ class RolIn(BaseModel):
 
 class EstadoIn(BaseModel):
     estado: str
+
+
+class TransporteParamsIn(BaseModel):
+    km_botadero: Optional[float] = None
+    km_mezclas: Optional[float] = None
+    km_granulares: Optional[float] = None
+    peaje_aplica: Optional[bool] = None
+    peaje_valor: Optional[float] = None
+
+
+class ClaseTransporteIn(BaseModel):
+    apu_codigo: str
+    shift: str
+    insumo_codigo: str
+    insumo_nombre: str = ""
+    categoria: str
+    volumen: float
+    km_base: Optional[float] = None
+
+
+class ClasificarIn(BaseModel):
+    filas: list[ClaseTransporteIn]

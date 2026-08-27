@@ -98,6 +98,7 @@ flowchart TD
 | `seguridad_headers.py` | Middleware de cabeceras de seguridad (HSTS, nosniff, X-Frame-Options, Referrer-Policy, CSP). |
 | `subapus.py` | Migración: marca como sub-APU los componentes cuyo código es un APU existente. |
 | `supabase_admin.py` | Cliente de la Admin API de Supabase Auth, tras una interfaz (fake en tests). |
+| `transporte.py` | Servicio de distancias de acarreo por proyecto y de clasificación de la biblioteca. |
 | `usuarios.py` | Lógica de gestión de usuarios (solo-Admin). Mutaciones sensibles: ganchos para |
 
 ## interfaz/ — puntos de entrada (CLI, GUI)

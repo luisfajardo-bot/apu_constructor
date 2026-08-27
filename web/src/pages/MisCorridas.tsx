@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Folder } from "lucide-react";
 import { toast } from "sonner";
 import { listarCorridas, eliminarCorrida, renombrarCorrida, descargarPlantillaLicitacion } from "@/api/corridas";
@@ -287,6 +287,15 @@ export default function MisCorridas() {
                   <span className="mr-2 text-[11px] text-muted-foreground">
                     {carpeta.n_corridas} corrida{carpeta.n_corridas !== 1 ? "s" : ""}
                   </span>
+                  {carpeta.parent_id === null && (
+                    <Link
+                      to={`/proyecto/${carpeta.id}/distancias`}
+                      className="mr-1.5 text-xs underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Distancias
+                    </Link>
+                  )}
                   {puedeEditar && (
                     <div className="flex gap-1.5">
                       <Button

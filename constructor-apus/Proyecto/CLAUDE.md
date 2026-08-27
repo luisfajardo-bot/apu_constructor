@@ -56,7 +56,7 @@ lista licitación ──► matching ──► IA acotada (sin dinero) ──►
                                        └─► motor de precios ──► cuadro resumen (Excel)
 
 Interfaces sobre el mismo pipeline (dominio/pipeline.py):
-  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 50 endpoints) + web/ (React) para multiusuario
+  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 59 endpoints) + web/ (React) para multiusuario
 ```
 
 `apu_tool/config.py` es transversal, fuera de cualquier paquete: rutas, umbrales de
@@ -102,6 +102,7 @@ matching, modelo de IA, clasificación de precios.
 | `assemble.py`            | orquestador por ítem |
 | `pricing.py`             | motor de costos (**ÚNICO** que ve dinero) |
 | `alertas.py`             | alertas de costeo (por qué un ítem necesita revisión) |
+| `transporte.py`          | distancias de acarreo por proyecto + ajustes de composición |
 | `report.py`              | cuadro resumen en Excel |
 | `report_categorizado.py` | cuadro resumen agrupado por capítulos de presupuesto |
 | `integridad.py`          | chequeo de integridad del vínculo APU↔insumo |
@@ -125,6 +126,8 @@ matching, modelo de IA, clasificación de precios.
 | `subapus.py`           | migración: marca componentes que son sub-APU |
 | `apus.py`              | lectura de la biblioteca de APUs |
 | `carpetas.py`          | reglas de carpetas de corridas |
+| `transporte.py`        | distancias del proyecto, impacto y clasificación de acarreos |
+| `ajustes.py`           | ajustes puntuales de composición por proyecto |
 | `usuarios.py`          | gestión de usuarios (solo Admin) |
 | `auditoria.py`         | servicio de auditoría (registro + lectura paginada) |
 | `supabase_admin.py`    | cliente de la Admin API de Supabase Auth |
@@ -174,6 +177,18 @@ matching, modelo de IA, clasificación de precios.
   costea con el histórico pero con alerta (`sin_precio_catalogo`) — antes era un
   underbid silencioso. API: `GET/POST /api/listas-precios`, `PATCH
   /api/listas-precios/{id}` (sin DELETE, a propósito).
+- **Distancias por proyecto.** Una carpeta de nivel 1 ES un proyecto y puede fijar sus
+  distancias de acarreo (`botadero`, `mezclas`, `granulares`), si hay peaje y cuánto vale
+  (`proyecto_parametros`), más ajustes puntuales de composición (`proyecto_ajuste`, que
+  ganan sobre la regla). El rendimiento efectivo de un componente de acarreo es
+  `volumen × km_del_proyecto`, con el volumen clasificado una vez por componente en
+  `componente_transporte` (las filas M3-KM de la biblioteca). Se aplica en
+  `PricingEngine.components()`, el único punto de paso; la biblioteca NO se toca y cada
+  proyecto costea el mismo APU distinto. Sin parámetros ni ajustes, el costeo es idéntico
+  al de siempre. Un componente M3-KM sin clasificar NO se reescala y sale con alerta —
+  también si vive dentro de un sub-APU, caso en el que la alerta dice en qué sub-APU está.
+  La identidad de un componente es **código + nombre**: 6 de los 9 códigos de transporte
+  tienen homónimo en el catálogo.
 - **Salidas:** `salidas/` (cuadros) y `ejemplos/` (licitaciones de ejemplo).
 - Fuentes de precio: `PRECIO IDU` se trata como **público**; el resto
   (`COSTO INTERNO`, `COMPRAS…`, etc.) como **interno/confidencial**
@@ -193,3 +208,11 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   Principal: el respaldo silencioso es justo lo que esta feature evita.
 - No borres listas de precios: una corrida guarda su `lista_precios_id` sin FK, y
   `seed --force` ya las destruye sin poder recuperarlas del Excel (ver Comandos).
+- No metas la distancia de un proyecto dentro de la biblioteca (ni editando el APU ni
+  duplicándolo): para eso están `proyecto_parametros` y `proyecto_ajuste`. La distancia es
+  del sitio, no del APU.
+- No confíes en el código de un insumo de transporte para clasificarlo: 6 de los 9 códigos
+  tienen homónimo en el catálogo. Siempre código + nombre.
+- Ojo: `seed --force` borra `componente_transporte` (igual que las listas NP) y hay que
+  reclasificar las filas M3-KM. Los dos backends se comportan igual a propósito: el espejo
+  Postgres hace `DROP SCHEMA apus CASCADE`.

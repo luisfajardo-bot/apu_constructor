@@ -153,20 +153,32 @@ class CarpetasDB:
                      creado_por: Optional[str] = None) -> int:
         import datetime as _dt
         creado_en = _dt.datetime.now().isoformat(timespec="seconds")
-        sql = ("INSERT OR REPLACE INTO proyecto_ajuste "
+        # UPSERT explícito (no INSERT OR REPLACE): ante conflicto por la UNIQUE, un
+        # REPLACE borra la fila e inserta otra con rowid NUEVO, así que el id que la
+        # UI guardó quedaría colgado y su borrado fallaría en silencio. El DO UPDATE
+        # conserva el id, igual que el `ON CONFLICT ... RETURNING id` del espejo
+        # Postgres: los dos backends deben devolver el mismo id para el mismo ajuste.
+        sql = ("INSERT INTO proyecto_ajuste "
                "(carpeta_id, apu_codigo, shift, accion, insumo_codigo, insumo_nombre, "
                " unidad, rendimiento, insumo_nuevo_codigo, insumo_nuevo_nombre, tipo, "
                " ref_shift, nota, creado_en, creado_por) "
-               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+               "ON CONFLICT (carpeta_id, apu_codigo, shift, accion, insumo_codigo) "
+               "DO UPDATE SET insumo_nombre=excluded.insumo_nombre, "
+               "unidad=excluded.unidad, rendimiento=excluded.rendimiento, "
+               "insumo_nuevo_codigo=excluded.insumo_nuevo_codigo, "
+               "insumo_nuevo_nombre=excluded.insumo_nuevo_nombre, "
+               "tipo=excluded.tipo, ref_shift=excluded.ref_shift, nota=excluded.nota "
+               "RETURNING id")
         p = (int(ajuste.carpeta_id), ajuste.apu_codigo, ajuste.shift, ajuste.accion,
              ajuste.insumo_codigo, ajuste.insumo_nombre, ajuste.unidad,
              ajuste.rendimiento, ajuste.insumo_nuevo_codigo,
              ajuste.insumo_nuevo_nombre, ajuste.tipo or "insumo", ajuste.ref_shift,
              ajuste.nota, creado_en, creado_por or ajuste.creado_por)
         if conn is not None:
-            return int(conn.execute(sql, p).lastrowid)
+            return int(conn.execute(sql, p).fetchone()["id"])
         with self.connect() as c:
-            return int(c.execute(sql, p).lastrowid)
+            return int(c.execute(sql, p).fetchone()["id"])
 
     def borrar_ajuste(self, carpeta_id: int, ajuste_id: int, conn=None) -> bool:
         sql = "DELETE FROM proyecto_ajuste WHERE carpeta_id=? AND id=?"

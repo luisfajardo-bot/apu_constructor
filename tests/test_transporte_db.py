@@ -108,3 +108,33 @@ def test_borrar_la_carpeta_borra_sus_parametros_y_ajustes(tmp_path):
                                     insumo_nombre="X"))
     assert car.eliminar(cid) is True
     assert car.get_parametros(cid) is None and car.listar_ajustes(cid) == []
+
+
+def test_reeditar_un_ajuste_conserva_su_id(tmp_path):
+    """Guardar dos veces el mismo ajuste actualiza la fila y DEVUELVE EL MISMO id: un
+    id nuevo dejaria colgado el que la UI ya tiene (y su borrado fallaria callado)."""
+    car = _carpetas(tmp_path)
+    cid = car.crear("Metro")
+    def _aj(rend):
+        return AjusteProyecto(carpeta_id=cid, apu_codigo="4390", shift="DIURNO",
+                              accion="rendimiento", insumo_codigo="6722",
+                              insumo_nombre="SUBBASE GRANULAR B-400", rendimiento=rend)
+    primero = car.crear_ajuste(_aj(1.1))
+    segundo = car.crear_ajuste(_aj(1.25))
+    assert primero == segundo
+    ajustes = car.listar_ajustes(cid)
+    assert len(ajustes) == 1 and ajustes[0].rendimiento == 1.25
+    assert car.borrar_ajuste(cid, primero) is True
+
+
+def test_candidatos_tolera_una_unidad_escrita_distinto(tmp_path):
+    """La regla de costeo normaliza la unidad (colapsa el guion), asi que la pantalla
+    de clasificacion tiene que ver las mismas filas: si no, esa fila alerta como "sin
+    clasificar" y no hay forma de resolverla."""
+    db = _db(tmp_path)
+    db.insert_components([
+        ApuComponent(apu_codigo="4200", shift="DIURNO", insumo_codigo="7462",
+                     insumo_nombre="TRANSPORTE DE PETREOS", unidad="m3 - km",
+                     rendimiento=26.25, precio_unitario_hist=1000.0)])
+    codigos = [c["insumo_codigo"] for c in db.componentes_transporte_candidatos()]
+    assert codigos == ["6878", "7462"]

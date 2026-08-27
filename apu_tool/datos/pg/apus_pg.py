@@ -14,6 +14,7 @@ from apu_tool.nucleo import relevancia
 from apu_tool.nucleo.models import (
     Apu, ApuComponent, ClaseTransporte, DePricedApu, DePricedComponent,
 )
+from apu_tool.nucleo.texto import normalizar
 
 SCHEMA_PATH = config.PROJECT_ROOT / "db" / "pg" / "apus.sql"
 
@@ -281,16 +282,19 @@ class ApusPg:
         return len(rows)
 
     def componentes_transporte_candidatos(self) -> list[dict]:
+        """Espejo de `ApusDB.componentes_transporte_candidatos`: el filtro fino lo
+        decide `normalizar` en Python (la misma definición que usa
+        `dominio/transporte._escalable`), no el SQL. El LIKE es solo un prefiltro."""
+        objetivo = normalizar(config.UNIDAD_TRANSPORTE)
         with self.cx.connection() as conn:
             rows = conn.execute(
                 "SELECT c.apu_codigo, c.shift, a.nombre AS apu_nombre, "
                 "       c.insumo_codigo, c.insumo_nombre, c.unidad, c.rendimiento "
                 "FROM apus.apu_componentes c "
                 "LEFT JOIN apus.apus a ON a.codigo = c.apu_codigo AND a.shift = c.shift "
-                "WHERE UPPER(c.unidad) = %s AND COALESCE(c.tipo,'insumo') <> 'apu' "
-                "ORDER BY c.apu_codigo, c.shift, c.insumo_codigo",
-                (config.UNIDAD_TRANSPORTE,)).fetchall()
-        return [dict(r) for r in rows]
+                "WHERE UPPER(c.unidad) LIKE '%%KM%%' AND COALESCE(c.tipo,'insumo') <> 'apu' "
+                "ORDER BY c.apu_codigo, c.shift, c.insumo_codigo").fetchall()
+        return [dict(r) for r in rows if normalizar(r["unidad"]) == objetivo]
 
     def get_depriced_apu(self, codigo: str, shift: str) -> Optional[DePricedApu]:
         apu = self.get_apu(codigo, shift)

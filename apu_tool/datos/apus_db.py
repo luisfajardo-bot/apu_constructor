@@ -13,6 +13,7 @@ from typing import Iterable, Iterator, Optional
 
 from apu_tool import config
 from apu_tool.nucleo import relevancia
+from apu_tool.nucleo.texto import normalizar
 from apu_tool.nucleo.models import (
     Apu, ApuComponent, ClaseTransporte, DePricedApu, DePricedComponent,
 )
@@ -54,7 +55,15 @@ class ApusDB:
                 conn.execute("ALTER TABLE apu_componentes ADD COLUMN ref_shift TEXT")
 
     def reset(self) -> None:
-        """Reconstruye el esquema desde cero (descarta y recrea desde db/apus.sql)."""
+        """Reconstruye el esquema desde cero (descarta y recrea desde db/apus.sql).
+
+        EXCEPCIÓN deliberada: `componente_transporte` NO se dropea. Su clave es de
+        negocio (apu_codigo, shift, insumo_codigo), no un id surrogado, así que
+        sobrevive un re-semillado sin quedar mal apuntada, y clasificar esas filas es
+        juicio de ingeniería que no se debe tirar. Una fila que quede huérfana es
+        inerte: `dominio/transporte._clase_de` revalida el nombre del insumo en cada
+        lookup y, si no coincide, la trata como "sin clasificar" (alerta) en vez de
+        aplicar un dato viejo en silencio."""
         with self.connect() as conn:
             for t in ("apu_componentes", "apus", "meta"):
                 conn.execute(f"DROP TABLE IF EXISTS {t}")
@@ -308,17 +317,25 @@ class ApusDB:
 
     def componentes_transporte_candidatos(self) -> list[dict]:
         """Filas de la biblioteca que escalan con la distancia (unidad M3-KM), con
-        su APU dueño. Es la entrada de la pantalla de clasificación."""
+        su APU dueño. Es la entrada de la pantalla de clasificación.
+
+        El filtro fino lo decide `normalizar` en Python, la MISMA definición que usa
+        `dominio/transporte._escalable` para saber qué es acarreo. Con un
+        `UPPER(unidad) = 'M3-KM'` crudo, una unidad escrita "M3 - KM" sería acarreo
+        para el costeo (que normaliza y colapsa el guion) pero no saldría acá, y su
+        alerta de "sin clasificar" no tendría forma de resolverse. El LIKE es solo un
+        prefiltro barato: normalizar nunca inventa letras, así que todo lo que
+        normaliza a "M3 KM" contiene "KM"."""
+        objetivo = normalizar(config.UNIDAD_TRANSPORTE)
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT c.apu_codigo, c.shift, a.nombre AS apu_nombre, "
                 "       c.insumo_codigo, c.insumo_nombre, c.unidad, c.rendimiento "
                 "FROM apu_componentes c "
                 "LEFT JOIN apus a ON a.codigo = c.apu_codigo AND a.shift = c.shift "
-                "WHERE UPPER(c.unidad) = ? AND COALESCE(c.tipo,'insumo') <> 'apu' "
-                "ORDER BY c.apu_codigo, c.shift, c.insumo_codigo",
-                (config.UNIDAD_TRANSPORTE,)).fetchall()
-        return [dict(r) for r in rows]
+                "WHERE UPPER(c.unidad) LIKE '%KM%' AND COALESCE(c.tipo,'insumo') <> 'apu' "
+                "ORDER BY c.apu_codigo, c.shift, c.insumo_codigo").fetchall()
+        return [dict(r) for r in rows if normalizar(r["unidad"]) == objetivo]
 
     def get_depriced_apu(self, codigo: str, shift: str) -> Optional[DePricedApu]:
         apu = self.get_apu(codigo, shift)

@@ -100,6 +100,15 @@ def _km_util(params: ParametrosProyecto, categoria: str) -> Optional[float]:
     return km if km is not None and km > 0 else None
 
 
+def _clase_util(comp: ApuComponent, apu_codigo: str, shift: str,
+                clasificacion: Clasificacion) -> Optional[ClaseTransporte]:
+    """La clase sirve solo si su volumen es > 0. Un volumen en 0 (o negativo) es un
+    dato inválido, no una clasificación: reescalar con él dejaría el acarreo en $0, y
+    si el componente vive en un sub-APU ese $0 no alertaría en el ítem."""
+    cls = _clase_de(comp, apu_codigo, shift, clasificacion)
+    return cls if cls is not None and cls.volumen > 0 else None
+
+
 def pendientes(componentes: Sequence[ApuComponent], apu_codigo: str, shift: str,
                params: Optional[ParametrosProyecto],
                clasificacion: Optional[Clasificacion]) -> tuple[str, ...]:
@@ -113,7 +122,7 @@ def pendientes(componentes: Sequence[ApuComponent], apu_codigo: str, shift: str,
     for c in componentes:
         if not _escalable(c):
             continue
-        cls = _clase_de(c, apu_codigo, shift, clasificacion)
+        cls = _clase_util(c, apu_codigo, shift, clasificacion)
         if cls is None or _km_util(params, cls.categoria) is None:
             faltan.append(c.insumo_codigo)
     return tuple(faltan)
@@ -149,7 +158,7 @@ def _aplicar_regla(comps: list[ApuComponent], apu_codigo: str, shift: str,
         if es_derechos(c) or not _escalable(c):
             salida.append(c)               # volumen, no distancia
             continue
-        cls = _clase_de(c, apu_codigo, shift, clasificacion)
+        cls = _clase_util(c, apu_codigo, shift, clasificacion)
         km = _km_util(params, cls.categoria) if cls is not None else None
         if cls is None or km is None:
             salida.append(c)               # sin clasificar o sin km: intacto (ver pendientes)

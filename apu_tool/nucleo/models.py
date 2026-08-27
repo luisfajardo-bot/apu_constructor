@@ -138,9 +138,13 @@ class ParametrosProyecto:
 
     @property
     def vacio(self) -> bool:
-        """Sin nada definido la regla es un no-op (garantía de no regresión)."""
+        """Sin nada definido la regla es un no-op (garantía de no regresión).
+        `peaje_valor` cuenta: si alguien cargó el valor del peaje del proyecto y esto
+        dijera "vacío", el motor descartaría el contexto y costearía con el precio del
+        catálogo sin avisar."""
         return all(v is None for v in (self.km_botadero, self.km_mezclas,
-                                       self.km_granulares, self.peaje_aplica))
+                                       self.km_granulares, self.peaje_aplica,
+                                       self.peaje_valor))
 
 
 @dataclass(frozen=True)
@@ -255,7 +259,6 @@ FUENTE_SIN_PRECIO_LISTA = "sin precio en lista"      # insumo encontrado, sin fi
 FUENTE_SIN_RESPALDO = "sin respaldo"                 # sub-APU sin árbol costeable (ciclo/vacío) en una lista NP
 CALIDAD_SIN_PRECIO_LISTA = "sin_precio_lista"        # ausencia de precio en una lista NP
 CALIDAD_SIN_PRECIO_CATALOGO = "sin_precio_catalogo"  # insumo encontrado sin fila de precio en Principal
-CALIDAD_SIN_DISTANCIA = "sin_distancia_proyecto"   # componente M3-KM sin clasificar
 
 
 @dataclass

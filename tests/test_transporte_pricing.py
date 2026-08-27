@@ -61,8 +61,10 @@ def test_sin_contexto_el_costeo_es_el_de_siempre(tmp_path):
     base = PricingEngine(alm).cost_apu("4390", "DIURNO")
     conctx_vacio = PricingEngine(alm, contexto=ContextoProyecto(
         params=ParametrosProyecto(), clasificacion={})).cost_apu("4390", "DIURNO")
-    assert [(c.insumo_codigo, c.rendimiento, c.costo) for c in base[0]] == \
-           [(c.insumo_codigo, c.rendimiento, c.costo) for c in conctx_vacio[0]]
+    # CostedComponent es un dataclass (eq por campo): comparar las listas completas
+    # cubre gratis precio_unitario, fuente_precio, calidad_cruce, unidad, tipo y
+    # ref_shift, no solo (codigo, rendimiento, costo).
+    assert base[0] == conctx_vacio[0]
     assert base[1] == conctx_vacio[1]
 
 
@@ -123,10 +125,13 @@ def test_ajuste_agrega_insumo_al_apu_del_proyecto(tmp_path):
     alm = _alm(tmp_path)
     ctx = ContextoProyecto(
         params=ParametrosProyecto(), clasificacion={},
-        ajustes=(AjusteProyecto(apu_codigo="4390", shift="DIURNO", accion="quitar",
-                                insumo_codigo="INT3", insumo_nombre="PEAJE"),))
-    comps, _ = PricingEngine(alm, contexto=ctx).cost_apu("4390", "DIURNO")
-    assert all(c.insumo_codigo != "INT3" for c in comps)
+        ajustes=(AjusteProyecto(apu_codigo="4390", shift="DIURNO", accion="agregar",
+                                insumo_codigo="7231",
+                                insumo_nombre="DERECHOS DE BOTADERO", unidad="M3",
+                                rendimiento=2.0),))
+    comps, total = PricingEngine(alm, contexto=ctx).cost_apu("4390", "DIURNO")
+    agregado = [c for c in comps if c.insumo_codigo == "7231"][0]
+    assert agregado.rendimiento == 2.0 and agregado.costo == 10000   # 2 * 5000
 
 
 def test_precargar_no_cambia_el_resultado(tmp_path):
@@ -138,3 +143,29 @@ def test_precargar_no_cambia_el_resultado(tmp_path):
     motor.precargar([("4390", "DIURNO")])
     con_precarga = motor.cost_apu("4390", "DIURNO")
     assert sin_precarga[1] == con_precarga[1]
+
+
+def test_pendiente_dentro_del_subapu_alerta_en_el_item(tmp_path):
+    """La distancia del botadero vive en el sub-APU: si esa fila no está clasificada,
+    el ítem que lo usa tiene que enterarse."""
+    alm = _alm(tmp_path)
+    solo_4390 = {k: v for k, v in _clas().items() if k[0] == "4390"}
+    ctx = ContextoProyecto(params=ParametrosProyecto(km_botadero=34, km_granulares=32),
+                           clasificacion=solo_4390)
+    motor = PricingEngine(alm, contexto=ctx)
+    motor.cost_apu("4390", "DIURNO")
+    assert motor.sin_distancia("3017", "DIURNO") == ("7462",)
+    assert motor.sin_distancia("4390", "DIURNO") == ("7462",)   # el del subárbol también
+
+
+def test_un_ajuste_no_inventa_composicion_de_un_apu_inexistente(tmp_path):
+    alm = _alm(tmp_path)
+    ctx = ContextoProyecto(
+        params=ParametrosProyecto(), clasificacion={},
+        ajustes=(AjusteProyecto(apu_codigo="9999", shift="DIURNO", accion="agregar",
+                                insumo_codigo="7231",
+                                insumo_nombre="DERECHOS DE BOTADERO", unidad="M3",
+                                rendimiento=1.0),))
+    motor = PricingEngine(alm, contexto=ctx)
+    assert motor.components("9999", "DIURNO") == []
+    assert motor.cost_apu("9999", "DIURNO")[1] == 0

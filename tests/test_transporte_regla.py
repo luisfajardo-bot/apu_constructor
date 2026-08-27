@@ -7,6 +7,7 @@ def test_parametros_vacios():
     assert ParametrosProyecto().vacio is True
     assert ParametrosProyecto(km_botadero=30).vacio is False
     assert ParametrosProyecto(peaje_aplica=False).vacio is False
+    assert ParametrosProyecto(peaje_valor=12400).vacio is False
 
 
 def test_km_por_categoria():
@@ -159,5 +160,14 @@ def test_km_en_cero_no_reescala_y_es_pendiente():
     comps = [_comp("6878", "TRANSPORTE DE BASES ASFALTICAS")]
     cls = _clase("6878", "TRANSPORTE DE BASES ASFALTICAS", "mezclas", 1.05)
     p = ParametrosProyecto(km_mezclas=0)
+    assert transporte.aplicar(comps, "4200", "DIURNO", p, cls, ())[0].rendimiento == 26.25
+    assert transporte.pendientes(comps, "4200", "DIURNO", p, cls) == ("6878",)
+
+
+def test_volumen_en_cero_no_reescala_y_es_pendiente():
+    """Un volumen inválido tampoco puede dejar el acarreo en $0 en silencio."""
+    comps = [_comp("6878", "TRANSPORTE DE BASES ASFALTICAS")]
+    cls = _clase("6878", "TRANSPORTE DE BASES ASFALTICAS", "mezclas", 0.0)
+    p = ParametrosProyecto(km_mezclas=28)
     assert transporte.aplicar(comps, "4200", "DIURNO", p, cls, ())[0].rendimiento == 26.25
     assert transporte.pendientes(comps, "4200", "DIURNO", p, cls) == ("6878",)

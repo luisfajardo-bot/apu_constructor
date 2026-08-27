@@ -73,21 +73,51 @@ class PricingEngine:
         return self._cache[codigo]
 
     def sin_distancia(self, apu_codigo: str, shift: str) -> tuple[str, ...]:
-        """Componentes de acarreo de ese APU que el proyecto no pudo reescalar."""
-        return self._sin_distancia.get((apu_codigo, shift), ())
+        """Componentes de acarreo que el proyecto no pudo reescalar en este APU
+        **ni en su árbol de sub-APUs**.
+
+        El árbol importa: la distancia al botadero vive DENTRO del sub-APU de
+        escombros, así que un pendiente de ahí tiene que alertar en el ítem que lo
+        usa — si no, el ítem se costea con la distancia de la biblioteca y nadie se
+        entera. Recorre `_comp_cache`, que ya tiene el árbol del costeo."""
+        faltan: list[str] = []
+        vistos: set[tuple[str, str]] = set()
+        pendiente = [(apu_codigo, shift)]
+        while pendiente:
+            clave = pendiente.pop()
+            if clave in vistos:                  # corta ciclos de sub-APUs
+                continue
+            vistos.add(clave)
+            faltan.extend(self._sin_distancia.get(clave, ()))
+            for comp in self._comp_cache.get(clave, ()):
+                if (comp.tipo or "insumo") == "apu" and comp.insumo_codigo:
+                    pendiente.append((comp.insumo_codigo, comp.ref_shift or comp.shift))
+        # dedup preservando el orden de aparición
+        return tuple(dict.fromkeys(faltan))
 
     def claves_cargadas(self) -> list[tuple[str, str]]:
         """(código, turno) de todo lo que hay en el caché de composiciones, incluido
         el cierre de sub-APUs que trajo `precargar`. Lo usa la tabla de impacto para
-        recorrer el árbol sin duplicar la BFS."""
-        return sorted(self._comp_cache.keys())
+        recorrer el árbol sin duplicar la BFS. Un APU sin composición (borrado o
+        inexistente) no cuenta: no hay árbol que recorrer ahí."""
+        return sorted(k for k, comps in self._comp_cache.items() if comps)
+
+    @property
+    def contexto(self):
+        """Solo lectura: las desviaciones se fijan al construir el motor. Con los
+        cachés calientes, cambiarlas mezclaría composiciones de dos proyectos y daría
+        un total plausible y equivocado (mismo criterio que `lista_id`)."""
+        return self._ctx
 
     def _efectivos(self, codigo: str, shift: str, crudos: list) -> list:
         """Composición EFECTIVA del proyecto (regla de transporte + ajustes).
 
         Se aplica ANTES de cachear, así el costeo, el memo de sub-APUs y la
         precarga en lote ven todos la misma composición: un solo camino."""
-        if self._ctx is None:
+        if self._ctx is None or not crudos:
+            # Sin composición no hay nada que desviar: un ajuste no puede INVENTAR
+            # un APU. Si no, un APU borrado de la biblioteca dejaría de caer al
+            # respaldo de `_costear_row` y costearía solo lo agregado, en silencio.
             return crudos
         pend = transporte.pendientes(crudos, codigo, shift, self._ctx.params,
                                      self._ctx.clasificacion)
@@ -119,6 +149,7 @@ class PricingEngine:
         except Exception:
             self._comp_cache.clear()
             self._cache.clear()
+            self._sin_distancia.clear()
 
     def _precargar_lote(self, claves_top) -> None:
         pendientes = {(str(c), s) for c, s in claves_top if c}

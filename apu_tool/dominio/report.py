@@ -164,8 +164,35 @@ def _build_alertas(ws, apus: list[AssembledApu]) -> None:
     _autosize(ws, {1: 8, 2: 45, 3: 12, 4: 10, 5: 14, 6: 60})
 
 
+def _build_desviaciones(ws, parametros, ajustes) -> None:
+    """Con qué distancias, peaje y ajustes se costeó este cuadro. Sin esta hoja,
+    dos cuadros del mismo APU con distancias distintas son indistinguibles."""
+    ws.append(["PARÁMETRO", "VALOR"])
+    _style_header(ws, 1, 2)
+    if parametros is not None:
+        ws.append(["Botadero (km)", parametros.km_botadero])
+        ws.append(["Mezclas asfálticas (km)", parametros.km_mezclas])
+        ws.append(["Granulares y pétreos (km)", parametros.km_granulares])
+        peaje = ("sí" if parametros.peaje_aplica else
+                 "no" if parametros.peaje_aplica is False else "sin definir")
+        ws.append(["¿Hay peaje?", peaje])
+        ws.append(["Valor del peaje", parametros.peaje_valor])
+        ws.cell(row=ws.max_row, column=2).number_format = _MONEY
+    if ajustes:
+        ws.append([])
+        fila = ws.max_row + 1
+        ws.append(["APU", "TURNO", "ACCIÓN", "INSUMO", "NOMBRE", "REND.", "NOTA"])
+        _style_header(ws, fila, 7)
+        for a in ajustes:
+            ws.append([a.apu_codigo, a.shift, a.accion, a.insumo_codigo,
+                       a.insumo_nombre or a.insumo_nuevo_nombre, a.rendimiento, a.nota])
+            ws.cell(row=ws.max_row, column=6).number_format = _REND
+    _autosize(ws, {1: 26, 2: 18, 3: 14, 4: 12, 5: 40, 6: 10, 7: 40})
+
+
 def write_report(apus: list[AssembledApu], path: Path | str,
-                 lista_nombre: str = "Principal") -> Path:
+                 lista_nombre: str = "Principal",
+                 parametros=None, ajustes=()) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     wb = openpyxl.Workbook()
@@ -173,6 +200,10 @@ def write_report(apus: list[AssembledApu], path: Path | str,
     wb.active.title = "RESUMEN"
     _build_desglose(wb.create_sheet("DESGLOSE"), apus)
     _build_alertas(wb.create_sheet("ALERTAS"), apus)
+    # Solo si el proyecto realmente se desvía de la biblioteca.
+    if (parametros is not None and not parametros.vacio) or ajustes:
+        _build_desviaciones(wb.create_sheet("DESVIACIONES DEL PROYECTO"),
+                            parametros, list(ajustes))
     # Metadatos.
     meta = wb.create_sheet("INFO")
     meta.append(["Generado", date.today().isoformat()])

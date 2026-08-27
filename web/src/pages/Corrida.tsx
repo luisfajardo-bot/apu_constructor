@@ -96,6 +96,7 @@ export default function Corrida() {
         duracion_ms: null,
         modo: "activa",
         carpeta_id: null,
+        transporte: null,
         lista_precios_id: vivo.listaId,
         lista_nombre: vivo.listaNombre,
       }
@@ -143,7 +144,18 @@ export default function Corrida() {
           </p>
         </div>
         {!live && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {data.transporte && (
+              <span className="text-xs text-muted-foreground">
+                botadero {data.transporte.km_botadero ?? "—"} km · mezclas{" "}
+                {data.transporte.km_mezclas ?? "—"} · granulares{" "}
+                {data.transporte.km_granulares ?? "—"}
+                {data.transporte.peaje_aplica
+                  ? ` · peaje ${cop(data.transporte.peaje_valor ?? 0)}` : " · sin peaje"}
+                {data.transporte.ajustes > 0
+                  ? ` · ${data.transporte.ajustes} ajustes` : ""}
+              </span>
+            )}
             <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${
               data.modo === "congelada" ? "bg-blue-100 text-blue-800" : "bg-green-100 text-green-800"}`}>
               {data.modo === "congelada" ? "Congelada" : "Activa"}

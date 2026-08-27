@@ -133,6 +133,21 @@ def test_listar_corridas_resuelve_el_contexto_una_vez_por_proyecto(tmp_path, mon
     assert llamadas.count(metro) == 1, llamadas
 
 
+def test_la_vista_de_la_corrida_dice_con_que_distancias_costeo(tmp_path):
+    alm = _alm(tmp_path)
+    metro = alm.carpetas.crear("Metro")
+    alm.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro, km_granulares=32,
+                                                  peaje_aplica=True, peaje_valor=12400))
+    cid = _corrida(alm, metro)
+    meta = svc.vista_corrida(alm, cid)
+    assert meta["carpeta_id"] == metro
+    assert meta["transporte"]["km_granulares"] == 32
+    assert meta["transporte"]["peaje_valor"] == 12400
+    # una corrida sin proyecto no trae distancias
+    otra = _corrida(alm, alm.carpetas.crear("Sin distancias"))
+    assert svc.vista_corrida(alm, otra)["transporte"] is None
+
+
 def test_la_corrida_alerta_el_componente_sin_clasificar(tmp_path):
     alm = _alm(tmp_path)
     # Se borra la clasificación para simular un APU nuevo sin clasificar.

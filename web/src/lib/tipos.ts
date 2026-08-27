@@ -174,6 +174,15 @@ export interface CorridaCreada {
   resumen: Totales;
 }
 
+export interface TransporteCorrida {
+  km_botadero: number | null;
+  km_mezclas: number | null;
+  km_granulares: number | null;
+  peaje_aplica: boolean | null;
+  peaje_valor: number | null;
+  ajustes: number;
+}
+
 export interface CorridaDetalle {
   id: number;
   nombre: string;
@@ -184,6 +193,8 @@ export interface CorridaDetalle {
   totales: Totales;
   duracion_ms: number | null;
   carpeta_id: number | null;
+  // Con qué distancias se está costeando; null = sin proyecto/sin desviaciones.
+  transporte: TransporteCorrida | null;
   lista_precios_id: number | null;
   lista_nombre: string;
 }

@@ -20,7 +20,8 @@ from openpyxl.styles import Font
 
 from apu_tool.nucleo.models import AssembledApu, MatchStatus
 from apu_tool.dominio.report import (_MONEY, _PCT, _REND, _STATUS_LABEL, _TOTAL_FILL,
-                                     _WARN_FILL, _ALERT_FILL, _autosize, _style_header)
+                                     _WARN_FILL, _ALERT_FILL, _autosize, _style_header,
+                                     _build_desviaciones)
 from apu_tool.dominio.alertas import alertas_costeo, filas_alertadas, motivo_alerta
 
 
@@ -170,7 +171,8 @@ def _build_alertas(ws, apus: list[AssembledApu]) -> None:
 
 
 def write_report_categorizado(apus: list[AssembledApu], path: Path | str,
-                              lista_nombre: str = "Principal") -> Path:
+                              lista_nombre: str = "Principal",
+                              parametros=None, ajustes=()) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     grupos = agrupar_por_capitulo(apus)
@@ -181,6 +183,10 @@ def write_report_categorizado(apus: list[AssembledApu], path: Path | str,
     _build_detalle(wb.create_sheet("DETALLE"), grupos)
     _build_apus(wb.create_sheet("APUS"), apus)
     _build_alertas(wb.create_sheet("ALERTAS"), apus)
+    # Solo si el proyecto realmente se desvía de la biblioteca (ver report.py).
+    if (parametros is not None and not parametros.vacio) or ajustes:
+        _build_desviaciones(wb.create_sheet("DESVIACIONES DEL PROYECTO"),
+                            parametros, list(ajustes))
 
     info = wb.create_sheet("INFO")
     info.append(["Generado", date.today().isoformat()])

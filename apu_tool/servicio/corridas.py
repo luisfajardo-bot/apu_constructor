@@ -253,8 +253,9 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
     if meta is None:
         return None
     rows = alm.corridas.get_items(corrida_id)
+    ctx = _contexto(alm, meta)
     pricing = PricingEngine(alm, lista_id=meta.lista_precios_id,
-                            contexto=_contexto(alm, meta))   # COMPARTIDO por la corrida
+                            contexto=ctx)   # COMPARTIDO por la corrida
     pricing.precargar((r.apu_codigo, r.shift) for r in rows if r.apu_codigo)  # lote
     ensambles = _ensamblar_corrida(alm, meta, rows, pricing)
     # Una foto congelada ya se emitió: no tiene pendientes que avisar (evita ruido
@@ -269,6 +270,14 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
         "id": meta.id, "nombre": meta.nombre, "archivo": meta.archivo,
         "estado": meta.estado, "modo": meta.modo,
         "carpeta_id": meta.carpeta_id,
+        # Con qué distancias se está costeando: el encabezado de la corrida lo muestra.
+        "transporte": (None if ctx.params.vacio else {
+            "km_botadero": ctx.params.km_botadero,
+            "km_mezclas": ctx.params.km_mezclas,
+            "km_granulares": ctx.params.km_granulares,
+            "peaje_aplica": ctx.params.peaje_aplica,
+            "peaje_valor": ctx.params.peaje_valor,
+            "ajustes": len(ctx.ajustes)}),
         "lista_precios_id": meta.lista_precios_id,
         "lista_nombre": _nombre_lista(alm, meta.lista_precios_id),
         "duracion_ms": meta.duracion_ms, "items": items,
@@ -498,15 +507,17 @@ def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:
         congelar(alm, corrida_id)
         snaps = alm.corridas.get_snapshots(corrida_id)
     rows = alm.corridas.get_items(corrida_id)
+    ctx = _contexto(alm, meta)
     pricing = PricingEngine(alm, lista_id=meta.lista_precios_id,
-                            contexto=_contexto(alm, meta))   # COMPARTIDO al generar el cuadro
+                            contexto=ctx)   # COMPARTIDO al generar el cuadro
     pricing.precargar((r.apu_codigo, r.shift) for r in rows
                       if r.apu_codigo and r.seq not in snaps)
     assembled = [_assembled_desde_snapshot(r, snaps[r.seq]) if r.seq in snaps
                  else _costear_row(alm, r, pricing) for r in rows]
     stamp = meta.creada_en.replace(":", "").replace("-", "").replace("T", "_")
     out = config.OUTPUT_DIR / f"cuadro_corrida_{corrida_id}_{stamp}.xlsx"
-    write_report(assembled, out, lista_nombre=_nombre_lista(alm, meta.lista_precios_id))
+    write_report(assembled, out, lista_nombre=_nombre_lista(alm, meta.lista_precios_id),
+                 parametros=ctx.params, ajustes=ctx.ajustes)
     alm.corridas.set_cuadro(corrida_id, str(out))
     alm.corridas.set_estado(corrida_id, "finalizada")
     return out

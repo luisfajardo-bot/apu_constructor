@@ -79,6 +79,7 @@ flowchart TD
 
 | Archivo | Responsabilidad |
 | --- | --- |
+| `ajustes.py` | Ajustes puntuales de composición por proyecto: las excepciones que decide el |
 | `app.py` | App FastAPI: monta /api y, si existe el build, sirve el frontend (web/dist). |
 | `apus.py` | Lectura de la biblioteca de APUs (para la página de APUs). |
 | `auditoria.py` | Servicio de auditoría: helper transaccional para registrar eventos y lectura paginada. |

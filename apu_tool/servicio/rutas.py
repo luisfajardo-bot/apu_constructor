@@ -19,6 +19,7 @@ from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.licitacion import read_licitacion
 from apu_tool.dominio.pipeline import BibliotecaVacia, ensure_seeded, generate_sample
+from apu_tool.servicio import ajustes as ajustes_svc
 from apu_tool.servicio import apus as apus_svc
 from apu_tool.servicio import auditoria as auditoria_svc
 from apu_tool.servicio import autoria
@@ -36,8 +37,9 @@ from apu_tool.servicio.dependencias import get_almacen
 from apu_tool.servicio import limites
 from pydantic import BaseModel
 from apu_tool.servicio.esquemas import (
-    ApuEditIn, ApuNuevoIn, CambiosIn, ClasificarIn, ConfirmarIn, ConfirmarLoteIn, EstadoIn,
-    InsumoNuevoIn, ListaPreciosIn, RolIn, StatusOut, TransporteParamsIn, UsuarioInvitarIn)
+    AjusteProyectoIn, ApuEditIn, ApuNuevoIn, CambiosIn, ClasificarIn, ConfirmarIn,
+    ConfirmarLoteIn, EstadoIn, InsumoNuevoIn, ListaPreciosIn, RolIn, StatusOut,
+    TransporteParamsIn, UsuarioInvitarIn)
 
 
 class CarpetaIn(BaseModel):
@@ -746,3 +748,32 @@ def clasificar_transporte(body: ClasificarIn, alm: Almacen = Depends(get_almacen
             alm, [f.model_dump() for f in body.filas], actor=actor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ---- ajustes puntuales por proyecto ----
+@router.get("/carpetas/{carpeta_id}/ajustes")
+def listar_ajustes(carpeta_id: int, alm: Almacen = Depends(get_almacen),
+                   _: object = Depends(requiere_rol("consulta"))):
+    try:
+        return ajustes_svc.listar(alm, carpeta_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/carpetas/{carpeta_id}/ajustes")
+def crear_ajuste(carpeta_id: int, body: AjusteProyectoIn,
+                 alm: Almacen = Depends(get_almacen),
+                 actor=Depends(requiere_rol("editor"))):
+    try:
+        return ajustes_svc.crear(alm, carpeta_id, body.model_dump(), actor=actor)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/carpetas/{carpeta_id}/ajustes/{ajuste_id}")
+def borrar_ajuste(carpeta_id: int, ajuste_id: int,
+                  alm: Almacen = Depends(get_almacen),
+                  actor=Depends(requiere_rol("editor"))):
+    if not ajustes_svc.borrar(alm, carpeta_id, ajuste_id, actor=actor):
+        raise HTTPException(status_code=404, detail="Ajuste no encontrado.")
+    return {"ok": True}

@@ -114,3 +114,18 @@ class ClaseTransporteIn(BaseModel):
 
 class ClasificarIn(BaseModel):
     filas: list[ClaseTransporteIn]
+
+
+class AjusteProyectoIn(BaseModel):
+    apu_codigo: str
+    shift: str
+    accion: str                          # rendimiento | agregar | quitar | reemplazar
+    insumo_codigo: str
+    insumo_nombre: str = ""
+    unidad: str = ""
+    rendimiento: Optional[float] = None
+    insumo_nuevo_codigo: str = ""
+    insumo_nuevo_nombre: str = ""
+    tipo: str = "insumo"
+    ref_shift: str = ""
+    nota: str = ""

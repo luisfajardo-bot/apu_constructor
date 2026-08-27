@@ -623,9 +623,9 @@ function DetalleExpandido({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {detalle.composicion.map((lin, i) => (
+              {detalle.composicion.map((lin) => (
                 <FilaComposicion
-                  key={i}
+                  key={`${lin.insumo_codigo}|${lin.insumo_nombre}`}
                   linea={lin}
                   apuCodigo={detalle.apu_codigo || null}
                   turno={detalle.apu_turno}
@@ -720,6 +720,11 @@ export function FilaComposicion({ linea, apuCodigo, turno, carpetaId, editable, 
             <Button size="xs" onClick={aplicar} disabled={enviando}>
               {enviando ? "Aplicando…" : "Aplicar"}
             </Button>
+            {/* Visible ANTES de aplicar (no solo el `title`, invisible en touch):
+                el ajuste es solo de este proyecto, nunca de la biblioteca. */}
+            <span className="text-[10px] font-medium text-muted-foreground whitespace-nowrap">
+              Solo este proyecto
+            </span>
           </span>
         ) : (
           linea.rendimiento.toLocaleString("es-CO", { maximumFractionDigits: 4 })

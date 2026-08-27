@@ -10,11 +10,22 @@ import { Input } from "@/components/ui/input";
 
 const NUM = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 });
 
-function num(v: string): number | null {
+// Etiquetas visibles de cada campo, compartidas entre el formulario y el
+// mensaje de error de guardar() (para no repetir el texto en dos lugares).
+const ETIQUETAS: Record<string, string> = {
+  km_botadero: "Botadero (km)",
+  km_mezclas: "Mezclas (km)",
+  km_granulares: "Granulares (km)",
+  peaje_valor: "Valor del peaje",
+};
+
+// null = el campo esta vacio a proposito ("esta distancia no aplica").
+// undefined = hay texto que no es un numero: es un error del usuario, no un "no aplica".
+function num(v: string): number | null | undefined {
   const t = v.trim();
   if (!t) return null;
   const n = Number(t.replace(",", "."));
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n) ? n : undefined;
 }
 
 function msg(e: unknown): string {
@@ -46,14 +57,33 @@ export default function DistanciasProyecto() {
   }, [carpetaId]);
 
   async function guardar() {
+    const km_botadero = num(form.km_botadero ?? "");
+    const km_mezclas = num(form.km_mezclas ?? "");
+    const km_granulares = num(form.km_granulares ?? "");
+    const peaje_valor = peaje ? num(form.peaje_valor ?? "") : null;
+
+    // Basura (texto que no es número) bloquea el guardado; vacío ("no aplica")
+    // sigue viajando como null. Ver `num()`.
+    const invalido = ([
+      ["km_botadero", km_botadero],
+      ["km_mezclas", km_mezclas],
+      ["km_granulares", km_granulares],
+      ["peaje_valor", peaje_valor],
+    ] as const).find(([, v]) => v === undefined);
+    if (invalido) {
+      const [campo] = invalido;
+      toast.error(`${ETIQUETAS[campo]}: "${form[campo] ?? ""}" no es un número.`);
+      return;
+    }
+
     setGuardando(true);
     try {
       const payload: Partial<ParametrosTransporte> = {
-        km_botadero: num(form.km_botadero ?? ""),
-        km_mezclas: num(form.km_mezclas ?? ""),
-        km_granulares: num(form.km_granulares ?? ""),
+        km_botadero: km_botadero ?? null,
+        km_mezclas: km_mezclas ?? null,
+        km_granulares: km_granulares ?? null,
         peaje_aplica: peaje,
-        peaje_valor: peaje ? num(form.peaje_valor ?? "") : null,
+        peaje_valor: peaje_valor ?? null,
       };
       setVista(await guardarTransporte(carpetaId, payload));
       toast.success("Distancias del proyecto guardadas. Las corridas activas se recostean.");
@@ -69,11 +99,11 @@ export default function DistanciasProyecto() {
   return (
     <div className="p-4 space-y-4">
       <div className="flex flex-wrap items-end gap-4">
-        <Campo id="km_botadero" etiqueta="Botadero (km)" form={form} setForm={setForm}
+        <Campo id="km_botadero" etiqueta={ETIQUETAS.km_botadero} form={form} setForm={setForm}
                disabled={!puedeEditar} />
-        <Campo id="km_mezclas" etiqueta="Mezclas (km)" form={form} setForm={setForm}
+        <Campo id="km_mezclas" etiqueta={ETIQUETAS.km_mezclas} form={form} setForm={setForm}
                disabled={!puedeEditar} />
-        <Campo id="km_granulares" etiqueta="Granulares (km)" form={form} setForm={setForm}
+        <Campo id="km_granulares" etiqueta={ETIQUETAS.km_granulares} form={form} setForm={setForm}
                disabled={!puedeEditar} />
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={peaje} disabled={!puedeEditar}
@@ -81,7 +111,7 @@ export default function DistanciasProyecto() {
           Peaje
         </label>
         {peaje && (
-          <Campo id="peaje_valor" etiqueta="Valor del peaje" form={form} setForm={setForm}
+          <Campo id="peaje_valor" etiqueta={ETIQUETAS.peaje_valor} form={form} setForm={setForm}
                  disabled={!puedeEditar} />
         )}
         <Button onClick={guardar} disabled={guardando || !puedeEditar}>

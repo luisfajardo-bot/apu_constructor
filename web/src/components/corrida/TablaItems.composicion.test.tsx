@@ -50,6 +50,18 @@ describe("FilaComposicion", () => {
     expect(onCambio).toHaveBeenCalled();
   });
 
+  it("al abrir el editor, el alcance 'solo este proyecto' se ve en el DOM (no solo el title)", () => {
+    render(<table><tbody>
+      <FilaComposicion linea={LINEA} apuCodigo="4390" turno="DIURNO"
+                       carpetaId={7} editable onCambio={() => {}} />
+    </tbody></table>);
+    // Antes de abrir: la única señal es el title (on-hover), no hay texto visible.
+    expect(screen.queryByText(/solo este proyecto/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /ajustar/i }));
+    // Al abrir el editor inline, el alcance queda visible como texto (no title).
+    expect(screen.getByText(/solo este proyecto/i)).toBeTruthy();
+  });
+
   it("sin carpeta o sin permiso no muestra el botón", () => {
     render(<table><tbody>
       <FilaComposicion linea={LINEA} apuCodigo="4390" turno="DIURNO"

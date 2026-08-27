@@ -30,6 +30,14 @@ export default function ClasificacionTransporte() {
   const atipicas = useMemo(
     () => filas.filter((f) => f.volumen < 0.5 || f.volumen > 2).length, [filas]);
 
+  // Lo que realmente escribe "Guardar clasificación": mismo filtro que usa
+  // guardar() de abajo, para que el botón nunca prometa un alcance distinto
+  // del que va a aplicar.
+  const aGuardar = useMemo(
+    () => filas.filter((f) => f.categoria && f.volumen > 0), [filas]);
+  const atipicasAGuardar = useMemo(
+    () => aGuardar.filter((f) => f.volumen < 0.5 || f.volumen > 2).length, [aGuardar]);
+
   function editar(k: string, cambio: Partial<FilaClasificacion>) {
     setFilas((prev) => prev.map((f) => {
       if (clave(f) !== k) return f;
@@ -46,11 +54,10 @@ export default function ClasificacionTransporte() {
   }
 
   async function guardar() {
-    const listas = filas.filter((f) => f.categoria && f.volumen > 0);
-    if (!listas.length) { toast.error("No hay filas con categoría y volumen."); return; }
+    if (!aGuardar.length) { toast.error("No hay filas con categoría y volumen."); return; }
     setGuardando(true);
     try {
-      const r = await clasificar(listas.map((f) => ({
+      const r = await clasificar(aGuardar.map((f) => ({
         apu_codigo: f.apu_codigo, shift: f.shift, insumo_codigo: f.insumo_codigo,
         insumo_nombre: f.insumo_nombre, categoria: f.categoria as CategoriaTransporte,
         volumen: f.volumen, km_base: f.km_base })));
@@ -73,7 +80,11 @@ export default function ClasificacionTransporte() {
           {filas.length} componentes de acarreo · {atipicas} con volumen atípico
         </span>
         <Button onClick={guardar} disabled={guardando}>
-          {guardando ? "Guardando…" : "Guardar clasificación"}
+          {guardando ? "Guardando…" : (
+            `Guardar clasificación (${aGuardar.length} `
+            + `${aGuardar.length === 1 ? "fila" : "filas"})`
+            + (atipicasAGuardar > 0 ? ` · ${atipicasAGuardar} con volumen atípico` : "")
+          )}
         </Button>
       </div>
       <div className="overflow-x-auto">

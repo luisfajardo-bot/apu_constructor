@@ -1,12 +1,14 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import * as api from "@/api/transporte";
 import DistanciasProyecto from "@/pages/DistanciasProyecto";
 
 // El componente usa useAuth() para saber si puede editar (mismo patrón que
 // Insumos.test.tsx); sin <AuthProvider> real en el árbol de test, se mockea.
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ perfil: { rol: "editor" } }) }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 // `@testing-library/user-event` y `jest-dom` (toBeInTheDocument) no son
 // dependencias de este repo (ver otros tests de páginas, p.ej.
 // Apus.duplicar.test.tsx): se usa `fireEvent` y `toBeTruthy()` en su lugar.
@@ -53,7 +55,44 @@ describe("DistanciasProyecto", () => {
     const botadero = await screen.findByLabelText(/botadero/i);
     fireEvent.change(botadero, { target: { value: "40" } });
     fireEvent.click(screen.getByRole("button", { name: /guardar/i }));
-    await waitFor(() => expect(guardar).toHaveBeenCalledWith(
-      7, expect.objectContaining({ km_botadero: 40 })));
+    // El backend hace reemplazo total: si algún día alguien manda solo lo que
+    // cambió, borra en silencio los otros parámetros del proyecto. Se fijan
+    // las 5 claves (no solo su presencia con objectContaining) para que este
+    // test explote si el PUT deja de mandar alguna.
+    await waitFor(() => expect(guardar).toHaveBeenLastCalledWith(7, {
+      km_botadero: 40,
+      km_mezclas: null,
+      km_granulares: 32,
+      peaje_aplica: true,
+      peaje_valor: 12400,
+    }));
+  });
+
+  it("basura en un km bloquea el guardado y avisa cuál campo está mal", async () => {
+    vi.spyOn(api, "verTransporte").mockResolvedValue(VISTA as never);
+    const guardar = vi.spyOn(api, "guardarTransporte").mockResolvedValue(VISTA as never);
+    // vitest.config.ts no limpia mocks entre it(): el spy acumula historial de
+    // tests anteriores. Se compara contra este conteo, no contra 0.
+    const llamadasPrevias = guardar.mock.calls.length;
+    montar();
+    const mezclas = await screen.findByLabelText(/mezclas/i);
+    fireEvent.change(mezclas, { target: { value: "3g" } });
+    fireEvent.click(screen.getByRole("button", { name: /guardar/i }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const mensaje = vi.mocked(toast.error).mock.calls.at(-1)?.[0] as string;
+    expect(mensaje).toMatch(/mezclas/i);
+    expect(mensaje).toMatch(/3g/);
+    expect(guardar.mock.calls.length).toBe(llamadasPrevias);
+  });
+
+  it("vaciar un km sí lo guarda como null (no aplica)", async () => {
+    vi.spyOn(api, "verTransporte").mockResolvedValue(VISTA as never);
+    const guardar = vi.spyOn(api, "guardarTransporte").mockResolvedValue(VISTA as never);
+    montar();
+    const botadero = await screen.findByLabelText(/botadero/i);
+    fireEvent.change(botadero, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: /guardar/i }));
+    await waitFor(() => expect(guardar).toHaveBeenLastCalledWith(
+      7, expect.objectContaining({ km_botadero: null })));
   });
 });

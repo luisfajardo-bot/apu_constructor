@@ -71,6 +71,23 @@ describe("ClasificacionTransporte", () => {
     expect(screen.queryByText(/nan/i)).toBeNull();
   });
 
+  it("el botón muestra cuántas filas se van a guardar (excluye las sin categoría)", async () => {
+    const lista = {
+      ...LISTA,
+      items: [
+        { ...LISTA.items[0], categoria_sugerida: null },
+        LISTA.items[1],
+      ],
+    };
+    vi.spyOn(api, "listarComponentes").mockResolvedValue(lista as never);
+    montar();
+    await screen.findByText("SUMIDERO");
+    // 2 filas en total, pero solo 1 llega precargada con categoría (la otra
+    // quedó sin categoria_sugerida): el botón cuenta lo que va a escribir, no
+    // el total de filas.
+    expect(screen.getByRole("button", { name: /guardar clasificación \(1 fila\)/i })).toBeTruthy();
+  });
+
   it("no manda filas sin categoría al guardar", async () => {
     const lista = {
       ...LISTA,

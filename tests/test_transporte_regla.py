@@ -32,7 +32,7 @@ def test_clase_transporte_es_inmutable():
 
 
 from apu_tool.dominio import transporte
-from apu_tool.nucleo.models import ApuComponent
+from apu_tool.nucleo.models import AjusteProyecto, ApuComponent
 
 
 def _comp(cod, nombre, unidad="M3-KM", rend=26.25, tipo="insumo", hist=1000.0):
@@ -124,3 +124,40 @@ def test_es_peaje_y_es_derechos():
     assert transporte.es_peaje(_comp("INT3", "PEAJE", unidad="GLB")) is True
     assert transporte.es_peaje(_comp("INT3", "OTRA COSA", unidad="GLB")) is False
     assert transporte.es_derechos(_comp("7231", "DERECHOS DE BOTADERO")) is True
+
+
+def test_ajuste_con_codigo_nocturno_encuentra_su_componente():
+    """Un ajuste guardado con el código literal de la composición nocturna
+    ("INT3 N") tiene que matchear: si no, es un no-op silencioso."""
+    comps = [_comp("INT3 N", "PEAJE", unidad="GLB", rend=1.0)]
+    out = transporte.aplicar(comps, "4200", "DIURNO", ajustes=[AjusteProyecto(
+        apu_codigo="4200", shift="DIURNO", accion="quitar",
+        insumo_codigo="INT3 N", insumo_nombre="PEAJE")])
+    assert out == []
+
+
+def test_agregar_no_duplica_al_reaplicar_sobre_su_salida():
+    aj = AjusteProyecto(apu_codigo="4200", shift="DIURNO", accion="agregar",
+                        insumo_codigo="9001", insumo_nombre="GEOTEXTIL NT 2000",
+                        unidad="M2", rendimiento=1.1)
+    primera = transporte.aplicar([], "4200", "DIURNO", ajustes=[aj])
+    segunda = transporte.aplicar(primera, "4200", "DIURNO", ajustes=[aj])
+    assert len(primera) == 1 and len(segunda) == 1
+
+
+def test_ajuste_sin_rendimiento_no_tumba_el_costeo():
+    comps = [_comp("6878", "TRANSPORTE DE BASES ASFALTICAS")]
+    out = transporte.aplicar(comps, "4200", "DIURNO", ajustes=[AjusteProyecto(
+        apu_codigo="4200", shift="DIURNO", accion="rendimiento",
+        insumo_codigo="6878", insumo_nombre="TRANSPORTE DE BASES ASFALTICAS",
+        rendimiento=None)])
+    assert out == comps
+
+
+def test_km_en_cero_no_reescala_y_es_pendiente():
+    """Un km inválido no puede dejar el acarreo en $0 en silencio."""
+    comps = [_comp("6878", "TRANSPORTE DE BASES ASFALTICAS")]
+    cls = _clase("6878", "TRANSPORTE DE BASES ASFALTICAS", "mezclas", 1.05)
+    p = ParametrosProyecto(km_mezclas=0)
+    assert transporte.aplicar(comps, "4200", "DIURNO", p, cls, ())[0].rendimiento == 26.25
+    assert transporte.pendientes(comps, "4200", "DIURNO", p, cls) == ("6878",)

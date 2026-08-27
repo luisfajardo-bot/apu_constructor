@@ -56,7 +56,11 @@ def _codigo_base(codigo: str) -> str:
 
 
 def _mismo(comp: ApuComponent, codigo: str, nombre: str) -> bool:
-    return (_codigo_base(comp.insumo_codigo) == codigo
+    """Identidad de un componente: código base (sin la marca nocturna) + nombre
+    normalizado. Los DOS lados se normalizan: un ajuste guardado con el código
+    literal de una composición nocturna ("3017 N") tiene que encontrar su
+    componente igual. Mismo criterio que `autoria._es_gemelo_nocturno`."""
+    return (_codigo_base(comp.insumo_codigo) == _codigo_base(codigo)
             and normalizar(comp.insumo_nombre) == normalizar(nombre))
 
 
@@ -87,6 +91,15 @@ def _escalable(comp: ApuComponent) -> bool:
             and not es_peaje(comp) and not es_derechos(comp))
 
 
+def _km_util(params: ParametrosProyecto, categoria: str) -> Optional[float]:
+    """El km de una categoría solo sirve si es > 0. Un 0 (o un negativo) es un dato
+    inválido, no una distancia: reescalar con él dejaría el acarreo en $0 y la regla
+    de negocio prohíbe un $0 silencioso, así que se trata como 'sin definir' y lo
+    delata `pendientes`."""
+    km = params.km(categoria)
+    return km if km is not None and km > 0 else None
+
+
 def pendientes(componentes: Sequence[ApuComponent], apu_codigo: str, shift: str,
                params: Optional[ParametrosProyecto],
                clasificacion: Optional[Clasificacion]) -> tuple[str, ...]:
@@ -100,7 +113,8 @@ def pendientes(componentes: Sequence[ApuComponent], apu_codigo: str, shift: str,
     for c in componentes:
         if not _escalable(c):
             continue
-        if _clase_de(c, apu_codigo, shift, clasificacion) is None:
+        cls = _clase_de(c, apu_codigo, shift, clasificacion)
+        if cls is None or _km_util(params, cls.categoria) is None:
             faltan.append(c.insumo_codigo)
     return tuple(faltan)
 
@@ -136,7 +150,7 @@ def _aplicar_regla(comps: list[ApuComponent], apu_codigo: str, shift: str,
             salida.append(c)               # volumen, no distancia
             continue
         cls = _clase_de(c, apu_codigo, shift, clasificacion)
-        km = params.km(cls.categoria) if cls is not None else None
+        km = _km_util(params, cls.categoria) if cls is not None else None
         if cls is None or km is None:
             salida.append(c)               # sin clasificar o sin km: intacto (ver pendientes)
             continue
@@ -158,14 +172,21 @@ def _aplicar_ajustes(comps: list[ApuComponent], apu_codigo: str, shift: str,
 
 def _un_ajuste(comps: list[ApuComponent], a: AjusteProyecto,
                apu_codigo: str, shift: str) -> list[ApuComponent]:
+    if a.accion in ("rendimiento", "agregar") and not (a.rendimiento and a.rendimiento > 0):
+        # Fila corrupta (la API exige rendimiento > 0 al crearla): se ignora este
+        # ajuste en vez de tumbar el costeo de toda la corrida con un TypeError.
+        return comps
     if a.accion == "quitar":
         return [c for c in comps if not _mismo(c, a.insumo_codigo, a.insumo_nombre)]
     if a.accion == "reemplazar":
         # `precio_unitario_hist=0.0` a propósito: el histórico embebido es del insumo
         # VIEJO. Conservarlo costearía el insumo nuevo con el precio del viejo en
-        # silencio; con 0 cae a "sin precio" y la alerta lo delata.
+        # silencio; con 0 cae a "sin precio" y la alerta lo delata. La unidad nueva
+        # gana si el ajuste la trae: dejar la vieja podría hacer que una pasada
+        # futura de la regla trate el insumo nuevo como acarreo (M3-KM) por error.
         return [replace(c, insumo_codigo=a.insumo_nuevo_codigo,
                         insumo_nombre=a.insumo_nuevo_nombre,
+                        unidad=(a.unidad or c.unidad),
                         precio_unitario_hist=0.0)
                 if _mismo(c, a.insumo_codigo, a.insumo_nombre) else c
                 for c in comps]

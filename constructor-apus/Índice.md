@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 48 planes, 55 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 49 planes, 55 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -87,6 +87,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 48 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-08-27 | [[Planes/2026-08-27-distancias-transporte-proyecto|Distancias de transporte y ajustes por proyecto — Plan de implementación]] |
 | 2026-08-10 | [[Planes/2026-08-10-login-google|Ingresar con la cuenta de Google — Implementation Plan]] |
 | 2026-08-10 | [[Planes/2026-08-10-alta-sin-duplicados|Alta sin duplicados (insumos y APUs) — Implementation Plan]] |
 | 2026-08-06 | [[Planes/2026-08-06-presencia-y-busqueda-relevante|Presencia en línea + búsqueda por relevancia — Plan de implementación]] |

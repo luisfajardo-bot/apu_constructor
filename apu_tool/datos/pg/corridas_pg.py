@@ -69,6 +69,17 @@ class CorridasPg:
         except psycopg.errors.ForeignKeyViolation as e:
             raise CorridaEliminada(corrida_id) from e
 
+    def borrar_items(self, corrida_id: int, seqs, conn=None) -> int:
+        lista = [int(s) for s in seqs]
+        if not lista:
+            return 0
+        sql = "DELETE FROM corridas.corrida_item WHERE corrida_id=%s AND seq = ANY(%s)"
+        params = (int(corrida_id), lista)
+        if conn is not None:
+            return conn.execute(sql, params).rowcount
+        with self.cx.connection() as c:
+            return c.execute(sql, params).rowcount
+
     def actualizar_eleccion(self, corrida_id: int, seq: int, *, status: str,
                             apu_codigo: Optional[str], apu_nombre: str, unidad: str,
                             shift: str, origen: str, confianza: float,

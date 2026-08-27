@@ -171,7 +171,7 @@ git commit -m "feat(datos): get_por_email y reasignar_user_id en el repo de perf
 
 **Interfaces:**
 - Consumes: `alm.perfiles.get_por_email(email)` y `alm.perfiles.reasignar_user_id(viejo, nuevo, conn=...)` de Task 1.
-- Produces: `resolver_perfil(alm, user_id: str, email: str, email_verificado: bool = False) -> Perfil`. El default `False` mantiene compatibles las llamadas de 3 argumentos que ya existen en `tests/test_auth_rbac.py`, y significa "sin prueba de que el email sea suyo, no se adopta nada".
+- Produces: `resolver_perfil(alm, user_id: str, email: str, identidad_verificada: bool = False) -> Perfil`. El default `False` mantiene compatibles las llamadas de 3 argumentos que ya existen en `tests/test_auth_rbac.py`, y significa "sin prueba de que el email sea suyo, no se adopta nada". También `identidad_verificada(claims: dict) -> bool`, función pura que arma ese bool leyendo `amr`/`app_metadata` — nunca `user_metadata`, que el propio usuario puede escribir con la anon key.
 
 - [ ] **Step 1: Escribir los tests que fallan**
 
@@ -186,7 +186,7 @@ import pytest
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Perfil
-from apu_tool.servicio.auth import ErrorAuth, resolver_perfil
+from apu_tool.servicio.auth import ErrorAuth, identidad_verificada, resolver_perfil
 
 
 def _alm(tmp_path, monkeypatch):
@@ -238,10 +238,15 @@ def test_dos_perfiles_con_el_mismo_email_no_se_adivina(tmp_path, monkeypatch):
 
 
 def test_perfil_adoptado_inactivo_no_se_cuela(tmp_path, monkeypatch):
+    """Un perfil inactivo no se adopta: no se re-clava una fila muerta. Cae en el mismo
+    403 de "no invitado" de siempre (no en "Usuario inactivo.", porque nunca llegó a
+    resolverse ningún perfil), y el perfil viejo queda intacto, sin moverse."""
     alm = _alm(tmp_path, monkeypatch)
     alm.perfiles.upsert(Perfil("viejo", "ana@obra.co", "editor", "inactivo"))
-    with pytest.raises(ErrorAuth, match="inactivo"):
+    with pytest.raises(ErrorAuth, match="no invitado"):
         resolver_perfil(alm, "nuevo", "ana@obra.co", True)
+    assert alm.perfiles.get("viejo").estado == "inactivo"   # intacto, no se movió
+    assert alm.perfiles.get("nuevo") is None
 
 
 def test_email_con_otro_caso_y_espacios_igual_adopta(tmp_path, monkeypatch):
@@ -261,54 +266,115 @@ def test_sin_perfil_y_sin_ser_admin_sigue_denegando(tmp_path, monkeypatch):
     alm = _alm(tmp_path, monkeypatch)
     with pytest.raises(ErrorAuth):
         resolver_perfil(alm, "ajeno", "ajeno@gmail.com", True)
+
+
+@pytest.mark.parametrize("claims, esperado", [
+    # El ataque que rompía la guarda vieja: user_metadata lo escribe el propio usuario
+    # con la anon key (updateUser({data})), así que declararse verificado ahí no cuenta.
+    ({"user_metadata": {"email_verified": True}}, False),
+    ({"amr": [{"method": "oauth"}]}, True),
+    ({"amr": [{"method": "password"}]}, False),
+    ({"app_metadata": {"providers": ["google"]}}, True),
+    ({"app_metadata": {"provider": "email"}}, False),
+    ({}, False),
+    ({"amr": "no-es-lista"}, False),           # claim con forma inesperada: no revienta
+    ({"app_metadata": None}, False),           # idem
+])
+def test_identidad_verificada_ignora_user_metadata_y_exige_proveedor_externo(claims, esperado):
+    assert identidad_verificada(claims) is esperado
 ```
 
 - [ ] **Step 2: Correr los tests y verificar que fallan**
 
 Run: `python -m pytest tests/test_auth_google.py -v`
-Expected: FAIL. `resolver_perfil` acepta 3 argumentos (`TypeError`) y no adopta nada.
+Expected: FAIL. `resolver_perfil` acepta 3 argumentos (`TypeError`), `identidad_verificada`
+no existe (`ImportError`), y no adopta nada.
 
 - [ ] **Step 3: Escribir la adopción**
 
-En `apu_tool/servicio/auth.py`, agregar `from dataclasses import replace` a los imports y
-reemplazar `resolver_perfil`:
+En `apu_tool/servicio/auth.py`, agregar `Optional` al import de `typing` y reemplazar
+`resolver_perfil`:
 
 ```python
+# Proveedores externos cuya verificación de identidad aceptamos para adoptar un
+# perfil por email. Solo Google está habilitado en Supabase hoy.
+_PROVEEDORES_CONFIABLES = {"google"}
+_METODOS_PROVEEDOR = {"oauth"}
+
+
+def identidad_verificada(claims: dict) -> bool:
+    """True si un proveedor externo (Google) respalda esta identidad.
+
+    Lee SOLO claims que pone GoTrue y el usuario no puede escribir:
+
+    - `amr`: los métodos de autenticación de ESTA sesión, `[{method, timestamp}]`.
+      Es la señal más precisa, y es la que se prefiere.
+    - `app_metadata.provider(s)`: los proveedores vinculados a la cuenta. Solo se
+      cambian con la service_role. Es el respaldo si el token no trae `amr`.
+
+    NUNCA lee `user_metadata`: ese bolsillo lo escribe el propio usuario con
+    `updateUser({data})` y la anon key pública, así que no sirve para autorizar.
+    Es un invariante de este repo (ver docs/auditoria-codigo-2026-07-01.md).
+    """
+    amr = claims.get("amr") or []
+    if any(isinstance(m, dict) and m.get("method") in _METODOS_PROVEEDOR for m in amr):
+        return True
+    app = claims.get("app_metadata") or {}
+    provs = app.get("providers") or ([app["provider"]] if app.get("provider") else [])
+    return any(p in _PROVEEDORES_CONFIABLES for p in provs)
+
+
 def _adoptar_por_email(alm: Almacen, user_id: str, email: str) -> Optional[Perfil]:
-    """Re-clava a `user_id` el perfil de ese email, si hay EXACTAMENTE uno. None si no.
+    """Re-clava a `user_id` el perfil de ese email, si hay EXACTAMENTE uno y está activo.
 
     Es lo que permite que un invitado entre con Google cuando Supabase le entrega un
-    `user_id` distinto al que creó la invitación. El llamador ya verificó que el email
-    viene verificado por el proveedor: sin eso, alguien que se registre con el correo de
-    otro y no lo confirme se quedaría con su perfil (y con su rol).
+    `user_id` distinto al que creó la invitación. El llamador ya verificó que la
+    identidad viene respaldada por un proveedor externo: sin eso, alguien que declare su
+    propio `user_metadata.email_verified = true` (algo que puede hacer con la anon key,
+    sin que nadie lo confirme) se quedaría con el perfil de otro y su rol.
 
     Con dos perfiles del mismo email no se adivina: devuelve None y el llamador deniega.
-    `perfiles.email` no es UNIQUE y en producción ya hubo usuarios duplicados."""
+    `perfiles.email` no es UNIQUE y en producción ya hubo usuarios duplicados.
+
+    Un perfil inactivo no se adopta: no tiene sentido re-clavar una fila muerta (en
+    producción hay perfiles huérfanos de usuarios borrados en Supabase), y así esta
+    puerta no toca nada en el caso que de todos modos va a terminar denegando (cae en
+    el mismo 403 de "no invitado" de siempre)."""
+    email = (email or "").strip().lower()
+    if not email:
+        return None
     candidatos = alm.perfiles.get_por_email(email)
     if len(candidatos) != 1:
         return None
     viejo = candidatos[0]
+    if viejo.estado != "activo":
+        return None
     with alm.transaccion("seguridad") as conn:
         alm.perfiles.reasignar_user_id(viejo.user_id, user_id, conn=conn)
         registrar_auditoria(alm, conn, None, "usuario.vincular_identidad", "usuario",
                             user_id, antes={"user_id": viejo.user_id, "email": viejo.email},
                             despues={"user_id": user_id, "email": viejo.email,
                                      "rol": viejo.rol})
-    return replace(viejo, user_id=user_id)
+    # Se relee en vez de construir con dataclasses.replace: si el UPDATE movió 0 filas
+    # (rowcount ignorado por reasignar_user_id), esto devuelve None y la puerta deniega,
+    # en vez de fabricar un Perfil con el rol de la víctima para una fila que no existe.
+    return alm.perfiles.get(user_id)
 
 
 def resolver_perfil(alm: Almacen, user_id: str, email: str,
-                    email_verificado: bool = False) -> Perfil:
+                    identidad_verificada: bool = False) -> Perfil:
     """Devuelve el Perfil activo del usuario; bootstrap admin por APU_ADMIN_EMAILS.
 
-    `email_verificado` es lo que dice el proveedor de identidad (Google siempre manda
-    true). Solo con eso en true se intenta la adopción por email. El default es False
-    para que la ausencia de prueba nunca adopte nada.
+    `identidad_verificada` es true solo si un proveedor externo (Google) respalda esta
+    sesión — la arma la función `identidad_verificada()` de este mismo módulo a partir
+    de los claims del JWT (`amr`/`app_metadata`, nunca `user_metadata`). Solo con eso en
+    true se intenta la adopción por email. El default es False para que la ausencia de
+    prueba nunca adopte nada.
 
     Lanza ErrorAuth si el usuario está inactivo o no está autorizado (no invitado).
     """
     p = alm.perfiles.get(user_id)
-    if p is None and email_verificado:
+    if p is None and identidad_verificada:
         p = _adoptar_por_email(alm, user_id, email)
     if p is not None:
         if p.estado != "activo":
@@ -326,8 +392,6 @@ def resolver_perfil(alm: Almacen, user_id: str, email: str,
     raise ErrorAuth("Usuario no autorizado (no invitado).")
 ```
 
-Agregar `Optional` al import de typing del archivo si no está.
-
 - [ ] **Step 4: Pasar el claim desde `usuario_actual`**
 
 En `apu_tool/servicio/auth.py::usuario_actual`:
@@ -335,12 +399,8 @@ En `apu_tool/servicio/auth.py::usuario_actual`:
 ```python
     user_id = claims.get("sub", "")
     email = claims.get("email", "")
-    # Lo pone el proveedor de identidad: Google manda true; un signup por contraseña sin
-    # confirmar, no. Es la única prueba de que el email es suyo, y de eso depende la
-    # adopción por email de resolver_perfil.
-    verificado = bool((claims.get("user_metadata") or {}).get("email_verified"))
     try:
-        return resolver_perfil(alm, user_id, email, verificado)
+        return resolver_perfil(alm, user_id, email, identidad_verificada(claims))
     except ErrorAuth as e:
         raise HTTPException(status_code=403, detail=str(e))
 ```
@@ -348,7 +408,8 @@ En `apu_tool/servicio/auth.py::usuario_actual`:
 - [ ] **Step 5: Correr los tests y verificar que pasan**
 
 Run: `python -m pytest tests/test_auth_google.py -v`
-Expected: PASS los 8.
+Expected: PASS los 16 (8 de `resolver_perfil` + 8 casos parametrizados de
+`identidad_verificada`, incluido el caso del ataque de `user_metadata`).
 
 - [ ] **Step 6: Correr la suite completa**
 
@@ -550,13 +611,15 @@ Necesita `SUPABASE_URL` y `APU_ADMIN_EMAILS` en el entorno, o todo `/api` respon
 
 ## Notas de la auto-revisión
 
-- **Cobertura del spec:** los dos métodos del repo (Task 1), la adopción con sus tres
-  guardas y el claim `email_verified` (Task 2), el botón y el SVG inline (Task 3), los
-  pasos manuales (Task 4), la verificación en navegador (Task 5). La CSP y `AuthProvider`
-  no se tocan, como dice el spec.
+- **Cobertura del spec:** los dos métodos del repo (Task 1), la adopción con sus guardas
+  y `identidad_verificada(claims)` leyendo `amr`/`app_metadata` (nunca `user_metadata`)
+  (Task 2), el botón y el SVG inline (Task 3), los pasos manuales (Task 4), la
+  verificación en navegador (Task 5). La CSP y `AuthProvider` no se tocan, como dice el
+  spec.
 - **Consistencia de nombres:** `get_por_email(email) -> list[Perfil]`,
   `reasignar_user_id(viejo, nuevo, conn=None)`, `_adoptar_por_email(alm, user_id, email)`,
-  `resolver_perfil(alm, user_id, email, email_verificado=False)`, la acción de auditoría
+  `resolver_perfil(alm, user_id, email, identidad_verificada=False)`,
+  `identidad_verificada(claims: dict) -> bool`, la acción de auditoría
   `usuario.vincular_identidad`. Los mismos en todas las tareas.
 - **Riesgo conocido:** si Supabase sí vincula la identidad, la adopción no corre nunca en
   producción y queda cubierta solo por tests. Está declarado en el spec y es aceptado: es

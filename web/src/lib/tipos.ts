@@ -49,6 +49,36 @@ export interface ItemCuadro {
   margen_total: number;
 }
 
+/** Una línea tal como la leyó el Excel, antes de armarse. */
+export interface LineaPreview {
+  item: string;
+  descripcion: string;
+  unidad: string;
+  cantidad: number;
+  precio_contractual: number;
+  shift: string;
+  /** Presente solo en `duplicadas`: el seq de la línea que ya está en la corrida. */
+  seq_existente?: number;
+}
+
+export interface PreviewLineas {
+  total: number;
+  nuevas: LineaPreview[];
+  duplicadas: LineaPreview[];
+  modo: string;
+  tope: number;
+}
+
+/** Línea cargada a mano. `shift` vacío = el turno por defecto de la corrida. */
+export interface LineaNueva {
+  descripcion: string;
+  unidad?: string;
+  cantidad?: number;
+  precio_contractual?: number;
+  shift?: string;
+  item?: string;
+}
+
 export interface Candidato {
   apu_codigo: string;
   apu_nombre: string;

@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 49 planes, 55 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 50 planes, 56 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -17,9 +17,12 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 49 plane
 ## Runbooks
 
 - [[Runbooks/runbook-correo-resend-smtp|Runbook — Correo transaccional con Resend + Supabase (SMTP)]]
+- [[Runbooks/runbook-login-google|Runbook — Login con Google (Supabase Auth)]]
 
 ## Otros
 
+- [[Otros/estado-agregar-lineas-corrida|Estado — agregar líneas a una corrida activa]]
+- [[Otros/estado-login-google|Dónde quedó el login con Google]]
 - [[Otros/listas-precios-np|Listas de precios y APUs de No Previstos (NP)]]
 - [[Otros/smoke-test-listas-np|Smoke test — Listas de precios / APUs de No Previstos (NP)]]
 
@@ -28,6 +31,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 49 plane
 | Fecha | Título |
 | --- | --- |
 | 2026-08-26 | [[Specs/2026-08-26-distancias-transporte-proyecto-design|Distancias de transporte y ajustes por proyecto]] |
+| 2026-08-18 | [[Specs/2026-08-18-agregar-lineas-corrida-design|Agregar líneas a una corrida activa]] |
 | 2026-08-10 | [[Specs/2026-08-10-sin-duplicados-alta-design|Alta sin códigos ni nombres repetidos (insumos y APUs)]] |
 | 2026-08-10 | [[Specs/2026-08-10-login-google-design|Ingresar con la cuenta de Google]] |
 | 2026-08-06 | [[Specs/2026-08-06-presencia-y-busqueda-relevante-design|Presencia en línea + búsqueda ordenada por relevancia]] |
@@ -88,6 +92,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 49 plane
 | Fecha | Título |
 | --- | --- |
 | 2026-08-27 | [[Planes/2026-08-27-distancias-transporte-proyecto|Distancias de transporte y ajustes por proyecto — Plan de implementación]] |
+| 2026-08-18 | [[Planes/2026-08-18-agregar-lineas-corrida|Agregar líneas a una corrida activa — Plan de implementación]] |
 | 2026-08-10 | [[Planes/2026-08-10-login-google|Ingresar con la cuenta de Google — Implementation Plan]] |
 | 2026-08-10 | [[Planes/2026-08-10-alta-sin-duplicados|Alta sin duplicados (insumos y APUs) — Implementation Plan]] |
 | 2026-08-06 | [[Planes/2026-08-06-presencia-y-busqueda-relevante|Presencia en línea + búsqueda por relevancia — Plan de implementación]] |

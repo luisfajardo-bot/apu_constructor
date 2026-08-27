@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import TablaItems from "@/components/corrida/TablaItems";
+import { DialogoAgregarLineas } from "@/components/corrida/DialogoAgregarLineas";
 import { getCorrida, descargarCuadro, congelarCorrida, activarCorrida } from "@/api/corridas";
 import { cop, pct } from "@/lib/moneda";
 import { fmtDuracion } from "@/lib/tiempo";
@@ -38,6 +39,7 @@ export default function Corrida() {
   const [corrida, setCorrida] = useState<CorridaDetalle | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [agregando, setAgregando] = useState(false);
   const control = useCorridaTabla(corrida?.items ?? []);
 
   async function cambiarModo(accion: "congelar" | "activar") {
@@ -164,6 +166,11 @@ export default function Corrida() {
               onClick={() => cambiarModo(data.modo === "congelada" ? "activar" : "congelar")}>
               {data.modo === "congelada" ? "Activar" : "Congelar"}
             </Button>
+            {data.modo !== "congelada" && data.estado !== "armando" && (
+              <Button size="sm" variant="outline" onClick={() => setAgregando(true)}>
+                Agregar líneas
+              </Button>
+            )}
             <Button size="sm" variant="outline"
               onClick={() => descargarCuadro(corridaId).catch((e) =>
                 toast.error(e instanceof Error ? e.message : "No se pudo descargar el cuadro."))}>
@@ -222,6 +229,15 @@ export default function Corrida() {
         puedeEditar={puede(perfil?.rol, "editor")}
         carpetaId={data.carpeta_id}
       />
+
+      {agregando && (
+        <DialogoAgregarLineas
+          open
+          corridaId={corridaId}
+          onOpenChange={(v) => { if (!v) setAgregando(false); }}
+          onAgregado={(c) => { setCorrida(c); setAgregando(false); }}
+        />
+      )}
     </div>
   );
 }

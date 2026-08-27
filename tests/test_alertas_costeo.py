@@ -66,7 +66,11 @@ def test_alerta_de_distancia_no_aplicada():
                        shift="DIURNO", componentes=[comp], costo_unitario=26250,
                        status=MatchStatus.CONFIRMED, confianza=1.0)
     assert alertas_costeo(ens) == []                     # sin proyecto: sin alerta
-    motivos = alertas_costeo(ens, sin_distancia=("7462",))
+    ens_pendiente = AssembledApu(item=item, apu_codigo="4390", apu_nombre="RELLENO",
+                                 unidad="M3", shift="DIURNO", componentes=[comp],
+                                 costo_unitario=26250, status=MatchStatus.CONFIRMED,
+                                 confianza=1.0, sin_distancia=("7462",))
+    motivos = alertas_costeo(ens_pendiente)
     assert motivos == ["7462 TRANSPORTE DE PETREOS: distancia del proyecto no aplicada"]
 
 
@@ -81,8 +85,9 @@ def test_alerta_de_pendiente_que_vive_en_un_subapu():
                           tipo="apu", ref_shift="DIURNO")
     ens = AssembledApu(item=item, apu_codigo="4390", apu_nombre="RELLENO", unidad="M3",
                        shift="DIURNO", componentes=[sub], costo_unitario=26500,
-                       status=MatchStatus.CONFIRMED, confianza=1.0)
-    motivos = alertas_costeo(ens, en_subapus=(("3017", "7462"),))
+                       status=MatchStatus.CONFIRMED, confianza=1.0,
+                       en_subapus=(("3017", "7462"),))
+    motivos = alertas_costeo(ens)
     assert motivos == ["7462: distancia del proyecto no aplicada (en el sub-APU 3017)"]
 
 
@@ -103,6 +108,7 @@ def test_el_codigo_repetido_no_confunde_las_dos_lineas():
                           tipo="apu", ref_shift="DIURNO")
     ens = AssembledApu(item=item, apu_codigo="4390", apu_nombre="RELLENO", unidad="M3",
                        shift="DIURNO", componentes=[arriba, sub], costo_unitario=60100,
-                       status=MatchStatus.CONFIRMED, confianza=1.0)
-    motivos = alertas_costeo(ens, sin_distancia=(), en_subapus=(("3017", "7462"),))
+                       status=MatchStatus.CONFIRMED, confianza=1.0,
+                       en_subapus=(("3017", "7462"),))
+    motivos = alertas_costeo(ens)
     assert motivos == ["7462: distancia del proyecto no aplicada (en el sub-APU 3017)"]

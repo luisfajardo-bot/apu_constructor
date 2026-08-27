@@ -203,3 +203,21 @@ def test_alerta_del_pendiente_de_un_subapu_menciona_el_subapu(tmp_path):
     alertas = svc.vista_corrida(alm, cid)["items"][0]["alertas_costeo"]
     assert any("distancia del proyecto no aplicada" in a and "sub-APU 3017" in a
               for a in alertas), alertas
+
+
+def test_el_cuadro_generado_alerta_el_pendiente_de_un_subapu(tmp_path):
+    """El cuadro es el entregable: `generar_cuadro` congela la corrida antes de
+    escribir el Excel, y la alerta tiene que sobrevivir esa vuelta por el snapshot."""
+    import openpyxl
+    alm = _alm_con_subapu(tmp_path)
+    metro = alm.carpetas.crear("Metro")
+    alm.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro, km_botadero=34))
+    items = [LicitacionItem(item="1", descripcion="RELLENO", unidad="M3", cantidad=1,
+                            precio_contractual=100000.0, shift="DIURNO")]
+    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False, carpeta_id=metro)
+    svc.confirmar_item(alm, cid, 0, "4390", "DIURNO")
+    out = svc.generar_cuadro(alm, cid)
+    ws = openpyxl.load_workbook(out)["ALERTAS"]
+    texto = "\n".join(str(c.value) for row in ws.iter_rows() for c in row
+                      if c.value is not None)
+    assert "distancia del proyecto no aplicada" in texto

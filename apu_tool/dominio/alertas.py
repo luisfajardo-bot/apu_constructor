@@ -21,17 +21,16 @@ _MOTIVO_CRUCE = {
 }
 
 
-def alertas_costeo(a: AssembledApu, sin_distancia: tuple[str, ...] = (),
-                   en_subapus: tuple[tuple[str, str], ...] = ()) -> list[str]:
+def alertas_costeo(a: AssembledApu) -> list[str]:
     """Motivos de revisión de costo del ítem. Lista vacía = sin alerta.
 
-    `sin_distancia`: acarreos de ESTE APU que el proyecto no pudo reescalar.
-    `en_subapus`: `(apu_del_sub, codigo)` de los que viven dentro de sus sub-APUs —
-    van aparte porque el mismo código puede estar bien clasificado arriba y sin
-    clasificar abajo, y en ese caso la línea de arriba no debe robarse la alerta.
-    """
+    Los pendientes de distancia viajan CON el ítem (`a.sin_distancia`: acarreos de
+    ESTE APU; `a.en_subapus`: `(apu_del_sub, codigo)` de los que viven dentro de sus
+    sub-APUs). Van aparte porque el mismo código puede estar bien clasificado arriba
+    y sin clasificar abajo, y en ese caso la línea de arriba no debe robarse la
+    alerta."""
     motivos: list[str] = []
-    pendientes = set(sin_distancia)
+    pendientes = set(a.sin_distancia)
     for c in a.componentes:
         etiqueta = f"{c.insumo_codigo} {c.insumo_nombre}".strip()
         if c.calidad_cruce == CALIDAD_SIN_PRECIO_LISTA:
@@ -46,7 +45,7 @@ def alertas_costeo(a: AssembledApu, sin_distancia: tuple[str, ...] = (),
     # botadero es el caso típico), así que el bucle de arriba no los ve. Se reportan
     # con el APU donde viven: sin eso, el ítem se costearía con la distancia de la
     # biblioteca y nadie se enteraría.
-    for apu_sub, cod in en_subapus:
+    for apu_sub, cod in a.en_subapus:
         motivos.append(f"{cod}: distancia del proyecto no aplicada "
                        f"(en el sub-APU {apu_sub})")
     if not motivos and a.costo_unitario <= 0:

@@ -288,6 +288,13 @@ class AssembledApu:
     confianza: float
     explicacion: str = ""
     origen: str = "historico"     # "historico" | "generado" | "manual"
+    # Acarreos que el proyecto NO pudo reescalar por falta de clasificación. Viajan
+    # CON el ítem —y no como parámetro de `alertas_costeo`— porque los consumidores
+    # son varios (vista de corrida, cuadro Excel, totales) y solo uno tiene el motor
+    # a mano. Un snapshot congelado los deja vacíos salvo que el propio snapshot ya
+    # los tenga guardados (ver `servicio/corridas.py::congelar`).
+    sin_distancia: tuple[str, ...] = ()                    # en este APU
+    en_subapus: tuple[tuple[str, str], ...] = ()           # (apu_del_sub, codigo)
 
     @property
     def costo_total(self) -> int:

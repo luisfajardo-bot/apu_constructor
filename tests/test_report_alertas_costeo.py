@@ -8,10 +8,10 @@ def _item(item="1"):
                           precio_contractual=100.0, shift="DIURNO")
 
 
-def _apu(comps, costo, status=MatchStatus.AUTO):
+def _apu(comps, costo, status=MatchStatus.AUTO, en_subapus=()):
     return AssembledApu(item=_item(), apu_codigo="A", apu_nombre="Losa", unidad="m3",
                         shift="DIURNO", componentes=comps, costo_unitario=costo,
-                        status=status, confianza=1.0)
+                        status=status, confianza=1.0, en_subapus=en_subapus)
 
 
 def _comp(costo, precio, calidad="exacto"):
@@ -32,6 +32,19 @@ def test_alertas_lista_motivo_de_costeo(tmp_path):
     ws = openpyxl.load_workbook(out)["ALERTAS"]
     textos = [ws.cell(row=r, column=6).value for r in range(2, ws.max_row + 1)]
     assert any(t and "en $0" in t for t in textos)
+
+
+def test_el_cuadro_alerta_la_distancia_no_aplicada(tmp_path):
+    """El cuadro es el entregable: un ítem costeado con la distancia de la
+    biblioteca (por un pendiente en un sub-APU) tiene que salir en la hoja ALERTAS,
+    no solo en la vista web."""
+    ens = _apu([_comp(26500.0, 26500.0)], costo=26500.0,
+              en_subapus=(("3017", "7462"),))
+    out = write_report([ens], tmp_path / "c.xlsx")
+    ws = openpyxl.load_workbook(out)["ALERTAS"]
+    texto = "\n".join(str(c.value) for row in ws.iter_rows() for c in row
+                      if c.value is not None)
+    assert "distancia del proyecto no aplicada" in texto
 
 
 def test_resumen_prioridad_alerta_costeo_sobre_margen_negativo(tmp_path):

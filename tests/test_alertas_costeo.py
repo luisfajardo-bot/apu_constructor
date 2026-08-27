@@ -54,3 +54,33 @@ def test_item_sin_componentes_en_cero():
 def test_cruce_huerfano_con_precio_positivo():
     motivos = alertas_costeo(_ensamble([_comp(calidad="huerfano")], 10.0))
     assert motivos == ["7 Cemento: sin insumo en catálogo"]
+
+
+def test_alerta_de_distancia_no_aplicada():
+    item = LicitacionItem(item="1", descripcion="RELLENO", unidad="M3", cantidad=1,
+                          precio_contractual=1000.0, shift="DIURNO")
+    comp = CostedComponent(insumo_codigo="7462", insumo_nombre="TRANSPORTE DE PETREOS",
+                           unidad="M3-KM", rendimiento=26.25, precio_unitario=1000.0,
+                           fuente_precio="COSTO INTERNO", costo=26250)
+    ens = AssembledApu(item=item, apu_codigo="4390", apu_nombre="RELLENO", unidad="M3",
+                       shift="DIURNO", componentes=[comp], costo_unitario=26250,
+                       status=MatchStatus.CONFIRMED, confianza=1.0)
+    assert alertas_costeo(ens) == []                     # sin proyecto: sin alerta
+    motivos = alertas_costeo(ens, sin_distancia=("7462",))
+    assert motivos == ["7462 TRANSPORTE DE PETREOS: distancia del proyecto no aplicada"]
+
+
+def test_alerta_de_pendiente_que_vive_en_un_subapu():
+    """El pendiente del sub-APU no está entre los componentes del ítem, y aún así
+    tiene que alertar: es el caso del botadero."""
+    item = LicitacionItem(item="1", descripcion="RELLENO", unidad="M3", cantidad=1,
+                          precio_contractual=1000.0, shift="DIURNO")
+    sub = CostedComponent(insumo_codigo="3017", insumo_nombre="TTE ESCOMBROS",
+                          unidad="M3", rendimiento=1.0, precio_unitario=26500.0,
+                          fuente_precio="APU", costo=26500, calidad_cruce="apu",
+                          tipo="apu", ref_shift="DIURNO")
+    ens = AssembledApu(item=item, apu_codigo="4390", apu_nombre="RELLENO", unidad="M3",
+                       shift="DIURNO", componentes=[sub], costo_unitario=26500,
+                       status=MatchStatus.CONFIRMED, confianza=1.0)
+    motivos = alertas_costeo(ens, sin_distancia=("7462",))
+    assert motivos == ["7462: distancia del proyecto no aplicada (en un sub-APU)"]

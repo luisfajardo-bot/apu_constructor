@@ -131,7 +131,9 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
             return
         yield ("progress", {"i": i, "total": total,
                             "descripcion": item.descripcion,
-                            "fila": _vista_item(ens, seq, ens.status.value)})
+                            "fila": _vista_item(
+                                ens, seq, ens.status.value,
+                                assembler.pricing.sin_distancia(ens.apu_codigo or "", ens.shift))})
     duracion_ms = round((time.monotonic() - t0) * 1000)
     alm.corridas.set_estado(corrida_id, "en_revision")
     alm.corridas.set_duracion(corrida_id, duracion_ms)
@@ -209,7 +211,8 @@ def _assembled_desde_snapshot(row: CorridaItemRow, snap: dict) -> AssembledApu:
         confianza=row.confianza, explicacion=row.explicacion, origen=row.origen)
 
 
-def _vista_item(ens: AssembledApu, seq: int, status: str) -> dict:
+def _vista_item(ens: AssembledApu, seq: int, status: str,
+                sin_distancia: tuple[str, ...] = ()) -> dict:
     return {
         "seq": seq, "item": ens.item.item, "descripcion": ens.item.descripcion,
         "unidad": ens.unidad, "cantidad": ens.item.cantidad,
@@ -219,7 +222,7 @@ def _vista_item(ens: AssembledApu, seq: int, status: str) -> dict:
         "costo_unitario": ens.costo_unitario, "margen_unitario": ens.margen_unitario,
         "margen_pct": ens.margen_pct, "contractual_total": ens.contractual_total,
         "costo_total": ens.costo_total, "margen_total": ens.margen_total,
-        "alertas_costeo": alertas_costeo(ens),
+        "alertas_costeo": alertas_costeo(ens, sin_distancia),
     }
 
 
@@ -254,7 +257,14 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
                             contexto=_contexto(alm, meta))   # COMPARTIDO por la corrida
     pricing.precargar((r.apu_codigo, r.shift) for r in rows if r.apu_codigo)  # lote
     ensambles = _ensamblar_corrida(alm, meta, rows, pricing)
-    items = [_vista_item(ens, r.seq, r.status) for ens, r in zip(ensambles, rows)]
+    # Una foto congelada ya se emitió: no tiene pendientes que avisar (evita ruido
+    # sobre un costo que no se va a recalcular). Solo los ítems costeados EN VIVO
+    # (activa, o congelada sin snapshot -> cae a _costear_row) llevan sin_distancia.
+    snaps = alm.corridas.get_snapshots(meta.id) if meta.modo == "congelada" else {}
+    items = [_vista_item(ens, r.seq, r.status,
+                         () if r.seq in snaps
+                         else pricing.sin_distancia(r.apu_codigo or "", r.shift))
+             for ens, r in zip(ensambles, rows)]
     return {
         "id": meta.id, "nombre": meta.nombre, "archivo": meta.archivo,
         "estado": meta.estado, "modo": meta.modo,

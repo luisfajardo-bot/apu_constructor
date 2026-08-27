@@ -131,3 +131,15 @@ def test_listar_corridas_resuelve_el_contexto_una_vez_por_proyecto(tmp_path, mon
     monkeypatch.setattr(svc.transporte, "cargar_contexto", espia)
     svc.listar_corridas(alm)
     assert llamadas.count(metro) == 1, llamadas
+
+
+def test_la_corrida_alerta_el_componente_sin_clasificar(tmp_path):
+    alm = _alm(tmp_path)
+    # Se borra la clasificación para simular un APU nuevo sin clasificar.
+    with alm.apus.connect() as conn:
+        conn.execute("DELETE FROM componente_transporte")
+    metro = alm.carpetas.crear("Metro")
+    alm.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro, km_granulares=32))
+    cid = _corrida(alm, metro)
+    alertas = svc.vista_corrida(alm, cid)["items"][0]["alertas_costeo"]
+    assert any("distancia del proyecto no aplicada" in a for a in alertas)

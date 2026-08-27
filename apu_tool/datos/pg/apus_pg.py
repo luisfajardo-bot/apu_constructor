@@ -11,7 +11,9 @@ from typing import Iterable, Optional
 from apu_tool import config
 from apu_tool.datos.pg.conexion import Conexion, ejecutar_script
 from apu_tool.nucleo import relevancia
-from apu_tool.nucleo.models import Apu, ApuComponent, DePricedApu, DePricedComponent
+from apu_tool.nucleo.models import (
+    Apu, ApuComponent, ClaseTransporte, DePricedApu, DePricedComponent,
+)
 
 SCHEMA_PATH = config.PROJECT_ROOT / "db" / "pg" / "apus.sql"
 
@@ -239,6 +241,56 @@ class ApusPg:
         for r in rows:
             out.setdefault((r["apu_codigo"], r["shift"]), []).append(self._fila_a_componente(r))
         return out
+
+    # ---- clasificación de transporte ----
+    def get_clasificacion_transporte(self) -> list[ClaseTransporte]:
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT apu_codigo, shift, insumo_codigo, insumo_nombre, categoria, "
+                "       volumen, km_base, actualizado_en, actualizado_por "
+                "FROM apus.componente_transporte").fetchall()
+        return [ClaseTransporte(
+            apu_codigo=r["apu_codigo"], shift=r["shift"],
+            insumo_codigo=r["insumo_codigo"], insumo_nombre=r["insumo_nombre"],
+            categoria=r["categoria"], volumen=r["volumen"], km_base=r["km_base"],
+            actualizado_en=r["actualizado_en"] or "",
+            actualizado_por=r["actualizado_por"]) for r in rows]
+
+    def set_clasificacion_transporte(self, filas: Iterable[ClaseTransporte],
+                                     conn=None, actualizado_por: Optional[str] = None) -> int:
+        import datetime as _dt
+        ahora = _dt.datetime.now().isoformat(timespec="seconds")
+        rows = [(f.apu_codigo, f.shift, f.insumo_codigo, f.insumo_nombre,
+                 f.categoria, float(f.volumen), f.km_base, ahora, actualizado_por)
+                for f in filas]
+        sql = ("INSERT INTO apus.componente_transporte "
+               "(apu_codigo, shift, insumo_codigo, insumo_nombre, categoria, "
+               " volumen, km_base, actualizado_en, actualizado_por) "
+               "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+               "ON CONFLICT (apu_codigo, shift, insumo_codigo) DO UPDATE SET "
+               "insumo_nombre=EXCLUDED.insumo_nombre, categoria=EXCLUDED.categoria, "
+               "volumen=EXCLUDED.volumen, km_base=EXCLUDED.km_base, "
+               "actualizado_en=EXCLUDED.actualizado_en, "
+               "actualizado_por=EXCLUDED.actualizado_por")
+        if conn is not None:
+            with conn.cursor() as cur:
+                cur.executemany(sql, rows)
+            return len(rows)
+        with self.cx.connection() as c, c.cursor() as cur:
+            cur.executemany(sql, rows)
+        return len(rows)
+
+    def componentes_transporte_candidatos(self) -> list[dict]:
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT c.apu_codigo, c.shift, a.nombre AS apu_nombre, "
+                "       c.insumo_codigo, c.insumo_nombre, c.unidad, c.rendimiento "
+                "FROM apus.apu_componentes c "
+                "LEFT JOIN apus.apus a ON a.codigo = c.apu_codigo AND a.shift = c.shift "
+                "WHERE UPPER(c.unidad) = %s AND COALESCE(c.tipo,'insumo') <> 'apu' "
+                "ORDER BY c.apu_codigo, c.shift, c.insumo_codigo",
+                (config.UNIDAD_TRANSPORTE,)).fetchall()
+        return [dict(r) for r in rows]
 
     def get_depriced_apu(self, codigo: str, shift: str) -> Optional[DePricedApu]:
         apu = self.get_apu(codigo, shift)

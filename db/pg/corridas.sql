@@ -11,6 +11,38 @@ CREATE TABLE IF NOT EXISTS corridas.carpeta (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_carpeta_hermanas
     ON corridas.carpeta(COALESCE(parent_id, 0), nombre);
 
+CREATE TABLE IF NOT EXISTS corridas.proyecto_parametros (
+    carpeta_id      BIGINT PRIMARY KEY REFERENCES corridas.carpeta(id) ON DELETE CASCADE,
+    km_botadero     DOUBLE PRECISION,
+    km_mezclas      DOUBLE PRECISION,
+    km_granulares   DOUBLE PRECISION,
+    peaje_aplica    SMALLINT,
+    peaje_valor     DOUBLE PRECISION,
+    actualizado_en  TEXT NOT NULL,
+    actualizado_por TEXT
+);
+
+CREATE TABLE IF NOT EXISTS corridas.proyecto_ajuste (
+    id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    carpeta_id          BIGINT NOT NULL REFERENCES corridas.carpeta(id) ON DELETE CASCADE,
+    apu_codigo          TEXT NOT NULL,
+    shift               TEXT NOT NULL,
+    accion              TEXT NOT NULL,
+    insumo_codigo       TEXT NOT NULL,
+    insumo_nombre       TEXT NOT NULL DEFAULT '',
+    unidad              TEXT NOT NULL DEFAULT '',
+    rendimiento         DOUBLE PRECISION,
+    insumo_nuevo_codigo TEXT,
+    insumo_nuevo_nombre TEXT,
+    tipo                TEXT NOT NULL DEFAULT 'insumo',
+    ref_shift           TEXT NOT NULL DEFAULT '',
+    nota                TEXT NOT NULL DEFAULT '',
+    creado_en           TEXT NOT NULL,
+    creado_por          TEXT,
+    UNIQUE (carpeta_id, apu_codigo, shift, accion, insumo_codigo)
+);
+CREATE INDEX IF NOT EXISTS ix_proyecto_ajuste ON corridas.proyecto_ajuste(carpeta_id);
+
 CREATE TABLE IF NOT EXISTS corridas.corrida (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     creada_en     TEXT NOT NULL,

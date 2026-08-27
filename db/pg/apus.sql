@@ -34,3 +34,16 @@ CREATE TABLE IF NOT EXISTS apus.meta (
     clave TEXT PRIMARY KEY,
     valor TEXT
 );
+
+CREATE TABLE IF NOT EXISTS apus.componente_transporte (
+    apu_codigo      TEXT NOT NULL,
+    shift           TEXT NOT NULL,
+    insumo_codigo   TEXT NOT NULL,
+    insumo_nombre   TEXT NOT NULL,
+    categoria       TEXT NOT NULL,
+    volumen         DOUBLE PRECISION NOT NULL,
+    km_base         DOUBLE PRECISION,
+    actualizado_en  TEXT NOT NULL,
+    actualizado_por TEXT,
+    PRIMARY KEY (apu_codigo, shift, insumo_codigo)
+);

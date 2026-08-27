@@ -22,8 +22,15 @@ def _alm(tmp_path):
         Apu(codigo="4390", nombre="RELLENO", unidad="M3", shift="DIURNO", grupo="VIAS"),
         Apu(codigo="3017", nombre="TRANSPORTE Y DISPOSICION FINAL DE ESCOMBROS",
             unidad="M3", shift="DIURNO", grupo="TRANSPORTES"),
+        # su ÚNICO componente es el peaje: existe para probar que un proyecto sin
+        # peaje puede VACIAR una composición entera (no solo achicarla).
+        Apu(codigo="9002", nombre="SOLO PEAJE", unidad="GLB", shift="DIURNO",
+            grupo="TRANSPORTES"),
     ])
     alm.apus.insert_components([
+        ApuComponent(apu_codigo="9002", shift="DIURNO", insumo_codigo="INT3",
+                     insumo_nombre="PEAJE", unidad="GLB", rendimiento=1.0,
+                     precio_unitario_hist=8000.0),
         # el APU 4390 usa el sub-APU 3017 y transporte propio
         ApuComponent(apu_codigo="4390", shift="DIURNO", insumo_codigo="3017",
                      insumo_nombre="TRANSPORTE Y DISPOSICION FINAL DE ESCOMBROS",
@@ -97,6 +104,20 @@ def test_peaje_no_aplica_lo_saca_de_la_composicion(tmp_path):
     comps, _ = PricingEngine(alm, contexto=ctx).cost_apu("4390", "DIURNO")
     assert all(c.insumo_codigo != "INT3" for c in comps)
     assert all(c.costo > 0 for c in comps)   # y nada quedó en $0
+
+
+def test_vaciado_por_el_proyecto_distingue_del_apu_sin_composicion(tmp_path):
+    """9002 SOLO tiene el peaje como componente: sin peaje, la biblioteca SÍ tenía
+    algo y el proyecto lo vació. 9999 no existe en la biblioteca: nunca tuvo nada
+    que vaciar. `_costear_row` necesita distinguir los dos para saber si cae al
+    respaldo de la fila (bug crítico de la revisión)."""
+    alm = _alm(tmp_path)
+    ctx = ContextoProyecto(params=ParametrosProyecto(peaje_aplica=False), clasificacion={})
+    motor = PricingEngine(alm, contexto=ctx)
+    assert motor.components("9002", "DIURNO") == []
+    assert motor.vaciado_por_el_proyecto("9002", "DIURNO") is True
+    assert motor.components("9999", "DIURNO") == []
+    assert motor.vaciado_por_el_proyecto("9999", "DIURNO") is False
 
 
 def test_peaje_usa_el_valor_del_proyecto(tmp_path):

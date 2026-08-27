@@ -45,6 +45,11 @@ class PricingEngine:
         # (apu, shift) -> códigos de acarreo que no se pudieron reescalar; los lee
         # alertas.py para avisar en vez de costear con la distancia equivocada.
         self._sin_distancia: dict[tuple[str, str], tuple[str, ...]] = {}
+        # (apu, shift) cuya composición la biblioteca SÍ tenía pero las desviaciones
+        # del proyecto la dejaron vacía. `_costear_row` lo necesita para distinguir
+        # "el proyecto vació esto" de "la biblioteca no tiene nada" (ver
+        # `vaciado_por_el_proyecto`).
+        self._vaciados: set[tuple[str, str]] = set()
 
     @property
     def lista_id(self) -> int:
@@ -105,6 +110,17 @@ class PricingEngine:
         # dedup preservando el orden de aparición
         return tuple(dict.fromkeys(faltan))
 
+    def vaciado_por_el_proyecto(self, apu_codigo: str, shift: str) -> bool:
+        """True si la biblioteca SÍ tiene composición para este APU pero las
+        desviaciones del proyecto la dejaron vacía (p. ej. el único componente era
+        el peaje y el proyecto no tiene peaje).
+
+        `_costear_row` lo necesita para NO caer al respaldo de la composición
+        guardada del ítem: ese respaldo existe para un APU borrado de la biblioteca,
+        y usarlo acá recobraría justo lo que el proyecto excluyó, al precio del
+        catálogo y sin alerta."""
+        return (apu_codigo, shift) in self._vaciados
+
     def claves_cargadas(self) -> list[tuple[str, str]]:
         """(código, turno) de todo lo que hay en el caché de composiciones, incluido
         el cierre de sub-APUs que trajo `precargar`. Lo usa la tabla de impacto para
@@ -135,8 +151,14 @@ class PricingEngine:
                                      self._ctx.clasificacion)
         if pend:
             self._sin_distancia[(codigo, shift)] = pend
-        return transporte.aplicar(crudos, codigo, shift, self._ctx.params,
-                                  self._ctx.clasificacion, self._ctx.ajustes)
+        efectivos = transporte.aplicar(crudos, codigo, shift, self._ctx.params,
+                                       self._ctx.clasificacion, self._ctx.ajustes)
+        if not efectivos:
+            # Había composición (crudos no vacío) y quedó en nada: el proyecto la
+            # vació (p.ej. el único componente era el peaje y no hay peaje). Distinto
+            # de un APU sin composición para empezar (ver `vaciado_por_el_proyecto`).
+            self._vaciados.add((codigo, shift))
+        return efectivos
 
     def components(self, codigo: str, shift: str) -> list:
         """Composición EFECTIVA de un APU, cacheada por (codigo, shift). Si
@@ -162,6 +184,7 @@ class PricingEngine:
             self._comp_cache.clear()
             self._cache.clear()
             self._sin_distancia.clear()
+            self._vaciados.clear()
 
     def _precargar_lote(self, claves_top) -> None:
         pendientes = {(str(c), s) for c, s in claves_top if c}

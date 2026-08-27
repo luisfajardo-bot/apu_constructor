@@ -2,7 +2,8 @@
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio import transporte
 from apu_tool.nucleo.models import (
-    Apu, ApuComponent, ClaseTransporte, Insumo, LicitacionItem, ParametrosProyecto)
+    AjusteProyecto, Apu, ApuComponent, ClaseTransporte, Insumo, LicitacionItem,
+    ParametrosProyecto)
 from apu_tool.servicio import corridas as svc
 
 
@@ -254,3 +255,128 @@ def test_agregar_items_costea_con_la_distancia_del_proyecto(tmp_path):
     alm.apus.borrar_apu("4390", "DIURNO")
     tras_borrado = svc.vista_corrida(alm, cid)["items"][1]
     assert tras_borrado["costo_unitario"] == 33600  # el respaldo trajo la distancia del proyecto
+
+
+def _alm_solo_peaje(base_dir):
+    """Un APU cuyo ÚNICO componente es el peaje: un proyecto sin peaje lo deja SIN
+    NADA, no solo más barato. Es el repro del bug crítico de la revisión."""
+    alm = Almacen(precios_path=base_dir / "p.db", apus_path=base_dir / "a.db",
+                  corridas_path=base_dir / "c.db")
+    alm.init_schema()
+    alm.precios.insert_insumos([
+        Insumo(codigo="INT3", nombre="PEAJE", unidad="GLB", grupo="TRANSPORTES",
+               precio=8000.0, fuente_precio="COSTO INTERNO")])
+    alm.apus.insert_apus([Apu(codigo="9002", nombre="SOLO PEAJE", unidad="GLB",
+                              shift="DIURNO", grupo="TRANSPORTES")])
+    alm.apus.insert_components([
+        ApuComponent(apu_codigo="9002", shift="DIURNO", insumo_codigo="INT3",
+                     insumo_nombre="PEAJE", unidad="GLB", rendimiento=1.0,
+                     precio_unitario_hist=8000.0)])
+    return alm
+
+
+def _corrida_peaje(alm, carpeta_id):
+    items = [LicitacionItem(item="1", descripcion="SOLO PEAJE", unidad="GLB", cantidad=1,
+                            precio_contractual=10000.0, shift="DIURNO")]
+    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False, carpeta_id=carpeta_id)
+    svc.confirmar_item(alm, cid, 0, "9002", "DIURNO")
+    return cid
+
+
+def test_peaje_quitado_no_vuelve_por_el_respaldo_del_item(tmp_path):
+    """Si el proyecto vacia la composicion, el costeo NO puede caer al respaldo de la
+    composicion guardada: recobraria lo que el proyecto excluyo, sin alerta.
+
+    Los dos ordenes de operacion tienen que dar el MISMO resultado: antes del fix,
+    'corrida primero' costeaba 8000 sin alertas (el respaldo trajo de vuelta el
+    peaje que el proyecto excluyo) y 'parametros primero' costeaba 0 con alerta --
+    dos numeros distintos para el mismo estado."""
+    # orden A: la corrida se arma ANTES de fijar los parámetros del proyecto.
+    alm_a = _alm_solo_peaje(tmp_path / "orden_a")
+    metro_a = alm_a.carpetas.crear("Metro")
+    cid_a = _corrida_peaje(alm_a, metro_a)
+    alm_a.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro_a, peaje_aplica=False))
+    v_a = svc.vista_corrida(alm_a, cid_a)["items"][0]
+
+    # orden B: los parámetros del proyecto se fijan ANTES de armar la corrida.
+    alm_b = _alm_solo_peaje(tmp_path / "orden_b")
+    metro_b = alm_b.carpetas.crear("Metro")
+    alm_b.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro_b, peaje_aplica=False))
+    cid_b = _corrida_peaje(alm_b, metro_b)
+    v_b = svc.vista_corrida(alm_b, cid_b)["items"][0]
+
+    for v in (v_a, v_b):
+        assert v["costo_unitario"] == 0
+        assert any("en $0" in a for a in v["alertas_costeo"]), v["alertas_costeo"]
+    assert v_a["costo_unitario"] == v_b["costo_unitario"]
+    assert v_a["alertas_costeo"] == v_b["alertas_costeo"]
+
+
+def test_dos_quitar_que_vacian_un_apu_no_son_un_no_op(tmp_path):
+    """Antes del fix, dos ajustes 'quitar' que vaciaban toda la composicion NO
+    tenian efecto (el respaldo del item devolvia el costo de siempre)."""
+    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
+                  corridas_path=tmp_path / "c.db")
+    alm.init_schema()
+    alm.precios.insert_insumos([
+        Insumo(codigo="A1", nombre="INSUMO UNO", unidad="M3", grupo="X",
+               precio=10000.0, fuente_precio="COSTO INTERNO"),
+        Insumo(codigo="A2", nombre="INSUMO DOS", unidad="M3", grupo="X",
+               precio=11900.0, fuente_precio="COSTO INTERNO")])
+    alm.apus.insert_apus([Apu(codigo="8888", nombre="DOS INSUMOS", unidad="M3",
+                              shift="DIURNO", grupo="X")])
+    alm.apus.insert_components([
+        ApuComponent(apu_codigo="8888", shift="DIURNO", insumo_codigo="A1",
+                     insumo_nombre="INSUMO UNO", unidad="M3", rendimiento=1.0,
+                     precio_unitario_hist=10000.0),
+        ApuComponent(apu_codigo="8888", shift="DIURNO", insumo_codigo="A2",
+                     insumo_nombre="INSUMO DOS", unidad="M3", rendimiento=1.0,
+                     precio_unitario_hist=11900.0)])
+    metro = alm.carpetas.crear("Metro")
+    items = [LicitacionItem(item="1", descripcion="DOS INSUMOS", unidad="M3",
+                            cantidad=1, precio_contractual=100000.0, shift="DIURNO")]
+    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False, carpeta_id=metro)
+    svc.confirmar_item(alm, cid, 0, "8888", "DIURNO")
+    assert svc.vista_corrida(alm, cid)["items"][0]["costo_unitario"] == 21900
+
+    alm.carpetas.crear_ajuste(AjusteProyecto(
+        apu_codigo="8888", shift="DIURNO", accion="quitar", insumo_codigo="A1",
+        insumo_nombre="INSUMO UNO", carpeta_id=metro))
+    alm.carpetas.crear_ajuste(AjusteProyecto(
+        apu_codigo="8888", shift="DIURNO", accion="quitar", insumo_codigo="A2",
+        insumo_nombre="INSUMO DOS", carpeta_id=metro))
+
+    v = svc.vista_corrida(alm, cid)["items"][0]
+    assert v["costo_unitario"] == 0
+    assert any("en $0" in a for a in v["alertas_costeo"]), v["alertas_costeo"]
+
+
+def test_el_cuadro_congelado_muestra_las_distancias_con_las_que_se_costeo(tmp_path):
+    """Congelar a 34 km, cambiar el proyecto a 99, regenerar: el cuadro tiene que
+    decir 34, que es con lo que estan calculados sus numeros."""
+    import openpyxl
+    alm = _alm(tmp_path)
+    metro = alm.carpetas.crear("Metro")
+    alm.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro, km_granulares=34))
+    cid = _corrida(alm, metro)
+    svc.congelar(alm, cid)
+    congelado = svc.vista_corrida(alm, cid)["items"][0]["costo_unitario"]
+    assert congelado == 35700                             # 1.05 * 34 * 1000
+
+    alm.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro, km_granulares=99))
+
+    # el encabezado de la vista sigue diciendo 34, no 99 (la corrida sigue congelada)
+    vista = svc.vista_corrida(alm, cid)
+    assert vista["transporte"]["km_granulares"] == 34
+    assert vista["items"][0]["costo_unitario"] == congelado
+
+    out = svc.generar_cuadro(alm, cid)
+    wb = openpyxl.load_workbook(out)
+    resumen = "\n".join(str(c.value) for row in wb["RESUMEN"].iter_rows() for c in row
+                        if c.value is not None)
+    assert "35700" in resumen or "35.700" in resumen       # RESUMEN sigue en 34km
+    assert "103950" not in resumen and "103.950" not in resumen  # no el de 99km
+
+    desv = "\n".join(str(c.value) for row in wb["DESVIACIONES DEL PROYECTO"].iter_rows()
+                     for c in row if c.value is not None)
+    assert "34" in desv and "99" not in desv               # y no se contradice a si mismo

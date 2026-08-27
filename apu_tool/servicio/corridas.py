@@ -8,7 +8,7 @@ el equipo), pero nunca abre un camino hacia la IA.
 from __future__ import annotations
 
 import time
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
@@ -22,8 +22,8 @@ from apu_tool.dominio.pricing import PricingEngine
 from apu_tool.dominio.report import write_report
 from apu_tool.dominio import transporte
 from apu_tool.nucleo.models import (
-    ApuComponent, AssembledApu, CostedComponent, CorridaItemRow, CorridaMeta,
-    LicitacionItem, MatchStatus,
+    AjusteProyecto, ApuComponent, AssembledApu, CostedComponent, CorridaItemRow,
+    CorridaMeta, LicitacionItem, MatchStatus, ParametrosProyecto,
 )
 from apu_tool.nucleo.texto import normalizar
 from apu_tool.servicio.auditoria import registrar_auditoria
@@ -77,6 +77,20 @@ def _contexto(alm: Almacen, meta: CorridaMeta, cache: Optional[dict] = None):
     if meta.carpeta_id not in cache:
         cache[meta.carpeta_id] = transporte.cargar_contexto(alm, meta.carpeta_id)
     return cache[meta.carpeta_id]
+
+
+def _contexto_al_congelar(snaps: dict) -> Optional[transporte.ContextoProyecto]:
+    """El contexto (parámetros + ajustes) con el que se congeló la corrida, leído
+    del snapshot de cualquier ítem — `congelar` lo guarda redundante en CADA uno
+    (no hay tabla a nivel de corrida; reusar `snapshot_json` es cero cambios de
+    esquema). None si no hay snapshots o son de antes de este campo: el llamador
+    cae a `_contexto` en vivo (retrocompatible)."""
+    for snap in snaps.values():
+        if "parametros" in snap:
+            params = ParametrosProyecto(**snap["parametros"])
+            ajustes = tuple(AjusteProyecto(**a) for a in snap.get("ajustes", ()))
+            return transporte.ContextoProyecto(params=params, clasificacion={}, ajustes=ajustes)
+    return None
 
 
 def _armar_fila(assembler: Assembler, item: LicitacionItem,
@@ -319,7 +333,14 @@ def _costear_row(alm: Almacen, row: CorridaItemRow,
     costed = None
     if row.apu_codigo:
         lib = pricing.components(row.apu_codigo, row.shift)   # usa caché precargado si existe
-        if lib:
+        if lib or pricing.vaciado_por_el_proyecto(row.apu_codigo, row.shift):
+            # `lib` vacío por dos motivos MUY distintos: (a) el APU fue borrado de
+            # la biblioteca (o nunca tuvo composición ahí) -> cae al respaldo de
+            # abajo; (b) la biblioteca SÍ tenía algo y el proyecto lo vació (p.ej.
+            # el único componente era el peaje y el proyecto no tiene peaje) -> se
+            # costea la lista vacía tal cual (da 0) y NO se cae al respaldo: ese
+            # respaldo recobraría justo lo que el proyecto excluyó, al precio del
+            # catálogo y sin alerta. `alertas.py` avisa el $0 en cualquier caso.
             costed, total = pricing.cost_components(lib, seed)
     if costed is None:
         comps = [ApuComponent(
@@ -372,15 +393,20 @@ def _vista_item(ens: AssembledApu, seq: int, status: str) -> dict:
     }
 
 
-def _ensamblar_corrida(alm: Almacen, meta, rows, pricing: PricingEngine) -> list[AssembledApu]:
+def _ensamblar_corrida(alm: Almacen, meta, rows, pricing: PricingEngine,
+                       snaps: Optional[dict] = None) -> list[AssembledApu]:
     """Ensambla los ítems de una corrida respetando el modo: congelada -> snapshot por
     ítem (con caída a costeo en vivo si falta el snapshot); activa -> costeo en vivo.
     Camino ÚNICO compartido por vista_corrida y listar_corridas. Cada AssembledApu ya
     trae sus pendientes de distancia (sin_distancia/en_subapus, ver `_costear_row` y
     `_assembled_desde_snapshot`), así que el llamador no necesita tocar el motor ni
-    los snapshots de nuevo."""
+    los snapshots de nuevo.
+
+    `snaps`: si el llamador ya los leyó (p.ej. para resolver el contexto congelado,
+    ver `vista_corrida`), se reusan en vez de volver a consultarlos."""
     if meta.modo == "congelada":
-        snaps = alm.corridas.get_snapshots(meta.id)
+        if snaps is None:
+            snaps = alm.corridas.get_snapshots(meta.id)
         return [_assembled_desde_snapshot(r, snaps[r.seq]) if r.seq in snaps
                 else _costear_row(alm, r, pricing, meta.lista_precios_id) for r in rows]
     return [_costear_row(alm, r, pricing, meta.lista_precios_id) for r in rows]
@@ -402,11 +428,16 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
     if meta is None:
         return None
     rows = alm.corridas.get_items(corrida_id)
-    ctx = _contexto(alm, meta)
+    # Congelada: costear y mostrar con los parámetros CON LOS QUE SE CONGELÓ, no
+    # los de hoy — si no, el encabezado ("transporte") contradice al cuadro y a la
+    # propia composición ya fija del snapshot. Retrocompatible: una foto vieja sin
+    # esa clave cae a `_contexto` en vivo (comportamiento de siempre).
+    snaps = alm.corridas.get_snapshots(corrida_id) if meta.modo == "congelada" else {}
+    ctx = _contexto_al_congelar(snaps) or _contexto(alm, meta)
     pricing = PricingEngine(alm, lista_id=meta.lista_precios_id,
                             contexto=ctx)   # COMPARTIDO por la corrida
     pricing.precargar((r.apu_codigo, r.shift) for r in rows if r.apu_codigo)  # lote
-    ensambles = _ensamblar_corrida(alm, meta, rows, pricing)
+    ensambles = _ensamblar_corrida(alm, meta, rows, pricing, snaps)
     items = [_vista_item(ens, r.seq, r.status) for ens, r in zip(ensambles, rows)]
     return {
         "id": meta.id, "nombre": meta.nombre, "archivo": meta.archivo,
@@ -464,10 +495,17 @@ def congelar(alm: Almacen, corrida_id: int) -> Optional[dict]:
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:
         return None
+    ctx = _contexto(alm, meta)
     pricing = PricingEngine(alm, lista_id=meta.lista_precios_id,
-                            contexto=_contexto(alm, meta))   # COMPARTIDO al congelar
+                            contexto=ctx)   # COMPARTIDO al congelar
     _rows = alm.corridas.get_items(corrida_id)
     pricing.precargar((r.apu_codigo, r.shift) for r in _rows if r.apu_codigo)
+    # Con qué parámetros/ajustes se congela: van CON cada foto (redundante entre
+    # ítems, pero son de la CORRIDA, no del ítem, y no hay tabla a nivel de corrida)
+    # para que un cuadro/vista regenerados después no mezclen esta foto con las
+    # distancias de HOY (ver `_contexto_al_congelar`).
+    ctx_congelado = {"parametros": asdict(ctx.params),
+                     "ajustes": [asdict(a) for a in ctx.ajustes]}
     for r in _rows:
         ens = _costear_row(alm, r, pricing)
         payload = {"composicion": [{
@@ -480,7 +518,8 @@ def congelar(alm: Almacen, corrida_id: int) -> Optional[dict]:
             # armar el cuadro) perdería la alerta justo en el entregable — el snapshot
             # solo tenía composición+costo, y la re-lectura desde ahí no traía de
             # vuelta los pendientes calculados arriba.
-            "sin_distancia": ens.sin_distancia, "en_subapus": ens.en_subapus}
+            "sin_distancia": ens.sin_distancia, "en_subapus": ens.en_subapus,
+            **ctx_congelado}
         alm.corridas.set_snapshot(corrida_id, r.seq, payload)
     alm.corridas.set_modo(corrida_id, "congelada")
     return vista_corrida(alm, corrida_id)
@@ -654,7 +693,11 @@ def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:
         congelar(alm, corrida_id)
         snaps = alm.corridas.get_snapshots(corrida_id)
     rows = alm.corridas.get_items(corrida_id)
-    ctx = _contexto(alm, meta)
+    # A esta altura la corrida está congelada CON foto (recién generada arriba, o
+    # ya existía): el cuadro tiene que costear con esos parámetros, no con los de
+    # hoy — si no, RESUMEN queda con los números de la foto y DESVIACIONES DEL
+    # PROYECTO con las distancias de hoy, contradiciéndose en el mismo Excel.
+    ctx = _contexto_al_congelar(snaps) or _contexto(alm, meta)
     pricing = PricingEngine(alm, lista_id=meta.lista_precios_id,
                             contexto=ctx)   # COMPARTIDO al generar el cuadro
     pricing.precargar((r.apu_codigo, r.shift) for r in rows

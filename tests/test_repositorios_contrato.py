@@ -6,7 +6,9 @@ Es el oráculo de no-regresión del port a Postgres (Enfoque A).
 import os
 import pytest
 
-from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
+from apu_tool.nucleo.models import (
+    AjusteProyecto, Apu, ApuComponent, ClaseTransporte, Insumo, ParametrosProyecto,
+)
 from apu_tool.nucleo.texto import normalizar
 from apu_tool.datos.repositorio import RepositorioPrecios, RepositorioApus
 
@@ -44,6 +46,46 @@ def repos(request, tmp_path):
     else:
         p, a, cx = _repos_postgres(tmp_path)
     yield p, a
+    if cx is not None:
+        cx.cerrar()
+
+
+def _repos_proyecto_sqlite(tmp_path):
+    from apu_tool.datos.apus_db import ApusDB
+    from apu_tool.datos.carpetas_db import CarpetasDB
+    from apu_tool.datos.corridas_db import CorridasDB
+    a = ApusDB(tmp_path / "apus.db")
+    a.init_schema()
+    corridas_path = tmp_path / "corridas.db"
+    CorridasDB(corridas_path).init_schema()  # crea carpeta/proyecto_parametros/proyecto_ajuste
+    c = CarpetasDB(corridas_path)
+    return a, c, None
+
+
+def _repos_proyecto_postgres(tmp_path):
+    from apu_tool.datos.pg.conexion import Conexion
+    from apu_tool.datos.pg.apus_pg import ApusPg
+    from apu_tool.datos.pg.carpetas_pg import CarpetasPg
+    from apu_tool.datos.pg.corridas_pg import CorridasPg
+    cx = Conexion(os.environ["TEST_DATABASE_URL"])
+    a = ApusPg(cx)
+    a.reset()  # esquema limpio
+    CorridasPg(cx).reset()  # crea corridas.carpeta/proyecto_parametros/proyecto_ajuste
+    c = CarpetasPg(cx)
+    return a, c, cx
+
+
+@pytest.fixture(params=_BACKENDS)
+def repos_proyecto(request, tmp_path):
+    """(apus, carpetas): las distancias de acarreo por proyecto tocan dos repos que
+    `repos` no cubre (carpetas no existía ahí, y el otro par es precios+apus, no
+    apus+carpetas). Fixture nueva en vez de ensanchar `repos` a una tupla de 3/4
+    para no tocar la firma que ya usan ~40 tests existentes."""
+    if request.param == "sqlite":
+        a, c, cx = _repos_proyecto_sqlite(tmp_path)
+    else:
+        a, c, cx = _repos_proyecto_postgres(tmp_path)
+    yield a, c
     if cx is not None:
         cx.cerrar()
 
@@ -480,3 +522,103 @@ def test_identidades_en_conflicto_incluye_los_ocultos(repos):
     p.set_oculto(iid, True)
     assert p.identidades_en_conflicto("300", normalizar("X")) == [
         ("300", "TRANSPORTE DE MATERIAL", True)]
+
+
+# ---- distancias de acarreo por proyecto (transporte) ----
+
+def test_reclasificar_transporte_actualiza_no_duplica(repos_proyecto):
+    """Reclasificar un componente ya clasificado (misma clave apu+shift+insumo) debe
+    ACTUALIZAR la fila existente, no ignorarla (ON CONFLICT ... DO NOTHING) ni dejar
+    `volumen` fuera del UPDATE: las dos formas de romper el upsert dejarían la
+    clasificación vieja vigente sin avisar."""
+    apus, _ = repos_proyecto
+    fila = ClaseTransporte(apu_codigo="4200", shift="DIURNO", insumo_codigo="6878",
+                           insumo_nombre="TRANSPORTE DE BASES ASFALTICAS",
+                           categoria="mezclas", volumen=1.05, km_base=25.0)
+    apus.set_clasificacion_transporte([fila])
+    reclasificada = ClaseTransporte(apu_codigo="4200", shift="DIURNO",
+                                    insumo_codigo="6878",
+                                    insumo_nombre="TRANSPORTE DE BASES ASFALTICAS",
+                                    categoria="granulares", volumen=2.5, km_base=30.0)
+    apus.set_clasificacion_transporte([reclasificada])
+    filas = apus.get_clasificacion_transporte()
+    assert len(filas) == 1
+    assert filas[0].categoria == "granulares"
+    assert filas[0].volumen == 2.5
+
+
+def test_parametros_peaje_valor_sobrevive_el_viaje(repos_proyecto):
+    """`peaje_valor` es el único campo monetario de ParametrosProyecto: si el get lo
+    pierde, el proyecto costea con un peaje distinto al que realmente se cargó."""
+    _, carpetas = repos_proyecto
+    cid = carpetas.crear("Metro")
+    carpetas.set_parametros(ParametrosProyecto(carpeta_id=cid, peaje_aplica=True,
+                                                peaje_valor=12400))
+    assert carpetas.get_parametros(cid).peaje_valor == 12400
+
+
+def test_parametros_peaje_aplica_false_no_es_none(repos_proyecto):
+    """None (sin definir) y False (el proyecto apagó el peaje a propósito) son estados
+    distintos; confundirlos reactiva un peaje que el proyecto desactivó."""
+    _, carpetas = repos_proyecto
+    cid = carpetas.crear("Metro")
+    carpetas.set_parametros(ParametrosProyecto(carpeta_id=cid, peaje_aplica=False))
+    assert carpetas.get_parametros(cid).peaje_aplica is False
+
+
+def test_reguardar_parametros_actualiza_fila_existente(repos_proyecto):
+    """Guardar los parámetros dos veces sobre la misma carpeta debe actualizar la fila
+    (ON CONFLICT ... DO UPDATE), no dejar la primera versión colgada."""
+    _, carpetas = repos_proyecto
+    cid = carpetas.crear("Metro")
+    carpetas.set_parametros(ParametrosProyecto(carpeta_id=cid, km_botadero=10))
+    carpetas.set_parametros(ParametrosProyecto(
+        carpeta_id=cid, km_botadero=34, peaje_aplica=True, peaje_valor=12400))
+    p = carpetas.get_parametros(cid)
+    assert p.km_botadero == 34 and p.peaje_aplica is True and p.peaje_valor == 12400
+
+
+def test_borrar_ajuste_borra_solo_ese(repos_proyecto):
+    """Borrar un ajuste no puede llevarse los demás del mismo proyecto (falta del
+    `AND id=%s` en el DELETE)."""
+    _, carpetas = repos_proyecto
+    cid = carpetas.crear("Metro")
+    a1 = carpetas.crear_ajuste(AjusteProyecto(
+        carpeta_id=cid, apu_codigo="4390", shift="DIURNO", accion="quitar",
+        insumo_codigo="6722", insumo_nombre="SUBBASE GRANULAR B-400"))
+    a2 = carpetas.crear_ajuste(AjusteProyecto(
+        carpeta_id=cid, apu_codigo="4390", shift="DIURNO", accion="quitar",
+        insumo_codigo="6723", insumo_nombre="BASE GRANULAR B-200"))
+    assert carpetas.borrar_ajuste(cid, a1) is True
+    assert [a.id for a in carpetas.listar_ajustes(cid)] == [a2]
+
+
+def test_listar_ajustes_no_ve_otro_proyecto(repos_proyecto):
+    """Dos proyectos con un ajuste cada uno: `listar_ajustes` de uno no debe traer el
+    del otro (falta del `WHERE carpeta_id=%s`)."""
+    _, carpetas = repos_proyecto
+    cid1 = carpetas.crear("Metro")
+    cid2 = carpetas.crear("Calle 13")
+    carpetas.crear_ajuste(AjusteProyecto(
+        carpeta_id=cid1, apu_codigo="4390", shift="DIURNO", accion="quitar",
+        insumo_codigo="6722", insumo_nombre="SUBBASE GRANULAR B-400"))
+    carpetas.crear_ajuste(AjusteProyecto(
+        carpeta_id=cid2, apu_codigo="4390", shift="DIURNO", accion="quitar",
+        insumo_codigo="6722", insumo_nombre="SUBBASE GRANULAR B-400"))
+    assert [a.carpeta_id for a in carpetas.listar_ajustes(cid1)] == [cid1]
+    assert [a.carpeta_id for a in carpetas.listar_ajustes(cid2)] == [cid2]
+
+
+def test_componentes_transporte_candidatos_excluye_subapus(repos_proyecto):
+    """Un componente M3-KM tipo='apu' es un sub-APU (su rendimiento ya viene resuelto
+    por el sub-APU referenciado), no un candidato a clasificar como acarreo."""
+    apus, _ = repos_proyecto
+    apus.crear_apu(Apu("SUB1", "SUBAPU DE ACARREO", "M3", "DIURNO"), [])
+    apus.crear_apu(Apu("A1", "MEZCLA ASFALTICA", "M3", "DIURNO", "PAVIMENTOS"), [
+        ApuComponent("A1", "DIURNO", "6878", "TRANSPORTE DE BASES ASFALTICAS",
+                     "M3-KM", 1.05, 0.0),
+        ApuComponent("A1", "DIURNO", "SUB1", "SUBAPU DE ACARREO", "M3-KM", 2.0, 0.0,
+                     tipo="apu", ref_shift="DIURNO"),
+    ])
+    candidatos = apus.componentes_transporte_candidatos()
+    assert [c["insumo_codigo"] for c in candidatos] == ["6878"]

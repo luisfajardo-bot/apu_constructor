@@ -32,3 +32,20 @@ CREATE TABLE IF NOT EXISTS meta (
 
 CREATE INDEX IF NOT EXISTS idx_comp_apu    ON apu_componentes(apu_codigo, shift);
 CREATE INDEX IF NOT EXISTS idx_apus_nombre ON apus(nombre);
+
+-- Clasificación de los componentes de acarreo: qué categoría son y cuántos m3
+-- esponjados mueven por unidad de APU. El rendimiento efectivo de un proyecto es
+-- volumen * km_del_proyecto. Tabla APARTE de apu_componentes a propósito: esa la
+-- reescriben seed/autoría/importadores con seq nuevo en cada semillado.
+CREATE TABLE IF NOT EXISTS componente_transporte (
+    apu_codigo      TEXT NOT NULL,
+    shift           TEXT NOT NULL,
+    insumo_codigo   TEXT NOT NULL,
+    insumo_nombre   TEXT NOT NULL,   -- identidad real: codigo + nombre
+    categoria       TEXT NOT NULL,   -- botadero | mezclas | granulares
+    volumen         REAL NOT NULL,
+    km_base         REAL,
+    actualizado_en  TEXT NOT NULL,
+    actualizado_por TEXT,
+    PRIMARY KEY (apu_codigo, shift, insumo_codigo)
+);

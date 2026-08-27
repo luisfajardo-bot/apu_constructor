@@ -14,7 +14,7 @@ from typing import Iterable, Iterator, Optional
 from apu_tool import config
 from apu_tool.nucleo import relevancia
 from apu_tool.nucleo.models import (
-    Apu, ApuComponent, DePricedApu, DePricedComponent,
+    Apu, ApuComponent, ClaseTransporte, DePricedApu, DePricedComponent,
 )
 
 SCHEMA_PATH = config.PROJECT_ROOT / "db" / "apus.sql"
@@ -273,6 +273,52 @@ class ApusDB:
                     out.setdefault((r["apu_codigo"], r["shift"]), []).append(
                         self._fila_a_componente(r))
         return out
+
+    # ---- clasificación de transporte (distancias por proyecto) ----
+    def get_clasificacion_transporte(self) -> list[ClaseTransporte]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT apu_codigo, shift, insumo_codigo, insumo_nombre, categoria, "
+                "       volumen, km_base, actualizado_en, actualizado_por "
+                "FROM componente_transporte").fetchall()
+        return [ClaseTransporte(
+            apu_codigo=r["apu_codigo"], shift=r["shift"],
+            insumo_codigo=r["insumo_codigo"], insumo_nombre=r["insumo_nombre"],
+            categoria=r["categoria"], volumen=r["volumen"], km_base=r["km_base"],
+            actualizado_en=r["actualizado_en"] or "",
+            actualizado_por=r["actualizado_por"]) for r in rows]
+
+    def set_clasificacion_transporte(self, filas: Iterable[ClaseTransporte],
+                                     conn=None, actualizado_por: Optional[str] = None) -> int:
+        import datetime as _dt
+        ahora = _dt.datetime.now().isoformat(timespec="seconds")
+        rows = [(f.apu_codigo, f.shift, f.insumo_codigo, f.insumo_nombre,
+                 f.categoria, float(f.volumen), f.km_base, ahora, actualizado_por)
+                for f in filas]
+        sql = ("INSERT OR REPLACE INTO componente_transporte "
+               "(apu_codigo, shift, insumo_codigo, insumo_nombre, categoria, "
+               " volumen, km_base, actualizado_en, actualizado_por) "
+               "VALUES (?,?,?,?,?,?,?,?,?)")
+        if conn is not None:
+            conn.executemany(sql, rows)
+            return len(rows)
+        with self.connect() as c:
+            c.executemany(sql, rows)
+        return len(rows)
+
+    def componentes_transporte_candidatos(self) -> list[dict]:
+        """Filas de la biblioteca que escalan con la distancia (unidad M3-KM), con
+        su APU dueño. Es la entrada de la pantalla de clasificación."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT c.apu_codigo, c.shift, a.nombre AS apu_nombre, "
+                "       c.insumo_codigo, c.insumo_nombre, c.unidad, c.rendimiento "
+                "FROM apu_componentes c "
+                "LEFT JOIN apus a ON a.codigo = c.apu_codigo AND a.shift = c.shift "
+                "WHERE UPPER(c.unidad) = ? AND COALESCE(c.tipo,'insumo') <> 'apu' "
+                "ORDER BY c.apu_codigo, c.shift, c.insumo_codigo",
+                (config.UNIDAD_TRANSPORTE,)).fetchall()
+        return [dict(r) for r in rows]
 
     def get_depriced_apu(self, codigo: str, shift: str) -> Optional[DePricedApu]:
         apu = self.get_apu(codigo, shift)

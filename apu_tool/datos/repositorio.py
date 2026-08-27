@@ -9,8 +9,8 @@ from __future__ import annotations
 from typing import Iterable, Optional, Protocol, runtime_checkable
 
 from apu_tool.nucleo.models import (
-    Apu, ApuComponent, Carpeta, CorridaItemRow, CorridaMeta, DePricedApu, EventoAuditoria,
-    Insumo, ListaPrecios, Perfil,
+    Apu, ApuComponent, Carpeta, ClaseTransporte, CorridaItemRow, CorridaMeta, DePricedApu,
+    EventoAuditoria, Insumo, ListaPrecios, Perfil,
 )
 
 
@@ -144,6 +144,15 @@ class RepositorioApus(Protocol):
         """(insumo_codigo, insumo_nombre) distintos de cada componente tipo='insumo'."""
         ...
     def get_depriced_apu(self, codigo: str, shift: str) -> Optional[DePricedApu]: ...
+    def get_clasificacion_transporte(self) -> list[ClaseTransporte]:
+        """Clasificación de los componentes de acarreo (categoría + volumen)."""
+        ...
+    def set_clasificacion_transporte(self, filas: Iterable[ClaseTransporte],
+                                     conn=None,
+                                     actualizado_por: Optional[str] = None) -> int: ...
+    def componentes_transporte_candidatos(self) -> list[dict]:
+        """Filas M3-KM de la biblioteca con su APU dueño, para clasificar."""
+        ...
     def componentes_para_integridad(self) -> list[tuple[str, str]]:
         """(insumo_codigo, insumo_nombre) de cada componente con código no vacío.
         Para el chequeo de integridad APU→insumo, sin SQL crudo en el dominio."""

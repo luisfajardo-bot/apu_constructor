@@ -41,3 +41,11 @@ def test_assert_no_money_detects_nested_violation():
 def test_rendimiento_is_allowed():
     ok = {"componentes": [{"rendimiento": 1.5, "cantidad": 10}]}
     privacy.assert_no_money(ok)  # cantidades no son dinero
+
+
+def test_peaje_valor_no_puede_ir_a_la_ia():
+    with pytest.raises(privacy.PrivacyViolation):
+        privacy.assert_no_money({"proyecto": {"km_botadero": 34, "peaje_valor": 12400}})
+    # las distancias y los rendimientos SÍ pueden (son cantidades, no dinero)
+    privacy.assert_no_money({"proyecto": {"km_botadero": 34, "km_mezclas": 28},
+                             "componentes": [{"rendimiento": 33.6}]})

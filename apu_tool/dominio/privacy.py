@@ -23,6 +23,9 @@ _FORBIDDEN_KEYS = {
     "costo", "costo_unitario", "costo_total", "valor", "valor_unitario",
     "valor_total", "margen", "price", "cost", "amount", "total",
     "fuente_precio",
+    # El valor del peaje de un proyecto es dinero. `valor` ya está en la lista,
+    # pero el chequeo es por nombre EXACTO de clave.
+    "peaje_valor",
 }
 
 # Claves que SÍ son cantidades (no dinero) y por tanto se permiten.

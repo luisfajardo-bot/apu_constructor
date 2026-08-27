@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
-from apu_tool.dominio import cruce
+from apu_tool.dominio import cruce, transporte
 from apu_tool.nucleo.models import (
     ApuComponent, CostedComponent,
     CALIDAD_SIN_PRECIO_CATALOGO, CALIDAD_SIN_PRECIO_LISTA,
@@ -23,7 +23,8 @@ from apu_tool.nucleo.redondeo import mul_redondeado
 
 
 class PricingEngine:
-    def __init__(self, almacen: Almacen, lista_id: int | None = None):
+    def __init__(self, almacen: Almacen, lista_id: int | None = None,
+                 contexto: "transporte.ContextoProyecto | None" = None):
         self.alm = almacen
         # Normalizada UNA vez: dentro del motor la lista es siempre un int concreto,
         # así que no hay dos nociones de "Principal" (comparar el crudo contra None
@@ -38,6 +39,12 @@ class PricingEngine:
         # (el borde que cerró el ciclo cayó a histórico). Aceptable porque un ciclo
         # es un error de datos; la guarda de ciclos garantiza terminación igual.
         self._apu_cost_cache: dict[tuple, float] = {}
+        # Desviaciones del proyecto (distancias, peaje, ajustes). None = biblioteca
+        # tal cual: el costeo es idéntico al de antes de esta feature.
+        self._ctx = None if (contexto is None or contexto.vacio) else contexto
+        # (apu, shift) -> códigos de acarreo que no se pudieron reescalar; los lee
+        # alertas.py para avisar en vez de costear con la distancia equivocada.
+        self._sin_distancia: dict[tuple[str, str], tuple[str, ...]] = {}
 
     @property
     def lista_id(self) -> int:
@@ -65,12 +72,37 @@ class PricingEngine:
                 codigo, lista_id=self._lista_id)
         return self._cache[codigo]
 
+    def sin_distancia(self, apu_codigo: str, shift: str) -> tuple[str, ...]:
+        """Componentes de acarreo de ese APU que el proyecto no pudo reescalar."""
+        return self._sin_distancia.get((apu_codigo, shift), ())
+
+    def claves_cargadas(self) -> list[tuple[str, str]]:
+        """(código, turno) de todo lo que hay en el caché de composiciones, incluido
+        el cierre de sub-APUs que trajo `precargar`. Lo usa la tabla de impacto para
+        recorrer el árbol sin duplicar la BFS."""
+        return sorted(self._comp_cache.keys())
+
+    def _efectivos(self, codigo: str, shift: str, crudos: list) -> list:
+        """Composición EFECTIVA del proyecto (regla de transporte + ajustes).
+
+        Se aplica ANTES de cachear, así el costeo, el memo de sub-APUs y la
+        precarga en lote ven todos la misma composición: un solo camino."""
+        if self._ctx is None:
+            return crudos
+        pend = transporte.pendientes(crudos, codigo, shift, self._ctx.params,
+                                     self._ctx.clasificacion)
+        if pend:
+            self._sin_distancia[(codigo, shift)] = pend
+        return transporte.aplicar(crudos, codigo, shift, self._ctx.params,
+                                  self._ctx.clasificacion, self._ctx.ajustes)
+
     def components(self, codigo: str, shift: str) -> list:
-        """Composición de un APU, cacheada por (codigo, shift). Si `precargar` la
-        trajo en lote, no toca la base; si no, cae a la consulta individual."""
+        """Composición EFECTIVA de un APU, cacheada por (codigo, shift). Si
+        `precargar` la trajo en lote, no toca la base."""
         clave = (codigo, shift)
         if clave not in self._comp_cache:
-            self._comp_cache[clave] = self.alm.apus.get_components(codigo, shift)
+            self._comp_cache[clave] = self._efectivos(
+                codigo, shift, self.alm.apus.get_components(codigo, shift))
         return self._comp_cache[clave]
 
     def precargar(self, claves_top) -> None:
@@ -94,7 +126,7 @@ class PricingEngine:
             cargados = self.alm.apus.get_components_bulk(list(pendientes))
             siguientes: set = set()
             for clave in pendientes:
-                comps = cargados.get(clave, [])
+                comps = self._efectivos(clave[0], clave[1], cargados.get(clave, []))
                 self._comp_cache[clave] = comps
                 for comp in comps:
                     if (comp.tipo or "insumo") == "apu" and comp.insumo_codigo:
@@ -112,6 +144,15 @@ class PricingEngine:
     def cost_component(self, comp: ApuComponent, _visitando: tuple = ()) -> CostedComponent:
         if (comp.tipo or "insumo") == "apu":
             return self._cost_subapu(comp, _visitando)
+        if self._ctx is not None and transporte.es_peaje(comp):
+            valor = self._ctx.params.peaje_valor
+            if valor:                      # 0/None => sigue el camino normal del catálogo
+                return CostedComponent(
+                    insumo_codigo=comp.insumo_codigo, insumo_nombre=comp.insumo_nombre,
+                    unidad=comp.unidad, rendimiento=comp.rendimiento,
+                    precio_unitario=float(valor), fuente_precio="peaje del proyecto",
+                    costo=mul_redondeado(comp.rendimiento, float(valor)),
+                    calidad_cruce="exacto", tipo="insumo", ref_shift="")
         r = cruce.resolver(self._candidatos(comp.insumo_codigo), comp.insumo_nombre)
         calidad = r.calidad.value
         if r.insumo is not None and not r.insumo.sin_precio:     # EXACTO o APROXIMADO, con tarifa

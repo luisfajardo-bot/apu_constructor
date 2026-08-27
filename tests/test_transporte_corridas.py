@@ -221,3 +221,36 @@ def test_el_cuadro_generado_alerta_el_pendiente_de_un_subapu(tmp_path):
     texto = "\n".join(str(c.value) for row in ws.iter_rows() for c in row
                       if c.value is not None)
     assert "distancia del proyecto no aplicada" in texto
+
+
+def test_agregar_items_costea_con_la_distancia_del_proyecto(tmp_path):
+    """Agregar una linea a una corrida ya armada tiene que costear con el MISMO
+    contexto que el armado original (esta linea nueva == la linea equivalente que
+    ya trae la corrida), no con la biblioteca cruda.
+
+    Mientras el APU siga en la biblioteca, `_costear_row` relee su composicion
+    fresca (con el contexto de la VISTA) para cualquier fila, asi que el costo
+    vivo ya sale bien aunque el `Assembler` de `agregar_items` quedara sin
+    `contexto=`. Donde SI se nota es en el respaldo que queda persistido con la
+    linea (`row.componentes`, ver `_costear_row`): en cuanto el APU se borra de
+    la biblioteca, el costeo cae a ese respaldo, y sin contexto trae la distancia
+    CRUDA (26.25, -> 26250) en vez de la del proyecto (33.6, -> 33600) — costeando
+    de menos, en silencio, justo cuando ya no hay de donde re-derivarla."""
+    alm = _alm(tmp_path)
+    metro = alm.carpetas.crear("Metro")
+    alm.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro, km_granulares=32))
+    cid = _corrida(alm, metro)                    # arma+confirma un RELLENO -> 33600
+    original = svc.vista_corrida(alm, cid)["items"][0]
+    assert original["costo_unitario"] == 33600     # confirma el punto de partida
+
+    vista = svc.agregar_items(alm, cid, [LicitacionItem(
+        item="2", descripcion="RELLENO", unidad="M3", cantidad=10,
+        precio_contractual=100000.0, shift="DIURNO")])
+    nueva = vista["items"][1]
+    assert nueva["apu_codigo"] == "4390"           # el matcher la asigno sola
+    assert nueva["costo_unitario"] == original["costo_unitario"] == 33600
+
+    # El APU se borra de la biblioteca: la línea cae a su respaldo persistido.
+    alm.apus.borrar_apu("4390", "DIURNO")
+    tras_borrado = svc.vista_corrida(alm, cid)["items"][1]
+    assert tras_borrado["costo_unitario"] == 33600  # el respaldo trajo la distancia del proyecto

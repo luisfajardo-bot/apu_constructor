@@ -240,8 +240,13 @@ def agregar_items(alm: Almacen, corrida_id: int,
     assembler = Assembler(alm, advisor=ApuAdvisor(enabled=meta.use_ai),
                           lista_id=meta.lista_precios_id,
                           # Mismas desviaciones del proyecto que el resto de la
-                          # corrida: si no, la línea nueva costea distinto al armado
-                          # original en silencio (ver `_contexto`).
+                          # corrida: si no, el respaldo que persiste esta línea
+                          # (`row.componentes`, ver `_costear_row`) queda con el
+                          # rendimiento de la biblioteca cruda. Hoy no se nota
+                          # (el costeo vivo se re-deriva fresco de la biblioteca
+                          # mientras el APU siga ahí) pero SÍ en cuanto el APU se
+                          # borre de la biblioteca: ese respaldo es lo único que
+                          # queda, y costearía de menos en silencio.
                           contexto=_contexto(alm, meta))
     # El seq sigue desde el máximo y los huecos que dejó un borrado NO se reusan: el
     # seq es la clave del snapshot y de la URL del ítem.

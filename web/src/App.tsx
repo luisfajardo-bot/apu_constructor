@@ -12,6 +12,7 @@ import Apus from "@/pages/Apus";
 import Usuarios from "@/pages/Usuarios";
 import Auditoria from "@/pages/Auditoria";
 import DistanciasProyecto from "@/pages/DistanciasProyecto";
+import ClasificacionTransporte from "@/pages/ClasificacionTransporte";
 import { ArmadoVivoProvider } from "@/lib/armado";
 
 export default function App() {
@@ -29,6 +30,7 @@ export default function App() {
             <Route path="insumos" element={<Insumos />} />
             <Route path="apus" element={<Apus />} />
             <Route path="proyecto/:carpetaId/distancias" element={<DistanciasProyecto />} />
+            <Route path="transporte/clasificacion" element={<ClasificacionTransporte />} />
             <Route element={<RequiereRol minimo="admin" />}>
               <Route path="usuarios" element={<Usuarios />} />
               <Route path="auditoria" element={<Auditoria />} />

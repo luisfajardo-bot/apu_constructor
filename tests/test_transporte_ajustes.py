@@ -85,8 +85,17 @@ def test_quitar_lo_que_la_regla_conservo():
     assert out == []
 
 
+def test_nombre_distinto_no_lo_encuentra_el_ajuste():
+    """La identidad es codigo + nombre: un ajuste con el codigo correcto y otro
+    nombre apunta a otro insumo y no debe tocar la composicion."""
+    out = transporte.aplicar(BASE, "4390", "DIURNO", ajustes=[
+        _aj("quitar", insumo_codigo="6722", insumo_nombre="OTRA COSA")])
+    assert [c.insumo_codigo for c in out] == ["6722", "7231"]
+
+
 def test_no_muta_la_lista_de_entrada():
     entrada = list(BASE)
-    transporte.aplicar(entrada, "4390", "DIURNO", ajustes=[
+    salida = transporte.aplicar(entrada, "4390", "DIURNO", ajustes=[
         _aj("quitar", insumo_codigo="6722", insumo_nombre="SUBBASE GRANULAR B-400")])
-    assert entrada == BASE
+    assert salida is not entrada          # devuelve lista nueva
+    assert entrada == BASE                # y no le agrego ni quito nada

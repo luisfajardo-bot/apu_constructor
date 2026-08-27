@@ -1,14 +1,32 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { verTransporte, guardarTransporte } from "@/api/transporte";
-import type { ParametrosTransporte, VistaTransporte } from "@/lib/tipos";
+import { verTransporte, guardarTransporte, listarAjustes, borrarAjuste } from "@/api/transporte";
+import type { AjusteProyecto, ParametrosTransporte, VistaTransporte } from "@/lib/tipos";
 import { useAuth } from "@/lib/auth";
 import { puede } from "@/components/rutas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 const NUM = new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 });
+
+const ETIQUETA_ACCION: Record<AjusteProyecto["accion"], string> = {
+  rendimiento: "Rendimiento",
+  agregar: "Agregar insumo",
+  quitar: "Quitar insumo",
+  reemplazar: "Reemplazar insumo",
+};
+
+function fechaLegible(iso?: string): string {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("es-CO", {
+      year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
 
 // Etiquetas visibles de cada campo, compartidas entre el formulario y el
 // mensaje de error de guardar() (para no repetir el texto en dos lugares).
@@ -40,6 +58,7 @@ export default function DistanciasProyecto() {
   const [form, setForm] = useState<Record<string, string>>({});
   const [peaje, setPeaje] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const [ajustes, setAjustes] = useState<AjusteProyecto[]>([]);
 
   useEffect(() => {
     verTransporte(carpetaId)
@@ -55,6 +74,28 @@ export default function DistanciasProyecto() {
       })
       .catch((e) => toast.error(msg(e)));
   }, [carpetaId]);
+
+  useEffect(() => {
+    listarAjustes(carpetaId).then(setAjustes).catch((e) => toast.error(msg(e)));
+  }, [carpetaId]);
+
+  async function eliminarAjuste(a: AjusteProyecto) {
+    if (a.id == null) return;
+    if (!window.confirm(
+      `¿Borrar este ajuste? Afecta a todas las corridas del proyecto.`)) return;
+    try {
+      await borrarAjuste(carpetaId, a.id);
+      toast.success("Ajuste borrado.");
+      // El costo del proyecto cambió: se refresca el impacto (verTransporte)
+      // y la lista de ajustes, igual que hace guardar() con la respuesta del PUT.
+      await Promise.all([
+        verTransporte(carpetaId).then(setVista),
+        listarAjustes(carpetaId).then(setAjustes),
+      ]);
+    } catch (e) {
+      toast.error(msg(e));
+    }
+  }
 
   async function guardar() {
     const km_botadero = num(form.km_botadero ?? "");
@@ -162,6 +203,73 @@ export default function DistanciasProyecto() {
         {vista.sin_clasificar} componente{vista.sin_clasificar === 1 ? "" : "s"} sin
         clasificar{" "}
         <Link className="underline" to="/transporte/clasificacion">Clasificar</Link>
+      </div>
+
+      <div className="space-y-2">
+        <h2 className="text-sm font-medium">Ajustes del proyecto</h2>
+        <div className="text-sm text-muted-foreground">
+          Ajustes puntuales de composición que valen solo para este proyecto: no tocan
+          la biblioteca de APUs.
+        </div>
+        {ajustes.length === 0 ? (
+          <div className="text-sm text-muted-foreground">
+            Este proyecto no tiene ajustes de composición.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b text-left text-muted-foreground">
+                  <th className="py-1 pr-3">APU</th>
+                  <th className="py-1 pr-3">Acción</th>
+                  <th className="py-1 pr-3">Insumo</th>
+                  <th className="py-1 pr-3 text-right">Rendimiento</th>
+                  <th className="py-1 pr-3">Nota</th>
+                  <th className="py-1 pr-3">Creado</th>
+                  {puedeEditar && <th className="py-1 pr-3" />}
+                </tr>
+              </thead>
+              <tbody>
+                {ajustes.map((a) => (
+                  <tr key={a.id} className="border-b align-top">
+                    <td className="py-1 pr-3 font-mono">{a.apu_codigo} · {a.shift}</td>
+                    <td className="py-1 pr-3">{ETIQUETA_ACCION[a.accion]}</td>
+                    <td className="py-1 pr-3">
+                      <span className="font-mono text-muted-foreground">{a.insumo_codigo}</span>{" "}
+                      {a.insumo_nombre}
+                      {a.accion === "reemplazar" && a.insumo_nuevo_codigo && (
+                        <>
+                          {" → "}
+                          <span className="font-mono text-muted-foreground">
+                            {a.insumo_nuevo_codigo}
+                          </span>{" "}
+                          {a.insumo_nuevo_nombre}
+                        </>
+                      )}
+                    </td>
+                    <td className="py-1 pr-3 text-right">
+                      {a.rendimiento != null ? NUM.format(a.rendimiento) : "—"}
+                    </td>
+                    <td className="py-1 pr-3">{a.nota || "—"}</td>
+                    <td className="py-1 pr-3 text-muted-foreground">
+                      {a.creado_por ?? "—"}
+                      <br />
+                      {fechaLegible(a.creado_en)}
+                    </td>
+                    {puedeEditar && (
+                      <td className="py-1 pr-3">
+                        <Button variant="destructive" size="xs" title="Borrar este ajuste"
+                                onClick={() => eliminarAjuste(a)}>
+                          Borrar
+                        </Button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

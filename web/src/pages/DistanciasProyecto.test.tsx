@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import * as api from "@/api/transporte";
 import DistanciasProyecto from "@/pages/DistanciasProyecto";
@@ -29,6 +29,15 @@ const VISTA = {
   sin_clasificar: 1,
 };
 
+// Insumo distinto al de VISTA.impacto (que también usa "7462"/"6878" con esos
+// nombres) para que los asserts por texto no encuentren dos coincidencias.
+const AJUSTES = [
+  { id: 11, apu_codigo: "4390", shift: "DIURNO", accion: "rendimiento",
+    insumo_codigo: "9911", insumo_nombre: "CONCRETO PREMEZCLADO 3000 PSI", unidad: "M3",
+    rendimiento: 40, nota: "el rendimiento de biblioteca no aplica a esta obra por el sitio",
+    creado_en: "2026-08-20T15:30:00Z", creado_por: "luisfajardo@indugravas.com" },
+];
+
 function montar() {
   return render(
     <MemoryRouter initialEntries={["/proyecto/7/distancias"]}>
@@ -39,6 +48,13 @@ function montar() {
 }
 
 describe("DistanciasProyecto", () => {
+  // Default sin ajustes: sin este beforeEach, los tests que no mockean
+  // listarAjustes explícitamente dispararían la llamada real (fetch) al montar.
+  beforeEach(() => {
+    vi.spyOn(api, "listarAjustes").mockResolvedValue([]);
+  });
+
+
   it("muestra los parámetros y el impacto", async () => {
     vi.spyOn(api, "verTransporte").mockResolvedValue(VISTA as never);
     montar();
@@ -94,5 +110,60 @@ describe("DistanciasProyecto", () => {
     fireEvent.click(screen.getByRole("button", { name: /guardar/i }));
     await waitFor(() => expect(guardar).toHaveBeenLastCalledWith(
       7, expect.objectContaining({ km_botadero: null })));
+  });
+
+  it("lista los ajustes del proyecto, con la nota visible", async () => {
+    vi.spyOn(api, "verTransporte").mockResolvedValue(VISTA as never);
+    vi.spyOn(api, "listarAjustes").mockResolvedValue(AJUSTES as never);
+    montar();
+    expect(await screen.findByText("CONCRETO PREMEZCLADO 3000 PSI")).toBeTruthy();
+    expect(screen.getByText(/el rendimiento de biblioteca no aplica/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /borrar/i })).toBeTruthy();
+  });
+
+  it("sin ajustes muestra el estado vacío, no una tabla fantasma", async () => {
+    vi.spyOn(api, "verTransporte").mockResolvedValue(VISTA as never);
+    vi.spyOn(api, "listarAjustes").mockResolvedValue([]);
+    montar();
+    expect(await screen.findByText(/este proyecto no tiene ajustes de composición/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /borrar/i })).toBeNull();
+  });
+
+  it("borrar pide confirmación, llama borrarAjuste(carpetaId, ajusteId) y refresca vista + lista", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const verTransporte = vi.spyOn(api, "verTransporte").mockResolvedValue(VISTA as never);
+    const listarAjustes = vi.spyOn(api, "listarAjustes").mockResolvedValue(AJUSTES as never);
+    const borrar = vi.spyOn(api, "borrarAjuste").mockResolvedValue(undefined);
+    montar();
+    await screen.findByText("CONCRETO PREMEZCLADO 3000 PSI");
+    const llamadasVerAntes = verTransporte.mock.calls.length;
+    const llamadasListarAntes = listarAjustes.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: /borrar/i }));
+    await waitFor(() => expect(borrar).toHaveBeenLastCalledWith(7, 11));
+    await waitFor(() => expect(verTransporte.mock.calls.length).toBeGreaterThan(llamadasVerAntes));
+    await waitFor(() => expect(listarAjustes.mock.calls.length).toBeGreaterThan(llamadasListarAntes));
+  });
+
+  it("cancelar la confirmación no borra el ajuste", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    vi.spyOn(api, "verTransporte").mockResolvedValue(VISTA as never);
+    vi.spyOn(api, "listarAjustes").mockResolvedValue(AJUSTES as never);
+    const borrar = vi.spyOn(api, "borrarAjuste").mockResolvedValue(undefined);
+    const llamadasPrevias = borrar.mock.calls.length;
+    montar();
+    fireEvent.click(await screen.findByRole("button", { name: /borrar/i }));
+    expect(borrar.mock.calls.length).toBe(llamadasPrevias);
+  });
+
+  it("si el borrado falla, muestra el mensaje del backend", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.spyOn(api, "verTransporte").mockResolvedValue(VISTA as never);
+    vi.spyOn(api, "listarAjustes").mockResolvedValue(AJUSTES as never);
+    vi.spyOn(api, "borrarAjuste").mockRejectedValue(new Error("No autorizado para borrar ajustes."));
+    montar();
+    fireEvent.click(await screen.findByRole("button", { name: /borrar/i }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const mensaje = vi.mocked(toast.error).mock.calls.at(-1)?.[0] as string;
+    expect(mensaje).toMatch(/no autorizado/i);
   });
 });

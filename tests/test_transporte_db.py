@@ -48,3 +48,63 @@ def test_candidatos_solo_las_filas_m3_km(tmp_path):
     c = cands[0]
     assert c["apu_codigo"] == "4200" and c["apu_nombre"] == "MEZCLA MD20"
     assert c["rendimiento"] == 26.25 and c["unidad"] == "M3-KM"
+
+
+from apu_tool.datos.carpetas_db import CarpetasDB
+from apu_tool.datos.corridas_db import CorridasDB
+from apu_tool.nucleo.models import AjusteProyecto, ParametrosProyecto
+
+
+def _carpetas(tmp_path):
+    CorridasDB(tmp_path / "c.db").init_schema()      # crea el esquema compartido
+    return CarpetasDB(tmp_path / "c.db")
+
+
+def test_parametros_inexistentes_son_none(tmp_path):
+    car = _carpetas(tmp_path)
+    cid = car.crear("Calle 13")
+    assert car.get_parametros(cid) is None
+
+
+def test_set_y_get_parametros(tmp_path):
+    car = _carpetas(tmp_path)
+    cid = car.crear("Metro")
+    car.set_parametros(ParametrosProyecto(
+        carpeta_id=cid, km_botadero=34, km_mezclas=28, km_granulares=32,
+        peaje_aplica=True, peaje_valor=12400), actualizado_por="yo@test.co")
+    p = car.get_parametros(cid)
+    assert (p.km_botadero, p.km_mezclas, p.km_granulares) == (34, 28, 32)
+    assert p.peaje_aplica is True and p.peaje_valor == 12400
+    assert p.actualizado_en and p.actualizado_por == "yo@test.co"
+    # Reescribir actualiza, no duplica.
+    car.set_parametros(ParametrosProyecto(carpeta_id=cid, km_botadero=21,
+                                         peaje_aplica=False))
+    p = car.get_parametros(cid)
+    assert p.km_botadero == 21 and p.peaje_aplica is False and p.km_mezclas is None
+
+
+def test_crud_de_ajustes(tmp_path):
+    car = _carpetas(tmp_path)
+    cid = car.crear("Metro")
+    assert car.listar_ajustes(cid) == []
+    aid = car.crear_ajuste(AjusteProyecto(
+        carpeta_id=cid, apu_codigo="4390", shift="DIURNO", accion="agregar",
+        insumo_codigo="9001", insumo_nombre="GEOTEXTIL NT 2000", unidad="M2",
+        rendimiento=1.1, nota="lo exige la especificación"), creado_por="yo@test.co")
+    ajustes = car.listar_ajustes(cid)
+    assert len(ajustes) == 1 and ajustes[0].id == aid
+    assert ajustes[0].accion == "agregar" and ajustes[0].rendimiento == 1.1
+    assert car.borrar_ajuste(cid, aid) is True
+    assert car.listar_ajustes(cid) == []
+    assert car.borrar_ajuste(cid, aid) is False
+
+
+def test_borrar_la_carpeta_borra_sus_parametros_y_ajustes(tmp_path):
+    car = _carpetas(tmp_path)
+    cid = car.crear("Temporal")
+    car.set_parametros(ParametrosProyecto(carpeta_id=cid, km_botadero=30))
+    car.crear_ajuste(AjusteProyecto(carpeta_id=cid, apu_codigo="1", shift="DIURNO",
+                                    accion="quitar", insumo_codigo="9",
+                                    insumo_nombre="X"))
+    assert car.eliminar(cid) is True
+    assert car.get_parametros(cid) is None and car.listar_ajustes(cid) == []

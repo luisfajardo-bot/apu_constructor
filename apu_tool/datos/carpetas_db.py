@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 from apu_tool import config
-from apu_tool.nucleo.models import Carpeta
+from apu_tool.nucleo.models import AjusteProyecto, Carpeta, ParametrosProyecto
 
 
 class CarpetasDB:
@@ -96,3 +96,82 @@ class CarpetasDB:
         with self.connect() as conn:
             return conn.execute("SELECT COUNT(*) FROM corrida WHERE carpeta_id=?",
                                 (int(carpeta_id),)).fetchone()[0]
+
+    # ---- parámetros de transporte del proyecto ----
+    def get_parametros(self, carpeta_id: int) -> Optional[ParametrosProyecto]:
+        with self.connect() as conn:
+            r = conn.execute("SELECT * FROM proyecto_parametros WHERE carpeta_id=?",
+                             (int(carpeta_id),)).fetchone()
+        if r is None:
+            return None
+        return ParametrosProyecto(
+            carpeta_id=r["carpeta_id"], km_botadero=r["km_botadero"],
+            km_mezclas=r["km_mezclas"], km_granulares=r["km_granulares"],
+            peaje_aplica=None if r["peaje_aplica"] is None else bool(r["peaje_aplica"]),
+            peaje_valor=r["peaje_valor"], actualizado_en=r["actualizado_en"] or "",
+            actualizado_por=r["actualizado_por"])
+
+    def set_parametros(self, params: ParametrosProyecto, conn=None,
+                       actualizado_por: Optional[str] = None) -> None:
+        import datetime as _dt
+        ahora = _dt.datetime.now().isoformat(timespec="seconds")
+        sql = ("INSERT OR REPLACE INTO proyecto_parametros "
+               "(carpeta_id, km_botadero, km_mezclas, km_granulares, peaje_aplica, "
+               " peaje_valor, actualizado_en, actualizado_por) VALUES (?,?,?,?,?,?,?,?)")
+        p = (int(params.carpeta_id), params.km_botadero, params.km_mezclas,
+             params.km_granulares,
+             None if params.peaje_aplica is None else int(params.peaje_aplica),
+             params.peaje_valor, ahora, actualizado_por or params.actualizado_por)
+        if conn is not None:
+            conn.execute(sql, p)
+            return
+        with self.connect() as c:
+            c.execute(sql, p)
+
+    # ---- ajustes puntuales del proyecto ----
+    def _fila_ajuste(self, r) -> AjusteProyecto:
+        return AjusteProyecto(
+            id=r["id"], carpeta_id=r["carpeta_id"], apu_codigo=r["apu_codigo"],
+            shift=r["shift"], accion=r["accion"], insumo_codigo=r["insumo_codigo"],
+            insumo_nombre=r["insumo_nombre"] or "", unidad=r["unidad"] or "",
+            rendimiento=r["rendimiento"],
+            insumo_nuevo_codigo=r["insumo_nuevo_codigo"] or "",
+            insumo_nuevo_nombre=r["insumo_nuevo_nombre"] or "",
+            tipo=r["tipo"] or "insumo", ref_shift=r["ref_shift"] or "",
+            nota=r["nota"] or "", creado_en=r["creado_en"] or "",
+            creado_por=r["creado_por"])
+
+    def listar_ajustes(self, carpeta_id: int) -> list[AjusteProyecto]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM proyecto_ajuste WHERE carpeta_id=? "
+                "ORDER BY apu_codigo, shift, accion, insumo_codigo",
+                (int(carpeta_id),)).fetchall()
+        return [self._fila_ajuste(r) for r in rows]
+
+    def crear_ajuste(self, ajuste: AjusteProyecto, conn=None,
+                     creado_por: Optional[str] = None) -> int:
+        import datetime as _dt
+        creado_en = _dt.datetime.now().isoformat(timespec="seconds")
+        sql = ("INSERT OR REPLACE INTO proyecto_ajuste "
+               "(carpeta_id, apu_codigo, shift, accion, insumo_codigo, insumo_nombre, "
+               " unidad, rendimiento, insumo_nuevo_codigo, insumo_nuevo_nombre, tipo, "
+               " ref_shift, nota, creado_en, creado_por) "
+               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        p = (int(ajuste.carpeta_id), ajuste.apu_codigo, ajuste.shift, ajuste.accion,
+             ajuste.insumo_codigo, ajuste.insumo_nombre, ajuste.unidad,
+             ajuste.rendimiento, ajuste.insumo_nuevo_codigo,
+             ajuste.insumo_nuevo_nombre, ajuste.tipo or "insumo", ajuste.ref_shift,
+             ajuste.nota, creado_en, creado_por or ajuste.creado_por)
+        if conn is not None:
+            return int(conn.execute(sql, p).lastrowid)
+        with self.connect() as c:
+            return int(c.execute(sql, p).lastrowid)
+
+    def borrar_ajuste(self, carpeta_id: int, ajuste_id: int, conn=None) -> bool:
+        sql = "DELETE FROM proyecto_ajuste WHERE carpeta_id=? AND id=?"
+        p = (int(carpeta_id), int(ajuste_id))
+        if conn is not None:
+            return conn.execute(sql, p).rowcount > 0
+        with self.connect() as c:
+            return c.execute(sql, p).rowcount > 0

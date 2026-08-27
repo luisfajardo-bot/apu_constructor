@@ -9,8 +9,8 @@ from __future__ import annotations
 from typing import Iterable, Optional, Protocol, runtime_checkable
 
 from apu_tool.nucleo.models import (
-    Apu, ApuComponent, Carpeta, ClaseTransporte, CorridaItemRow, CorridaMeta, DePricedApu,
-    EventoAuditoria, Insumo, ListaPrecios, Perfil,
+    AjusteProyecto, Apu, ApuComponent, Carpeta, ClaseTransporte, CorridaItemRow, CorridaMeta,
+    DePricedApu, EventoAuditoria, Insumo, ListaPrecios, ParametrosProyecto, Perfil,
 )
 
 
@@ -210,6 +210,16 @@ class RepositorioCarpetas(Protocol):
     def eliminar(self, carpeta_id: int, conn=None) -> bool: ...
     def contar_hijas(self, carpeta_id: int) -> int: ...
     def contar_corridas(self, carpeta_id: int) -> int: ...
+
+    def get_parametros(self, carpeta_id: int) -> Optional[ParametrosProyecto]:
+        """Distancias/peaje del proyecto. None = sin definir (costeo de siempre)."""
+        ...
+    def set_parametros(self, params: ParametrosProyecto, conn=None,
+                       actualizado_por: Optional[str] = None) -> None: ...
+    def listar_ajustes(self, carpeta_id: int) -> list[AjusteProyecto]: ...
+    def crear_ajuste(self, ajuste: AjusteProyecto, conn=None,
+                     creado_por: Optional[str] = None) -> int: ...
+    def borrar_ajuste(self, carpeta_id: int, ajuste_id: int, conn=None) -> bool: ...
 
 
 @runtime_checkable

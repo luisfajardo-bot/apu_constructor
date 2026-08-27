@@ -206,3 +206,44 @@ def _un_ajuste(comps: list[ApuComponent], a: AjusteProyecto,
             rendimiento=float(a.rendimiento), precio_unitario_hist=0.0,
             tipo=a.tipo or "insumo", ref_shift=a.ref_shift or "")]
     return comps
+
+
+def cargar_contexto(almacen, carpeta_id: Optional[int]) -> ContextoProyecto:
+    """Contexto del proyecto al que pertenece una carpeta (sube a la raíz).
+
+    Es lo único de este módulo que lee la base — mismo criterio que
+    `PricingEngine`, que también recibe el `Almacen`. Tres consultas como máximo:
+    la carpeta raíz, sus parámetros/ajustes y la clasificación de la biblioteca
+    (una tabla de decenas de filas, se lee completa).
+    """
+    vacio = ContextoProyecto(params=ParametrosProyecto(), clasificacion={})
+    if carpeta_id is None:
+        return vacio
+    raiz = raiz_de(almacen, carpeta_id)
+    if raiz is None:
+        return vacio
+    params = almacen.carpetas.get_parametros(raiz) or ParametrosProyecto(carpeta_id=raiz)
+    ajustes = tuple(almacen.carpetas.listar_ajustes(raiz))
+    if params.vacio and not ajustes:
+        return vacio                       # nada definido: ni se lee la clasificación
+    clasificacion = {(c.apu_codigo, c.shift, c.insumo_codigo): c
+                     for c in almacen.apus.get_clasificacion_transporte()}
+    return ContextoProyecto(params=params, clasificacion=clasificacion, ajustes=ajustes)
+
+
+def raiz_de(almacen, carpeta_id: Optional[int]) -> Optional[int]:
+    """Carpeta de nivel 1 (= el proyecto) a la que pertenece `carpeta_id`.
+    La jerarquía es de 2 niveles (lo garantiza servicio/carpetas.py), así que
+    esto son 2 consultas como máximo; el tope de 5 vueltas es una red por si
+    algún día alguien crea un ciclo a mano en la base."""
+    actual = carpeta_id
+    for _ in range(5):
+        if actual is None:
+            return None
+        c = almacen.carpetas.get(actual)
+        if c is None:
+            return None
+        if c.parent_id is None:
+            return c.id
+        actual = c.parent_id
+    return actual

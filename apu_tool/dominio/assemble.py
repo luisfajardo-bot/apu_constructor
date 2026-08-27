@@ -34,12 +34,14 @@ ProgressCb = Optional[Callable[[int, int, str], None]]
 
 class Assembler:
     def __init__(self, almacen: Almacen, advisor: Optional[ApuAdvisor] = None,
-                 lista_id: Optional[int] = None):
+                 lista_id: Optional[int] = None, contexto=None):
         self.alm = almacen
         # Costear con la tarifa de la corrida: armar y confirmar deben dar el mismo
         # número que la vista. None = Principal.
         self.lista_id = lista_id
-        self.pricing = PricingEngine(almacen, lista_id=lista_id)
+        # Desviaciones del proyecto: armar/confirmar tienen que dar el mismo número
+        # que la vista, así que el contexto viaja también por acá.
+        self.pricing = PricingEngine(almacen, lista_id=lista_id, contexto=contexto)
         self.advisor = advisor or ApuAdvisor()
         # Matcher / retriever / índice de códigos son PEREZOSOS: construirlos lee el
         # catálogo completo de APUs (2 consultas) y arma un índice invertido en CPU.

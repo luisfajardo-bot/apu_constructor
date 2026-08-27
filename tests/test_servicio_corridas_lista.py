@@ -110,9 +110,9 @@ def test_confirmar_item_construye_el_assembler_con_la_lista_de_la_corrida(alm, n
     class _AssemblerEspia(svc.Assembler):
         capturado: dict = {}
 
-        def __init__(self, almacen, advisor=None, lista_id=None):
+        def __init__(self, almacen, advisor=None, lista_id=None, contexto=None):
             _AssemblerEspia.capturado["lista_id"] = lista_id
-            super().__init__(almacen, advisor=advisor, lista_id=lista_id)
+            super().__init__(almacen, advisor=advisor, lista_id=lista_id, contexto=contexto)
 
     monkeypatch.setattr(svc, "Assembler", _AssemblerEspia)
 

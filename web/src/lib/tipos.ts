@@ -348,3 +348,89 @@ export interface ImportResultado {
   subapus_marcados?: number;
   errores: { codigo: string; turno?: string; error: string }[];
 }
+
+export type CategoriaTransporte = "botadero" | "mezclas" | "granulares";
+
+export interface ParametrosTransporte {
+  carpeta_id?: number;
+  km_botadero: number | null;
+  km_mezclas: number | null;
+  km_granulares: number | null;
+  peaje_aplica: boolean | null;
+  peaje_valor: number | null;
+  actualizado_en?: string;
+  actualizado_por?: string | null;
+}
+
+export interface FilaImpacto {
+  apu_codigo: string;
+  shift: string;
+  insumo_codigo: string;
+  insumo_nombre: string;
+  unidad: string;
+  rendimiento_actual: number;
+  categoria: CategoriaTransporte | null;
+  volumen: number | null;
+  rendimiento_nuevo: number | null;
+  quitado: boolean;
+  origen: "biblioteca" | "distancia";
+  sin_clasificar: boolean;
+}
+
+export interface VistaTransporte {
+  parametros: ParametrosTransporte;
+  impacto: FilaImpacto[];
+  sin_clasificar: number;
+}
+
+export interface FilaClasificacion {
+  apu_codigo: string;
+  shift: string;
+  apu_nombre: string;
+  insumo_codigo: string;
+  insumo_nombre: string;
+  unidad: string;
+  rendimiento: number;
+  categoria: CategoriaTransporte | null;
+  categoria_sugerida: CategoriaTransporte | null;
+  volumen: number;
+  km_base: number;
+  km_implicito: number | null;
+}
+
+export interface ListaClasificacion {
+  items: FilaClasificacion[];
+  total: number;
+  categorias: CategoriaTransporte[];
+  km_base_defecto: number;
+}
+
+export interface ClaseTransporteIn {
+  apu_codigo: string;
+  shift: string;
+  insumo_codigo: string;
+  insumo_nombre: string;
+  categoria: CategoriaTransporte;
+  volumen: number;
+  km_base?: number | null;
+}
+
+export type AccionAjuste = "rendimiento" | "agregar" | "quitar" | "reemplazar";
+
+export interface AjusteProyecto {
+  id?: number;
+  apu_codigo: string;
+  shift: string;
+  accion: AccionAjuste;
+  insumo_codigo: string;
+  insumo_nombre: string;
+  unidad?: string;
+  rendimiento?: number | null;
+  insumo_nuevo_codigo?: string;
+  insumo_nuevo_nombre?: string;
+  tipo?: string;
+  ref_shift?: string;
+  nota?: string;
+  creado_en?: string;
+  creado_por?: string | null;
+}

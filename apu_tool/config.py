@@ -84,6 +84,32 @@ def classify_price_source(fuente: str) -> str:
 LISTA_PRINCIPAL_ID = 1
 
 
+# --- Transporte por proyecto (distancias de acarreo) -------------------------
+# Categorías de acarreo que un proyecto parametriza. Vocabulario cerrado, sin
+# tabla (mismo criterio que PUBLIC_PRICE_SOURCES y los grupos de APU).
+TRANSPORTE_CATEGORIAS = ("botadero", "mezclas", "granulares")
+
+# Identidad (código, nombre) de los insumos con trato especial. Se compara por
+# código + nombre normalizado: 6 de los 9 códigos de transporte tienen homónimo
+# en el catálogo (7462 es también NIPLE 16", 6878 también CONCRETO 3000 PSI).
+PEAJE = ("INT3", "PEAJE")
+DERECHOS_BOTADERO = ("7231", "DERECHOS DE BOTADERO")   # es volumen: NO escala con km
+
+# Supuesto inicial de la pantalla de clasificación: la distancia con la que se
+# armó la biblioteca. El usuario lo corrige fila por fila.
+KM_BASE_DEFECTO = 25.0
+
+# Solo para SUGERIR la categoría al clasificar; el usuario confirma.
+# (ámbito, fragmentos de nombre normalizado, categoría)
+TRANSPORTE_SUGERENCIAS = (
+    ("apu_nombre", ("ESCOMBROS", "BOTADERO"), "botadero"),
+    ("insumo_nombre", ("BASES ASFALTICAS", "ASFALTIC"), "mezclas"),
+    ("insumo_nombre", ("PETREOS", "GRANULARES"), "granulares"),
+)
+
+UNIDAD_TRANSPORTE = "M3-KM"     # unidad de los componentes que escalan con la distancia
+
+
 def detect_source_xlsx() -> Path | None:
     """Devuelve la ruta al Excel definida en la variable APU_SOURCE_XLSX, o None.
 

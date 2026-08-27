@@ -96,6 +96,75 @@ class ListaPrecios:
 
 
 @dataclass(frozen=True)
+class ClaseTransporte:
+    """Clasificación de un componente de transporte de la biblioteca.
+
+    `volumen` = m³ esponjados que mueve el APU por unidad suya; el rendimiento
+    efectivo es `volumen × km_del_proyecto`. `km_base` es la distancia que se
+    asumió al clasificar (solo trazabilidad: `volumen = rendimiento / km_base`).
+    La identidad es código + nombre porque los códigos se repiten en el catálogo.
+    """
+    apu_codigo: str
+    shift: str
+    insumo_codigo: str
+    insumo_nombre: str
+    categoria: str                # botadero | mezclas | granulares
+    volumen: float
+    km_base: Optional[float] = None
+    actualizado_en: str = ""
+    actualizado_por: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ParametrosProyecto:
+    """Distancias y peaje de un proyecto (carpeta de nivel 1).
+
+    Todo `None` = no definido: la regla no toca nada y el costeo es el de hoy.
+    `peaje_valor` es dinero (por eso está en `privacy._FORBIDDEN_KEYS`).
+    """
+    carpeta_id: Optional[int] = None
+    km_botadero: Optional[float] = None
+    km_mezclas: Optional[float] = None
+    km_granulares: Optional[float] = None
+    peaje_aplica: Optional[bool] = None
+    peaje_valor: Optional[float] = None
+    actualizado_en: str = ""
+    actualizado_por: Optional[str] = None
+
+    def km(self, categoria: str) -> Optional[float]:
+        return {"botadero": self.km_botadero,
+                "mezclas": self.km_mezclas,
+                "granulares": self.km_granulares}.get(categoria)
+
+    @property
+    def vacio(self) -> bool:
+        """Sin nada definido la regla es un no-op (garantía de no regresión)."""
+        return all(v is None for v in (self.km_botadero, self.km_mezclas,
+                                       self.km_granulares, self.peaje_aplica))
+
+
+@dataclass(frozen=True)
+class AjusteProyecto:
+    """Excepción puntual de composición para un proyecto. NO ve dinero."""
+    apu_codigo: str
+    shift: str
+    accion: str                   # rendimiento | agregar | quitar | reemplazar
+    insumo_codigo: str
+    insumo_nombre: str = ""
+    unidad: str = ""
+    rendimiento: Optional[float] = None
+    insumo_nuevo_codigo: str = ""
+    insumo_nuevo_nombre: str = ""
+    tipo: str = "insumo"          # insumo | apu (sub-APU)
+    ref_shift: str = ""
+    nota: str = ""
+    id: Optional[int] = None
+    carpeta_id: Optional[int] = None
+    creado_en: str = ""
+    creado_por: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class EventoAuditoria:
     """Un evento de auditoría (tabla seguridad.auditoria). SIN dinero directo:
     los precios viajan dentro de antes/despues como parte del estado, nunca hacia la IA."""
@@ -186,6 +255,7 @@ FUENTE_SIN_PRECIO_LISTA = "sin precio en lista"      # insumo encontrado, sin fi
 FUENTE_SIN_RESPALDO = "sin respaldo"                 # sub-APU sin árbol costeable (ciclo/vacío) en una lista NP
 CALIDAD_SIN_PRECIO_LISTA = "sin_precio_lista"        # ausencia de precio en una lista NP
 CALIDAD_SIN_PRECIO_CATALOGO = "sin_precio_catalogo"  # insumo encontrado sin fila de precio en Principal
+CALIDAD_SIN_DISTANCIA = "sin_distancia_proyecto"   # componente M3-KM sin clasificar
 
 
 @dataclass

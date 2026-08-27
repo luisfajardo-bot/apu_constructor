@@ -1931,6 +1931,25 @@ def test_alerta_de_distancia_no_aplicada():
 Y en `tests/test_transporte_corridas.py`:
 
 ```python
+def test_alerta_de_pendiente_que_vive_en_un_subapu():
+    """El pendiente del sub-APU no está entre los componentes del ítem, y aún así
+    tiene que alertar: es el caso del botadero."""
+    from apu_tool.dominio.alertas import alertas_costeo
+    from apu_tool.nucleo.models import (
+        AssembledApu, CostedComponent, LicitacionItem, MatchStatus)
+    item = LicitacionItem(item="1", descripcion="RELLENO", unidad="M3", cantidad=1,
+                          precio_contractual=1000.0, shift="DIURNO")
+    sub = CostedComponent(insumo_codigo="3017", insumo_nombre="TTE ESCOMBROS",
+                          unidad="M3", rendimiento=1.0, precio_unitario=26500.0,
+                          fuente_precio="APU", costo=26500, calidad_cruce="apu",
+                          tipo="apu", ref_shift="DIURNO")
+    ens = AssembledApu(item=item, apu_codigo="4390", apu_nombre="RELLENO", unidad="M3",
+                       shift="DIURNO", componentes=[sub], costo_unitario=26500,
+                       status=MatchStatus.CONFIRMED, confianza=1.0)
+    motivos = alertas_costeo(ens, sin_distancia=("7462",))
+    assert motivos == ["7462: distancia del proyecto no aplicada (en un sub-APU)"]
+
+
 def test_la_corrida_alerta_el_componente_sin_clasificar(tmp_path):
     alm = _alm(tmp_path)
     # Se borra la clasificación para simular un APU nuevo sin clasificar.
@@ -1959,6 +1978,7 @@ def alertas_costeo(a: AssembledApu, sin_distancia: tuple[str, ...] = ()) -> list
     Se avisa en vez de costear con la distancia equivocada en silencio."""
     motivos: list[str] = []
     pendientes = set(sin_distancia)
+    reportados: set[str] = set()
     for c in a.componentes:
         etiqueta = f"{c.insumo_codigo} {c.insumo_nombre}".strip()
         if c.calidad_cruce == CALIDAD_SIN_PRECIO_LISTA:
@@ -1967,8 +1987,16 @@ def alertas_costeo(a: AssembledApu, sin_distancia: tuple[str, ...] = ()) -> list
             motivos.append(f"{etiqueta}: en $0")
         elif c.insumo_codigo in pendientes:
             motivos.append(f"{etiqueta}: distancia del proyecto no aplicada")
+            reportados.add(c.insumo_codigo)
         elif c.calidad_cruce in _MOTIVO_CRUCE:
             motivos.append(f"{etiqueta}: {_MOTIVO_CRUCE[c.calidad_cruce]}")
+    # Un pendiente que vive DENTRO de un sub-APU (el caso del botadero) no aparece
+    # entre los componentes del ítem, así que el bucle no lo ve. Sin esto, el ítem se
+    # costearía con la distancia de la biblioteca y nadie se enteraría.
+    for cod in sin_distancia:
+        if cod not in reportados:
+            motivos.append(f"{cod}: distancia del proyecto no aplicada (en un sub-APU)")
+            reportados.add(cod)
     if not motivos and a.costo_unitario <= 0:
         motivos.append("APU en $0 (sin composición o sin costo)")
     return motivos

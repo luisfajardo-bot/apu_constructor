@@ -368,13 +368,11 @@ Salieron al inspeccionar la biblioteca; quedan documentados para decidirlos apar
 
 ## Riesgos documentados
 
-- **`seed --force` conserva `componente_transporte`** (excepción deliberada de
-  `ApusDB.reset()`, documentada en su docstring): la clave es de negocio
-  (`apu_codigo, shift, insumo_codigo`), no un id surrogado como en las listas NP, así
-  que la clasificación sobrevive un re-semillado sin quedar mal apuntada y no se tiran
-  10 minutos de juicio de ingeniería. Riesgo residual: filas huérfanas si un APU deja
-  de existir; son inertes porque el lookup revalida el nombre del insumo y cae en «sin
-  clasificar» con alerta, nunca en un dato viejo aplicado en silencio.
+- **`seed --force` borra `componente_transporte`** (misma suerte que las listas NP).
+  Los dos backends se comportan igual a propósito: `ApusPg.reset()` hace
+  `DROP SCHEMA apus CASCADE`, que se lleva la tabla, y una asimetría entre backends en
+  el camino de `--force` es peor que perder la clasificación. Reclasificar son unos
+  minutos con el default de km base. Va a la sección «No hacer» de CLAUDE.md.
 - **Mover una corrida de carpeta le cambia el costo**, porque los parámetros se heredan en
   vivo. Es el precio de tener una sola fuente de verdad por proyecto. Mitigación: el
   encabezado de la corrida muestra las distancias vigentes y el movimiento queda en

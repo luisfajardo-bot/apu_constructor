@@ -138,3 +138,16 @@ def test_candidatos_tolera_una_unidad_escrita_distinto(tmp_path):
                      rendimiento=26.25, precio_unitario_hist=1000.0)])
     codigos = [c["insumo_codigo"] for c in db.componentes_transporte_candidatos()]
     assert codigos == ["6878", "7462"]
+
+
+def test_reset_borra_la_clasificacion_igual_que_postgres(tmp_path):
+    """`seed --force` (reset_catalogo) tiene que dejar la misma foto en los dos
+    backends: ApusPg.reset() hace DROP SCHEMA CASCADE, que se lleva la tabla."""
+    db = _db(tmp_path)
+    db.set_clasificacion_transporte([ClaseTransporte(
+        apu_codigo="4200", shift="DIURNO", insumo_codigo="6878",
+        insumo_nombre="TRANSPORTE DE BASES ASFALTICAS", categoria="mezclas",
+        volumen=1.05, km_base=25.0)])
+    assert len(db.get_clasificacion_transporte()) == 1
+    db.reset()
+    assert db.get_clasificacion_transporte() == []

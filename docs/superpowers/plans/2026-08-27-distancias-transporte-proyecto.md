@@ -3860,10 +3860,9 @@ En **No hacer**:
   distancia es del sitio, no del APU.
 - No confíes en el código de un insumo de transporte para clasificarlo: 6 de los 9
   códigos tienen homónimo en el catálogo. Siempre código + nombre.
-- Ojo: `seed --force` NO borra `componente_transporte` — es una excepción deliberada
-  de `ApusDB.reset()`: la clave es de negocio, así que la clasificación sobrevive un
-  re-semillado. Una fila huérfana es inerte (el lookup revalida el nombre del insumo y
-  la trata como «sin clasificar», con alerta).
+- Ojo: `seed --force` borra `componente_transporte` (igual que las listas NP) y hay
+  que reclasificar las filas M3-KM. Los dos backends se comportan igual a propósito:
+  el espejo Postgres hace `DROP SCHEMA apus CASCADE`.
 ```
 
 - [ ] **Step 2: Correr la suite completa de Python**

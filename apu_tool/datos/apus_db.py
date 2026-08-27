@@ -57,15 +57,14 @@ class ApusDB:
     def reset(self) -> None:
         """Reconstruye el esquema desde cero (descarta y recrea desde db/apus.sql).
 
-        EXCEPCIÓN deliberada: `componente_transporte` NO se dropea. Su clave es de
-        negocio (apu_codigo, shift, insumo_codigo), no un id surrogado, así que
-        sobrevive un re-semillado sin quedar mal apuntada, y clasificar esas filas es
-        juicio de ingeniería que no se debe tirar. Una fila que quede huérfana es
-        inerte: `dominio/transporte._clase_de` revalida el nombre del insumo en cada
-        lookup y, si no coincide, la trata como "sin clasificar" (alerta) en vez de
-        aplicar un dato viejo en silencio."""
+        `componente_transporte` (la clasificación de acarreos) también se dropea, a
+        propósito: el espejo Postgres hace `DROP SCHEMA apus CASCADE`, que se la lleva
+        igual, y dos backends con comportamientos distintos en el camino de
+        `seed --force` es peor que perder la clasificación. Es la misma suerte que las
+        listas NP: `--force` es el camino destructivo declarado. Reclasificar son unos
+        minutos con el default de km base."""
         with self.connect() as conn:
-            for t in ("apu_componentes", "apus", "meta"):
+            for t in ("componente_transporte", "apu_componentes", "apus", "meta"):
                 conn.execute(f"DROP TABLE IF EXISTS {t}")
             conn.executescript(_load_schema())
 

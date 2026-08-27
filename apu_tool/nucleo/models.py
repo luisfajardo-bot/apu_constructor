@@ -156,7 +156,7 @@ class AjusteProyecto:
     insumo_nuevo_codigo: str = ""
     insumo_nuevo_nombre: str = ""
     tipo: str = "insumo"          # insumo | apu (sub-APU)
-    ref_shift: str = ""
+    ref_shift: str = ""           # turno del sub-APU cuando tipo == "apu"
     nota: str = ""
     id: Optional[int] = None
     carpeta_id: Optional[int] = None

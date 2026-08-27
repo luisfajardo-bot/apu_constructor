@@ -94,3 +94,40 @@ def test_detalle_item_y_cuadro_usan_el_contexto(tmp_path):
     det = svc.detalle_item(alm, cid, 0)
     assert det["composicion"][0]["rendimiento"] == 33.6
     assert svc.generar_cuadro(alm, cid) is not None
+
+
+def test_el_armado_en_vivo_costea_con_las_distancias_del_proyecto(tmp_path):
+    """Los eventos del armado tienen que traer el mismo costo que la vista: si no,
+    el numero salta cuando termina de armar."""
+    alm = _alm(tmp_path)
+    metro = alm.carpetas.crear("Metro")
+    alm.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro, km_granulares=32))
+    items = [LicitacionItem(item="1", descripcion="RELLENO", unidad="M3", cantidad=10,
+                            precio_contractual=100000.0, shift="DIURNO")]
+    filas = []
+    for evento, payload in svc.construir_corrida_stream(
+            alm, "lic.xlsx", items, "DIURNO", False, carpeta_id=metro):
+        if evento == "progress":
+            filas.append(payload["fila"])
+    costeadas = [f for f in filas if f.get("costo_unitario")]
+    assert costeadas, filas
+    assert all(f["costo_unitario"] == 33600 for f in costeadas)
+
+
+def test_listar_corridas_resuelve_el_contexto_una_vez_por_proyecto(tmp_path, monkeypatch):
+    """El contexto se resuelve por PROYECTO, no por corrida: contra Postgres cada
+    resolucion son varios round-trips."""
+    alm = _alm(tmp_path)
+    metro = alm.carpetas.crear("Metro")
+    alm.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro, km_granulares=32))
+    _corrida(alm, metro)
+    _corrida(alm, metro)
+    _corrida(alm, metro)
+    llamadas = []
+    real = transporte.cargar_contexto
+    def espia(almacen, carpeta_id):
+        llamadas.append(carpeta_id)
+        return real(almacen, carpeta_id)
+    monkeypatch.setattr(svc.transporte, "cargar_contexto", espia)
+    svc.listar_corridas(alm)
+    assert llamadas.count(metro) == 1, llamadas

@@ -59,13 +59,22 @@ def _nombre_lista(alm: Almacen, lista_id: Optional[int]) -> str:
     return lista.nombre if lista else f"lista {lista_id}"
 
 
-def _contexto(alm: Almacen, meta: CorridaMeta):
+def _contexto(alm: Almacen, meta: CorridaMeta, cache: Optional[dict] = None):
     """Desviaciones del proyecto de esta corrida (distancias, peaje, ajustes).
 
-    Se resuelven EN VIVO desde la carpeta raíz: cambiar las distancias del
-    proyecto recostea sus corridas activas sin tocar nada más. Una corrida
-    congelada nunca llega acá (se sirve del snapshot)."""
-    return transporte.cargar_contexto(alm, meta.carpeta_id)
+    Se resuelven EN VIVO desde la carpeta raíz: cambiar las distancias del proyecto
+    recostea sus corridas activas sin tocar nada más. Una corrida congelada nunca
+    llega acá (se sirve del snapshot).
+
+    `cache`: memo por carpeta para un barrido de varias corridas (`listar_corridas`).
+    Sin él, listar N corridas resuelve el contexto N veces (hasta 4 consultas cada
+    una), que es el mismo N+1 de round-trips contra Postgres que la precarga en lote
+    ya había eliminado."""
+    if cache is None:
+        return transporte.cargar_contexto(alm, meta.carpeta_id)
+    if meta.carpeta_id not in cache:
+        cache[meta.carpeta_id] = transporte.cargar_contexto(alm, meta.carpeta_id)
+    return cache[meta.carpeta_id]
 
 
 def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
@@ -85,7 +94,11 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
     lo ya armado sobrevive si se abandona. La corrida nace 'armando'; si desaparece
     durante el armado, `agregar_item` lanza CorridaEliminada y se cancela."""
     advisor = ApuAdvisor(enabled=use_ai)
-    assembler = Assembler(alm, advisor=advisor, lista_id=lista_precios_id)
+    assembler = Assembler(alm, advisor=advisor, lista_id=lista_precios_id,
+                          # Las mismas desviaciones del proyecto que usará la vista:
+                          # si el armado en vivo costeara con la biblioteca cruda, los
+                          # números saltarían al terminar.
+                          contexto=transporte.cargar_contexto(alm, carpeta_id))
     nombre_efectivo = (nombre or "").strip()[:120].strip() or nombre_desde_archivo(archivo)
     corrida_id = alm.corridas.crear_corrida(CorridaMeta(
         id=None, creada_en=datetime.now().isoformat(timespec="seconds"),
@@ -422,6 +435,7 @@ def listar_corridas(alm: Almacen) -> list[dict]:
     # (precios/composición) y se arregló precargando en lote; el nombre de la lista
     # sigue la misma regla para no reintroducir el mismo patrón.
     nombres_lista = {l.id: l.nombre for l in alm.precios.listar_listas()}
+    ctx_cache: dict = {}   # memo por carpeta: N corridas del mismo proyecto, un solo contexto
     for meta in alm.corridas.listar_corridas():
         rows = alm.corridas.get_items(meta.id)
         n_rev = sum(1 for it in rows if it.status in ("review", "new"))
@@ -437,7 +451,7 @@ def listar_corridas(alm: Almacen) -> list[dict]:
                 "contractual": None, "costo": None, "margen": None, "margen_pct": None}
         try:                                           # fail-safe: si una corrida no
             pricing = PricingEngine(alm, lista_id=meta.lista_precios_id,
-                                    contexto=_contexto(alm, meta))   # costea, su fila queda con None
+                                    contexto=_contexto(alm, meta, ctx_cache))   # costea, su fila queda con None
             pricing.precargar((r.apu_codigo, r.shift) for r in rows if r.apu_codigo)
             tot = _totales(_ensamblar_corrida(alm, meta, rows, pricing), rows)
             fila.update(contractual=tot["contractual"], costo=tot["costo"],

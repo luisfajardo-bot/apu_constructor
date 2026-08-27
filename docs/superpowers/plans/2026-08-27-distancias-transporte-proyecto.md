@@ -2132,11 +2132,17 @@ def test_peaje_sin_valor_es_400(tmp_path):
     assert r.status_code == 400 and "$0" in r.text
 
 
-def test_km_negativo_es_400(tmp_path):
+def test_km_negativo_o_cero_es_400(tmp_path):
+    """Un km en 0 dejaría el acarreo en rendimiento 0 y el ítem en $0."""
     cli, alm = _cli(tmp_path)
     cid = alm.carpetas.crear("Metro")
-    r = cli.put(f"/api/carpetas/{cid}/transporte", json={"km_botadero": -1})
-    assert r.status_code == 400
+    assert cli.put(f"/api/carpetas/{cid}/transporte",
+                   json={"km_botadero": -1}).status_code == 400
+    assert cli.put(f"/api/carpetas/{cid}/transporte",
+                   json={"km_botadero": 0}).status_code == 400
+    # vacío sí se acepta: es "esta distancia no aplica".
+    assert cli.put(f"/api/carpetas/{cid}/transporte",
+                   json={"km_botadero": None}).status_code == 200
 
 
 def test_subcarpeta_no_puede_tener_parametros(tmp_path):
@@ -2270,8 +2276,12 @@ def guardar(alm: Almacen, carpeta_id: int, datos: dict, actor=None) -> dict:
     kms = {}
     for campo in ("km_botadero", "km_mezclas", "km_granulares"):
         v = datos.get(campo)
-        if v is not None and float(v) < 0:
-            raise ValueError(f"{campo} no puede ser negativo.")
+        # Un 0 NO es una distancia válida: reescalaría el acarreo a rendimiento 0 y
+        # dejaría el ítem en $0. Regla de negocio: nada en $0. Para "no aplica" se
+        # deja el campo en null, que es lo que la regla trata como sin definir.
+        if v is not None and float(v) <= 0:
+            raise ValueError(f"{campo} debe ser mayor que 0; deja el campo vacío "
+                             f"si esa distancia no aplica al proyecto.")
         kms[campo] = None if v is None else float(v)
     aplica = datos.get("peaje_aplica")
     valor = datos.get("peaje_valor")
@@ -2653,12 +2663,15 @@ def _out(a: AjusteProyecto) -> dict:
             "creado_en": a.creado_en, "creado_por": a.creado_por}
 
 
-def _existe_en_catalogo(alm: Almacen, codigo: str, nombre: str) -> bool:
-    """El insumo tiene que existir con ESE código y ESE nombre: los códigos se
-    repiten en el catálogo con significados distintos."""
+def _insumo_de_catalogo(alm: Almacen, codigo: str, nombre: str):
+    """El insumo del catálogo con ESE código y ESE nombre, o None. La identidad es
+    código + nombre: los códigos se repiten en el catálogo con significados
+    distintos (`7462` es TRANSPORTE DE PETREOS y también NIPLE 16")."""
     objetivo = normalizar(nombre)
-    return any(normalizar(i.nombre) == objetivo
-               for i in alm.precios.get_candidatos(codigo))
+    for i in alm.precios.get_candidatos(codigo):
+        if normalizar(i.nombre) == objetivo:
+            return i
+    return None
 
 
 def listar(alm: Almacen, carpeta_id: int) -> list[dict]:
@@ -2680,17 +2693,26 @@ def crear(alm: Almacen, carpeta_id: int, datos: dict, actor=None) -> dict:
         raise ValueError("El rendimiento debe ser mayor que 0.")
     codigo = str(datos.get("insumo_codigo") or "")
     nombre = str(datos.get("insumo_nombre") or "")
-    if accion == "agregar" and not _existe_en_catalogo(alm, codigo, nombre):
-        raise ValueError(f"El insumo {codigo} «{nombre}» no está en el catálogo.")
+    unidad = str(datos.get("unidad") or "")
+    if accion == "agregar":
+        ins = _insumo_de_catalogo(alm, codigo, nombre)
+        if ins is None:
+            raise ValueError(f"El insumo {codigo} «{nombre}» no está en el catálogo.")
+        unidad = unidad or ins.unidad
     if accion == "reemplazar":
         nuevo_cod = str(datos.get("insumo_nuevo_codigo") or "")
         nuevo_nom = str(datos.get("insumo_nuevo_nombre") or "")
-        if not _existe_en_catalogo(alm, nuevo_cod, nuevo_nom):
+        nuevo = _insumo_de_catalogo(alm, nuevo_cod, nuevo_nom)
+        if nuevo is None:
             raise ValueError(f"El insumo {nuevo_cod} «{nuevo_nom}» no está en el catálogo.")
+        # La unidad viaja SIEMPRE la del insumo nuevo: `transporte._un_ajuste` la usa
+        # para no dejar el componente reemplazado con la unidad del viejo (si esa
+        # unidad fuera M3-KM, la regla lo trataría como acarreo sin serlo).
+        unidad = nuevo.unidad
     ajuste = AjusteProyecto(
         carpeta_id=raiz, apu_codigo=str(datos["apu_codigo"]),
         shift=str(datos["shift"]), accion=accion, insumo_codigo=codigo,
-        insumo_nombre=nombre, unidad=str(datos.get("unidad") or ""),
+        insumo_nombre=nombre, unidad=unidad,
         rendimiento=None if rend is None else float(rend),
         insumo_nuevo_codigo=str(datos.get("insumo_nuevo_codigo") or ""),
         insumo_nuevo_nombre=str(datos.get("insumo_nuevo_nombre") or ""),

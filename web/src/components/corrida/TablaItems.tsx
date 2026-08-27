@@ -9,6 +9,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import EstadoBadge from "@/components/corrida/EstadoBadge";
 import SubApuBadge from "@/components/SubApuBadge";
 import BuscadorApu from "@/components/corrida/BuscadorApu";
@@ -18,7 +19,10 @@ import { cop, pct } from "@/lib/moneda";
 import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
 import { getItem, confirmar, confirmarLote } from "@/api/corridas";
 import { getApuDetalle } from "@/api/autoria";
-import type { ItemCuadro, DetalleItem, CorridaDetalle, ApuDetalle } from "@/lib/tipos";
+import { crearAjuste } from "@/api/transporte";
+import type {
+  ItemCuadro, DetalleItem, CorridaDetalle, ApuDetalle, LineaComposicion,
+} from "@/lib/tipos";
 import type { ControlCorridaTabla } from "@/lib/corridaTabla";
 
 interface TablaItemsProps {
@@ -29,6 +33,9 @@ interface TablaItemsProps {
   control?: ControlCorridaTabla;
   /** Rol editor: habilita crear un APU nuevo (duplicar) desde la corrida. */
   puedeEditar?: boolean;
+  /** Carpeta (proyecto) de la corrida; sin ella no hay a qué proyecto atar un
+   *  ajuste de composición, así que "Ajustar" no se ofrece. */
+  carpetaId?: number | null;
 }
 
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
@@ -42,6 +49,7 @@ export default function TablaItems({
   readOnly = false,
   control,
   puedeEditar = false,
+  carpetaId = null,
 }: TablaItemsProps) {
   // Con `control`, el padre ya entrega las filas filtradas/ordenadas y controla
   // "Solo revisión". Sin `control` (modo vivo), se mantiene el filtro local de hoy.
@@ -119,6 +127,18 @@ export default function TablaItems({
     setMarcadas(new Set());
   }
 
+  // Recarga el detalle de un ítem ya expandido sin colapsar la fila (a
+  // diferencia de `handleConfirmar`, que sí colapsa). La usan tanto el primer
+  // despliegue de `toggleExpand` como `onCambio` tras un ajuste de composición.
+  async function recargarDetalle(seq: number) {
+    try {
+      const detalle = await getItem(corridaId, seq);
+      setExpandido((prev) => ({ ...prev, [seq]: detalle }));
+    } catch {
+      setExpandido((prev) => ({ ...prev, [seq]: "error" }));
+    }
+  }
+
   async function toggleExpand(seq: number) {
     const actual = expandido[seq];
 
@@ -130,12 +150,7 @@ export default function TablaItems({
 
     // Primer despliegue: lazy fetch
     setExpandido((prev) => ({ ...prev, [seq]: "cargando" }));
-    try {
-      const detalle = await getItem(corridaId, seq);
-      setExpandido((prev) => ({ ...prev, [seq]: detalle }));
-    } catch {
-      setExpandido((prev) => ({ ...prev, [seq]: "error" }));
-    }
+    await recargarDetalle(seq);
   }
 
   /** Devuelve true si el ítem quedó reasignado. Los llamadores que no lo necesiten
@@ -399,6 +414,8 @@ export default function TablaItems({
                           puedeDuplicar={puedeEditar && !readOnly}
                           duplicarCargando={cargandoDuplicar === it.seq}
                           onDuplicar={abrirDuplicar}
+                          carpetaId={carpetaId}
+                          onCambioComposicion={() => recargarDetalle(it.seq)}
                         />
                       )}
                     </TableCell>
@@ -467,6 +484,9 @@ interface DetalleExpandidoProps {
   /** El fetch de "abrir duplicar" de ESTE ítem está en vuelo: deshabilita su botón. */
   duplicarCargando: boolean;
   onDuplicar: (seq: number, codigo: string, turno: string) => void;
+  carpetaId: number | null;
+  /** Recarga el detalle de este ítem tras un ajuste de composición (no colapsa la fila). */
+  onCambioComposicion: () => void;
 }
 
 function DetalleExpandido({
@@ -479,6 +499,8 @@ function DetalleExpandido({
   puedeDuplicar,
   duplicarCargando,
   onDuplicar,
+  carpetaId,
+  onCambioComposicion,
 }: DetalleExpandidoProps) {
   const esRevisable = REVISABLE.has(detalle.status);
 
@@ -590,39 +612,27 @@ function DetalleExpandido({
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="text-xs">Código</TableHead>
                 <TableHead className="text-xs">Insumo</TableHead>
                 <TableHead className="text-xs w-12">Und</TableHead>
                 <TableHead className="text-xs w-16 text-right">Rend.</TableHead>
                 <TableHead className="text-xs w-24 text-right">Precio</TableHead>
                 <TableHead className="text-xs w-24 text-right">Costo</TableHead>
                 <TableHead className="text-xs w-16">Cruce</TableHead>
+                <TableHead className="text-xs w-24" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {detalle.composicion.map((lin, i) => (
-                <TableRow key={i}>
-                  <TableCell className="text-xs max-w-[200px] truncate">
-                    {lin.insumo_nombre}
-                  </TableCell>
-                  <TableCell className="text-xs">{lin.unidad}</TableCell>
-                  <TableCell className="text-xs text-right font-mono tabular-nums">
-                    {lin.rendimiento.toLocaleString("es-CO", {
-                      maximumFractionDigits: 4,
-                    })}
-                  </TableCell>
-                  <TableCell className="text-xs text-right font-mono tabular-nums">
-                    {cop(lin.precio_unitario)}
-                  </TableCell>
-                  <TableCell className="text-xs text-right font-mono tabular-nums">
-                    {cop(lin.costo)}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {/* usa calidad_cruce (no tipo): tipo no viaja en la corrida ni sobrevive el snapshot congelado */}
-                    {lin.calidad_cruce === "apu"
-                      ? <SubApuBadge />
-                      : etiquetaCalidadCruce(lin.calidad_cruce)}
-                  </TableCell>
-                </TableRow>
+                <FilaComposicion
+                  key={i}
+                  linea={lin}
+                  apuCodigo={detalle.apu_codigo || null}
+                  turno={detalle.apu_turno}
+                  carpetaId={carpetaId}
+                  editable={puedeDuplicar}
+                  onCambio={onCambioComposicion}
+                />
               ))}
             </TableBody>
           </Table>
@@ -646,5 +656,95 @@ function DetalleExpandido({
         </div>
       )}
     </div>
+  );
+}
+
+// ─── fila de composición: ajuste puntual con alcance proyecto ────────────────
+// El default es "este proyecto" (nunca la biblioteca): un ajuste creado acá
+// solo afecta las corridas de la carpeta indicada por `carpetaId`. Editar la
+// biblioteca de APUs sigue siendo la acción aparte de la pantalla de APUs.
+
+export function FilaComposicion({ linea, apuCodigo, turno, carpetaId, editable, onCambio }: {
+  linea: LineaComposicion;
+  apuCodigo: string | null;
+  turno: string;
+  carpetaId: number | null;
+  editable: boolean;
+  onCambio: () => void;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const [valor, setValor] = useState(String(linea.rendimiento));
+  const [enviando, setEnviando] = useState(false);
+  const puede = editable && carpetaId !== null && apuCodigo !== null;
+
+  async function aplicar() {
+    const rend = Number(valor.replace(",", "."));
+    if (!Number.isFinite(rend) || rend <= 0) { toast.error("Rendimiento inválido."); return; }
+    setEnviando(true);
+    try {
+      await crearAjuste(carpetaId as number, {
+        apu_codigo: apuCodigo as string, shift: turno, accion: "rendimiento",
+        insumo_codigo: linea.insumo_codigo, insumo_nombre: linea.insumo_nombre,
+        unidad: linea.unidad, rendimiento: rend,
+        nota: "ajuste del proyecto desde la corrida",
+      });
+      toast.success("Ajuste aplicado a este proyecto (la biblioteca no cambió).");
+      setAbierto(false);
+      onCambio();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo aplicar el ajuste.");
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  return (
+    <TableRow>
+      <TableCell className="text-xs font-mono text-muted-foreground">
+        {linea.insumo_codigo}
+      </TableCell>
+      <TableCell className="text-xs max-w-[200px] truncate">
+        {linea.insumo_nombre}
+      </TableCell>
+      <TableCell className="text-xs">{linea.unidad}</TableCell>
+      <TableCell className="text-xs text-right font-mono tabular-nums">
+        {abierto ? (
+          <span className="inline-flex items-center gap-1">
+            <Input
+              className="w-20 text-right"
+              inputMode="decimal"
+              aria-label="Rendimiento del proyecto"
+              value={valor}
+              onChange={(e) => setValor(e.target.value)}
+            />
+            <Button size="xs" onClick={aplicar} disabled={enviando}>
+              {enviando ? "Aplicando…" : "Aplicar"}
+            </Button>
+          </span>
+        ) : (
+          linea.rendimiento.toLocaleString("es-CO", { maximumFractionDigits: 4 })
+        )}
+      </TableCell>
+      <TableCell className="text-xs text-right font-mono tabular-nums">
+        {cop(linea.precio_unitario)}
+      </TableCell>
+      <TableCell className="text-xs text-right font-mono tabular-nums">
+        {cop(linea.costo)}
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground">
+        {/* usa calidad_cruce (no tipo): tipo no viaja en la corrida ni sobrevive el snapshot congelado */}
+        {linea.calidad_cruce === "apu"
+          ? <SubApuBadge />
+          : etiquetaCalidadCruce(linea.calidad_cruce)}
+      </TableCell>
+      <TableCell className="text-xs">
+        {puede && !abierto && (
+          <Button variant="outline" size="xs" onClick={() => setAbierto(true)}
+            title="Ajustar la composición para este proyecto (no cambia la biblioteca)">
+            Ajustar
+          </Button>
+        )}
+      </TableCell>
+    </TableRow>
   );
 }

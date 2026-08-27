@@ -220,6 +220,7 @@ export default function Corrida() {
         readOnly={data.modo === "congelada"}
         control={live ? undefined : control}
         puedeEditar={puede(perfil?.rol, "editor")}
+        carpetaId={data.carpeta_id}
       />
     </div>
   );

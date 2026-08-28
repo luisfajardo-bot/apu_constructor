@@ -1,7 +1,14 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 
-vi.mock("react-router-dom", () => ({ useParams: () => ({ id: "1" }) }));
+// `Link` entra al mock porque el encabezado ahora enlaza a las distancias del
+// proyecto; sin el stub, el componente revienta con Link undefined.
+vi.mock("react-router-dom", () => ({
+  useParams: () => ({ id: "1" }),
+  Link: ({ to, children, ...resto }: { to: string; children: React.ReactNode }) => (
+    <a href={to} {...resto}>{children}</a>
+  ),
+}));
 vi.mock("@/lib/armado", () => ({
   useArmadoVivo: () => ({ corridaId: null, estado: "idle", filas: [], total: 0 }),
 }));
@@ -97,4 +104,30 @@ test("con la corrida en_revision, el botón Agregar líneas sí aparece", async 
 
   await screen.findByText("Excavación");
   expect(screen.getByText("Agregar líneas")).toBeTruthy();
+});
+
+
+test("desde la corrida se puede ir a las distancias del proyecto", async () => {
+  const { getCorrida } = await import("@/api/corridas");
+  (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
+    ...CORRIDA, carpeta_id: 7,
+    transporte: { km_botadero: 34, km_mezclas: 28, km_granulares: 32,
+                  peaje_aplica: true, peaje_valor: 12400, ajustes: 0 },
+  });
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  const enlace = await screen.findByRole("link", { name: /botadero 34 km/i });
+  expect(enlace.getAttribute("href")).toBe("/proyecto/7/distancias");
+});
+
+test("sin distancias cargadas, la corrida igual ofrece ir a definirlas", async () => {
+  const { getCorrida } = await import("@/api/corridas");
+  (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
+    ...CORRIDA, carpeta_id: 7, transporte: null,
+  });
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  // Es justo cuando MAS hace falta el acceso: no hay distancias que mostrar todavia.
+  const enlace = await screen.findByRole("link", { name: /definir distancias del proyecto/i });
+  expect(enlace.getAttribute("href")).toBe("/proyecto/7/distancias");
 });

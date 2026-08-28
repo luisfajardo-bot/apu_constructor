@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import TablaItems from "@/components/corrida/TablaItems";
@@ -147,16 +147,27 @@ export default function Corrida() {
         </div>
         {!live && (
           <div className="flex items-center gap-2 flex-wrap">
-            {data.transporte && (
-              <span className="text-xs text-muted-foreground">
-                botadero {data.transporte.km_botadero ?? "—"} km · mezclas{" "}
-                {data.transporte.km_mezclas ?? "—"} · granulares{" "}
-                {data.transporte.km_granulares ?? "—"}
-                {data.transporte.peaje_aplica
-                  ? ` · peaje ${cop(data.transporte.peaje_valor ?? 0)}` : " · sin peaje"}
-                {data.transporte.ajustes > 0
-                  ? ` · ${data.transporte.ajustes} ajustes` : ""}
-              </span>
+            {/* Enlace, no texto suelto: desde la corrida uno quiere SALTAR a las
+                distancias que produjeron estos costos. Y aparece tambien cuando el
+                proyecto NO tiene distancias, que es justo cuando hay que ir a
+                ponerlas (antes solo se mostraba si ya estaban cargadas). */}
+            {data.carpeta_id != null && (
+              <Link
+                to={`/proyecto/${data.carpeta_id}/distancias`}
+                className="text-xs text-muted-foreground underline"
+                title="Ver y editar las distancias de acarreo de este proyecto"
+              >
+                {data.transporte
+                  ? `botadero ${data.transporte.km_botadero ?? "—"} km · mezclas ${
+                      data.transporte.km_mezclas ?? "—"} · granulares ${
+                      data.transporte.km_granulares ?? "—"}${
+                      data.transporte.peaje_aplica
+                        ? ` · peaje ${cop(data.transporte.peaje_valor ?? 0)}`
+                        : " · sin peaje"}${
+                      data.transporte.ajustes > 0
+                        ? ` · ${data.transporte.ajustes} ajustes` : ""}`
+                  : "Definir distancias del proyecto"}
+              </Link>
             )}
             <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${
               data.modo === "congelada" ? "bg-blue-100 text-blue-800" : "bg-green-100 text-green-800"}`}>

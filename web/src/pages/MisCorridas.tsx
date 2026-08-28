@@ -242,6 +242,18 @@ export default function MisCorridas() {
         </div>
       </div>
 
+      {/* Estando DENTRO de un proyecto (carpeta de nivel 1) hay que poder llegar a sus
+          distancias: el enlace de la lista de subcarpetas solo se ve un nivel arriba, y
+          aca es donde el usuario esta trabajando con las corridas de ese proyecto. */}
+      {nodoActual != null && nodoActual.parent_id === null && (
+        <div className="mb-3 flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">Proyecto {nodoActual.nombre}:</span>
+          <Link to={`/proyecto/${nodoActual.id}/distancias`} className="underline">
+            Distancias y ajustes
+          </Link>
+        </div>
+      )}
+
       {/* Breadcrumb. Eran <span onClick>, o sea inalcanzables con teclado; pasan a
           <button>, que es lo que son. Mismo onClick, misma navegación. */}
       <nav aria-label="Ruta de carpetas" className="mb-3 text-xs text-muted-foreground">

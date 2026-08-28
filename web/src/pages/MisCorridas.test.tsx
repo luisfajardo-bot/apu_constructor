@@ -144,3 +144,18 @@ test("la columna Lista distingue una corrida NP de una Principal", async () => {
   const filaPrincipal = screen.getByText("lic.xlsx").closest("tr")!;
   expect(within(filaPrincipal).getByText("Principal")).toBeTruthy();
 });
+
+// El enlace a las distancias del proyecto vivía SOLO en la fila de la lista de
+// subcarpetas, o sea un nivel arriba: al entrar al proyecto desaparecía, y ahí es
+// justo donde el usuario trabaja con sus corridas. Lo reportó él, no un test.
+test("dentro de un proyecto (nivel 1) hay acceso a sus distancias", async () => {
+  render(<MemoryRouter initialEntries={["/corridas?carpeta=1"]}><MisCorridas /></MemoryRouter>);
+  const enlace = await screen.findByRole("link", { name: /distancias/i });
+  expect(enlace.getAttribute("href")).toBe("/proyecto/1/distancias");
+});
+
+test("dentro de una subcarpeta (nivel 2) NO se ofrecen distancias: son del proyecto", async () => {
+  render(<MemoryRouter initialEntries={["/corridas?carpeta=2"]}><MisCorridas /></MemoryRouter>);
+  await waitFor(() => expect(screen.getByText("Lote 3")).toBeTruthy());
+  expect(screen.queryByRole("link", { name: /distancias/i })).toBeNull();
+});

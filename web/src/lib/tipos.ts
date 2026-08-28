@@ -408,6 +408,9 @@ export interface FilaImpacto {
 }
 
 export interface VistaTransporte {
+  // Qué proyecto (carpeta raíz) es dueño de estos parámetros. Entrando desde una
+  // subcarpeta, el backend devuelve el padre: es lo que la pantalla debe nombrar.
+  proyecto: { id: number; nombre: string };
   parametros: ParametrosTransporte;
   impacto: FilaImpacto[];
   sin_clasificar: number;

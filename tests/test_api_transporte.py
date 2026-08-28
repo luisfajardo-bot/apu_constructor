@@ -158,3 +158,22 @@ def test_impacto_incluye_el_peaje_quitado(tmp_path):
     assert len(filas) == 1, imp
     assert filas[0]["quitado"] is True
     assert filas[0]["origen"] == "distancia"
+
+
+def test_la_vista_dice_de_que_proyecto_son_las_distancias(tmp_path):
+    """Estos numeros cambian la plata de un proyecto entero: la pantalla tiene que
+    poder decir de cual, con nombre."""
+    cli, alm = _cli(tmp_path)
+    metro = alm.carpetas.crear("Metro")
+    body = cli.get(f"/api/carpetas/{metro}/transporte").json()
+    assert body["proyecto"] == {"id": metro, "nombre": "Metro"}
+
+
+def test_desde_una_subcarpeta_nombra_al_proyecto_padre(tmp_path):
+    """Entrando desde 'Lote 3' se editan las distancias de 'Metro': si la pantalla no
+    lo dijera, el usuario creeria estar tocando solo su lote."""
+    cli, alm = _cli(tmp_path)
+    metro = alm.carpetas.crear("Metro")
+    lote = alm.carpetas.crear("Lote 3", parent_id=metro)
+    body = cli.get(f"/api/carpetas/{lote}/transporte").json()
+    assert body["proyecto"] == {"id": metro, "nombre": "Metro"}

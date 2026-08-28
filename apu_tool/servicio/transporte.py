@@ -39,13 +39,20 @@ def _raiz_o_error(alm: Almacen, carpeta_id: int) -> int:
 
 
 def ver(alm: Almacen, carpeta_id: int) -> dict:
-    """Parámetros del proyecto + tabla de impacto + cuántos componentes faltan clasificar."""
+    """Parámetros del proyecto + tabla de impacto + cuántos componentes faltan clasificar.
+
+    Devuelve también QUÉ proyecto es (la carpeta raíz, con su nombre): estos números
+    cambian la plata de un proyecto entero, y entrando desde una subcarpeta la pantalla
+    no tendría cómo decir que edita los del proyecto padre."""
     raiz = regla.raiz_de(alm, carpeta_id)
     if raiz is None:
         raise ValueError("La carpeta no existe.")
+    carpeta_raiz = alm.carpetas.get(raiz)
     params = alm.carpetas.get_parametros(raiz)
     impacto = _impacto(alm, raiz)
-    return {"parametros": _params_out(params, raiz),
+    return {"proyecto": {"id": raiz,
+                         "nombre": carpeta_raiz.nombre if carpeta_raiz else ""},
+            "parametros": _params_out(params, raiz),
             "impacto": impacto,
             "sin_clasificar": sum(1 for f in impacto if f["sin_clasificar"])}
 

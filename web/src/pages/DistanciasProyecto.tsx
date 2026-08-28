@@ -139,6 +139,23 @@ export default function DistanciasProyecto() {
 
   return (
     <div className="p-4 space-y-4">
+      {/* El nombre del proyecto va arriba y en grande: estos km cambian el costo de
+          TODAS las corridas del proyecto, y entrando desde una subcarpeta el usuario
+          no tendria como saber que edita los del padre. */}
+      <div>
+        <h2 className="text-[15px] font-semibold tracking-[-0.01em]">
+          Distancias del proyecto{" "}
+          <span className="text-primary">{vista.proyecto.nombre}</span>
+        </h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Aplican a todas las corridas activas de este proyecto y no modifican la
+          biblioteca de APUs.{" "}
+          <Link to={`/corridas?carpeta=${vista.proyecto.id}`} className="underline">
+            Volver a {vista.proyecto.nombre}
+          </Link>
+        </p>
+      </div>
+
       <div className="flex flex-wrap items-end gap-4">
         <Campo id="km_botadero" etiqueta={ETIQUETAS.km_botadero} form={form} setForm={setForm}
                disabled={!puedeEditar} />

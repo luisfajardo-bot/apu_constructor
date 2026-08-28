@@ -14,6 +14,7 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 // Apus.duplicar.test.tsx): se usa `fireEvent` y `toBeTruthy()` en su lugar.
 
 const VISTA = {
+  proyecto: { id: 7, nombre: "Metro" },
   parametros: { km_botadero: 34, km_mezclas: null, km_granulares: 32,
                 peaje_aplica: true, peaje_valor: 12400 },
   impacto: [{ apu_codigo: "4390", shift: "DIURNO", insumo_codigo: "7462",
@@ -166,4 +167,14 @@ describe("DistanciasProyecto", () => {
     const mensaje = vi.mocked(toast.error).mock.calls.at(-1)?.[0] as string;
     expect(mensaje).toMatch(/no autorizado/i);
   });
+});
+
+
+test("dice de que proyecto son las distancias que se estan editando", async () => {
+  vi.spyOn(api, "verTransporte").mockResolvedValue(VISTA as never);
+  vi.spyOn(api, "listarAjustes").mockResolvedValue([] as never);
+  montar();
+  // El nombre del proyecto tiene que estar en el encabezado, no solo en la URL.
+  const titulo = await screen.findByRole("heading", { name: /distancias del proyecto/i });
+  expect(titulo.textContent).toContain("Metro");
 });

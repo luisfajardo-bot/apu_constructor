@@ -1,8 +1,11 @@
-"""Composición generativa: se simula la IA (no se llama a la API real)."""
+"""Composición generativa a pedido: se simula la IA (no se llama a la API real).
+
+El armado NO la usa (ver test_assemble.py::test_armado_nunca_llama_a_la_ia); llega
+acá solo por `Assembler.generar_composicion`, que dispara el usuario.
+"""
 import pytest
 
 from apu_tool.dominio.ai_assist import (
-    AIDecision,
     ApuAdvisor,
     ComposedComponent,
     ComposeResult,
@@ -20,15 +23,12 @@ from apu_tool.nucleo.models import (
 
 
 class FakeAdvisor(ApuAdvisor):
-    """Simula la IA: fuerza el camino generativo y devuelve una composición fija."""
+    """Simula la IA y devuelve una composición fija."""
     def __init__(self, composicion):
         self.enabled = True
         self._client = object()  # no se usa
         self.model = "fake"
         self._composicion = composicion
-
-    def choose_apu(self, item, candidatos, depriced):
-        return AIDecision(None, 0.0, "sin base", "ia")  # fuerza generación
 
     def compose_apu(self, item, insumos, ejemplos):
         return self._composicion
@@ -65,7 +65,7 @@ def test_generative_composition_is_costed(alm):
     assembler = Assembler(alm, advisor=FakeAdvisor(comp))
     item = LicitacionItem("1", "JARDINERA PREFABRICADA EN CONCRETO", "M2", 10,
                           120000, "DIURNO")
-    a = assembler.assemble_item(item)
+    a = assembler.generar_composicion(item)
     assert a.origen == "generado"
     assert a.status == MatchStatus.REVIEW
     # 2.0*40000 + 0.1*500000 = 130000
@@ -80,13 +80,13 @@ def test_generative_drops_invalid_codes(alm):
         justificacion="x", confianza=0.5)
     assembler = Assembler(alm, advisor=FakeAdvisor(comp))
     item = LicitacionItem("1", "ALGO NUEVO", "M2", 1, 1000, "DIURNO")
-    a = assembler.assemble_item(item)
+    a = assembler.generar_composicion(item)
     assert len(a.componentes) == 1           # se descarta el código inválido
     assert a.componentes[0].insumo_codigo == "4279"
 
 
 def test_no_ai_keeps_manual(alm):
-    # advisor real deshabilitado -> compose devuelve None -> manual
+    # El armado nunca genera: una actividad sin match queda manual, con o sin IA.
     assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False))
     item = LicitacionItem("1", "ACTIVIDAD TOTALMENTE INEXISTENTE XYZ", "UN", 1, 1, "DIURNO")
     a = assembler.assemble_item(item)

@@ -134,3 +134,39 @@ def test_item_sin_apu_queda_con_alerta_de_costeo(assembler):
     item = LicitacionItem("11", "SUMINISTRO DE REDES ELECTRICAS", "M3", 5, 0.0, "DIURNO")
     a = assembler.assemble_item(item)
     assert alertas_costeo(a), "un ítem en $0 nunca puede quedar sin alerta"
+
+
+class _AdvisorEspia:
+    """Revienta si el armado lo toca. El armado tiene que ser determinístico."""
+    def choose_apu(self, *a, **k):
+        raise AssertionError("assemble_item no debe llamar a la IA")
+
+    def compose_apu(self, *a, **k):
+        raise AssertionError("assemble_item no debe componer con IA")
+
+
+def test_armado_nunca_llama_a_la_ia(tmp_path):
+    from apu_tool.datos.almacen import Almacen
+    from apu_tool.nucleo.models import Apu, ApuComponent, Insumo, LicitacionItem
+
+    a = Almacen(tmp_path / "p.db", tmp_path / "a.db")
+    a.reset()
+    a.precios.insert_insumos([Insumo("4279", "CUADRILLA", "HR", "MO", 40000, "PRECIO IDU")])
+    a.apus.insert_apus([Apu("100", "EXCAVACION MANUAL", "M3", "DIURNO", "MOV")])
+    a.apus.insert_components([
+        ApuComponent("100", "DIURNO", "4279", "CUADRILLA", "HR", 1.0, 40000)])
+    asm = Assembler(a, advisor=_AdvisorEspia())
+
+    # Dudoso (entre MATCH_REVIEW y MATCH_ACCEPT): toma el mejor candidato, sin IA.
+    dudoso = LicitacionItem(item="1", descripcion="EXCAVACION MANUAL EN TIERRA",
+                            unidad="M3", cantidad=1, precio_contractual=0, shift="DIURNO")
+    r1 = asm.assemble_item(dudoso)
+    assert r1.apu_codigo == "100"
+
+    # Sin coincidencia: queda SIN APU y con status new, nunca generado.
+    nuevo = LicitacionItem(item="2", descripcion="BARRERA ANTIRRUIDO MODULAR",
+                           unidad="M2", cantidad=1, precio_contractual=0, shift="DIURNO")
+    r2 = asm.assemble_item(nuevo)
+    assert r2.apu_codigo is None
+    assert r2.status.value == "new"
+    assert r2.origen == "manual"

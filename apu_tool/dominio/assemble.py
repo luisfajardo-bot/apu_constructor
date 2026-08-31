@@ -2,19 +2,21 @@
 Orquestador del pipeline por ítem.
 
 Para cada ítem de la lista de licitación:
-  1. matching determinístico contra el histórico (filtrado por turno).
-  2. si el match es claro -> se usa directo (status AUTO).
-     si es dudoso o nuevo -> la IA (acotada, sin dinero) propone el APU base
-        y se marca REVIEW para que el usuario confirme.
+  1. si el ítem trae código del presupuesto y ese APU existe -> AUTO, directo.
+  2. matching determinístico contra el histórico (filtrado por turno):
+       >= MATCH_ACCEPT -> AUTO
+       >= MATCH_REVIEW -> el mejor candidato, marcado REVIEW
+       por debajo      -> SIN APU, $0 con alerta (nunca se inventa nada)
   3. el motor determinístico costea la composición y arma el AssembledApu.
 
-El armado por analogía nunca inventa precios: reutiliza la composición del APU
-histórico elegido y la repreciar con los insumos vigentes.
+La IA NO participa del armado. Audita después, sobre la corrida ya armada
+(ver dominio/revision.py) y siempre proponiendo, nunca aplicando.
 """
 from __future__ import annotations
 
 from typing import Callable, Optional
 
+from apu_tool import config
 from apu_tool.dominio.ai_assist import ApuAdvisor, ComposeResult
 from apu_tool.dominio.compose import InsumoRetriever
 from apu_tool.datos.almacen import Almacen
@@ -22,7 +24,6 @@ from apu_tool.dominio.matching import Matcher
 from apu_tool.nucleo.models import (
     ApuComponent,
     AssembledApu,
-    DePricedApu,
     LicitacionItem,
     MatchResult,
     MatchStatus,
@@ -87,30 +88,28 @@ class Assembler:
                                MatchStatus.AUTO, result.confianza,
                                result.explicacion)
 
-        # Dudoso o nuevo: la IA elige el APU base entre los candidatos (sin dinero).
-        depriced = {
-            c.apu_codigo: self.alm.apus.get_depriced_apu(c.apu_codigo, item.shift)
-            for c in result.candidatos
-        }
-        depriced = {k: v for k, v in depriced.items() if v is not None}
-        decision = self.advisor.choose_apu(item, result.candidatos, depriced)
-
-        if not decision.apu_codigo:
-            # Sin base histórica adecuada -> intentar composición generativa (IA).
-            generado = self._try_generate(item)
-            if generado is not None:
-                return generado
-            return AssembledApu(
-                item=item, apu_codigo=None, apu_nombre="(sin base — armar manual)",
-                unidad=item.unidad, shift=item.shift, componentes=[],
-                costo_unitario=0.0, status=MatchStatus.NEW,
-                confianza=decision.confianza, origen="manual",
-                explicacion=decision.justificacion or result.explicacion,
-            )
-
-        expl = f"[{decision.fuente}] {decision.justificacion}".strip()
-        return self._build(item, decision.apu_codigo, item.shift,
-                           MatchStatus.REVIEW, decision.confianza, expl)
+        # Dudoso o nuevo: SIN IA. El mejor candidato por encima del piso de revisión
+        # se asigna marcado REVIEW; por debajo del piso la fila queda sin APU, en $0
+        # y con alerta. La IA ya no decide acá: audita después (dominio/revision.py).
+        # Un 25% de parecido de nombre producía un APU con pinta de autoritativo —
+        # caso real de 2026-08-04: una "Localización y replanteo" costeada como
+        # PEDESTAL DE CONCRETO, 2010 veces el costo correcto.
+        mejor = result.candidatos[0] if result.candidatos else None
+        if mejor is not None and mejor.score >= config.MATCH_REVIEW:
+            return self._build(item, mejor.apu_codigo, item.shift, MatchStatus.REVIEW,
+                               mejor.score,
+                               f"Mejor similaridad de nombre ({mejor.score:.0%}). "
+                               f"Sin confirmar.")
+        peor = f"{mejor.score:.0%}" if mejor is not None else "sin candidatos"
+        return AssembledApu(
+            item=item, apu_codigo=None, apu_nombre="(sin base — armar manual)",
+            unidad=item.unidad, shift=item.shift, componentes=[],
+            costo_unitario=0.0, status=MatchStatus.NEW,
+            confianza=mejor.score if mejor is not None else 0.0, origen="manual",
+            explicacion=(f"Mejor coincidencia {peor}, por debajo del mínimo de "
+                         f"{config.MATCH_REVIEW:.0%} para asignar un APU. "
+                         f"Elige uno de los candidatos o ármalo a mano."),
+        )
 
     def reassemble_with_choice(self, item: LicitacionItem, apu_codigo: str,
                                shift: Optional[str] = None) -> AssembledApu:
@@ -130,9 +129,15 @@ class Assembler:
         return out
 
     # --------------------------------------------------- composición generativa
-    def _try_generate(self, item: LicitacionItem) -> Optional[AssembledApu]:
-        """Arma un APU desde cero con la IA para una actividad nueva.
-        Devuelve None si no hay IA o si no se pudo componer (queda manual)."""
+    def generar_composicion(self, item: LicitacionItem) -> Optional[AssembledApu]:
+        """Compone un APU desde cero con la IA para una actividad nueva.
+
+        NO la llama el armado: es a pedido explícito del usuario (endpoint
+        `/corridas/{id}/componer/{seq}`), y lo que devuelve es una PROPUESTA que
+        alguien tiene que confirmar. Devuelve None si no hay IA o si no se pudo
+        componer. Es la única razón por la que el `Assembler` sigue recibiendo un
+        `advisor`.
+        """
         insumos, ejemplos = self.retriever.retrieve(item.descripcion, item.shift)
         result: Optional[ComposeResult] = self.advisor.compose_apu(item, insumos, ejemplos)
         if result is None or not result.componentes:

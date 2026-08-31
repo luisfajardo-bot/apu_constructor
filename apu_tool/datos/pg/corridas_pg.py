@@ -87,7 +87,7 @@ class CorridasPg:
         with self.cx.connection() as conn:
             conn.execute(
                 # El APU cambió: el veredicto de la IA hablaba del anterior. Se borra
-                # acá, el único punto por el que pasa un cambio de APU.
+                # acá, el único punto por el que pasa un cambio del APU elegido en la fila.
                 "UPDATE corridas.corrida_item SET status=%s, apu_codigo=%s, apu_nombre=%s, "
                 "unidad=%s, shift=%s, origen=%s, confianza=%s, explicacion=%s, "
                 "componentes_json=%s, revision_json=NULL WHERE corrida_id=%s AND seq=%s",
@@ -150,15 +150,6 @@ class CorridasPg:
                 (None if payload is None else json.dumps(payload, ensure_ascii=False),
                  int(corrida_id), int(seq)))
 
-    def get_revisiones(self, corrida_id: int) -> dict[int, dict]:
-        """seq -> veredicto, solo de las filas revisadas."""
-        with self.cx.connection() as conn:
-            rows = conn.execute(
-                "SELECT seq, revision_json FROM corridas.corrida_item "
-                "WHERE corrida_id=%s AND revision_json IS NOT NULL",
-                (int(corrida_id),)).fetchall()
-        return {r["seq"]: json.loads(r["revision_json"]) for r in rows}
-
     # ---- lectura ----
     def _row_to_item(self, r) -> CorridaItemRow:
         return CorridaItemRow(
@@ -169,7 +160,7 @@ class CorridasPg:
             confianza=r["confianza"] or 0.0, explicacion=r["explicacion"] or "",
             componentes=json.loads(r["componentes_json"] or "[]"),
             candidatos=json.loads(r["candidatos_json"] or "[]"),
-            revision=(json.loads(r["revision_json"]) if r.get("revision_json") else None))
+            revision=(json.loads(r["revision_json"]) if r["revision_json"] else None))
 
     def _row_to_meta(self, r) -> CorridaMeta:
         return CorridaMeta(

@@ -152,7 +152,7 @@ class CorridasDB:
         with self.connect() as conn:
             conn.execute(
                 # El APU cambió: el veredicto de la IA hablaba del anterior. Se borra
-                # acá, el único punto por el que pasa un cambio de APU.
+                # acá, el único punto por el que pasa un cambio del APU elegido en la fila.
                 "UPDATE corrida_item SET status=?, apu_codigo=?, apu_nombre=?, unidad=?, "
                 "shift=?, origen=?, confianza=?, explicacion=?, componentes_json=?, "
                 "revision_json=NULL "
@@ -212,15 +212,6 @@ class CorridasDB:
                 (None if payload is None else json.dumps(payload, ensure_ascii=False),
                  int(corrida_id), int(seq)))
 
-    def get_revisiones(self, corrida_id: int) -> dict[int, dict]:
-        """seq -> veredicto, solo de las filas revisadas."""
-        with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT seq, revision_json FROM corrida_item "
-                "WHERE corrida_id=? AND revision_json IS NOT NULL",
-                (int(corrida_id),)).fetchall()
-        return {r["seq"]: json.loads(r["revision_json"]) for r in rows}
-
     # ---- lectura ----
     def _row_to_item(self, r: sqlite3.Row) -> CorridaItemRow:
         return CorridaItemRow(
@@ -231,8 +222,7 @@ class CorridasDB:
             confianza=r["confianza"] or 0.0, explicacion=r["explicacion"] or "",
             componentes=json.loads(r["componentes_json"] or "[]"),
             candidatos=json.loads(r["candidatos_json"] or "[]"),
-            revision=(json.loads(r["revision_json"])
-                      if ("revision_json" in r.keys() and r["revision_json"]) else None))
+            revision=(json.loads(r["revision_json"]) if r["revision_json"] else None))
 
     def _row_to_meta(self, r: sqlite3.Row) -> CorridaMeta:
         return CorridaMeta(

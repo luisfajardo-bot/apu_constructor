@@ -11,7 +11,6 @@ import sqlite3
 
 import pytest
 
-from apu_tool.datos.almacen import Almacen
 from apu_tool.datos.corridas_db import CorridasDB
 from apu_tool.nucleo.models import CorridaItemRow, CorridaMeta, LicitacionItem
 
@@ -24,9 +23,9 @@ if os.environ.get("TEST_DATABASE_URL"):
 def corridas(request, tmp_path):
     """Repositorio de corridas de cada backend, con esquema limpio."""
     if request.param == "sqlite":
-        alm = Almacen(tmp_path / "p.db", tmp_path / "a.db", tmp_path / "c.db")
-        alm.init_schema()
-        yield alm.corridas
+        db = CorridasDB(tmp_path / "c.db")
+        db.init_schema()
+        yield db
         return
     from apu_tool.datos.pg.conexion import Conexion
     from apu_tool.datos.pg.corridas_pg import CorridasPg
@@ -52,7 +51,6 @@ def _corrida(corridas) -> int:
 
 def test_fila_nueva_no_tiene_veredicto(corridas):
     cid = _corrida(corridas)
-    assert corridas.get_revisiones(cid) == {}
     assert corridas.get_items(cid)[0].revision is None
 
 
@@ -62,7 +60,7 @@ def test_guarda_y_lee_el_veredicto(corridas):
          "turno_sugerido": "DIURNO", "confianza": 0.8,
          "justificacion": "la unidad no coincide", "nivel": "profundo"}
     corridas.set_revision(cid, 0, v)
-    assert corridas.get_revisiones(cid) == {0: v}
+    assert {it.seq: it.revision for it in corridas.get_items(cid) if it.revision} == {0: v}
     assert corridas.get_items(cid)[0].revision == v
     assert corridas.get_item(cid, 0).revision == v
 
@@ -74,7 +72,6 @@ def test_set_revision_none_borra_el_veredicto(corridas):
                                    "turno_sugerido": None, "confianza": 0.4,
                                    "justificacion": "", "nivel": "barrido"})
     corridas.set_revision(cid, 0, None)
-    assert corridas.get_revisiones(cid) == {}
     assert corridas.get_items(cid)[0].revision is None
 
 
@@ -86,7 +83,6 @@ def test_cambiar_el_apu_borra_el_veredicto(corridas):
     corridas.actualizar_eleccion(
         cid, 0, status="confirmed", apu_codigo="200", apu_nombre="B", unidad="M3",
         shift="DIURNO", origen="historico", confianza=1.0, explicacion="", componentes=[])
-    assert corridas.get_revisiones(cid) == {}
     assert corridas.get_items(cid)[0].revision is None
 
 
@@ -110,4 +106,4 @@ def test_migracion_agrega_revision_json(tmp_path):
     cid = _corrida(db)
     assert db.get_items(cid)[0].revision is None
     db.set_revision(cid, 0, {"dictamen": "ok"})
-    assert db.get_revisiones(cid) == {0: {"dictamen": "ok"}}
+    assert db.get_items(cid)[0].revision == {"dictamen": "ok"}

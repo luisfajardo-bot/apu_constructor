@@ -6,7 +6,6 @@ import logging
 import os
 import tempfile
 import zipfile
-from itertools import chain
 from pathlib import Path
 from typing import Optional
 
@@ -268,19 +267,20 @@ def get_corrida(cid: int, alm: Almacen = Depends(get_almacen),
 def revisar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
                     _: object = Depends(requiere_rol("editor"))):
     """Audita la corrida con IA. Propone; no aplica nada."""
-    gen = svc.revisar_corrida_stream(alm, cid)
     try:
-        # El generador es perezoso: sin tirar del primer evento, las validaciones
-        # correrían YA abierto el stream y el cliente vería un 200 que muere solo.
-        primero = next(gen)
-    except StopIteration:
-        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+        # Valida ANTES de devolver el generador: si no, el error saldría con el
+        # stream ya abierto y el cliente vería un 200 que muere solo.
+        gen = svc.revisar_corrida_stream(alm, cid)
     except svc.CorridaCongelada:
         raise HTTPException(status_code=409,
                             detail="La corrida está congelada; actívala para revisar.")
     except svc.IANoDisponible as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    return StreamingResponse(_event_stream(chain([primero], gen)),
+        # 503 y no 409: falta configuración del servidor, no es un conflicto con el
+        # estado de la corrida (ese sí es el 409 de arriba).
+        raise HTTPException(status_code=503, detail=str(e))
+    if gen is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return StreamingResponse(_event_stream(gen),
                              media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
 
@@ -292,7 +292,8 @@ def componer_item(cid: int, seq: int, alm: Almacen = Depends(get_almacen),
     try:
         d = svc.componer_item(alm, cid, seq)
     except svc.IANoDisponible as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        # 503 (igual que la revisión): falta configuración del servidor.
+        raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     if d is None:

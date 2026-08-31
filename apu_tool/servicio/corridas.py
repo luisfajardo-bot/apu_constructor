@@ -571,16 +571,22 @@ def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
 
 
 def revisar_corrida_stream(alm: Almacen, corrida_id: int):
-    """Revisa una corrida ya armada y emite eventos SSE, persistiendo cada veredicto
-    apenas sale. Si la IA falla a mitad, lo ya guardado se queda: re-correr solo
-    vuelve a pedir lo que no tiene veredicto.
+    """Revisa una corrida ya armada. Devuelve None si la corrida no existe; el
+    generador de eventos SSE si sí.
 
-    Eventos: los de `dominio.revision.revisar`, más ('error', {'detail'}).
+    Función normal (no generador) a propósito: validar acá y devolver el generador
+    deja el 404 explícito en el endpoint, en vez de depender de que un `return` antes
+    del primer `yield` se convierta en `StopIteration`.
+
+    Si la revisión se interrumpe, los veredictos ya persistidos se quedan; pero
+    re-correr revisa TODO de nuevo (el barrido necesita el índice de la corrida
+    entera) y sobrescribe los veredictos previos: cuesta el precio completo.
+
     Lanza CorridaCongelada (una foto no se revisa) e IANoDisponible.
     """
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:
-        return
+        return None
     if meta.modo == "congelada":
         raise CorridaCongelada(corrida_id)
     # ponytail: dos revisiones simultáneas sobre la misma corrida se pisan (gana la
@@ -590,17 +596,28 @@ def revisar_corrida_stream(alm: Almacen, corrida_id: int):
     if not revisor.disponible:
         raise IANoDisponible(
             "La revisión con IA necesita ANTHROPIC_API_KEY en el servidor.")
-    filas = alm.corridas.get_items(corrida_id)
+    return _eventos_revision(alm, corrida_id, alm.corridas.get_items(corrida_id), revisor)
+
+
+def _eventos_revision(alm: Almacen, corrida_id: int, filas, revisor):
+    """Generador puro: corre el motor y persiste cada veredicto apenas sale.
+
+    Eventos: los de `dominio.revision.revisar`, más ('error', {'detail'}) si falta la
+    IA. Cualquier OTRO fallo sube al `_event_stream` del endpoint, que lo loggea —
+    en particular la PrivacyViolation, que `revision.barrer` re-lanza a propósito y
+    acá tampoco se traga (invariante #1).
+    """
     try:
         for evento, payload in revisar(alm, filas, revisor):
             if evento == "veredicto":
                 alm.corridas.set_revision(corrida_id, payload["seq"],
                                           payload["veredicto"])
             yield (evento, payload)
-    except Exception as exc:
-        # Lo ya persistido se queda. El detalle del error no expone internals.
-        yield ("error", {"detail": f"La revisión se interrumpió: {type(exc).__name__}. "
-                                   f"Los veredictos ya guardados se conservan."})
+    except IANoDisponible as exc:
+        # `Revisor.disponible` solo mira la env var: si el SDK no importa, la falta de
+        # IA aparece acá, con el stream ya abierto. Mensaje accionable en vez del
+        # "Error interno." genérico.
+        yield ("error", {"detail": str(exc)})
 
 
 def componer_item(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:

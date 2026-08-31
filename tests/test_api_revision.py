@@ -75,6 +75,9 @@ def test_stream_persiste_los_veredictos(tmp_path, monkeypatch):
 
     r = cli.post(f"/api/corridas/{cid}/revision/stream")
     assert r.status_code == 200, r.text
+    # El primer evento del motor llega tal cual: es el que le dice a la interfaz
+    # cuántas filas se van a revisar.
+    assert r.text.startswith("event: started")
     assert "event: done" in r.text
 
     filas = alm.corridas.get_items(cid)
@@ -95,13 +98,45 @@ def test_congelada_no_se_revisa(tmp_path, monkeypatch):
 
 
 def test_sin_api_key_avisa(tmp_path, monkeypatch):
+    """503, no 409: al servidor le falta configuración, no hay conflicto con el
+    estado de la corrida (ese es el 409 de la congelada)."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     cli, alm = _cliente_api(tmp_path)
     cid = _corrida_armada(alm)
 
     r = cli.post(f"/api/corridas/{cid}/revision/stream")
-    assert r.status_code == 409, r.text
+    assert r.status_code == 503, r.text
     assert "ANTHROPIC_API_KEY" in r.json()["detail"]
+
+
+def test_si_la_ia_falla_a_mitad_lo_guardado_se_queda(tmp_path, monkeypatch):
+    """El barrido pasa y la primera profundización revienta: el stream avisa con
+    `event: error` y el veredicto ya persistido NO se pierde. Eso es lo que hace
+    valiosa la persistencia incremental."""
+    cli, alm = _cliente_api(tmp_path)
+    cid = _corrida_armada(alm)
+
+    class _RevisorQueRevienta(_RevisorDoble):
+        def _pedir(self, system, schema, payload, effort):
+            resp = self.respuestas.pop(0)
+            if resp is None:
+                raise RuntimeError("el SDK se cayó")
+            return resp
+
+    # seq 0 sale `ok` del barrido (veredicto persistido); seq 1 va a profundización,
+    # que es la llamada que revienta.
+    doble = _RevisorQueRevienta([
+        {"filas": [{"seq": 0, "resultado": "ok"}, {"seq": 1, "resultado": "revisar"}]},
+        None])
+    monkeypatch.setattr(svc, "Revisor", lambda: doble)
+
+    r = cli.post(f"/api/corridas/{cid}/revision/stream")
+    assert r.status_code == 200, r.text
+    assert "event: error" in r.text
+    assert "event: done" not in r.text
+    filas = alm.corridas.get_items(cid)
+    assert filas[0].revision is not None      # lo ya guardado se queda
+    assert filas[1].revision is None
 
 
 def test_corrida_inexistente(tmp_path, monkeypatch):
@@ -284,12 +319,13 @@ def test_la_propuesta_no_lleva_dinero(tmp_path, monkeypatch):
         assert prohibido not in plano, prohibido
 
 
-def test_componer_sin_ia_da_409(tmp_path, monkeypatch):
+def test_componer_sin_ia_da_503(tmp_path, monkeypatch):
+    """Mismo criterio que la revisión: falta de IA = servicio no disponible."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     cli, alm = _cliente_api(tmp_path)
     cid = _corrida_armada(alm)
     r = cli.post(f"/api/corridas/{cid}/componer/0")
-    assert r.status_code == 409, r.text
+    assert r.status_code == 503, r.text
     assert "ANTHROPIC_API_KEY" in r.json()["detail"]
 
 

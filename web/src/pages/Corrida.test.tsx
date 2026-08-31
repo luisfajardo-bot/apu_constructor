@@ -1,13 +1,15 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import { expect, test, vi } from "vitest";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+import { beforeEach, expect, test, vi } from "vitest";
 
 vi.mock("react-router-dom", () => ({ useParams: () => ({ id: "1" }) }));
 vi.mock("@/lib/armado", () => ({
   useArmadoVivo: () => ({ corridaId: null, estado: "idle", filas: [], total: 0 }),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-// Corrida ahora usa useAuth() para calcular `puedeEditar` (rol -> TablaItems).
-vi.mock("@/lib/auth", () => ({ useAuth: () => ({ perfil: { rol: "editor" } }) }));
+// Corrida usa useAuth() para calcular `puedeEditar` (rol -> TablaItems y botón
+// "Revisar con IA"). El rol es mutable para poder probar el caso sin permisos.
+let rol: "consulta" | "editor" | "admin" = "editor";
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ perfil: { rol } }) }));
 
 function fila(p: Record<string, unknown>) {
   return {
@@ -20,6 +22,7 @@ function fila(p: Record<string, unknown>) {
 
 const CORRIDA = {
   id: 1, archivo: "obra.xlsx", estado: "en_revision", modo: "activa", duracion_ms: 1000,
+  ia_disponible: true,
   items: [
     fila({ seq: 0, descripcion: "Excavación", unidad: "M3", contractual_total: 1000 }),
     fila({ seq: 1, descripcion: "Concreto", unidad: "M2", contractual_total: 500 }),
@@ -32,6 +35,8 @@ vi.mock("@/api/corridas", () => ({
   descargarCuadro: vi.fn(),
   congelarCorrida: vi.fn(),
   activarCorrida: vi.fn(),
+  revisarCorridaStream: vi.fn(async () => RESUMEN),
+  aplicarSugerencias: vi.fn(async () => CORRIDA),
 }));
 // TablaItems importa BuscadorApu -> @/api/autoria -> @/api/client -> @/lib/supabase,
 // que crea el cliente de Supabase al cargar el módulo (falla sin envs en test). Se
@@ -39,6 +44,18 @@ vi.mock("@/api/corridas", () => ({
 vi.mock("@/api/autoria", () => ({
   listarApus: vi.fn(async () => ({ items: [], total: 0, limit: 15, offset: 0 })),
 }));
+
+const RESUMEN = { total: 2, ok: 0, dudoso: 1, cambiar: 1, sin_apu: 0, sin_veredicto: 0 };
+
+/** Fila con dictamen "cambiar": la única que ofrece aplicar la sugerencia. */
+const cambiar = (seq: number, apu: string) => ({
+  seq, dictamen: "cambiar", apu_sugerido: apu, turno_sugerido: "NOCTURNO",
+  confianza: 0.8, justificacion: "Otro candidato encaja mejor.", nivel: "profundo",
+});
+
+const boton = (re: RegExp) => screen.getByRole("button", { name: re }) as HTMLButtonElement;
+
+beforeEach(() => { rol = "editor"; });
 
 test("al filtrar por Und, los totales y el contador recalculan sobre lo filtrado", async () => {
   const { default: Corrida } = await import("./Corrida");
@@ -206,4 +223,171 @@ test("un segundo clic en el contador de sin APU apaga el filtro", async () => {
   fireEvent.click(screen.getByText(/1 sin APU/));
   expect(screen.getByText("Excavación")).toBeTruthy();
   expect(screen.getByText("Actividad rara")).toBeTruthy();
+});
+
+
+// ─── Revisar con IA ──────────────────────────────────────────────────────────
+
+test("sin IA en el servidor el botón queda deshabilitado y dice por qué", async () => {
+  const { getCorrida } = await import("@/api/corridas");
+  vi.mocked(getCorrida).mockResolvedValueOnce({ ...CORRIDA, ia_disponible: false });
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+
+  const b = boton(/revisar .* con IA/i);
+  expect(b.disabled).toBe(true);
+  expect(b.getAttribute("title")).toMatch(/ANTHROPIC_API_KEY/);
+});
+
+test("con la corrida congelada no se puede revisar", async () => {
+  const { getCorrida } = await import("@/api/corridas");
+  vi.mocked(getCorrida).mockResolvedValueOnce({ ...CORRIDA, modo: "congelada" });
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+
+  const b = boton(/revisar .* con IA/i);
+  expect(b.disabled).toBe(true);
+  expect(b.getAttribute("title")).toMatch(/congelada/i);
+});
+
+test("sin rol de editor el botón de revisar no aparece", async () => {
+  rol = "consulta";
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+
+  expect(screen.queryByRole("button", { name: /revisar .* con IA/i })).toBeNull();
+});
+
+test("el botón dice cuántas filas va a revisar", async () => {
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+
+  expect(boton(/revisar 2 líneas con IA/i)).toBeTruthy();
+});
+
+test("mientras revisa: botón bloqueado, triaje por lotes y luego veredictos", async () => {
+  const { revisarCorridaStream } = await import("@/api/corridas");
+  type OnP = (p: Record<string, unknown>) => void;
+  let onProgreso: OnP | undefined;
+  let terminar: ((r: unknown) => void) | undefined;
+  vi.mocked(revisarCorridaStream).mockImplementationOnce(((_id, _onV, onP) => {
+    onProgreso = onP as OnP;
+    return new Promise((res) => { terminar = res; });
+  }) as never);
+
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+  fireEvent.click(boton(/revisar 2 líneas con IA/i));
+
+  // Doble clic: el segundo no dispara una segunda revisión.
+  const enCurso = boton(/revisando/i);
+  expect(enCurso.disabled).toBe(true);
+  fireEvent.click(enCurso);
+  expect(vi.mocked(revisarCorridaStream)).toHaveBeenCalledTimes(1);
+
+  // Fase 1: `lote: 1` significa que el lote 1 YA TERMINÓ ("1 de 3 listos").
+  act(() => { onProgreso?.({ evento: "started", total: 2, lotes: 3 }); });
+  act(() => { onProgreso?.({ evento: "barriendo", lote: 1, lotes: 3 }); });
+  expect(screen.getByText("Triaje: 1 de 3 lotes listos")).toBeTruthy();
+
+  // Fase 2: veredictos fila por fila.
+  act(() => { onProgreso?.({ evento: "barrido", revisar: 2, sin_respuesta: [] }); });
+  expect(screen.getByText("Veredictos: 0 de 2 filas")).toBeTruthy();
+
+  await act(async () => { terminar?.(RESUMEN); });
+});
+
+test("al terminar recarga la corrida y avisa el resumen", async () => {
+  const { getCorrida, revisarCorridaStream } = await import("@/api/corridas");
+  const { toast } = await import("sonner");
+  vi.mocked(getCorrida).mockClear();
+  vi.mocked(toast.success).mockClear();
+  vi.mocked(revisarCorridaStream).mockResolvedValueOnce(RESUMEN);
+
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+  const antes = vi.mocked(getCorrida).mock.calls.length;
+
+  fireEvent.click(boton(/revisar 2 líneas con IA/i));
+
+  await waitFor(() =>
+    expect(vi.mocked(getCorrida).mock.calls.length).toBe(antes + 1));
+  expect(vi.mocked(toast.success).mock.calls[0][0])
+    .toBe("Revisión lista: 1 por cambiar, 1 dudosas, 0 sin APU.");
+});
+
+test("si el stream falla a mitad, recarga igual y lo dice", async () => {
+  const { getCorrida, revisarCorridaStream } = await import("@/api/corridas");
+  const { toast } = await import("sonner");
+  vi.mocked(getCorrida).mockClear();
+  vi.mocked(toast.error).mockClear();
+  vi.mocked(revisarCorridaStream).mockRejectedValueOnce(
+    new Error("El proxy cortó el stream."));
+
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+  const antes = vi.mocked(getCorrida).mock.calls.length;
+
+  fireEvent.click(boton(/revisar 2 líneas con IA/i));
+
+  // Lo ya persistido no se pierde: se recarga igual...
+  await waitFor(() =>
+    expect(vi.mocked(getCorrida).mock.calls.length).toBe(antes + 1));
+  // ...y el mensaje del backend no se reemplaza por uno genérico.
+  const msg = vi.mocked(toast.error).mock.calls[0][0] as string;
+  expect(msg.startsWith("El proxy cortó el stream.")).toBe(true);
+  expect(msg).toMatch(/se conservan/i);
+  // La revisión terminó: el botón vuelve a ofrecerse.
+  await waitFor(() => expect(boton(/revisar 2 líneas con IA/i).disabled).toBe(false));
+});
+
+// ─── Aplicar N sugerencias ───────────────────────────────────────────────────
+
+const CON_SUGERENCIAS = {
+  ...CORRIDA,
+  items: [
+    fila({ seq: 0, descripcion: "Excavación", revision: cambiar(0, "222") }),
+    fila({ seq: 1, descripcion: "Concreto", revision: cambiar(1, "333") }),
+    // dictamen != cambiar: NO entra al lote aunque traiga apu_sugerido.
+    fila({ seq: 2, descripcion: "Relleno",
+           revision: { ...cambiar(2, "444"), dictamen: "dudoso" } }),
+  ],
+};
+
+test("Aplicar N sugerencias manda UNA sola llamada con las N asignaciones", async () => {
+  const { getCorrida, aplicarSugerencias } = await import("@/api/corridas");
+  vi.mocked(getCorrida).mockResolvedValueOnce(CON_SUGERENCIAS);
+  vi.mocked(aplicarSugerencias).mockClear();
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Relleno");
+
+  fireEvent.click(boton(/aplicar 2 sugerencias/i));
+
+  await waitFor(() => expect(vi.mocked(aplicarSugerencias)).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(aplicarSugerencias)).toHaveBeenCalledWith(1, [
+    { seq: 0, apu_codigo: "222", shift: "NOCTURNO" },
+    { seq: 1, apu_codigo: "333", shift: "NOCTURNO" },
+  ]);
+});
+
+test("sin filas con dictamen 'cambiar' no se ofrece aplicar en lote", async () => {
+  const { getCorrida } = await import("@/api/corridas");
+  vi.mocked(getCorrida).mockResolvedValueOnce({
+    ...CORRIDA,
+    items: [fila({ seq: 0, descripcion: "Excavación",
+                   revision: { ...cambiar(0, "222"), dictamen: "ok" } })],
+  });
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+
+  expect(screen.queryByRole("button", { name: /aplicar .* sugerencia/i })).toBeNull();
 });

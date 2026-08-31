@@ -233,7 +233,7 @@ export async function revisarCorridaStream(
     if (ev.event === "veredicto") {
       onVeredicto((ev.data as { veredicto: VeredictoIA }).veredicto);
     } else if (ev.event === "started") {
-      onProgreso?.({ evento: "started", ...(ev.data as { total: number }) });
+      onProgreso?.({ evento: "started", ...(ev.data as { total: number; lotes?: number }) });
     } else if (ev.event === "barriendo") {
       onProgreso?.({ evento: "barriendo", ...(ev.data as { lote: number; lotes: number }) });
     } else if (ev.event === "barrido") {

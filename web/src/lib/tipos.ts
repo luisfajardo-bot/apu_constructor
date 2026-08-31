@@ -51,7 +51,11 @@ export interface VeredictoIA {
  *  en corridas grandes, donde el triaje son varias llamadas seguidas a la IA);
  *  'barrido' llega una vez, al terminar el triaje completo. */
 export type ProgresoRevision =
-  | { evento: "started"; total: number }
+  // `lotes` viaja en el mismo 'started' (el backend lo calcula ANTES del primer
+  // yield justo para esto): así el triaje se puede pintar "0 de N" desde el
+  // arranque y no como un indeterminado de varios minutos. Opcional porque el
+  // dato es del contador, no del contrato mínimo del evento.
+  | { evento: "started"; total: number; lotes?: number }
   | { evento: "barriendo"; lote: number; lotes: number }
   | { evento: "barrido"; revisar: number; sin_respuesta: number[] };
 

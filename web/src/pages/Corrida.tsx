@@ -1,17 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import TablaItems from "@/components/corrida/TablaItems";
 import { DialogoAgregarLineas } from "@/components/corrida/DialogoAgregarLineas";
-import { getCorrida, descargarCuadro, congelarCorrida, activarCorrida } from "@/api/corridas";
+import {
+  getCorrida, descargarCuadro, congelarCorrida, activarCorrida,
+  revisarCorridaStream, aplicarSugerencias,
+} from "@/api/corridas";
 import { cop, pct } from "@/lib/moneda";
 import { fmtDuracion } from "@/lib/tiempo";
 import { useArmadoVivo } from "@/lib/armado";
 import { useCorridaTabla, SIN_APU } from "@/lib/corridaTabla";
 import { useAuth } from "@/lib/auth";
 import { puede } from "@/components/rutas";
-import type { CorridaDetalle, ItemCuadro, Totales } from "@/lib/tipos";
+import type { AsignacionIA, CorridaDetalle, ItemCuadro, Totales } from "@/lib/tipos";
 
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
 
@@ -40,7 +43,32 @@ export default function Corrida() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [agregando, setAgregando] = useState(false);
+  // null = no hay revisión corriendo. Dos fases: el triaje por lotes (`lote` es el
+  // último lote TERMINADO, así lo manda el backend) y los veredictos fila por fila.
+  const [revision, setRevision] = useState<
+    { fase: "triaje" | "veredictos"; lote: number; lotes: number; hechos: number; total: number }
+    | null
+  >(null);
+  const [aplicando, setAplicando] = useState(false);
   const control = useCorridaTabla(corrida?.items ?? []);
+  // La revisión de 300 líneas dura minutos: el usuario se va de la página mucho
+  // antes de que termine. El stream sigue (y el backend sigue guardando), pero acá
+  // ya no hay a quién avisarle: nada de setState sobre un componente desmontado.
+  const montado = useRef(true);
+  useEffect(() => {
+    montado.current = true;
+    return () => { montado.current = false; };
+  }, []);
+
+  /** Relee la corrida del backend (los veredictos los persiste el servidor). */
+  async function recargarCorrida() {
+    try {
+      const c = await getCorrida(corridaId);
+      if (montado.current) setCorrida(c);
+    } catch {
+      toast.error("No se pudo recargar la corrida; recarga la página para ver los veredictos.");
+    }
+  }
 
   async function cambiarModo(accion: "congelar" | "activar") {
     try {
@@ -132,6 +160,83 @@ export default function Corrida() {
   const nSinApu = data.items.filter((f) => !f.apu_codigo).length;
   const bloqueado = nSinApu > 0;
   const esActivar = data.modo === "congelada";
+  const puedeEditar = puede(perfil?.rol, "editor");
+  const nFilas = data.items.length;
+
+  // La IA propone; aplicar lo decide el usuario. Se mira el DICTAMEN (nunca "hay
+  // apu_sugerido"), igual que la celda de la tabla.
+  const sugerencias: AsignacionIA[] = data.items.flatMap((f) => {
+    const v = f.revision;
+    if (!v || v.dictamen !== "cambiar" || !v.apu_sugerido) return [];
+    return [{
+      seq: f.seq,
+      apu_codigo: v.apu_sugerido,
+      ...(v.turno_sugerido ? { shift: v.turno_sugerido } : {}),
+    }];
+  });
+
+  const motivoNoRevisar = !data.ia_disponible
+    ? "El servidor no tiene IA configurada (falta ANTHROPIC_API_KEY)."
+    : esActivar
+      ? "La corrida está congelada; actívala para revisar."
+      : data.estado === "armando"
+        ? "Espera a que la corrida termine de armarse."
+        : revision
+          ? "La revisión con IA ya está corriendo."
+          : null;
+
+  async function revisar() {
+    // El botón ya está deshabilitado mientras corre; esto es el cinturón contra el
+    // doble clic que dispara los dos handlers antes del re-render.
+    if (revision || !data) return;
+    setRevision({ fase: "triaje", lote: 0, lotes: 0, hechos: 0, total: data.items.length });
+    try {
+      const resumen = await revisarCorridaStream(
+        corridaId,
+        // Un veredicto por fila: acá solo se cuenta. Los datos salen de la recarga,
+        // que es lo que el backend efectivamente guardó.
+        () => setRevision((r) => (r ? { ...r, fase: "veredictos", hechos: r.hechos + 1 } : r)),
+        (p) => setRevision((r) => {
+          if (!r) return r;
+          if (p.evento === "started") return { ...r, total: p.total, lotes: p.lotes ?? r.lotes };
+          if (p.evento === "barriendo") return { ...r, fase: "triaje", lote: p.lote, lotes: p.lotes };
+          if (p.evento === "barrido") return { ...r, fase: "veredictos" };
+          return r;
+        }),
+      );
+      await recargarCorrida();
+      toast.success(
+        `Revisión lista: ${resumen.cambiar} por cambiar, ${resumen.dudoso} dudosas, `
+        + `${resumen.sin_apu} sin APU.`,
+      );
+    } catch (e) {
+      // Un stream que se corta a mitad NO pierde lo ya dictaminado: el backend lo
+      // guarda veredicto por veredicto. Se recarga igual y se dice qué pasó.
+      await recargarCorrida();
+      toast.error(
+        `${e instanceof Error ? e.message : "La revisión con IA falló."} `
+        + "Los veredictos que alcanzó a guardar se conservan.",
+      );
+    } finally {
+      if (montado.current) setRevision(null);
+    }
+  }
+
+  /** Las N sugerencias en UNA sola llamada: un recosteo, no N. */
+  async function aplicarTodas() {
+    if (aplicando || sugerencias.length === 0) return;
+    setAplicando(true);
+    const n = sugerencias.length;
+    try {
+      const actualizada = await aplicarSugerencias(corridaId, sugerencias);
+      if (montado.current) setCorrida(actualizada);
+      toast.success(n === 1 ? "1 sugerencia aplicada" : `${n} sugerencias aplicadas`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudieron aplicar las sugerencias.");
+    } finally {
+      if (montado.current) setAplicando(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4" style={{ padding: "16px 20px" }}>
@@ -170,6 +275,28 @@ export default function Corrida() {
             {!esActivar && data.estado !== "armando" && (
               <Button size="sm" variant="outline" onClick={() => setAgregando(true)}>
                 Agregar líneas
+              </Button>
+            )}
+            {puedeEditar && (
+              <Button size="sm" variant="outline"
+                disabled={motivoNoRevisar !== null}
+                title={motivoNoRevisar
+                  ?? "La IA audita la corrida ya armada y propone; aplicar lo decides tú."}
+                onClick={revisar}>
+                {revision
+                  ? "Revisando…"
+                  : `Revisar ${nFilas} ${nFilas === 1 ? "línea" : "líneas"} con IA`}
+              </Button>
+            )}
+            {puedeEditar && !esActivar && sugerencias.length > 0 && (
+              <Button size="sm" variant="outline"
+                disabled={aplicando}
+                title="Asigna de una vez el APU que la IA propuso para cada línea con dictamen «cambiar»."
+                onClick={aplicarTodas}>
+                {aplicando
+                  ? "Aplicando…"
+                  : `Aplicar ${sugerencias.length} ${
+                      sugerencias.length === 1 ? "sugerencia" : "sugerencias"}`}
               </Button>
             )}
             <Button size="sm" variant="outline"
@@ -225,6 +352,15 @@ export default function Corrida() {
             {totales.n_revision} por revisar
           </span>
         )}
+        {revision && (
+          <span className="text-info font-medium">
+            {revision.fase === "triaje"
+              ? revision.lotes
+                ? `Triaje: ${revision.lote} de ${revision.lotes} lotes listos`
+                : "Triaje en curso…"
+              : `Veredictos: ${revision.hechos} de ${revision.total} filas`}
+          </span>
+        )}
         {!live && nSinApu > 0 && (
           <button
             type="button"
@@ -245,7 +381,7 @@ export default function Corrida() {
         onConfirmado={(c) => setCorrida(c)}
         readOnly={data.modo === "congelada"}
         control={live ? undefined : control}
-        puedeEditar={puede(perfil?.rol, "editor")}
+        puedeEditar={puedeEditar}
       />
 
       {agregando && (

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from apu_tool import config
 from apu_tool.dominio import privacy
@@ -311,3 +311,53 @@ class Revisor:
                          turno_sugerido=turno, confianza=conf, justificacion=just,
                          nivel="profundo")
 
+
+# -------------------------------------------------------------- orquestador
+def revisar(almacen, filas: list[CorridaItemRow], revisor: Revisor,
+            ) -> Iterator[tuple[str, dict]]:
+    """Revisa la corrida entera y emite eventos, para que el llamador (el endpoint
+    SSE) persista y reporte en vivo:
+
+      ('started',  {'total'})
+      ('barrido',  {'revisar': n, 'sin_respuesta': [seq, ...]})
+      ('veredicto',{'seq', 'veredicto': {...}})   — por fila, ya lista para guardar
+      ('done',     {'total', 'ok', 'dudoso', 'cambiar', 'sin_apu', 'sin_veredicto'})
+
+    Las filas que el barrido no contestó quedan SIN veredicto (no se inventa un `ok`)
+    y salen contadas en `sin_veredicto`.
+
+    El `almacen` viene por parámetro y no vive dentro del `Revisor`: esta función es
+    la única parte que necesita leer la biblioteca, y dejar al `Revisor` como pura
+    fachada de la IA permite sustituirlo en los tests sin montar una base.
+    """
+    yield ("started", {"total": len(filas)})
+    marcadas = revisor.barrer(filas)
+    sin_respuesta = set(revisor.sin_respuesta)
+    yield ("barrido", {"revisar": len(marcadas),
+                       "sin_respuesta": sorted(sin_respuesta)})
+
+    conteo = {d: 0 for d in DICTAMENES}
+    for fila in filas:
+        if fila.seq in sin_respuesta:
+            continue
+        if fila.seq not in marcadas:
+            v = Veredicto(seq=fila.seq, dictamen="ok", apu_sugerido=None,
+                          turno_sugerido=None, confianza=0.0,
+                          justificacion="Sin objeciones en el barrido.",
+                          nivel="barrido")
+        else:
+            asignado = (almacen.apus.get_depriced_apu(fila.apu_codigo, fila.shift)
+                        if fila.apu_codigo else None)
+            # Un candidato que ya no está en la biblioteca se omite: no hay
+            # composición que mostrarle a la IA, y no puede ser el sugerido.
+            candidatos = []
+            for c in (fila.candidatos or []):
+                dp = almacen.apus.get_depriced_apu(c.get("apu_codigo"), fila.shift)
+                if dp is not None:
+                    candidatos.append(dp)
+            v = revisor.profundizar(fila, asignado, candidatos)
+        conteo[v.dictamen] = conteo.get(v.dictamen, 0) + 1
+        yield ("veredicto", {"seq": fila.seq, "veredicto": v.to_dict()})
+
+    yield ("done", {"total": len(filas), **conteo,
+                    "sin_veredicto": len(sin_respuesta)})

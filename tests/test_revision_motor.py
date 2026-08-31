@@ -49,6 +49,12 @@ class RevisorDoble(revision.Revisor):
         return r
 
 
+def _barrer(revisor, filas):
+    """Un solo lote, con el índice de la corrida entera — lo que hace `revisar` por
+    cada lote. Antes esto era `Revisor.barrer`, que además partía en lotes."""
+    return revisor.barrer_lote(filas, revision.indice_corrida(filas))
+
+
 class _ClienteFalso:
     """Cliente de anthropic de mentira: `RevisorDoble` sustituye `_pedir` entero y deja
     su cuerpo SIN EJECUTAR — y ahí vive `privacy.safe_json`, que es donde el invariante
@@ -79,27 +85,48 @@ def test_barrido_marca_solo_lo_que_la_ia_senala():
     filas = [_fila(0, "EXCAVACION MANUAL", "100"), _fila(1, "CONCRETO 3000 PSI", "200")]
     r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "ok"},
                                  {"seq": 1, "resultado": "revisar"}]}])
-    marcadas, sin_respuesta = r.barrer(filas)
+    marcadas, sin_respuesta = _barrer(r, filas)
     assert marcadas == {1}
     assert sin_respuesta == set()
 
 
 def test_barrido_parte_en_lotes_y_manda_el_indice_completo(monkeypatch):
+    """La partición vive en `revisar`; el índice de la corrida ENTERA viaja en CADA
+    lote, que es la razón de ser del barrido: ver el presupuesto como un todo."""
     monkeypatch.setattr(revision, "TAM_LOTE", 2)
     filas = [_fila(i, f"ACTIVIDAD {i}", "100") for i in range(5)]
     r = RevisorDoble([{"filas": [{"seq": s, "resultado": "ok"}]} for s in (0, 2, 4)])
-    r.barrer(filas)
+    list(revision.revisar(None, filas, r))           # nadie marcado: no toca el almacén
     assert len(r.pedidos) == 3                       # 5 filas / lotes de 2
     for p in r.pedidos:
         assert len(p["payload"]["indice"]) == 5      # el presupuesto entero, siempre
+        assert [f["seq"] for f in p["payload"]["indice"]] == [0, 1, 2, 3, 4]
+    assert [len(p["payload"]["filas"]) for p in r.pedidos] == [2, 2, 1]
     assert r.pedidos[0]["effort"] == "low"
+
+
+def test_revisar_reporta_progreso_despues_de_cada_lote(monkeypatch):
+    """Sin esto el barrido corre mudo: con 300 líneas son minutos sin un solo byte,
+    el proxy corta el stream y la interfaz no tiene cómo saber si avanza."""
+    monkeypatch.setattr(revision, "TAM_LOTE", 2)
+    filas = [_fila(i, f"ACTIVIDAD {i}", "100") for i in range(5)]
+    r = RevisorDoble([{"filas": [{"seq": s, "resultado": "ok"} for s in ss]}
+                      for ss in ((0, 1), (2, 3), (4,))])
+    eventos = list(revision.revisar(None, filas, r))
+    tipos = [e for e, _ in eventos]
+    assert [p for e, p in eventos if e == "barriendo"] == [
+        {"lote": 1, "lotes": 3}, {"lote": 2, "lotes": 3}, {"lote": 3, "lotes": 3}]
+    # ... y todos ANTES del primer veredicto: es el progreso del barrido.
+    assert tipos.index("barriendo") == 1             # justo después de `started`
+    assert (max(i for i, e in enumerate(tipos) if e == "barriendo")
+            < tipos.index("veredicto"))
 
 
 def test_barrido_sin_respuesta_para_una_fila_no_la_da_por_buena():
     """Un lote que vuelve incompleto deja esas filas SIN veredicto, no en `ok`."""
     filas = [_fila(0, "A", "100"), _fila(1, "B", "200")]
     r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "ok"}]}])
-    marcadas, sin_respuesta = r.barrer(filas)
+    marcadas, sin_respuesta = _barrer(r, filas)
     assert marcadas == set()
     assert sin_respuesta == {1}
 
@@ -124,7 +151,7 @@ def test_barrido_con_respuesta_inutil_deja_todo_el_lote_sin_respuesta(respuesta)
     """
     filas = [_fila(0, "A", "100"), _fila(1, "B", "200")]
     r = RevisorDoble([respuesta])
-    marcadas, sin_respuesta = r.barrer(filas)
+    marcadas, sin_respuesta = _barrer(r, filas)
     assert marcadas == set()
     assert sin_respuesta == {0, 1}
 
@@ -133,28 +160,32 @@ def test_barrido_tolera_espacios_y_mayusculas_en_el_resultado():
     """El vocabulario se valida normalizado: " REVISAR " sí es una respuesta."""
     filas = [_fila(0, "A", "100")]
     r = RevisorDoble([{"filas": [{"seq": 0, "resultado": " REVISAR "}]}])
-    assert r.barrer(filas) == ({0}, set())
+    assert _barrer(r, filas) == ({0}, set())
 
 
 def test_barrido_no_arrastra_estado_entre_llamadas():
     filas = [_fila(0, "A", "100")]
     r = RevisorDoble([{}, {"filas": [{"seq": 0, "resultado": "revisar"}]}])
-    assert r.barrer(filas) == (set(), {0})
-    assert r.barrer(filas) == ({0}, set())
+    assert _barrer(r, filas) == (set(), {0})
+    assert _barrer(r, filas) == ({0}, set())
 
 
-def test_un_error_del_sdk_en_un_lote_no_tira_los_demas(monkeypatch):
+def test_un_error_del_sdk_en_un_lote_no_tira_los_demas(monkeypatch, alm_apus):
     """Un 429 o un timeout en el lote 2 no puede perder el trabajo ya pagado: ese lote
     entero cae en `sin_respuesta` y el barrido sigue."""
     monkeypatch.setattr(revision, "TAM_LOTE", 1)
     filas = [_fila(i, f"ACTIVIDAD {i}", "100") for i in range(3)]
     r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "revisar"}]},
                       RuntimeError("429 rate limit"),
-                      {"filas": [{"seq": 2, "resultado": "ok"}]}])
-    marcadas, sin_respuesta = r.barrer(filas)
-    assert marcadas == {0}
-    assert sin_respuesta == {1}
-    assert len(r.pedidos) == 3          # el error no abortó el barrido
+                      {"filas": [{"seq": 2, "resultado": "ok"}]},
+                      {"dictamen": "ok", "apu_sugerido": None, "turno_sugerido": None,
+                       "confianza": 0.9, "justificacion": "encaja"}])
+    eventos = list(revision.revisar(alm_apus, filas, r))
+    assert next(p for e, p in eventos if e == "barrido") == {"revisar": 1,
+                                                             "sin_respuesta": [1]}
+    assert len([p for e, p in eventos if e == "barriendo"]) == 3
+    assert len(r.pedidos) == 4          # 3 barridos (el error no abortó) + 1 profundo
+    assert [p["seq"] for e, p in eventos if e == "veredicto"] == [0, 2]
 
 
 def test_una_fuga_de_dinero_aborta_el_barrido_y_no_se_traga():
@@ -162,21 +193,24 @@ def test_una_fuga_de_dinero_aborta_el_barrido_y_no_se_traga():
     invariante #1 en un lote silenciosamente vacío."""
     r = RevisorDoble([privacy.PrivacyViolation("costo_unitario")])
     with pytest.raises(privacy.PrivacyViolation):
-        r.barrer([_fila(0, "A", "100")])
+        _barrer(r, [_fila(0, "A", "100")])
 
 
 def test_barrido_falla_si_la_ia_no_esta_disponible():
+    """Tanto el lote suelto (lo levanta `_pedir`) como el orquestador."""
     r = revision.Revisor(enabled=False)
     with pytest.raises(revision.IANoDisponible):
-        r.barrer([_fila(0, "A", "100")])
+        _barrer(r, [_fila(0, "A", "100")])
+    with pytest.raises(revision.IANoDisponible):
+        list(revision.revisar(None, [_fila(0, "A", "100")], r))
 
 
-def test_barrido_de_una_corrida_vacia_tambien_falla_sin_ia():
-    """Sin filas no hay llamada que reviente sola: el aviso lo da `barrer`, si no
-    el orquestador creería que la revisión corrió bien sin haber corrido."""
+def test_revisar_una_corrida_vacia_tambien_falla_sin_ia():
+    """Sin filas no hay lote que reviente solo: el aviso lo da `revisar`, si no el
+    llamador creería que la revisión corrió bien sin haber corrido."""
     r = revision.Revisor(enabled=False)
     with pytest.raises(revision.IANoDisponible):
-        r.barrer([])
+        list(revision.revisar(None, [], r))
 
 
 # ------------------------------------------------------------------ profundizacion
@@ -247,12 +281,17 @@ def test_apu_sugerido_inventado_no_sobrevive_a_un_dictamen_que_no_es_cambiar():
 
 
 def test_barrido_ignora_un_seq_que_no_es_de_la_corrida():
-    """La IA puede contestar por un `seq` que no le dimos; no hay fila que mirar."""
+    """La IA puede contestar por un `seq` que no le dimos; no hay fila que mirar, así
+    que `revisar` lo filtra antes de contarlo y de profundizarlo."""
     filas = [_fila(0, "A", "100"), _fila(1, "B", "200")]
     r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "ok"},
                                  {"seq": 1, "resultado": "ok"},
                                  {"seq": 99, "resultado": "revisar"}]}])
-    assert r.barrer(filas) == (set(), set())
+    eventos = list(revision.revisar(None, filas, r))
+    assert next(p for e, p in eventos if e == "barrido") == {"revisar": 0,
+                                                             "sin_respuesta": []}
+    assert len(r.pedidos) == 1      # el seq fantasma no gastó una profundización
+    assert [p["seq"] for e, p in eventos if e == "veredicto"] == [0, 1]
 
 
 # --------------------------------------------------------------- orquestador
@@ -379,7 +418,7 @@ def test_revisar_es_un_generador_perezoso(alm_apus):
     assert r.pedidos == []                       # nada corrió todavía
     assert next(gen)[0] == "started"
     assert r.pedidos == []                       # el barrido aún no se pidió
-    assert next(gen)[0] == "barrido"
+    assert next(gen)[0] == "barriendo"           # el primer lote, ya reportado
     assert len(r.pedidos) == 1
 
 

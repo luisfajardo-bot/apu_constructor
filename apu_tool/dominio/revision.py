@@ -46,7 +46,7 @@ TAM_LOTE = 25
 # y no se mezclan: "revisar" tría, nunca dictamina.
 DICTAMENES = ("ok", "dudoso", "cambiar", "sin_apu")
 
-# Vocabulario del TRIAJE (paso 1). Se valida en `barrer` aunque el esquema JSON ya lo
+# Vocabulario del TRIAJE (paso 1). Se valida en `barrer_lote` aunque el esquema JSON ya lo
 # restrinja, igual que `profundizar` revalida `dictamen`: un `resultado` que no
 # entendemos NO puede contar como "contestada y sin objeciones".
 RESULTADOS_BARRIDO = ("ok", "revisar")
@@ -263,58 +263,60 @@ class Revisor:
         return data if isinstance(data, dict) else {}
 
     # ------------------------------------------------------------------ barrido
-    def barrer(self, filas: list[CorridaItemRow]) -> tuple[set[int], set[int]]:
-        """Triaje. Devuelve `(marcadas, sin_respuesta)`: los seq que merecen
-        profundización y los que la IA no contestó (lote truncado, JSON inválido,
-        vocabulario ilegible o error del SDK). Esos NO se dan por buenos.
+    def barrer_lote(self, lote: list[CorridaItemRow],
+                    indice: list[dict[str, Any]]) -> tuple[set[int], set[int]]:
+        """Triaje de UN lote: UNA sola llamada a la IA. Devuelve `(marcadas,
+        sin_respuesta)` de ese lote — los seq que merecen profundización y los que la
+        IA no contestó (lote truncado, JSON inválido, vocabulario ilegible o error
+        del SDK). Esos NO se dan por buenos.
+
+        El `indice` es el de la corrida ENTERA y viaja en CADA lote: es la razón de
+        ser del barrido, que la IA vea el presupuesto como un todo y pueda detectar
+        incoherencias entre líneas.
 
         `sin_respuesta` va en el valor de retorno y no como estado del objeto a
         propósito: el orquestador natural ("si no está en marcadas, es ok")
         convertiría justo las filas sin contestar en veredictos `ok`, que es lo único
         que este módulo existe para evitar. Devolverlas obliga a mirarlas.
+
+        Partir la corrida en lotes NO se hace acá sino en `revisar`: un método = una
+        llamada a la IA, así el orquestador puede reportar progreso entre lote y lote
+        y el stream no se queda mudo (un proxy corta la conexión inactiva).
         """
-        if not self.disponible:
-            raise IANoDisponible("La revisión con IA necesita ANTHROPIC_API_KEY.")
-        indice = indice_corrida(filas)
+        payload = {"indice": indice, "filas": [payload_barrido(f) for f in lote]}
+        try:
+            data = self._pedir(_SISTEMA_BARRIDO, _ESQUEMA_BARRIDO, payload, "low")
+        except (privacy.PrivacyViolation, IANoDisponible):
+            # El invariante #1 NUNCA se traga: sin este `raise`, el `except` de
+            # abajo convertiría una fuga de dinero en un lote vacío y silencioso.
+            # Sin IA tampoco hay revisión que reportar: se avisa, no se maquilla
+            # (la levanta `_pedir`; el guard explícito está en `revisar`, que además
+            # cubre la corrida vacía, donde no hay ni una llamada que la levante).
+            raise
+        except Exception:
+            # Un 429 o un timeout que sobreviva a los reintentos del SDK no puede
+            # tirar los lotes ya pagados: este cae entero en `sin_respuesta`.
+            data = {}
         marcadas: set[int] = set()
-        sin_respuesta: set[int] = set()
-        for i in range(0, len(filas), TAM_LOTE):
-            lote = filas[i:i + TAM_LOTE]
-            payload = {"indice": indice,
-                       "filas": [payload_barrido(f) for f in lote]}
+        vistos: set[int] = set()
+        crudas = data.get("filas")
+        for r in (crudas if isinstance(crudas, list) else []):
+            if not isinstance(r, dict):
+                continue
             try:
-                data = self._pedir(_SISTEMA_BARRIDO, _ESQUEMA_BARRIDO, payload, "low")
-            except (privacy.PrivacyViolation, IANoDisponible):
-                # El invariante #1 NUNCA se traga: sin este `raise`, el `except` de
-                # abajo convertiría una fuga de dinero en un lote vacío y silencioso.
-                # Sin IA tampoco hay revisión que reportar: se avisa, no se maquilla.
-                raise
-            except Exception:
-                # Un 429 o un timeout que sobreviva a los reintentos del SDK no puede
-                # tirar los lotes ya pagados: este cae entero en `sin_respuesta`.
-                data = {}
-            vistos = set()
-            crudas = data.get("filas")
-            for r in (crudas if isinstance(crudas, list) else []):
-                if not isinstance(r, dict):
-                    continue
-                try:
-                    seq = int(r.get("seq"))
-                except (TypeError, ValueError):
-                    continue
-                res = str(r.get("resultado") or "").strip().lower()
-                if res not in RESULTADOS_BARRIDO:
-                    # Vocabulario ilegible (falta, `null`, "okey", basura): la fila NO
-                    # queda contestada. Darla por buena es bendecir un APU en silencio,
-                    # y el prompt dice lo contrario: ante la duda, revisar.
-                    continue
-                vistos.add(seq)
-                if res == "revisar":
-                    marcadas.add(seq)
-            sin_respuesta |= {f.seq for f in lote if f.seq not in vistos}
-        # La IA puede devolver un `seq` que no le dimos: si no es de esta corrida no
-        # hay fila que profundizar, y el orquestador la buscaría en vano.
-        return marcadas & {f.seq for f in filas}, sin_respuesta
+                seq = int(r.get("seq"))
+            except (TypeError, ValueError):
+                continue
+            res = str(r.get("resultado") or "").strip().lower()
+            if res not in RESULTADOS_BARRIDO:
+                # Vocabulario ilegible (falta, `null`, "okey", basura): la fila NO
+                # queda contestada. Darla por buena es bendecir un APU en silencio,
+                # y el prompt dice lo contrario: ante la duda, revisar.
+                continue
+            vistos.add(seq)
+            if res == "revisar":
+                marcadas.add(seq)
+        return marcadas, {f.seq for f in lote if f.seq not in vistos}
 
     # ---------------------------------------------------------- profundización
     def profundizar(self, fila: CorridaItemRow, asignado: Optional[DePricedApu],
@@ -374,6 +376,7 @@ def revisar(almacen, filas: list[CorridaItemRow], revisor: Revisor,
     SSE) persista y reporte en vivo:
 
       ('started',  {'total'})
+      ('barriendo',{'lote': i, 'lotes': n})       — uno por lote del barrido
       ('barrido',  {'revisar': n, 'sin_respuesta': [seq, ...]})
       ('veredicto',{'seq', 'veredicto': {...}})   — por fila, ya lista para guardar
       ('done',     {'total', 'ok', 'dudoso', 'cambiar', 'sin_apu', 'sin_veredicto'})
@@ -385,8 +388,27 @@ def revisar(almacen, filas: list[CorridaItemRow], revisor: Revisor,
     la única parte que necesita leer la biblioteca, y dejar al `Revisor` como pura
     fachada de la IA permite sustituirlo en los tests sin montar una base.
     """
+    if not revisor.disponible:
+        # Acá y no en `barrer_lote`: una corrida vacía no hace ni una llamada, y sin
+        # este guard el llamador creería que la revisión corrió bien sin haber corrido.
+        raise IANoDisponible("La revisión con IA necesita ANTHROPIC_API_KEY.")
     yield ("started", {"total": len(filas)})
-    marcadas, sin_respuesta = revisor.barrer(filas)
+
+    # El barrido reporta lote por lote y no de una: con 300 líneas son 12 llamadas con
+    # pensamiento adaptativo, varios minutos. Un stream mudo tanto rato lo corta el
+    # proxy (Render) y la interfaz no tiene cómo saber si avanza.
+    indice = indice_corrida(filas)
+    lotes = (len(filas) + TAM_LOTE - 1) // TAM_LOTE
+    marcadas: set[int] = set()
+    sin_respuesta: set[int] = set()
+    for n, i in enumerate(range(0, len(filas), TAM_LOTE), start=1):
+        del_lote, sin_del_lote = revisor.barrer_lote(filas[i:i + TAM_LOTE], indice)
+        marcadas |= del_lote
+        sin_respuesta |= sin_del_lote
+        yield ("barriendo", {"lote": n, "lotes": lotes})
+    # La IA puede devolver un `seq` que no le dimos: si no es de esta corrida no hay
+    # fila que profundizar, y el bucle de abajo la buscaría en vano.
+    marcadas &= {f.seq for f in filas}
     yield ("barrido", {"revisar": len(marcadas),
                        "sin_respuesta": sorted(sin_respuesta)})
 

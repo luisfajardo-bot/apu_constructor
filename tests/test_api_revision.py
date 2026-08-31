@@ -78,6 +78,9 @@ def test_stream_persiste_los_veredictos(tmp_path, monkeypatch):
     # El primer evento del motor llega tal cual: es el que le dice a la interfaz
     # cuántas filas se van a revisar.
     assert r.text.startswith("event: started")
+    # El progreso del barrido llega lote por lote: es lo que mantiene vivo el stream
+    # mientras la IA piensa (un proxy corta la conexión inactiva).
+    assert 'event: barriendo\ndata: {"lote": 1, "lotes": 1}' in r.text
     assert "event: done" in r.text
 
     filas = alm.corridas.get_items(cid)

@@ -602,10 +602,11 @@ def revisar_corrida_stream(alm: Almacen, corrida_id: int):
 def _eventos_revision(alm: Almacen, corrida_id: int, filas, revisor):
     """Generador puro: corre el motor y persiste cada veredicto apenas sale.
 
-    Eventos: los de `dominio.revision.revisar`, más ('error', {'detail'}) si falta la
-    IA. Cualquier OTRO fallo sube al `_event_stream` del endpoint, que lo loggea —
-    en particular la PrivacyViolation, que `revision.barrer` re-lanza a propósito y
-    acá tampoco se traga (invariante #1).
+    Eventos: los de `dominio.revision.revisar` (incluido el `barriendo` de cada lote
+    del barrido, que va tal cual al stream para que no se quede mudo), más
+    ('error', {'detail'}) si falta la IA. Cualquier OTRO fallo sube al `_event_stream`
+    del endpoint, que lo loggea — en particular la PrivacyViolation, que
+    `revision.barrer_lote` re-lanza a propósito y acá tampoco se traga (invariante #1).
     """
     try:
         for evento, payload in revisar(alm, filas, revisor):

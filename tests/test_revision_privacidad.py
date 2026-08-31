@@ -34,6 +34,15 @@ def test_payload_de_barrido_no_lleva_dinero():
     assert "999999" not in texto
 
 
+def test_payload_de_barrido_lleva_exactamente_estas_claves():
+    """Conjunto EXACTO, no lista negra: muerde ante cualquier campo nuevo (el score,
+    la confianza o la explicacion del matcher, o un monto con nombre no vetado)."""
+    p = revision.payload_barrido(_fila())
+    assert set(p) == {"seq", "actividad", "apu_asignado", "candidatos"}
+    assert set(p["apu_asignado"]) == {"codigo", "nombre", "unidad", "shift"}
+    assert set(p["candidatos"][0]) == {"codigo", "nombre"}
+
+
 def test_payload_de_barrido_no_lleva_el_score_del_matcher():
     """Si le damos la nota del fuzzy, la copia en vez de pensar."""
     texto = privacy.safe_json(revision.payload_barrido(_fila()))
@@ -49,13 +58,25 @@ def test_indice_de_corrida_no_lleva_dinero():
     assert "999999" not in texto
     assert "score" not in texto
     assert [f["seq"] for f in idx] == [0, 1]
+    for entrada in idx:
+        assert set(entrada) == {"seq", "descripcion", "unidad", "apu"}
 
 
 def test_payload_profundo_no_lleva_dinero():
+    """Nada de buscar la subcadena "precio": un insumo real puede llamarse asi
+    ("PRECIO IDU" es una fuente de este repo) y ademas pasaria si renombran la clave.
+    Se afirma el conjunto EXACTO de claves, en el payload y en cada sub-dict."""
     dp = _apu()
     p = revision.payload_profundo(_fila(), asignado=dp, candidatos=[dp])
     privacy.assert_no_money(p)
-    assert "precio" not in privacy.safe_json(p).lower()
+    assert "999999" not in privacy.safe_json(p)
+    assert set(p) == {"seq", "actividad", "apu_asignado", "candidatos"}
+    for apu in [p["apu_asignado"], *p["candidatos"]]:
+        assert set(apu) == {"codigo", "nombre", "unidad", "shift", "grupo",
+                            "componentes"}
+        for c in apu["componentes"]:
+            assert set(c) == {"insumo_codigo", "insumo_nombre", "unidad",
+                              "rendimiento", "tipo"}
 
 
 def test_un_precio_colado_revienta():

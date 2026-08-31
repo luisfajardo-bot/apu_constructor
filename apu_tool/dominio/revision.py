@@ -6,13 +6,16 @@ el APU asignado le parece bien, dudoso, cambiable por otro candidato, o si para 
 actividad no hay nada en la biblioteca. **Propone; nunca aplica.** Quien aplica es
 el usuario, con `confirmar_items`.
 
-Dos pasos, por costo y por foco:
+Dos pasos, por costo y por foco. Cada paso tiene su PROPIO vocabulario, a propósito:
   1. BARRIDO   — lotes de filas, sin composiciones. Cada lote lleva además el índice
                  de la corrida entera, así la IA ve el presupuesto como un todo y
-                 puede detectar incoherencias entre líneas. Devuelve ok | revisar.
+                 puede detectar incoherencias entre líneas. Devuelve `ok | revisar`:
+                 es un TRIAJE, no un veredicto — solo decide a quién vale la pena
+                 mirarle la composición. Por eso `revisar` NO está en `DICTAMENES`.
   2. PROFUNDIZACIÓN — solo las marcadas `revisar`. Una llamada por fila, ahora con la
                  composición completa (insumos, rendimientos, unidades) del APU
-                 asignado y de cada candidato.
+                 asignado y de cada candidato. Devuelve el VEREDICTO final, ese sí
+                 del vocabulario `DICTAMENES` (ok | dudoso | cambiar | sin_apu).
 
 Invariante #1: todo lo que sale de acá pasa por `privacy.safe_json`. En particular
 NO va el `precio_contractual` del ítem (lo omite `licitacion_item_to_dict`) ni el
@@ -35,6 +38,8 @@ from apu_tool.nucleo.models import CorridaItemRow, DePricedApu
 # subirlo hace lo contrario. Es la palanca si al barrido se le escapan objeciones.
 TAM_LOTE = 25
 
+# Vocabulario del VEREDICTO final (paso 2). El del barrido es otro (`ok | revisar`)
+# y no se mezclan: "revisar" tría, nunca dictamina.
 DICTAMENES = ("ok", "dudoso", "cambiar", "sin_apu")
 
 
@@ -82,8 +87,10 @@ def payload_profundo(fila: CorridaItemRow, asignado: Optional[DePricedApu],
                      candidatos: list[DePricedApu]) -> dict[str, Any]:
     """Una fila con TODA la estructura: composiciones del asignado y de cada candidato.
 
-    Los APUs entran como `DePricedApu` (no como la composición costeada de la corrida,
-    que sí lleva precio_unitario/costo): la frontera está en el tipo.
+    Los APUs entran como `DePricedApu` porque es un tipo que ESTRUCTURALMENTE no
+    puede llevar dinero: la frontera está en el tipo, no en acordarse de filtrar
+    campos. (`CorridaItemRow.componentes` tampoco trae precios; la que sí los lleva
+    es la vista de la API en `servicio/corridas.py`, que no entra acá.)
     """
     return {
         "seq": fila.seq,

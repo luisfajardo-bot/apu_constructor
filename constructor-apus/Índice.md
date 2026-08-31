@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 49 planes, 56 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 50 planes, 56 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -91,6 +91,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 49 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-08-31 | [[Planes/2026-08-31-ia-revisora-post-armado|IA revisora post-armado — Plan de implementación]] |
 | 2026-08-18 | [[Planes/2026-08-18-agregar-lineas-corrida|Agregar líneas a una corrida activa — Plan de implementación]] |
 | 2026-08-10 | [[Planes/2026-08-10-login-google|Ingresar con la cuenta de Google — Implementation Plan]] |
 | 2026-08-10 | [[Planes/2026-08-10-alta-sin-duplicados|Alta sin duplicados (insumos y APUs) — Implementation Plan]] |

@@ -127,8 +127,9 @@ export default function Corrida() {
   // Filas sin APU: se cuentan sobre TODOS los ítems, no sobre los filtrados —
   // el candado no depende de lo que estés mirando. El backend devuelve 409 al
   // congelar o descargar el cuadro; acá se ve antes de chocar contra la puerta.
-  const sinApu = (data.items ?? []).filter((f) => !f.apu_codigo);
-  const bloqueado = sinApu.length > 0;
+  const nSinApu = data.items.filter((f) => !f.apu_codigo).length;
+  const bloqueado = nSinApu > 0;
+  const esActivar = data.modo === "congelada";
 
   return (
     <div className="flex flex-col gap-4" style={{ padding: "16px 20px" }}>
@@ -152,18 +153,19 @@ export default function Corrida() {
         {!live && (
           <div className="flex items-center gap-2">
             <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${
-              data.modo === "congelada" ? "bg-blue-100 text-blue-800" : "bg-green-100 text-green-800"}`}>
-              {data.modo === "congelada" ? "Congelada" : "Activa"}
+              esActivar ? "bg-blue-100 text-blue-800" : "bg-green-100 text-green-800"}`}>
+              {esActivar ? "Congelada" : "Activa"}
             </span>
             <Button size="sm" variant="outline"
-              disabled={bloqueado && data.modo !== "congelada"}
-              title={bloqueado && data.modo !== "congelada"
-                ? `${sinApu.length} línea(s) sin APU: asígnalas antes de congelar.`
+              disabled={bloqueado && !esActivar}
+              title={bloqueado && !esActivar
+                ? `${nSinApu} línea(s) sin APU: asígnalas antes de congelar.`
                 : undefined}
-              onClick={() => cambiarModo(data.modo === "congelada" ? "activar" : "congelar")}>
-              {data.modo === "congelada" ? "Activar" : "Congelar"}
+              aria-describedby={bloqueado ? "candado-sin-apu" : undefined}
+              onClick={() => cambiarModo(esActivar ? "activar" : "congelar")}>
+              {esActivar ? "Activar" : "Congelar"}
             </Button>
-            {data.modo !== "congelada" && data.estado !== "armando" && (
+            {!esActivar && data.estado !== "armando" && (
               <Button size="sm" variant="outline" onClick={() => setAgregando(true)}>
                 Agregar líneas
               </Button>
@@ -171,8 +173,11 @@ export default function Corrida() {
             <Button size="sm" variant="outline"
               disabled={bloqueado}
               title={bloqueado
-                ? `${sinApu.length} línea(s) sin APU: asígnalas antes de descargar.`
+                ? esActivar
+                  ? `${nSinApu} línea(s) sin APU: actívala, asígnalas y vuelve a congelar.`
+                  : `${nSinApu} línea(s) sin APU: asígnalas antes de descargar.`
                 : undefined}
+              aria-describedby={bloqueado ? "candado-sin-apu" : undefined}
               onClick={() => descargarCuadro(corridaId).catch((e) =>
                 toast.error(e instanceof Error ? e.message : "No se pudo descargar el cuadro."))}>
               Descargar cuadro
@@ -218,14 +223,15 @@ export default function Corrida() {
             {totales.n_revision} por revisar
           </span>
         )}
-        {!live && sinApu.length > 0 && (
+        {!live && nSinApu > 0 && (
           <button
             type="button"
+            id="candado-sin-apu"
             className="text-red-700 font-semibold underline"
-            onClick={() => control.setFiltro("apu", SIN_APU)}
+            onClick={() => control.setFiltro("apu", control.filtros.apu === SIN_APU ? "" : SIN_APU)}
             title="Ver solo las líneas sin APU"
           >
-            {sinApu.length} sin APU
+            {nSinApu} sin APU
           </button>
         )}
       </div>

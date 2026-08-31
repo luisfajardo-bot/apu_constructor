@@ -14,6 +14,13 @@ export async function authHeader(): Promise<Record<string, string>> {
 export function mensajeDeError(cuerpo: unknown, respaldo: string): string {
   const d = (cuerpo as { detail?: unknown } | null)?.detail;
   if (typeof d === "string" && d) return d;
+  // 422 de FastAPI: detail es un array de errores de validación de Pydantic
+  // (`[{loc, msg, type}, ...]`). Antes caía al respaldo y mostraba "Unprocessable
+  // Content" en vez del motivo real.
+  if (Array.isArray(d)) {
+    const msgs = d.map((x) => (x as { msg?: string })?.msg).filter(Boolean);
+    if (msgs.length) return msgs.join("; ");
+  }
   if (d && typeof d === "object") {
     const m = (d as { mensaje?: unknown }).mensaje;
     if (typeof m === "string" && m) return m;

@@ -99,24 +99,8 @@ export function activarCorrida(id: number): Promise<CorridaDetalle> {
 }
 
 /** Descarga el cuadro xlsx con el token Bearer (una navegación normal no lleva el header). */
-export async function descargarCuadro(id: number): Promise<void> {
-  const r = await fetch(`/api/corridas/${id}/cuadro`, { headers: { ...(await authHeader()) } });
-  if (r.status === 401) {
-    const { supabase } = await import("@/lib/supabase");
-    await supabase.auth.signOut();
-    throw new Error("Sesión expirada.");
-  }
-  if (!r.ok) throw new Error(mensajeDeError(await r.json().catch(() => null), r.statusText));
-  const blob = await r.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `cuadro_corrida_${id}.xlsx`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
+export const descargarCuadro = (id: number) =>
+  descargarArchivo(`/corridas/${id}/cuadro`, `cuadro_corrida_${id}.xlsx`);
 
 export function descargarPlantillaLicitacion(): Promise<void> {
   return descargarArchivo("/corridas/plantilla", "plantilla_licitacion.xlsx");

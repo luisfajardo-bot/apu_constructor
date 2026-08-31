@@ -37,6 +37,11 @@ test("mensajeDeError lee detail string, detail objeto y cae al respaldo", async 
   expect(
     mensajeDeError({ detail: { mensaje: "2 línea(s) sin APU asignado.", seqs: [1, 7] } }, "respaldo"),
   ).toBe("2 línea(s) sin APU asignado.");
+  // El 422 de validación de Pydantic: detail es un array de {loc, msg, type}.
+  // Sin este caso caía al respaldo y mostraba "Unprocessable Content".
+  expect(
+    mensajeDeError({ detail: [{ loc: ["body", "nombre"], msg: "Field required", type: "missing" }] }, "respaldo"),
+  ).toBe("Field required");
   // Cuerpo vacío / no-JSON: queda el respaldo (statusText).
   expect(mensajeDeError(null, "Internal Server Error")).toBe("Internal Server Error");
   expect(mensajeDeError({}, "respaldo")).toBe("respaldo");

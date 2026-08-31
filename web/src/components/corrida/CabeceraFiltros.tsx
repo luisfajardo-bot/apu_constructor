@@ -82,36 +82,39 @@ export default function CabeceraFiltros({
       <TableRow className="hover:bg-transparent">
         {conSeleccion && <TableHead className="w-8 px-1" />}
         <TableHead className="w-6 px-1" />
-        {COLS.map((c) => (
-          <TableHead key={c.clave} className={`${c.ancho} py-1 align-top`}>
-            {c.tipo === "texto" && (
-              <input
-                className={inputCls}
-                // El filtro de APU puede llevar el centinela de "sin APU" (lo pone el
-                // contador rojo de la corrida). En la caja se muestra legible, no crudo;
-                // y al enfocarla se selecciona todo, para que escribir encima lo
-                // reemplace de una por un filtro de texto normal.
-                value={esCentinela(c.clave, control) ? "(sin APU)" : (control.filtros[c.clave] as string)}
-                onFocus={(e) => { if (esCentinela(c.clave, control)) e.currentTarget.select(); }}
-                aria-label={`Filtrar ${c.label}`} placeholder="contiene…"
-                onChange={(e) => control.setFiltro(c.clave, e.target.value)}
-              />
-            )}
-            {c.tipo === "select" && (
-              <select
-                className={inputCls} value={control.filtros[c.clave] as string}
-                aria-label={`Filtrar ${c.label}`}
-                onChange={(e) => control.setFiltro(c.clave, e.target.value)}
-              >
-                <option value="">(todas)</option>
-                {(c.clave === "unidad" ? control.opcionesUnidad : control.opcionesStatus).map((o) => (
-                  <option key={o} value={o}>{c.clave === "status" ? etiquetaEstado(o) : o}</option>
-                ))}
-              </select>
-            )}
-            {c.tipo === "num" && <Rango clave={c.clave} label={c.label} control={control} />}
-          </TableHead>
-        ))}
+        {COLS.map((c) => {
+          // El filtro de APU puede llevar el centinela de "sin APU" (lo pone el
+          // contador rojo de la corrida). El centinela se muestra como *placeholder*,
+          // no como value: así no hay texto que editar parcialmente y cualquier tecla
+          // arranca de vacío, como en un filtro normal.
+          const sinApuActivo = esCentinela(c.clave, control);
+          return (
+            <TableHead key={c.clave} className={`${c.ancho} py-1 align-top`}>
+              {c.tipo === "texto" && (
+                <input
+                  className={`${inputCls}${sinApuActivo ? " border-red-400 placeholder:text-red-700" : ""}`}
+                  value={sinApuActivo ? "" : (control.filtros[c.clave] as string)}
+                  placeholder={sinApuActivo ? "(sin APU)" : "contiene…"}
+                  aria-label={`Filtrar ${c.label}`}
+                  onChange={(e) => control.setFiltro(c.clave, e.target.value)}
+                />
+              )}
+              {c.tipo === "select" && (
+                <select
+                  className={inputCls} value={control.filtros[c.clave] as string}
+                  aria-label={`Filtrar ${c.label}`}
+                  onChange={(e) => control.setFiltro(c.clave, e.target.value)}
+                >
+                  <option value="">(todas)</option>
+                  {(c.clave === "unidad" ? control.opcionesUnidad : control.opcionesStatus).map((o) => (
+                    <option key={o} value={o}>{c.clave === "status" ? etiquetaEstado(o) : o}</option>
+                  ))}
+                </select>
+              )}
+              {c.tipo === "num" && <Rango clave={c.clave} label={c.label} control={control} />}
+            </TableHead>
+          );
+        })}
       </TableRow>
     </TableHeader>
   );

@@ -52,6 +52,11 @@ test("al filtrar por Und, los totales y el contador recalculan sobre lo filtrado
   fireEvent.change(screen.getByLabelText("Filtrar Und"), { target: { value: "M2" } });
   expect(screen.queryByText("Excavación")).toBeNull();
   expect(screen.getByText(/1 de 2 ítems/)).toBeTruthy();
+
+  // Un refactor que fije `disabled` en `true` no debe dejar a todo el mundo sin
+  // poder descargar: esta corrida no tiene líneas sin APU.
+  expect((screen.getByRole("button", { name: /descargar cuadro/i }) as HTMLButtonElement).disabled)
+    .toBe(false);
 });
 
 test("muestra la lista de precios de la corrida cuando no es Principal", async () => {
@@ -159,7 +164,7 @@ test("en una corrida congelada con líneas sin APU, Activar NO se bloquea", asyn
     .toBe(false);
 });
 
-test("la caja de filtro de APU muestra \"(sin APU)\", no el centinela crudo", async () => {
+test("la caja de filtro de APU usa \"(sin APU)\" como placeholder, no como value", async () => {
   const { getCorrida } = await import("@/api/corridas");
   (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
     ...CORRIDA,
@@ -172,7 +177,9 @@ test("la caja de filtro de APU muestra \"(sin APU)\", no el centinela crudo", as
 
   fireEvent.click(screen.getByText(/1 sin APU/));
   const caja = screen.getByLabelText("Filtrar APU") as HTMLInputElement;
-  expect(caja.value).toBe("(sin APU)");
+  // El value queda vacío: nada que editar parcialmente. El rótulo es placeholder.
+  expect(caja.value).toBe("");
+  expect(caja.placeholder).toBe("(sin APU)");
 
   // Se sale del estado como de cualquier otro filtro: escribir encima lo
   // reemplaza por un filtro de texto normal.
@@ -180,4 +187,23 @@ test("la caja de filtro de APU muestra \"(sin APU)\", no el centinela crudo", as
   expect((screen.getByLabelText("Filtrar APU") as HTMLInputElement).value).toBe("APU A");
   expect(screen.getByText("Excavación")).toBeTruthy();
   expect(screen.queryByText("Actividad rara")).toBeNull();
+});
+
+test("un segundo clic en el contador de sin APU apaga el filtro", async () => {
+  const { getCorrida } = await import("@/api/corridas");
+  (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
+    ...CORRIDA,
+    items: SIN_APU_ITEMS,
+  });
+
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Actividad rara");
+
+  fireEvent.click(screen.getByText(/1 sin APU/));
+  expect(screen.queryByText("Excavación")).toBeNull();
+
+  fireEvent.click(screen.getByText(/1 sin APU/));
+  expect(screen.getByText("Excavación")).toBeTruthy();
+  expect(screen.getByText("Actividad rara")).toBeTruthy();
 });

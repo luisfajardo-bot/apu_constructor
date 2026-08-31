@@ -392,19 +392,28 @@ def revisar(almacen, filas: list[CorridaItemRow], revisor: Revisor,
         # Acá y no en `barrer_lote`: una corrida vacía no hace ni una llamada, y sin
         # este guard el llamador creería que la revisión corrió bien sin haber corrido.
         raise IANoDisponible("La revisión con IA necesita ANTHROPIC_API_KEY.")
-    yield ("started", {"total": len(filas)})
+    # Los lotes se calculan ANTES del primer yield: con 300 líneas el primer
+    # `barriendo` tarda casi un minuto en llegar, y hasta entonces la interfaz no
+    # puede pintar "0 de N" — solo un indeterminado. División entera con techo, así que
+    # una corrida de 0 filas da 0 (no 1 ni una división por cero). `TAM_LOTE` se lee
+    # del módulo (nombre libre, no una copia local) para que el
+    # `monkeypatch.setattr(revision, "TAM_LOTE", n)` de los tests lo siga afectando.
+    lotes = (len(filas) + TAM_LOTE - 1) // TAM_LOTE
+    yield ("started", {"total": len(filas), "lotes": lotes})
 
     # El barrido reporta lote por lote y no de una: con 300 líneas son 12 llamadas con
     # pensamiento adaptativo, varios minutos. Un stream mudo tanto rato lo corta el
     # proxy (Render) y la interfaz no tiene cómo saber si avanza.
     indice = indice_corrida(filas)
-    lotes = (len(filas) + TAM_LOTE - 1) // TAM_LOTE
     marcadas: set[int] = set()
     sin_respuesta: set[int] = set()
     for n, i in enumerate(range(0, len(filas), TAM_LOTE), start=1):
         del_lote, sin_del_lote = revisor.barrer_lote(filas[i:i + TAM_LOTE], indice)
         marcadas |= del_lote
         sin_respuesta |= sin_del_lote
+        # `lote: n` acá significa que el lote n YA TERMINÓ (el n+1 sigue, si hay):
+        # quien pinte la barra debe leerlo como "n de `lotes` listos", no como
+        # "barriendo el n".
         yield ("barriendo", {"lote": n, "lotes": lotes})
     # La IA puede devolver un `seq` que no le dimos: si no es de esta corrida no hay
     # fila que profundizar, y el bucle de abajo la buscaría en vano.

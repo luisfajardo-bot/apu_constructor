@@ -122,6 +122,26 @@ def test_revisar_reporta_progreso_despues_de_cada_lote(monkeypatch):
             < tipos.index("veredicto"))
 
 
+def test_started_trae_lotes_y_cuadra_con_los_eventos_barriendo(monkeypatch):
+    """La interfaz necesita el número de lotes ANTES de que termine el primero, para
+    pintar "0 de N" en vez de un indeterminado durante casi un minuto."""
+    monkeypatch.setattr(revision, "TAM_LOTE", 2)
+    filas = [_fila(i, f"ACTIVIDAD {i}", "100") for i in range(5)]   # 5/2 -> 3 lotes
+    r = RevisorDoble([{"filas": [{"seq": s, "resultado": "ok"} for s in ss]}
+                      for ss in ((0, 1), (2, 3), (4,))])
+    eventos = list(revision.revisar(None, filas, r))
+    started = next(p for e, p in eventos if e == "started")
+    assert started == {"total": 5, "lotes": 3}
+    assert len([e for e, _ in eventos if e == "barriendo"]) == started["lotes"]
+
+
+def test_started_de_una_corrida_vacia_trae_lotes_cero():
+    r = RevisorDoble([])
+    eventos = list(revision.revisar(None, [], r))
+    started = next(p for e, p in eventos if e == "started")
+    assert started == {"total": 0, "lotes": 0}
+
+
 def test_barrido_sin_respuesta_para_una_fila_no_la_da_por_buena():
     """Un lote que vuelve incompleto deja esas filas SIN veredicto, no en `ok`."""
     filas = [_fila(0, "A", "100"), _fila(1, "B", "200")]
@@ -141,6 +161,7 @@ def test_barrido_sin_respuesta_para_una_fila_no_la_da_por_buena():
     {"filas": [{"seq": 0}]},                         # sin resultado
     {"filas": "ok"},                                 # `filas` no es una lista
     {"filas": [42, "ok"]},                           # elementos que no son dicts
+    {"filas": 42},                                   # `filas` ni siquiera es iterable
 ])
 def test_barrido_con_respuesta_inutil_deja_todo_el_lote_sin_respuesta(respuesta):
     """Nadie sale en `ok` por accidente: sin veredicto legible, sin veredicto.

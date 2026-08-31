@@ -273,3 +273,4 @@ class CorridaItemRow:
     explicacion: str
     componentes: list[dict]       # [{insumo_codigo, insumo_nombre, unidad, rendimiento}] (sin dinero)
     candidatos: list[dict]        # [{apu_codigo, apu_nombre, score, motivo}] (sin dinero)
+    revision: Optional[dict] = None    # veredicto de la IA; None = nunca revisada

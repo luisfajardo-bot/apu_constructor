@@ -45,13 +45,16 @@ CREATE TABLE IF NOT EXISTS corridas.corrida_item (
     explicacion   TEXT,
     componentes_json TEXT,
     candidatos_json  TEXT,
-    snapshot_json    TEXT
+    snapshot_json    TEXT,
+    -- Veredicto de la IA revisora sobre el APU de esta fila. NULL = nunca revisada.
+    revision_json    TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_corrida_item ON corridas.corrida_item(corrida_id, seq);
 
 -- Migración idempotente para bases existentes.
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS modo TEXT NOT NULL DEFAULT 'activa';
 ALTER TABLE corridas.corrida_item ADD COLUMN IF NOT EXISTS snapshot_json TEXT;
+ALTER TABLE corridas.corrida_item ADD COLUMN IF NOT EXISTS revision_json TEXT;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS carpeta_id BIGINT
     REFERENCES corridas.carpeta(id) ON DELETE RESTRICT;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS nombre TEXT;

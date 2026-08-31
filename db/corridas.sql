@@ -43,7 +43,9 @@ CREATE TABLE IF NOT EXISTS corrida_item (
   explicacion   TEXT,
   componentes_json TEXT,
   candidatos_json  TEXT,
-  snapshot_json    TEXT
+  snapshot_json    TEXT,
+  -- Veredicto de la IA revisora sobre el APU de esta fila. NULL = nunca revisada.
+  revision_json    TEXT
 );
 
 CREATE INDEX IF NOT EXISTS ix_corrida_item ON corrida_item(corrida_id, seq);

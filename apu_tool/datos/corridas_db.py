@@ -64,6 +64,8 @@ class CorridasDB:
             icols = {r["name"] for r in conn.execute("PRAGMA table_info(corrida_item)").fetchall()}
             if "snapshot_json" not in icols:
                 conn.execute("ALTER TABLE corrida_item ADD COLUMN snapshot_json TEXT")
+            if "revision_json" not in icols:
+                conn.execute("ALTER TABLE corrida_item ADD COLUMN revision_json TEXT")
             sc = conn.execute("SELECT id FROM carpeta WHERE nombre='Sin clasificar' "
                               "AND parent_id IS NULL").fetchone()
             if sc is None:
@@ -149,8 +151,11 @@ class CorridasDB:
                             explicacion: str, componentes: list[dict]) -> None:
         with self.connect() as conn:
             conn.execute(
+                # El APU cambió: el veredicto de la IA hablaba del anterior. Se borra
+                # acá, el único punto por el que pasa un cambio de APU.
                 "UPDATE corrida_item SET status=?, apu_codigo=?, apu_nombre=?, unidad=?, "
-                "shift=?, origen=?, confianza=?, explicacion=?, componentes_json=? "
+                "shift=?, origen=?, confianza=?, explicacion=?, componentes_json=?, "
+                "revision_json=NULL "
                 "WHERE corrida_id=? AND seq=?",
                 (status, apu_codigo, apu_nombre, unidad, shift, origen, confianza,
                  explicacion, json.dumps(componentes, ensure_ascii=False),
@@ -199,6 +204,23 @@ class CorridasDB:
                 "WHERE corrida_id=? AND snapshot_json IS NOT NULL", (int(corrida_id),)).fetchall()
         return {r["seq"]: json.loads(r["snapshot_json"]) for r in rows}
 
+    def set_revision(self, corrida_id: int, seq: int, payload: Optional[dict]) -> None:
+        """Guarda (o borra, con payload=None) el veredicto de la IA de una fila."""
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE corrida_item SET revision_json=? WHERE corrida_id=? AND seq=?",
+                (None if payload is None else json.dumps(payload, ensure_ascii=False),
+                 int(corrida_id), int(seq)))
+
+    def get_revisiones(self, corrida_id: int) -> dict[int, dict]:
+        """seq -> veredicto, solo de las filas revisadas."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT seq, revision_json FROM corrida_item "
+                "WHERE corrida_id=? AND revision_json IS NOT NULL",
+                (int(corrida_id),)).fetchall()
+        return {r["seq"]: json.loads(r["revision_json"]) for r in rows}
+
     # ---- lectura ----
     def _row_to_item(self, r: sqlite3.Row) -> CorridaItemRow:
         return CorridaItemRow(
@@ -208,7 +230,9 @@ class CorridasDB:
             shift=r["shift"] or "", origen=r["origen"] or "historico",
             confianza=r["confianza"] or 0.0, explicacion=r["explicacion"] or "",
             componentes=json.loads(r["componentes_json"] or "[]"),
-            candidatos=json.loads(r["candidatos_json"] or "[]"))
+            candidatos=json.loads(r["candidatos_json"] or "[]"),
+            revision=(json.loads(r["revision_json"])
+                      if ("revision_json" in r.keys() and r["revision_json"]) else None))
 
     def _row_to_meta(self, r: sqlite3.Row) -> CorridaMeta:
         return CorridaMeta(

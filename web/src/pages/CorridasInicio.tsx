@@ -12,7 +12,6 @@ export default function CorridasInicio() {
   const navigate = useNavigate();
   const { armarArchivo, armarEjemplo } = useArmadoVivo();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [usarIA, setUsarIA] = useState(true);
   const [cargando, setCargando] = useState(false);
   const [nombre, setNombre] = useState("");
   const [nombreTocado, setNombreTocado] = useState(false);
@@ -112,7 +111,6 @@ export default function CorridasInicio() {
     }
     const form = new FormData();
     form.append("archivo", archivo);
-    form.append("use_ai", String(usarIA));
     form.append("carpeta_id", String(carpetaDestino));
     form.append("nombre", nombre.trim());
     if (listaId !== LISTA_PRINCIPAL_ID) form.append("lista_id", String(listaId));
@@ -174,21 +172,6 @@ export default function CorridasInicio() {
             disabled={cargando}
             className="text-xs"
           />
-        </div>
-
-        {/* Usar IA */}
-        <div className="flex items-center gap-1.5">
-          <input
-            id="usar-ia"
-            type="checkbox"
-            checked={usarIA}
-            onChange={(e) => setUsarIA(e.target.checked)}
-            disabled={cargando}
-            className="size-3.5 cursor-pointer accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-          />
-          <label htmlFor="usar-ia" className="cursor-pointer text-xs font-medium">
-            Usar IA
-          </label>
         </div>
 
         {/* Carpeta */}

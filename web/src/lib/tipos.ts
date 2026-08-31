@@ -30,6 +30,68 @@ export interface Totales {
   n_revision: number;
 }
 
+// ─── Revisión con IA ────────────────────────────────────────────────────────
+
+export type DictamenIA = "ok" | "dudoso" | "cambiar" | "sin_apu";
+
+export interface VeredictoIA {
+  seq: number;
+  dictamen: DictamenIA;
+  apu_sugerido: string | null;
+  turno_sugerido: string | null;
+  confianza: number; // 0..1
+  justificacion: string;
+  // barrido = triaje sin objeción (nunca miró la composición completa);
+  // profundo = la IA sí vio la composición del asignado y de cada candidato.
+  nivel: "barrido" | "profundo";
+}
+
+/** Progreso del stream de revisión. 'started' llega una vez con el total de filas;
+ *  'barriendo' llega una vez POR LOTE del barrido (así el stream no se queda mudo
+ *  en corridas grandes, donde el triaje son varias llamadas seguidas a la IA);
+ *  'barrido' llega una vez, al terminar el triaje completo. */
+export type ProgresoRevision =
+  | { evento: "started"; total: number }
+  | { evento: "barriendo"; lote: number; lotes: number }
+  | { evento: "barrido"; revisar: number; sin_respuesta: number[] };
+
+/** Resumen final ('done') de la revisión: conteo de filas por dictamen más las
+ *  que quedaron sin veredicto porque el barrido no las contestó. */
+export interface ResumenRevision {
+  total: number;
+  ok: number;
+  dudoso: number;
+  cambiar: number;
+  sin_apu: number;
+  sin_veredicto: number;
+}
+
+export interface ComponenteComposicion {
+  insumo_codigo: string;
+  insumo_nombre: string;
+  unidad: string;
+  rendimiento: number;
+}
+
+/** Composición PROPUESTA por la IA para una fila sin APU (POST .../componer/{seq}).
+ *  No persiste nada: quien aplica es el usuario, vía el alta normal de APUs. */
+export interface ComposicionPropuesta {
+  seq: number;
+  nombre: string;
+  unidad: string;
+  shift: string;
+  justificacion: string;
+  confianza: number;
+  componentes: ComponenteComposicion[];
+}
+
+/** Un APU distinto por fila para aplicar sugerencias de la IA en un solo recosteo. */
+export interface AsignacionIA {
+  seq: number;
+  apu_codigo: string;
+  shift?: string;
+}
+
 export interface ItemCuadro {
   seq: number;
   item: string;
@@ -47,6 +109,8 @@ export interface ItemCuadro {
   contractual_total: number;
   costo_total: number;
   margen_total: number;
+  // Veredicto de la última revisión con IA, o null si esta fila no se revisó.
+  revision: VeredictoIA | null;
 }
 
 /** Una línea tal como la leyó el Excel, antes de armarse. */
@@ -216,6 +280,8 @@ export interface CorridaDetalle {
   carpeta_id: number | null;
   lista_precios_id: number | null;
   lista_nombre: string;
+  // Apaga el botón "Revisar con IA" cuando el servidor no tiene ANTHROPIC_API_KEY.
+  ia_disponible: boolean;
 }
 
 export interface ListaInsumos {

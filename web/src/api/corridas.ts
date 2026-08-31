@@ -1,5 +1,7 @@
 import { apiGet, apiPost, apiDelete, authHeader, descargarArchivo, mensajeDeError } from "@/api/client";
 import type {
+  AsignacionIA,
+  ComposicionPropuesta,
   StatusResponse,
   CorridaCreada,
   CorridaDetalle,
@@ -9,6 +11,9 @@ import type {
   LineaNueva,
   PreviewLineas,
   Progreso,
+  ProgresoRevision,
+  ResumenRevision,
+  VeredictoIA,
 } from "@/lib/tipos";
 
 export function getStatus(): Promise<StatusResponse> {
@@ -70,6 +75,24 @@ export function confirmarLote(
   });
 }
 
+/** Aplica N sugerencias de la IA en un solo recosteo: un APU (y turno) distinto
+ *  por fila. Devuelve la corrida recosteada (misma forma que `confirmar`). */
+export function aplicarSugerencias(
+  id: number,
+  asignaciones: AsignacionIA[],
+): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/items/confirmar-lote`, {
+    seqs: [],
+    asignaciones,
+  });
+}
+
+/** Propone una composición para una fila `sin_apu`. No persiste nada: crear el
+ *  APU sigue siendo el alta normal, con sus validaciones de duplicados. */
+export function componerItem(id: number, seq: number): Promise<ComposicionPropuesta> {
+  return apiPost<ComposicionPropuesta>(`/corridas/${id}/componer/${seq}`);
+}
+
 /** Qué se agregaría con este Excel (y qué ya está en la corrida). No escribe. */
 export function previewLineas(id: number, form: FormData): Promise<PreviewLineas> {
   return apiPost<PreviewLineas>(`/corridas/${id}/items/preview`, form);
@@ -121,12 +144,16 @@ export function parseSse(block: string): { event: string; data: unknown } | null
   }
 }
 
-async function streamCorrida(
+/** Abre un SSE en `path` y llama a `onEvent` por cada evento parseado. Es el fetch +
+ *  auth + chequeo de 401/ok + bucle de lectura del stream, compartido entre
+ *  `streamCorrida` (armado) y `revisarCorridaStream` (revisión con IA): cada
+ *  consumidor decide qué hacer con cada evento, incluyendo cuándo terminar
+ *  (lanzar acá dentro de `onEvent` rechaza la promesa de afuera, tal cual antes). */
+async function consumirSse(
   path: string,
   init: RequestInit,
-  onProgress: (p: Progreso) => void,
-  onStarted?: (c: CorridaIniciada) => void,
-): Promise<CorridaCreada> {
+  onEvent: (ev: { event: string; data: unknown }) => void,
+): Promise<void> {
   const r = await fetch("/api" + path, {
     ...init,
     headers: { ...(init.headers || {}), ...(await authHeader()) },
@@ -142,7 +169,6 @@ async function streamCorrida(
   const reader = r.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  let done: CorridaCreada | null = null;
   for (;;) {
     const { value, done: fin } = await reader.read();
     if (fin) break;
@@ -151,14 +177,25 @@ async function streamCorrida(
     while ((idx = buf.indexOf("\n\n")) >= 0) {
       const ev = parseSse(buf.slice(0, idx));
       buf = buf.slice(idx + 2);
-      if (!ev) continue;
-      if (ev.event === "started") onStarted?.(ev.data as CorridaIniciada);
-      else if (ev.event === "progress") onProgress(ev.data as Progreso);
-      else if (ev.event === "done") done = ev.data as CorridaCreada;
-      else if (ev.event === "error")
-        throw new Error(mensajeDeError(ev.data, "Error al armar"));
+      if (ev) onEvent(ev);
     }
   }
+}
+
+async function streamCorrida(
+  path: string,
+  init: RequestInit,
+  onProgress: (p: Progreso) => void,
+  onStarted?: (c: CorridaIniciada) => void,
+): Promise<CorridaCreada> {
+  let done: CorridaCreada | null = null;
+  await consumirSse(path, init, (ev) => {
+    if (ev.event === "started") onStarted?.(ev.data as CorridaIniciada);
+    else if (ev.event === "progress") onProgress(ev.data as Progreso);
+    else if (ev.event === "done") done = ev.data as CorridaCreada;
+    else if (ev.event === "error")
+      throw new Error(mensajeDeError(ev.data, "Error al armar"));
+  });
   if (!done) throw new Error("La corrida no terminó correctamente.");
   return done;
 }
@@ -176,4 +213,40 @@ export function crearSampleStream(
   onStarted?: (c: CorridaIniciada) => void,
 ) {
   return streamCorrida("/sample/stream", { method: "POST" }, onProgress, onStarted);
+}
+
+/** Audita la corrida con IA (barrido + profundización). La IA propone; nunca aplica.
+ *  `onVeredicto` llega una vez por fila con veredicto (evento 'veredicto'); `onProgreso`
+ *  es opcional y avisa el arranque ('started', con el total), cada lote del triaje
+ *  ('barriendo' — el barrido de una corrida grande son varias llamadas seguidas a la
+ *  IA, y sin este evento el stream se ve mudo un buen rato) y el fin del triaje
+ *  ('barrido', con cuántas filas quedaron marcadas y cuáles no contestaron). Resuelve
+ *  con el resumen del evento 'done'; un stream que corta sin 'done', o un evento
+ *  'error', rechaza la promesa. */
+export async function revisarCorridaStream(
+  id: number,
+  onVeredicto: (v: VeredictoIA) => void,
+  onProgreso?: (p: ProgresoRevision) => void,
+): Promise<ResumenRevision> {
+  let resumen: ResumenRevision | null = null;
+  await consumirSse(`/corridas/${id}/revision/stream`, { method: "POST" }, (ev) => {
+    if (ev.event === "veredicto") {
+      onVeredicto((ev.data as { veredicto: VeredictoIA }).veredicto);
+    } else if (ev.event === "started") {
+      onProgreso?.({ evento: "started", ...(ev.data as { total: number }) });
+    } else if (ev.event === "barriendo") {
+      onProgreso?.({ evento: "barriendo", ...(ev.data as { lote: number; lotes: number }) });
+    } else if (ev.event === "barrido") {
+      onProgreso?.({
+        evento: "barrido",
+        ...(ev.data as { revisar: number; sin_respuesta: number[] }),
+      });
+    } else if (ev.event === "done") {
+      resumen = ev.data as ResumenRevision;
+    } else if (ev.event === "error") {
+      throw new Error(mensajeDeError(ev.data, "Error al revisar"));
+    }
+  });
+  if (!resumen) throw new Error("La revisión no terminó correctamente.");
+  return resumen;
 }

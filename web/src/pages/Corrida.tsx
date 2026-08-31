@@ -100,6 +100,8 @@ export default function Corrida() {
         carpeta_id: null,
         lista_precios_id: vivo.listaId,
         lista_nombre: vivo.listaNombre,
+        // Todavía armando, sin persistir: nada que revisar hasta que termine.
+        ia_disponible: false,
       }
     : corrida;
 

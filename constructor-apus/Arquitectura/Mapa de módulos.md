@@ -73,6 +73,7 @@ flowchart TD
 | `privacy.py` | Frontera de privacidad de precios. |
 | `report.py` | Generación del cuadro resumen (salida en Excel). |
 | `report_categorizado.py` | Cuadro resumen agrupado por capítulos del presupuesto. |
+| `revision.py` | Revisión con IA de una corrida YA armada. |
 
 ## servicio/ — API web (FastAPI)
 

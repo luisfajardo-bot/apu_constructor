@@ -152,6 +152,49 @@ _ESQUEMA_BARRIDO = {
 }
 
 
+_SISTEMA_PROFUNDO = """Eres un ingeniero de costos de obra civil auditando UNA línea de un presupuesto ya
+armado. Te dan la ACTIVIDAD, el APU que se le asignó con su composición completa
+(insumos, unidades y rendimientos) y los APUs candidatos con la suya.
+
+Tu tarea: decidir cuál de estos cuatro dictámenes corresponde.
+- "ok": el APU asignado es el correcto para esta actividad.
+- "dudoso": no puedes decidir con lo que tienes; alguien tiene que mirarlo.
+- "cambiar": otro de los candidatos es claramente mejor. Devuelve su código en
+  `apu_sugerido` — SOLO códigos que estén en la lista de candidatos.
+- "sin_apu": ninguno sirve; para esta actividad no hay nada adecuado en la biblioteca.
+
+Reglas:
+- Decides por afinidad técnica: unidad, tipo de trabajo, e insumos y rendimientos de
+  la composición.
+- NUNCA recibirás precios ni costos, y no debes inventarlos ni pedirlos.
+- NUNCA inventes un código de APU. Si el que quieres no está entre los candidatos,
+  el dictamen es "sin_apu" o "dudoso".
+- La composición que ves es la de la BIBLIOTECA. Un proyecto puede ajustar distancias
+  de acarreo al costear, así que los rendimientos de transporte pueden diferir; juzga
+  la afinidad técnica de la actividad, no la exactitud numérica del rendimiento.
+- La justificación va en una frase corta, en español.
+
+Responde EXCLUSIVAMENTE con un JSON válido con este esquema:
+{"dictamen": "ok"|"dudoso"|"cambiar"|"sin_apu",
+ "apu_sugerido": <string|null>, "turno_sugerido": <string|null>,
+ "confianza": <number 0..1>, "justificacion": <string corto>}
+"""
+
+_ESQUEMA_PROFUNDO = {
+    "type": "object",
+    "properties": {
+        "dictamen": {"type": "string", "enum": list(DICTAMENES)},
+        "apu_sugerido": {"type": ["string", "null"]},
+        "turno_sugerido": {"type": ["string", "null"]},
+        "confianza": {"type": "number"},
+        "justificacion": {"type": "string"},
+    },
+    "required": ["dictamen", "apu_sugerido", "turno_sugerido", "confianza",
+                 "justificacion"],
+    "additionalProperties": False,
+}
+
+
 class Revisor:
     """Fachada sobre la IA para la revisión. Sin fallback determinístico.
 
@@ -224,3 +267,39 @@ class Revisor:
                     marcadas.add(seq)
             self.sin_respuesta |= {f.seq for f in lote if f.seq not in vistos}
         return marcadas
+
+    # ---------------------------------------------------------- profundización
+    def profundizar(self, fila: CorridaItemRow, asignado: Optional[DePricedApu],
+                    candidatos: list[DePricedApu]) -> Veredicto:
+        """Dictamen final de UNA fila, con las composiciones completas a la vista."""
+        if not self.disponible:
+            raise IANoDisponible("La revisión con IA necesita ANTHROPIC_API_KEY.")
+        data = self._pedir(_SISTEMA_PROFUNDO, _ESQUEMA_PROFUNDO,
+                           payload_profundo(fila, asignado, candidatos), "medium")
+        dictamen = str(data.get("dictamen") or "")
+        sugerido = data.get("apu_sugerido")
+        sugerido = str(sugerido).strip() if sugerido else None
+        turno = data.get("turno_sugerido")
+        turno = str(turno).strip() if turno else None
+        just = str(data.get("justificacion") or "").strip()
+        try:
+            conf = float(data.get("confianza") or 0.0)
+        except (TypeError, ValueError):
+            conf = 0.0
+
+        validos = {a.codigo for a in candidatos}
+        if dictamen not in DICTAMENES:
+            # JSON vacío, truncado o un dictamen que no existe: nadie sale en "ok"
+            # por accidente. "dudoso" manda la decisión al humano, que es lo correcto.
+            dictamen, sugerido, turno = "dudoso", None, None
+            just = just or "La IA no devolvió un dictamen legible."
+        elif dictamen == "cambiar" and (sugerido is None or sugerido not in validos):
+            # La IA no puede inventar un código. Si el que pide no estaba entre los
+            # candidatos que le dimos, no existe para esta decisión.
+            just = (f"La IA sugirió el APU {sugerido}, que no estaba entre los "
+                    f"candidatos. {just}").strip()
+            dictamen, sugerido, turno = "dudoso", None, None
+
+        return Veredicto(seq=fila.seq, dictamen=dictamen, apu_sugerido=sugerido,
+                         turno_sugerido=turno, confianza=conf, justificacion=just,
+                         nivel="profundo")

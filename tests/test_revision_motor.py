@@ -2,7 +2,9 @@
 import pytest
 
 from apu_tool.dominio import revision
-from apu_tool.nucleo.models import CorridaItemRow, LicitacionItem
+from apu_tool.nucleo.models import (
+    CorridaItemRow, DePricedApu, DePricedComponent, LicitacionItem,
+)
 
 
 def _fila(seq, desc, apu):
@@ -13,6 +15,15 @@ def _fila(seq, desc, apu):
         status="auto", apu_codigo=apu, apu_nombre=f"APU {apu}", unidad="M3",
         shift="DIURNO", origen="historico", confianza=0.9, explicacion="",
         componentes=[], candidatos=[])
+
+
+def _dp(codigo, nombre, unidad="M3"):
+    """Un APU sin dinero, como el que ve la IA en la profundizacion."""
+    return DePricedApu(codigo=codigo, nombre=nombre, unidad=unidad, shift="DIURNO",
+                       grupo="MOV",
+                       componentes=(DePricedComponent(
+                           insumo_codigo="4279", insumo_nombre="CUADRILLA", unidad="HR",
+                           rendimiento=1.0, tipo="insumo"),))
 
 
 class RevisorDoble(revision.Revisor):
@@ -95,3 +106,57 @@ def test_barrido_de_una_corrida_vacia_tambien_falla_sin_ia():
     r = revision.Revisor(enabled=False)
     with pytest.raises(revision.IANoDisponible):
         r.barrer([])
+
+
+# ------------------------------------------------------------------ profundizacion
+def test_profundizar_devuelve_cambiar_con_el_apu_sugerido():
+    fila = _fila(3, "EXCAVACION MECANICA", "100")
+    r = RevisorDoble([{"dictamen": "cambiar", "apu_sugerido": "200",
+                       "turno_sugerido": "DIURNO", "confianza": 0.85,
+                       "justificacion": "la actividad es mecánica"}])
+    v = r.profundizar(fila, asignado=_dp("100", "EXCAVACION MANUAL"),
+                      candidatos=[_dp("200", "EXCAVACION MECANICA")])
+    assert (v.dictamen, v.apu_sugerido, v.nivel) == ("cambiar", "200", "profundo")
+    assert r.pedidos[0]["effort"] == "medium"
+
+
+def test_sugerencia_que_no_esta_entre_los_candidatos_degrada_a_dudoso():
+    """La IA no puede inventar un código: si sugiere uno que no le pasamos, se cae."""
+    fila = _fila(3, "EXCAVACION MECANICA", "100")
+    r = RevisorDoble([{"dictamen": "cambiar", "apu_sugerido": "9999",
+                       "turno_sugerido": "DIURNO", "confianza": 0.9,
+                       "justificacion": "x"}])
+    v = r.profundizar(fila, asignado=_dp("100", "EXCAVACION MANUAL"),
+                      candidatos=[_dp("200", "EXCAVACION MECANICA")])
+    assert v.dictamen == "dudoso"
+    assert v.apu_sugerido is None
+    assert "9999" in v.justificacion
+
+
+def test_dictamen_desconocido_degrada_a_dudoso():
+    fila = _fila(3, "A", "100")
+    r = RevisorDoble([{"dictamen": "explota", "apu_sugerido": None,
+                       "turno_sugerido": None, "confianza": 0.5, "justificacion": ""}])
+    v = r.profundizar(fila, asignado=_dp("100", "A"), candidatos=[])
+    assert v.dictamen == "dudoso"
+
+
+def test_respuesta_vacia_degrada_a_dudoso():
+    fila = _fila(3, "A", "100")
+    r = RevisorDoble([{}])
+    v = r.profundizar(fila, asignado=_dp("100", "A"), candidatos=[])
+    assert v.dictamen == "dudoso"
+
+
+def test_confianza_no_numerica_no_revienta_y_cae_a_cero():
+    fila = _fila(3, "A", "100")
+    r = RevisorDoble([{"dictamen": "ok", "apu_sugerido": None, "turno_sugerido": None,
+                       "confianza": "alta", "justificacion": "encaja"}])
+    v = r.profundizar(fila, asignado=_dp("100", "A"), candidatos=[])
+    assert (v.dictamen, v.confianza) == ("ok", 0.0)
+
+
+def test_profundizar_falla_si_la_ia_no_esta_disponible():
+    r = revision.Revisor(enabled=False)
+    with pytest.raises(revision.IANoDisponible):
+        r.profundizar(_fila(0, "A", "100"), asignado=_dp("100", "A"), candidatos=[])

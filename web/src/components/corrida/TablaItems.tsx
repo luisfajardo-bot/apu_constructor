@@ -21,7 +21,7 @@ import {
 } from "@/api/corridas";
 import { getApuDetalle } from "@/api/autoria";
 import type { ItemCuadro, DetalleItem, CorridaDetalle, ApuDetalle } from "@/lib/tipos";
-import { VEREDICTO_UI, etiquetaVeredicto } from "@/lib/corridaTabla";
+import { VEREDICTO_UI, etiquetaVeredicto, tituloVeredicto } from "@/lib/corridaTabla";
 import type { ControlCorridaTabla } from "@/lib/corridaTabla";
 
 interface TablaItemsProps {
@@ -91,6 +91,9 @@ export default function TablaItems({
   const seleccionable = control !== undefined && !readOnly;
   // Mismo permiso que duplicar: rol editor y corrida no congelada.
   const puedeAplicarIA = puedeEditar && !readOnly;
+  // Sin una sola fila revisada la columna Veredicto estaría entera vacía, y una
+  // columna vacía igual empuja el scroll horizontal: no se dibuja.
+  const hayVeredicto = items.some((it) => it.revision);
 
   function alternar(idx: number, seq: number, conShift: boolean) {
     const desde = anclaSeqRef.current === null
@@ -274,8 +277,10 @@ export default function TablaItems({
     }
   }
 
-  // 1 chevron + 13 columnas de datos, más la de selección cuando está activa.
-  const TOTAL_COLS = 14 + (seleccionable ? 1 : 0);
+  // 1 chevron + 12 columnas de datos, más Veredicto cuando hay alguno y la de
+  // selección cuando está activa. Se mira `items` (no `visible`): así la cabecera
+  // y el colSpan de las filas expandidas/vacías salen SIEMPRE del mismo dato.
+  const TOTAL_COLS = 13 + (hayVeredicto ? 1 : 0) + (seleccionable ? 1 : 0);
 
   return (
     <div className="flex flex-col gap-2">
@@ -328,7 +333,8 @@ export default function TablaItems({
       {/* Dense table */}
       <Table>
         {control ? (
-          <CabeceraFiltros control={control} conSeleccion={seleccionable} />
+          <CabeceraFiltros control={control} conSeleccion={seleccionable}
+                           conVeredicto={hayVeredicto} />
         ) : (
           <TableHeader>
             <TableRow>
@@ -339,7 +345,7 @@ export default function TablaItems({
               <TableHead className="text-xs w-24">Ítem</TableHead>
               <TableHead className="text-xs w-28">APU</TableHead>
               <TableHead className="text-xs w-20">Estado</TableHead>
-              <TableHead className="text-xs w-28">Veredicto</TableHead>
+              {hayVeredicto && <TableHead className="text-xs w-28">Veredicto</TableHead>}
               <TableHead className="text-xs w-28 text-right">Unit. Contractual</TableHead>
               <TableHead className="text-xs w-28 text-right">Unit. Costo</TableHead>
               <TableHead className="text-xs w-28 text-right">Total Contractual</TableHead>
@@ -405,15 +411,17 @@ export default function TablaItems({
                   <TableCell className="text-xs">
                     <EstadoBadge status={it.status} />
                   </TableCell>
-                  <TableCell className="text-xs">
-                    <CeldaVeredicto
-                      item={it}
-                      puedeAplicar={puedeAplicarIA}
-                      aplicando={aplicandoIA === it.seq}
-                      bloqueado={aplicandoIA !== null}
-                      onAplicar={() => aplicarSugerencia(it)}
-                    />
-                  </TableCell>
+                  {hayVeredicto && (
+                    <TableCell className="text-xs">
+                      <CeldaVeredicto
+                        item={it}
+                        puedeAplicar={puedeAplicarIA}
+                        aplicando={aplicandoIA === it.seq}
+                        bloqueado={aplicandoIA !== null}
+                        onAplicar={() => aplicarSugerencia(it)}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell className="text-xs text-right font-mono tabular-nums">
                     {cop(it.precio_contractual)}
                   </TableCell>
@@ -537,7 +545,7 @@ function CeldaVeredicto({ item, puedeAplicar, aplicando, bloqueado, onAplicar }:
     <span className="inline-flex items-center gap-1">
       <span
         className={`whitespace-nowrap font-medium ${VEREDICTO_UI[v.dictamen]?.cls ?? ""}`}
-        title={v.justificacion || undefined}
+        title={tituloVeredicto(v)}
       >
         {etiquetaVeredicto(v.dictamen)}
       </span>

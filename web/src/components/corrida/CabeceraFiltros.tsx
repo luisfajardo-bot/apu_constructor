@@ -53,11 +53,16 @@ function Rango({ clave, label, control }: { clave: ClaveColumna; label: string; 
 export default function CabeceraFiltros({
   control,
   conSeleccion = false,
+  conVeredicto = true,
 }: {
   control: ControlCorridaTabla;
   /** Layout: reserva la celda de la columna de checkboxes cuando la selección está activa. */
   conSeleccion?: boolean;
+  /** false = la corrida no tiene ni un veredicto: la columna no se dibuja (14
+   *  columnas no caben en un portátil, y esta estaría entera vacía). */
+  conVeredicto?: boolean;
 }) {
+  const cols = conVeredicto ? COLS : COLS.filter((c) => c.clave !== "veredicto");
   const flecha = (clave: ClaveColumna) =>
     control.orden?.clave === clave ? (control.orden.dir === "asc" ? "↑" : "↓") : "";
 
@@ -66,7 +71,7 @@ export default function CabeceraFiltros({
       <TableRow>
         {conSeleccion && <TableHead className="w-8 px-1" />}
         <TableHead className="w-6 px-1" />
-        {COLS.map((c) => (
+        {cols.map((c) => (
           <TableHead key={c.clave} className={`text-xs ${c.ancho} ${c.derecha ? "text-right" : ""}`}>
             <button
               type="button"
@@ -83,7 +88,7 @@ export default function CabeceraFiltros({
       <TableRow className="hover:bg-transparent">
         {conSeleccion && <TableHead className="w-8 px-1" />}
         <TableHead className="w-6 px-1" />
-        {COLS.map((c) => {
+        {cols.map((c) => {
           // El filtro de APU puede llevar el centinela de "sin APU" (lo pone el
           // contador rojo de la corrida). El centinela se muestra como *placeholder*,
           // no como value: así no hay texto que editar parcialmente y cualquier tecla

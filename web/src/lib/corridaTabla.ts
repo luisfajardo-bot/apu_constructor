@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { DictamenIA, ItemCuadro } from "@/lib/tipos";
+import type { DictamenIA, ItemCuadro, VeredictoIA } from "@/lib/tipos";
 
 export type ClaveColumna =
   | "descripcion" | "unidad" | "cantidad" | "item" | "apu" | "status" | "veredicto"
@@ -51,6 +51,23 @@ export const VEREDICTO_UI: Record<DictamenIA, { label: string; cls: string }> = 
 
 export function etiquetaVeredicto(dictamen: string): string {
   return VEREDICTO_UI[dictamen as DictamenIA]?.label ?? dictamen;
+}
+
+/** El nivel del veredicto, en palabras de persona: `barrido` es un triaje que NO
+ *  miró la composición (no tiene la autoridad de un análisis a fondo) y `profundo`
+ *  sí vio los insumos y rendimientos del asignado y de cada candidato. */
+const NIVEL_TEXTO: Record<VeredictoIA["nivel"], string> = {
+  barrido: "Triaje rápido",
+  profundo: "Análisis a fondo",
+};
+
+/** Texto del `title` de la celda: nivel + confianza + la justificación. La etiqueta
+ *  visible se queda corta a propósito (la tabla es densa), así que el matiz —cuánto
+ *  miró la IA y qué tan segura está— vive acá. */
+export function tituloVeredicto(v: VeredictoIA): string {
+  const cabecera = `${NIVEL_TEXTO[v.nivel] ?? v.nivel} · confianza ${
+    Math.round(v.confianza * 100)}%`;
+  return v.justificacion ? `${cabecera} — ${v.justificacion}` : cabecera;
 }
 
 /** Texto por el que se filtra y ordena la columna Veredicto. "" cuando la fila

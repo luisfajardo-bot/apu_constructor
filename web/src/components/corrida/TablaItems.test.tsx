@@ -560,16 +560,72 @@ test("los cuatro dictámenes se muestran con etiqueta y color distinguibles", ()
 });
 
 test("una fila sin veredicto muestra un guion y no rompe la tabla", () => {
-  render(<TablaConControl items={[{ ...ITEM, revision: null }]} />);
+  // Con la columna condicionada a que HAYA veredictos, el caso interesante es la
+  // fila sin revisar en una corrida ya revisada (no la corrida entera sin revisar).
+  render(<TablaConControl items={[
+    { ...ITEM, seq: 0, revision: null },
+    { ...ITEM, seq: 1, item: "2", descripcion: "Otra", revision: { ...VEREDICTO_CAMBIAR, seq: 1 } },
+  ]} />);
   expect(screen.getByText("—")).toBeTruthy();
   expect(screen.getByText("Concreto")).toBeTruthy();
   expect(screen.queryByRole("button", { name: /^Aplicar$/ })).toBeNull();
 });
 
-test("la justificación de la IA queda accesible en la celda", () => {
+test("el title de la celda dice el nivel en palabras, la confianza y la justificación", () => {
   render(<TablaConControl items={[{ ...ITEM, revision: VEREDICTO_CAMBIAR }]} />);
+  // Un análisis a fondo SÍ miró la composición: la celda tiene que poder decirlo.
   expect(celdaVeredicto("↔ cambiar").getAttribute("title"))
-    .toBe("El asignado es de otra unidad.");
+    .toBe("Análisis a fondo · confianza 90% — El asignado es de otra unidad.");
+});
+
+test("un veredicto de barrido se anuncia como triaje, no como análisis a fondo", () => {
+  const revision = {
+    ...VEREDICTO_CAMBIAR, dictamen: "ok", apu_sugerido: null, turno_sugerido: null,
+    nivel: "barrido", confianza: 0, justificacion: "Sin objeciones en el barrido.",
+  };
+  render(<TablaConControl items={[{ ...ITEM, revision }]} />);
+  const title = celdaVeredicto("✔ ok").getAttribute("title") ?? "";
+  expect(title.startsWith("Triaje rápido · confianza 0%")).toBe(true);
+  expect(title.includes("Análisis a fondo")).toBe(false);
+});
+
+// ─── la columna solo existe si hay algo que mostrar ──────────────────────────
+
+/** Columnas de la primera fila de la cabecera (la de los rótulos). */
+const colsCabecera = () =>
+  document.querySelectorAll("thead tr")[0].querySelectorAll("th").length;
+
+test("sin un solo veredicto, la columna Veredicto no se dibuja", () => {
+  render(<TablaConControl items={[{ ...ITEM, revision: null }]} />);
+  expect(screen.queryByLabelText("Ordenar por Veredicto")).toBeNull();
+  expect(screen.queryByLabelText("Filtrar Veredicto")).toBeNull();
+});
+
+test("con al menos un veredicto, la columna Veredicto aparece", () => {
+  render(<TablaConControl items={[
+    { ...ITEM, seq: 0, revision: null },
+    { ...ITEM, seq: 1, item: "2", descripcion: "Otra", revision: { ...VEREDICTO_CAMBIAR, seq: 1 } },
+  ]} />);
+  expect(screen.getByLabelText("Ordenar por Veredicto")).toBeTruthy();
+  expect(screen.getByLabelText("Filtrar Veredicto")).toBeTruthy();
+});
+
+test("el colSpan de la fila expandida cuadra con la cabecera SIN veredictos", async () => {
+  render(<TablaConControl items={[{ ...ITEM, revision: null }]} />);
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await waitFor(() => {
+    const celda = document.querySelector("tbody td[colspan]") as HTMLTableCellElement;
+    expect(Number(celda.getAttribute("colspan"))).toBe(colsCabecera());
+  });
+});
+
+test("el colSpan de la fila expandida cuadra con la cabecera CON veredictos", async () => {
+  render(<TablaConControl items={[{ ...ITEM, revision: VEREDICTO_CAMBIAR }]} />);
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await waitFor(() => {
+    const celda = document.querySelector("tbody td[colspan]") as HTMLTableCellElement;
+    expect(Number(celda.getAttribute("colspan"))).toBe(colsCabecera());
+  });
 });
 
 test("Aplicar manda el seq, el APU sugerido y el turno de la sugerencia", async () => {

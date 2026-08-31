@@ -160,3 +160,26 @@ def test_profundizar_falla_si_la_ia_no_esta_disponible():
     r = revision.Revisor(enabled=False)
     with pytest.raises(revision.IANoDisponible):
         r.profundizar(_fila(0, "A", "100"), asignado=_dp("100", "A"), candidatos=[])
+
+
+def test_apu_sugerido_inventado_no_sobrevive_a_un_dictamen_que_no_es_cambiar():
+    """Solo "cambiar" propone un APU: en cualquier otro dictamen el código sobrante
+    se descarta, o viajaría a la base y a la interfaz como propuesta real."""
+    fila = _fila(3, "A", "100")
+    r = RevisorDoble([{"dictamen": "ok", "apu_sugerido": "9999",
+                       "turno_sugerido": "NOCTURNO", "confianza": 0.9,
+                       "justificacion": "encaja"}])
+    v = r.profundizar(fila, asignado=_dp("100", "A"), candidatos=[])
+    assert v.dictamen == "ok"
+    assert v.apu_sugerido is None
+    assert v.turno_sugerido is None
+
+
+def test_barrido_ignora_un_seq_que_no_es_de_la_corrida():
+    """La IA puede contestar por un `seq` que no le dimos; no hay fila que mirar."""
+    filas = [_fila(0, "A", "100"), _fila(1, "B", "200")]
+    r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "ok"},
+                                 {"seq": 1, "resultado": "ok"},
+                                 {"seq": 99, "resultado": "revisar"}]}])
+    assert r.barrer(filas) == set()
+

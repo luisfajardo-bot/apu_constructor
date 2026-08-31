@@ -266,7 +266,9 @@ class Revisor:
                 if str(r.get("resultado")) == "revisar":
                     marcadas.add(seq)
             self.sin_respuesta |= {f.seq for f in lote if f.seq not in vistos}
-        return marcadas
+        # La IA puede devolver un `seq` que no le dimos: si no es de esta corrida no
+        # hay fila que profundizar, y el orquestador la buscaría en vano.
+        return marcadas & {f.seq for f in filas}
 
     # ---------------------------------------------------------- profundización
     def profundizar(self, fila: CorridaItemRow, asignado: Optional[DePricedApu],
@@ -299,7 +301,13 @@ class Revisor:
             just = (f"La IA sugirió el APU {sugerido}, que no estaba entre los "
                     f"candidatos. {just}").strip()
             dictamen, sugerido, turno = "dudoso", None, None
+        if dictamen != "cambiar":
+            # Un `apu_sugerido` solo significa algo con "cambiar": con cualquier otro
+            # dictamen no se aplica nada, y un código inventado que sobreviva viaja
+            # igual a la base y a la interfaz como si fuera una propuesta real.
+            sugerido, turno = None, None
 
         return Veredicto(seq=fila.seq, dictamen=dictamen, apu_sugerido=sugerido,
                          turno_sugerido=turno, confianza=conf, justificacion=just,
                          nivel="profundo")
+

@@ -8,12 +8,25 @@ export async function authHeader(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/** Texto de error de la API. `detail` es normalmente un string, pero algunos
+ *  endpoints devuelven un objeto con datos que la interfaz necesita (p. ej. los
+ *  `seqs` de las filas sin APU); de ahí sale el `mensaje`. */
+export function mensajeDeError(cuerpo: unknown, respaldo: string): string {
+  const d = (cuerpo as { detail?: unknown } | null)?.detail;
+  if (typeof d === "string" && d) return d;
+  if (d && typeof d === "object") {
+    const m = (d as { mensaje?: unknown }).mensaje;
+    if (typeof m === "string" && m) return m;
+  }
+  return respaldo;
+}
+
 async function manejar(r: Response): Promise<Response> {
   if (r.status === 401) {
     await supabase.auth.signOut(); // sesión inválida -> redirección reactiva a /login
     throw new Error("Sesión expirada.");
   }
-  if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.detail || r.statusText);
+  if (!r.ok) throw new Error(mensajeDeError(await r.json().catch(() => null), r.statusText));
   return r;
 }
 
@@ -69,10 +82,7 @@ export async function descargarArchivo(path: string, filename: string): Promise<
     await supabase.auth.signOut();
     throw new Error("Sesión expirada.");
   }
-  if (!r.ok) {
-    const err = await r.json().catch(() => ({}) as { detail?: string });
-    throw new Error(err.detail || r.statusText);
-  }
+  if (!r.ok) throw new Error(mensajeDeError(await r.json().catch(() => null), r.statusText));
   const blob = await r.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

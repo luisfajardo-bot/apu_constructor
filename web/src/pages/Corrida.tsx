@@ -8,7 +8,7 @@ import { getCorrida, descargarCuadro, congelarCorrida, activarCorrida } from "@/
 import { cop, pct } from "@/lib/moneda";
 import { fmtDuracion } from "@/lib/tiempo";
 import { useArmadoVivo } from "@/lib/armado";
-import { useCorridaTabla } from "@/lib/corridaTabla";
+import { useCorridaTabla, SIN_APU } from "@/lib/corridaTabla";
 import { useAuth } from "@/lib/auth";
 import { puede } from "@/components/rutas";
 import type { CorridaDetalle, ItemCuadro, Totales } from "@/lib/tipos";
@@ -124,6 +124,11 @@ export default function Corrida() {
   const filas = live ? data.items : control.filtradas;
   const totales = live ? data.totales : totalesDe(filas);
   const margenNegativo = totales.margen < 0;
+  // Filas sin APU: se cuentan sobre TODOS los ítems, no sobre los filtrados —
+  // el candado no depende de lo que estés mirando. El backend devuelve 409 al
+  // congelar o descargar el cuadro; acá se ve antes de chocar contra la puerta.
+  const sinApu = (data.items ?? []).filter((f) => !f.apu_codigo);
+  const bloqueado = sinApu.length > 0;
 
   return (
     <div className="flex flex-col gap-4" style={{ padding: "16px 20px" }}>
@@ -151,6 +156,10 @@ export default function Corrida() {
               {data.modo === "congelada" ? "Congelada" : "Activa"}
             </span>
             <Button size="sm" variant="outline"
+              disabled={bloqueado && data.modo !== "congelada"}
+              title={bloqueado && data.modo !== "congelada"
+                ? `${sinApu.length} línea(s) sin APU: asígnalas antes de congelar.`
+                : undefined}
               onClick={() => cambiarModo(data.modo === "congelada" ? "activar" : "congelar")}>
               {data.modo === "congelada" ? "Activar" : "Congelar"}
             </Button>
@@ -160,6 +169,10 @@ export default function Corrida() {
               </Button>
             )}
             <Button size="sm" variant="outline"
+              disabled={bloqueado}
+              title={bloqueado
+                ? `${sinApu.length} línea(s) sin APU: asígnalas antes de descargar.`
+                : undefined}
               onClick={() => descargarCuadro(corridaId).catch((e) =>
                 toast.error(e instanceof Error ? e.message : "No se pudo descargar el cuadro."))}>
               Descargar cuadro
@@ -204,6 +217,16 @@ export default function Corrida() {
           <span className="text-amber-700 font-medium">
             {totales.n_revision} por revisar
           </span>
+        )}
+        {!live && sinApu.length > 0 && (
+          <button
+            type="button"
+            className="text-red-700 font-semibold underline"
+            onClick={() => control.setFiltro("apu", SIN_APU)}
+            title="Ver solo las líneas sin APU"
+          >
+            {sinApu.length} sin APU
+          </button>
         )}
       </div>
 

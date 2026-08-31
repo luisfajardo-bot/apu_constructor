@@ -27,3 +27,17 @@ test("401 dispara signOut y lanza", async () => {
   await expect(apiGet("/status")).rejects.toThrow();
   expect(supabase.auth.signOut).toHaveBeenCalled();
 });
+
+test("mensajeDeError lee detail string, detail objeto y cae al respaldo", async () => {
+  const { mensajeDeError } = await import("./client");
+  // Caso normal: detail es un string.
+  expect(mensajeDeError({ detail: "Sin permisos." }, "respaldo")).toBe("Sin permisos.");
+  // El 409 de las filas sin APU: detail es un objeto con mensaje + seqs. Sin esto,
+  // `new Error(objeto)` mostraba "[object Object]" y el candado bloqueaba sin explicar.
+  expect(
+    mensajeDeError({ detail: { mensaje: "2 línea(s) sin APU asignado.", seqs: [1, 7] } }, "respaldo"),
+  ).toBe("2 línea(s) sin APU asignado.");
+  // Cuerpo vacío / no-JSON: queda el respaldo (statusText).
+  expect(mensajeDeError(null, "Internal Server Error")).toBe("Internal Server Error");
+  expect(mensajeDeError({}, "respaldo")).toBe("respaldo");
+});

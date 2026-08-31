@@ -98,3 +98,63 @@ test("con la corrida en_revision, el botón Agregar líneas sí aparece", async 
   await screen.findByText("Excavación");
   expect(screen.getByText("Agregar líneas")).toBeTruthy();
 });
+
+// `jest-dom` no es dependencia de este repo: nada de
+// toBeDisabled()/toBeInTheDocument(), se mira la propiedad `disabled` del
+// <button> y se usa toBeTruthy().
+const SIN_APU_ITEMS = [
+  fila({ seq: 0, descripcion: "Excavación" }),
+  fila({ seq: 1, descripcion: "Actividad rara", apu_codigo: "", apu_nombre: "" }),
+];
+
+test("bloquea congelar y descargar cuando hay líneas sin APU", async () => {
+  const { getCorrida } = await import("@/api/corridas");
+  (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
+    ...CORRIDA,
+    items: SIN_APU_ITEMS,
+  });
+
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Actividad rara");
+
+  expect((screen.getByRole("button", { name: /descargar cuadro/i }) as HTMLButtonElement).disabled)
+    .toBe(true);
+  expect((screen.getByRole("button", { name: /^congelar$/i }) as HTMLButtonElement).disabled)
+    .toBe(true);
+  expect(screen.getByText(/1 sin APU/)).toBeTruthy();
+});
+
+test("el contador de sin APU filtra la tabla a esas líneas", async () => {
+  const { getCorrida } = await import("@/api/corridas");
+  (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
+    ...CORRIDA,
+    items: SIN_APU_ITEMS,
+  });
+
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Actividad rara");
+
+  fireEvent.click(screen.getByText(/1 sin APU/));
+  expect(screen.queryByText("Excavación")).toBeNull();
+  expect(screen.getByText("Actividad rara")).toBeTruthy();
+});
+
+test("en una corrida congelada con líneas sin APU, Activar NO se bloquea", async () => {
+  const { getCorrida } = await import("@/api/corridas");
+  (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
+    ...CORRIDA,
+    modo: "congelada",
+    items: SIN_APU_ITEMS,
+  });
+
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Actividad rara");
+
+  // Salir de congelada es justamente lo que hay que poder hacer para ir a
+  // asignar los APUs que faltan.
+  expect((screen.getByRole("button", { name: /^activar$/i }) as HTMLButtonElement).disabled)
+    .toBe(false);
+});

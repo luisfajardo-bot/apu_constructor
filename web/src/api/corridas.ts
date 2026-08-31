@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiDelete, authHeader, descargarArchivo } from "@/api/client";
+import { apiGet, apiPost, apiDelete, authHeader, descargarArchivo, mensajeDeError } from "@/api/client";
 import type {
   StatusResponse,
   CorridaCreada,
@@ -106,10 +106,7 @@ export async function descargarCuadro(id: number): Promise<void> {
     await supabase.auth.signOut();
     throw new Error("Sesión expirada.");
   }
-  if (!r.ok) {
-    const err = await r.json().catch(() => ({}) as { detail?: string });
-    throw new Error(err.detail || r.statusText);
-  }
+  if (!r.ok) throw new Error(mensajeDeError(await r.json().catch(() => null), r.statusText));
   const blob = await r.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -156,8 +153,7 @@ async function streamCorrida(
     throw new Error("Sesión expirada.");
   }
   if (!r.ok || !r.body) {
-    const err = await r.json().catch(() => ({}) as { detail?: string });
-    throw new Error(err.detail || r.statusText);
+    throw new Error(mensajeDeError(await r.json().catch(() => null), r.statusText));
   }
   const reader = r.body.getReader();
   const decoder = new TextDecoder();
@@ -176,7 +172,7 @@ async function streamCorrida(
       else if (ev.event === "progress") onProgress(ev.data as Progreso);
       else if (ev.event === "done") done = ev.data as CorridaCreada;
       else if (ev.event === "error")
-        throw new Error((ev.data as { detail?: string }).detail || "Error al armar");
+        throw new Error(mensajeDeError(ev.data, "Error al armar"));
     }
   }
   if (!done) throw new Error("La corrida no terminó correctamente.");

@@ -35,6 +35,9 @@ export const FILTROS_VACIOS: FiltrosColumna = {
   margen_pct: { min: "", max: "" },
 };
 
+/** Valor centinela del filtro de APU: deja solo las filas SIN APU asignado. */
+export const SIN_APU = "__sin__";
+
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
 const CLAVES_TEXTO: ClaveColumna[] = ["descripcion", "unidad", "item", "apu", "status"];
 
@@ -62,7 +65,12 @@ export function filtrar(items: ItemCuadro[], f: FiltrosColumna, soloRevision: bo
     if (f.unidad && it.unidad !== f.unidad) return false;
     if (!enRango(it.cantidad, f.cantidad)) return false;
     if (!contiene(it.item, f.item)) return false;
-    if (!contiene(`${it.apu_codigo} ${it.apu_nombre}`, f.apu)) return false;
+    // "__sin__" es un centinela dentro del filtro de texto de APU, no un estado
+    // aparte: el contador rojo de "sin APU" reusa la maquinaria de filtros que ya
+    // existe (y el botón "Limpiar" lo apaga como a cualquier otro filtro).
+    if (f.apu === SIN_APU) {
+      if (it.apu_codigo) return false;
+    } else if (!contiene(`${it.apu_codigo} ${it.apu_nombre}`, f.apu)) return false;
     if (f.status && it.status !== f.status) return false;
     if (!enRango(it.precio_contractual, f.precio_contractual)) return false;
     if (!enRango(it.costo_unitario, f.costo_unitario)) return false;

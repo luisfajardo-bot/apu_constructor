@@ -20,6 +20,7 @@ from apu_tool.dominio.alertas import alertas_costeo
 from apu_tool.dominio.assemble import Assembler, ApuAdvisor
 from apu_tool.dominio.pricing import PricingEngine
 from apu_tool.dominio.report import write_report
+from apu_tool.dominio.revision import IANoDisponible, Revisor, revisar
 from apu_tool.nucleo.models import (
     ApuComponent, AssembledApu, CostedComponent, CorridaItemRow, CorridaMeta,
     LicitacionItem, MatchStatus,
@@ -330,8 +331,12 @@ def _assembled_desde_snapshot(row: CorridaItemRow, snap: dict) -> AssembledApu:
         confianza=row.confianza, explicacion=row.explicacion, origen=row.origen)
 
 
-def _vista_item(ens: AssembledApu, seq: int, status: str) -> dict:
+def _vista_item(ens: AssembledApu, seq: int, status: str,
+                revision: Optional[dict] = None) -> dict:
     return {
+        # Veredicto de la IA (o None si esa fila no se revisó). Default None para que
+        # los llamadores del armado no tengan que pasarlo: ahí todavía no hay revisión.
+        "revision": revision,
         "seq": seq, "item": ens.item.item, "descripcion": ens.item.descripcion,
         "unidad": ens.unidad, "cantidad": ens.item.cantidad,
         "apu_codigo": ens.apu_codigo, "apu_nombre": ens.apu_nombre,
@@ -374,7 +379,8 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
     pricing = PricingEngine(alm, lista_id=meta.lista_precios_id)   # COMPARTIDO por la corrida
     pricing.precargar((r.apu_codigo, r.shift) for r in rows if r.apu_codigo)  # lote
     ensambles = _ensamblar_corrida(alm, meta, rows, pricing)
-    items = [_vista_item(ens, r.seq, r.status) for ens, r in zip(ensambles, rows)]
+    items = [_vista_item(ens, r.seq, r.status, r.revision)
+             for ens, r in zip(ensambles, rows)]
     return {
         "id": meta.id, "nombre": meta.nombre, "archivo": meta.archivo,
         "estado": meta.estado, "modo": meta.modo,
@@ -383,6 +389,10 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
         "lista_nombre": _nombre_lista(alm, meta.lista_precios_id),
         "duracion_ms": meta.duracion_ms, "items": items,
         "totales": _totales(ensambles, rows),
+        # Para que el botón "Revisar con IA" se apague solo donde no hay clave. Va
+        # acá y no solo en /api/status (que ya trae el mismo booleano como `ia`)
+        # porque la página de corrida pide esta vista y no /status.
+        "ia_disponible": config.ai_available(),
     }
 
 
@@ -548,6 +558,39 @@ def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
     devuelve None cuando ese seq no existe en la corrida (además de cuando la
     corrida no existe), así que el 404 del endpoint sale gratis del lote."""
     return confirmar_items(alm, corrida_id, [seq], apu_codigo, shift or None)
+
+
+def revisar_corrida_stream(alm: Almacen, corrida_id: int):
+    """Revisa una corrida ya armada y emite eventos SSE, persistiendo cada veredicto
+    apenas sale. Si la IA falla a mitad, lo ya guardado se queda: re-correr solo
+    vuelve a pedir lo que no tiene veredicto.
+
+    Eventos: los de `dominio.revision.revisar`, más ('error', {'detail'}).
+    Lanza CorridaCongelada (una foto no se revisa) e IANoDisponible.
+    """
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return
+    if meta.modo == "congelada":
+        raise CorridaCongelada(corrida_id)
+    # ponytail: dos revisiones simultáneas sobre la misma corrida se pisan (gana la
+    # última). Los veredictos son por fila e idempotentes, así que el daño es gastar
+    # dos veces, no corromper. Si molesta, el arreglo es un lock por corrida.
+    revisor = Revisor()   # POR REQUEST: compartirlo mezclaría estado entre peticiones
+    if not revisor.disponible:
+        raise IANoDisponible(
+            "La revisión con IA necesita ANTHROPIC_API_KEY en el servidor.")
+    filas = alm.corridas.get_items(corrida_id)
+    try:
+        for evento, payload in revisar(alm, filas, revisor):
+            if evento == "veredicto":
+                alm.corridas.set_revision(corrida_id, payload["seq"],
+                                          payload["veredicto"])
+            yield (evento, payload)
+    except Exception as exc:
+        # Lo ya persistido se queda. El detalle del error no expone internals.
+        yield ("error", {"detail": f"La revisión se interrumpió: {type(exc).__name__}. "
+                                   f"Los veredictos ya guardados se conservan."})
 
 
 def listar_corridas(alm: Almacen) -> list[dict]:

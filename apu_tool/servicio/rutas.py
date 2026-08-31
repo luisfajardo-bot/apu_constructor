@@ -6,6 +6,7 @@ import logging
 import os
 import tempfile
 import zipfile
+from itertools import chain
 from pathlib import Path
 from typing import Optional
 
@@ -261,6 +262,27 @@ def get_corrida(cid: int, alm: Almacen = Depends(get_almacen),
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v
+
+
+@router.post("/corridas/{cid}/revision/stream")
+def revisar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
+                    _: object = Depends(requiere_rol("editor"))):
+    """Audita la corrida con IA. Propone; no aplica nada."""
+    gen = svc.revisar_corrida_stream(alm, cid)
+    try:
+        # El generador es perezoso: sin tirar del primer evento, las validaciones
+        # correrían YA abierto el stream y el cliente vería un 200 que muere solo.
+        primero = next(gen)
+    except StopIteration:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para revisar.")
+    except svc.IANoDisponible as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return StreamingResponse(_event_stream(chain([primero], gen)),
+                             media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/corridas/{cid}/items/{seq}")

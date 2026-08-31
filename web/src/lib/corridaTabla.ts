@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import type { ItemCuadro } from "@/lib/tipos";
+import type { DictamenIA, ItemCuadro } from "@/lib/tipos";
 
 export type ClaveColumna =
-  | "descripcion" | "unidad" | "cantidad" | "item" | "apu" | "status"
+  | "descripcion" | "unidad" | "cantidad" | "item" | "apu" | "status" | "veredicto"
   | "precio_contractual" | "costo_unitario"
   | "contractual_total" | "costo_total" | "margen_total" | "margen_pct";
 
@@ -18,6 +18,7 @@ export interface FiltrosColumna {
   item: string;
   apu: string;
   status: string;
+  veredicto: string;
   precio_contractual: FiltroRango;
   costo_unitario: FiltroRango;
   contractual_total: FiltroRango;
@@ -28,7 +29,7 @@ export interface FiltrosColumna {
 
 export const FILTROS_VACIOS: FiltrosColumna = {
   descripcion: "", unidad: "", cantidad: { min: "", max: "" }, item: "",
-  apu: "", status: "",
+  apu: "", status: "", veredicto: "",
   precio_contractual: { min: "", max: "" }, costo_unitario: { min: "", max: "" },
   contractual_total: { min: "", max: "" },
   costo_total: { min: "", max: "" }, margen_total: { min: "", max: "" },
@@ -38,8 +39,28 @@ export const FILTROS_VACIOS: FiltrosColumna = {
 /** Valor centinela del filtro de APU: deja solo las filas SIN APU asignado. */
 export const SIN_APU = "__sin__";
 
+/** Etiqueta corta y color de cada dictamen de la revisión con IA. Los colores
+ *  salen del vocabulario de "significado" de index.css (positivo / revisar /
+ *  info / destructivo), no de la paleta cruda de Tailwind. */
+export const VEREDICTO_UI: Record<DictamenIA, { label: string; cls: string }> = {
+  ok:      { label: "✔ ok",      cls: "text-margen-pos" },
+  dudoso:  { label: "⚠ dudoso",  cls: "text-revisar" },
+  cambiar: { label: "↔ cambiar", cls: "text-info" },
+  sin_apu: { label: "✖ sin APU", cls: "text-destructive" },
+};
+
+export function etiquetaVeredicto(dictamen: string): string {
+  return VEREDICTO_UI[dictamen as DictamenIA]?.label ?? dictamen;
+}
+
+/** Texto por el que se filtra y ordena la columna Veredicto. "" cuando la fila
+ *  no tiene veredicto (la corrida no se revisó, o la IA no contestó esa fila). */
+export function valorVeredicto(it: ItemCuadro): string {
+  return it.revision?.dictamen ?? "";
+}
+
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
-const CLAVES_TEXTO: ClaveColumna[] = ["descripcion", "unidad", "item", "apu", "status"];
+const CLAVES_TEXTO: ClaveColumna[] = ["descripcion", "unidad", "item", "apu", "status", "veredicto"];
 
 export function normalizar(s: string): string {
   return (s ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
@@ -72,6 +93,7 @@ export function filtrar(items: ItemCuadro[], f: FiltrosColumna, soloRevision: bo
       if (it.apu_codigo) return false;
     } else if (!contiene(`${it.apu_codigo} ${it.apu_nombre}`, f.apu)) return false;
     if (f.status && it.status !== f.status) return false;
+    if (f.veredicto && valorVeredicto(it) !== f.veredicto) return false;
     if (!enRango(it.precio_contractual, f.precio_contractual)) return false;
     if (!enRango(it.costo_unitario, f.costo_unitario)) return false;
     if (!enRango(it.contractual_total, f.contractual_total)) return false;
@@ -89,6 +111,7 @@ function valorTexto(it: ItemCuadro, clave: ClaveColumna): string {
     case "item": return it.item;
     case "apu": return it.apu_codigo;
     case "status": return it.status;
+    case "veredicto": return valorVeredicto(it);
     default: return "";
   }
 }
@@ -119,10 +142,15 @@ export function ordenar(items: ItemCuadro[], orden: EstadoOrden): ItemCuadro[] {
   });
 }
 
-export function opcionesDe(items: ItemCuadro[], clave: "unidad" | "status"): string[] {
+export function opcionesDe(
+  items: ItemCuadro[],
+  clave: "unidad" | "status" | "veredicto",
+): string[] {
   const set = new Set<string>();
   for (const it of items) {
-    const v = clave === "unidad" ? it.unidad : it.status;
+    const v = clave === "unidad" ? it.unidad
+      : clave === "status" ? it.status
+      : valorVeredicto(it);
     if (v) set.add(v);
   }
   return [...set].sort((a, b) => a.localeCompare(b, "es-CO", { numeric: true }));
@@ -152,6 +180,7 @@ export interface ControlCorridaTabla {
   hayFiltros: boolean;
   opcionesUnidad: string[];
   opcionesStatus: string[];
+  opcionesVeredicto: string[];
 }
 
 export function useCorridaTabla(items: ItemCuadro[]): ControlCorridaTabla {
@@ -165,6 +194,7 @@ export function useCorridaTabla(items: ItemCuadro[]): ControlCorridaTabla {
   );
   const opcionesUnidad = useMemo(() => opcionesDe(items, "unidad"), [items]);
   const opcionesStatus = useMemo(() => opcionesDe(items, "status"), [items]);
+  const opcionesVeredicto = useMemo(() => opcionesDe(items, "veredicto"), [items]);
   const hayFiltros = hayFiltrosActivos(filtros, orden, soloRevision);
 
   return {
@@ -180,5 +210,6 @@ export function useCorridaTabla(items: ItemCuadro[]): ControlCorridaTabla {
     hayFiltros,
     opcionesUnidad,
     opcionesStatus,
+    opcionesVeredicto,
   };
 }

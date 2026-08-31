@@ -1,5 +1,5 @@
 import { TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { SIN_APU } from "@/lib/corridaTabla";
+import { SIN_APU, etiquetaVeredicto } from "@/lib/corridaTabla";
 import type { ClaveColumna, ControlCorridaTabla, FiltroRango } from "@/lib/corridaTabla";
 import { etiquetaEstado } from "@/components/corrida/EstadoBadge";
 
@@ -20,6 +20,7 @@ const COLS: Col[] = [
   { clave: "item", label: "Ítem", tipo: "texto", ancho: "w-24" },
   { clave: "apu", label: "APU", tipo: "texto", ancho: "w-28" },
   { clave: "status", label: "Estado", tipo: "select", ancho: "w-20" },
+  { clave: "veredicto", label: "Veredicto", tipo: "select", ancho: "w-28" },
   { clave: "precio_contractual", label: "Unit. Contractual", tipo: "num", ancho: "w-28", derecha: true },
   { clave: "costo_unitario", label: "Unit. Costo", tipo: "num", ancho: "w-28", derecha: true },
   { clave: "contractual_total", label: "Total Contractual", tipo: "num", ancho: "w-28", derecha: true },
@@ -88,6 +89,12 @@ export default function CabeceraFiltros({
           // no como value: así no hay texto que editar parcialmente y cualquier tecla
           // arranca de vacío, como en un filtro normal.
           const sinApuActivo = esCentinela(c.clave, control);
+          const opciones = c.clave === "unidad" ? control.opcionesUnidad
+            : c.clave === "status" ? control.opcionesStatus
+            : control.opcionesVeredicto;
+          const etiqueta = (o: string) => c.clave === "status" ? etiquetaEstado(o)
+            : c.clave === "veredicto" ? etiquetaVeredicto(o)
+            : o;
           return (
             <TableHead key={c.clave} className={`${c.ancho} py-1 align-top`}>
               {c.tipo === "texto" && (
@@ -106,8 +113,8 @@ export default function CabeceraFiltros({
                   onChange={(e) => control.setFiltro(c.clave, e.target.value)}
                 >
                   <option value="">(todas)</option>
-                  {(c.clave === "unidad" ? control.opcionesUnidad : control.opcionesStatus).map((o) => (
-                    <option key={o} value={o}>{c.clave === "status" ? etiquetaEstado(o) : o}</option>
+                  {opciones.map((o) => (
+                    <option key={o} value={o}>{etiqueta(o)}</option>
                   ))}
                 </select>
               )}

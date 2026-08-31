@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import {
   filtrar, ordenar, opcionesDe, siguienteOrden, hayFiltrosActivos,
-  normalizar, FILTROS_VACIOS,
+  normalizar, valorVeredicto, FILTROS_VACIOS,
 } from "./corridaTabla";
 import type { ItemCuadro } from "./tipos";
 
@@ -10,8 +10,16 @@ function item(p: Partial<ItemCuadro>): ItemCuadro {
     seq: 0, item: "1", descripcion: "X", unidad: "M3", cantidad: 1,
     apu_codigo: "A", apu_nombre: "APU A", status: "auto", confianza: 1,
     precio_contractual: 0, costo_unitario: 0, margen_unitario: 0, margen_pct: 0,
-    contractual_total: 0, costo_total: 0, margen_total: 0, ...p,
+    contractual_total: 0, costo_total: 0, margen_total: 0, revision: null, ...p,
   };
+}
+
+/** Veredicto de la IA para una fila; solo importan `seq` y `dictamen` acá. */
+function veredicto(dictamen: string) {
+  return {
+    seq: 0, dictamen, apu_sugerido: null, turno_sugerido: null,
+    confianza: 0.8, justificacion: "", nivel: "barrido",
+  } as ItemCuadro["revision"];
 }
 
 test("normalizar quita tildes y baja a minúsculas", () => {
@@ -125,4 +133,29 @@ test("ordenar: por precio_contractual asc y desc", () => {
 test("ordenar: por costo_unitario asc", () => {
   const items = [item({ costo_unitario: 30 }), item({ costo_unitario: 10 })];
   expect(ordenar(items, { clave: "costo_unitario", dir: "asc" }).map((i) => i.costo_unitario)).toEqual([10, 30]);
+});
+
+test("valorVeredicto: el dictamen, y \"\" si la fila no se revisó", () => {
+  expect(valorVeredicto(item({ revision: veredicto("cambiar") }))).toBe("cambiar");
+  expect(valorVeredicto(item({ revision: null }))).toBe("");
+});
+
+test("filtrar: el desplegable de Veredicto es coincidencia exacta", () => {
+  const items = [
+    item({ descripcion: "A", revision: veredicto("ok") }),
+    item({ descripcion: "B", revision: veredicto("cambiar") }),
+    item({ descripcion: "C", revision: null }),
+  ];
+  const f = { ...FILTROS_VACIOS, veredicto: "cambiar" };
+  expect(filtrar(items, f, false).map((i) => i.descripcion)).toEqual(["B"]);
+});
+
+test("opcionesDe: veredicto ignora las filas sin revisar", () => {
+  const items = [
+    item({ revision: veredicto("ok") }),
+    item({ revision: veredicto("cambiar") }),
+    item({ revision: veredicto("ok") }),
+    item({ revision: null }),
+  ];
+  expect(opcionesDe(items, "veredicto")).toEqual(["cambiar", "ok"]);
 });

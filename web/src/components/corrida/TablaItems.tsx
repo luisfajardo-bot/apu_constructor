@@ -16,9 +16,12 @@ import CabeceraFiltros from "@/components/corrida/CabeceraFiltros";
 import { DialogoAgregarApu } from "@/components/autoria/DialogoAgregarApu";
 import { cop, pct } from "@/lib/moneda";
 import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
-import { getItem, confirmar, confirmarLote, borrarLineas } from "@/api/corridas";
+import {
+  getItem, confirmar, confirmarLote, borrarLineas, aplicarSugerencias,
+} from "@/api/corridas";
 import { getApuDetalle } from "@/api/autoria";
 import type { ItemCuadro, DetalleItem, CorridaDetalle, ApuDetalle } from "@/lib/tipos";
+import { VEREDICTO_UI, etiquetaVeredicto } from "@/lib/corridaTabla";
 import type { ControlCorridaTabla } from "@/lib/corridaTabla";
 
 interface TablaItemsProps {
@@ -86,6 +89,8 @@ export default function TablaItems({
   // La selección solo existe con `control` (no en el armado en vivo, cuya tabla
   // viene del stream) y con la corrida activa.
   const seleccionable = control !== undefined && !readOnly;
+  // Mismo permiso que duplicar: rol editor y corrida no congelada.
+  const puedeAplicarIA = puedeEditar && !readOnly;
 
   function alternar(idx: number, seq: number, conShift: boolean) {
     const desde = anclaSeqRef.current === null
@@ -165,6 +170,29 @@ export default function TablaItems({
   }
 
   const [enLote, setEnLote] = useState(false);
+  // `seq` de la fila cuya sugerencia de la IA se está aplicando (null = ninguna).
+  const [aplicandoIA, setAplicandoIA] = useState<number | null>(null);
+
+  /** Aplica el APU que sugirió la IA para ESA fila. La IA propone; acá aplica el
+   *  usuario. Reusa el mismo callback de recosteo que la reasignación normal. */
+  async function aplicarSugerencia(it: ItemCuadro) {
+    const v = it.revision;
+    if (!v || v.dictamen !== "cambiar" || !v.apu_sugerido) return;
+    setAplicandoIA(it.seq);
+    try {
+      const actualizada = await aplicarSugerencias(corridaId, [{
+        seq: it.seq,
+        apu_codigo: v.apu_sugerido,
+        ...(v.turno_sugerido ? { shift: v.turno_sugerido } : {}),
+      }]);
+      onConfirmado(actualizada);
+      toast.success(`${v.apu_sugerido} asignado al ítem ${it.item}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo aplicar la sugerencia.");
+    } finally {
+      setAplicandoIA(null);
+    }
+  }
 
   /** `apu` undefined = confirmar el APU que cada línea ya tiene. */
   async function accionLote(apu?: { codigo: string; turno: string }) {
@@ -246,8 +274,8 @@ export default function TablaItems({
     }
   }
 
-  // 1 chevron + 12 columnas de datos, más la de selección cuando está activa.
-  const TOTAL_COLS = 13 + (seleccionable ? 1 : 0);
+  // 1 chevron + 13 columnas de datos, más la de selección cuando está activa.
+  const TOTAL_COLS = 14 + (seleccionable ? 1 : 0);
 
   return (
     <div className="flex flex-col gap-2">
@@ -311,6 +339,7 @@ export default function TablaItems({
               <TableHead className="text-xs w-24">Ítem</TableHead>
               <TableHead className="text-xs w-28">APU</TableHead>
               <TableHead className="text-xs w-20">Estado</TableHead>
+              <TableHead className="text-xs w-28">Veredicto</TableHead>
               <TableHead className="text-xs w-28 text-right">Unit. Contractual</TableHead>
               <TableHead className="text-xs w-28 text-right">Unit. Costo</TableHead>
               <TableHead className="text-xs w-28 text-right">Total Contractual</TableHead>
@@ -375,6 +404,15 @@ export default function TablaItems({
                   </TableCell>
                   <TableCell className="text-xs">
                     <EstadoBadge status={it.status} />
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    <CeldaVeredicto
+                      item={it}
+                      puedeAplicar={puedeAplicarIA}
+                      aplicando={aplicandoIA === it.seq}
+                      bloqueado={aplicandoIA !== null}
+                      onAplicar={() => aplicarSugerencia(it)}
+                    />
                   </TableCell>
                   <TableCell className="text-xs text-right font-mono tabular-nums">
                     {cop(it.precio_contractual)}
@@ -477,6 +515,44 @@ export default function TablaItems({
         />
       )}
     </div>
+  );
+}
+
+// ─── celda del veredicto de la IA ────────────────────────────────────────────
+// La IA propone; quien aplica es el usuario. El botón se decide por el DICTAMEN
+// (nunca por "hay apu_sugerido"): que el backend solo deje sobrevivir un código
+// con dictamen `cambiar` es garantía suya, no algo de lo que dependa la interfaz.
+
+function CeldaVeredicto({ item, puedeAplicar, aplicando, bloqueado, onAplicar }: {
+  item: ItemCuadro;
+  puedeAplicar: boolean;
+  aplicando: boolean;
+  bloqueado: boolean;
+  onAplicar: () => void;
+}) {
+  const v = item.revision;
+  if (!v) return <span className="text-muted-foreground">&mdash;</span>;
+  const ofreceAplicar = puedeAplicar && v.dictamen === "cambiar" && !!v.apu_sugerido;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span
+        className={`whitespace-nowrap font-medium ${VEREDICTO_UI[v.dictamen]?.cls ?? ""}`}
+        title={v.justificacion || undefined}
+      >
+        {etiquetaVeredicto(v.dictamen)}
+      </span>
+      {ofreceAplicar && (
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={bloqueado}
+          title={`Asignar ${v.apu_sugerido} a este ítem`}
+          onClick={onAplicar}
+        >
+          {aplicando ? "Aplicando…" : "Aplicar"}
+        </Button>
+      )}
+    </span>
   );
 }
 

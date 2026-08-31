@@ -21,6 +21,10 @@ vi.mock("@/api/corridas", () => ({
     id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
     totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
   })),
+  aplicarSugerencias: vi.fn(async () => ({
+    id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
+    totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
+  })),
 }));
 vi.mock("@/api/autoria", () => ({
   listarApus: vi.fn(async () => ({
@@ -50,8 +54,24 @@ const ITEM = {
   seq: 0, item: "1", descripcion: "Concreto", unidad: "M3", cantidad: 10,
   apu_codigo: "111", apu_nombre: "APU VIEJO", status: "matched", confianza: 1,
   precio_contractual: 0, costo_unitario: 0, margen_unitario: 0, margen_pct: 0,
-  contractual_total: 0, costo_total: 0, margen_total: 0,
+  contractual_total: 0, costo_total: 0, margen_total: 0, revision: null,
 };
+
+/** Veredicto "cambiar" con APU y turno sugeridos: el único que ofrece Aplicar. */
+const VEREDICTO_CAMBIAR = {
+  seq: 0, dictamen: "cambiar", apu_sugerido: "222", turno_sugerido: "NOCTURNO",
+  confianza: 0.9, justificacion: "El asignado es de otra unidad.", nivel: "profundo",
+};
+
+/** La etiqueta del veredicto EN LA FILA. El <option> del filtro de la cabecera
+ *  lleva el mismo texto, así que un getByText pelado encuentra dos nodos. */
+const celdaVeredicto = (texto: string) =>
+  screen.getAllByText(texto).filter((el) => el.tagName === "SPAN")[0];
+
+const veredicto = (seq: number, dictamen: string) => ({
+  ...VEREDICTO_CAMBIAR, seq, dictamen,
+  apu_sugerido: dictamen === "cambiar" ? "222" : null,
+});
 
 test("reasigna un ítem matched vía el buscador (pasa el turno elegido)", async () => {
   const { default: TablaItems } = await import("./TablaItems");
@@ -123,7 +143,9 @@ test("muestra el código de licitación (Ítem) junto al APU", async () => {
   expect(screen.getByText("111")).toBeTruthy();
 });
 
-function TablaConControl({ items, readOnly }: { items: typeof ITEM[]; readOnly?: boolean }) {
+function TablaConControl({ items, readOnly, puedeEditar }: {
+  items: typeof ITEM[]; readOnly?: boolean; puedeEditar?: boolean;
+}) {
   const control = useCorridaTabla(items);
   return (
     <TablaItems
@@ -132,6 +154,7 @@ function TablaConControl({ items, readOnly }: { items: typeof ITEM[]; readOnly?:
       control={control}
       onConfirmado={() => {}}
       readOnly={readOnly}
+      puedeEditar={puedeEditar}
     />
   );
 }
@@ -518,4 +541,90 @@ test("cancelar la confirmación no borra nada", async () => {
 
   expect(borrarLineas).not.toHaveBeenCalled();
   confirmSpy.mockRestore();
+});
+
+// ─── columna Veredicto (revisión con IA) ─────────────────────────────────────
+
+test("los cuatro dictámenes se muestran con etiqueta y color distinguibles", () => {
+  const items = ["ok", "dudoso", "cambiar", "sin_apu"].map((d, i) => ({
+    ...ITEM, seq: i, item: String(i + 1), descripcion: `Fila ${i}`,
+    revision: veredicto(i, d),
+  }));
+  render(<TablaConControl items={items} />);
+  const etiquetas = ["✔ ok", "⚠ dudoso", "↔ cambiar", "✖ sin APU"];
+  const clases = etiquetas.map((t) => celdaVeredicto(t).className);
+  // las cuatro presentes...
+  expect(clases).toHaveLength(4);
+  // ...y con cuatro colores distintos (si compartieran clase, no se distinguen)
+  expect(new Set(clases).size).toBe(4);
+});
+
+test("una fila sin veredicto muestra un guion y no rompe la tabla", () => {
+  render(<TablaConControl items={[{ ...ITEM, revision: null }]} />);
+  expect(screen.getByText("—")).toBeTruthy();
+  expect(screen.getByText("Concreto")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^Aplicar$/ })).toBeNull();
+});
+
+test("la justificación de la IA queda accesible en la celda", () => {
+  render(<TablaConControl items={[{ ...ITEM, revision: VEREDICTO_CAMBIAR }]} />);
+  expect(celdaVeredicto("↔ cambiar").getAttribute("title"))
+    .toBe("El asignado es de otra unidad.");
+});
+
+test("Aplicar manda el seq, el APU sugerido y el turno de la sugerencia", async () => {
+  const { aplicarSugerencias } = await import("@/api/corridas");
+  vi.mocked(aplicarSugerencias).mockClear();
+  const items = [{ ...ITEM, seq: 7, revision: { ...VEREDICTO_CAMBIAR, seq: 7 } }];
+  render(<TablaConControl items={items} puedeEditar />);
+  fireEvent.click(screen.getByRole("button", { name: /^Aplicar$/ }));
+  await waitFor(() =>
+    expect(aplicarSugerencias).toHaveBeenCalledWith(1, [
+      { seq: 7, apu_codigo: "222", shift: "NOCTURNO" },
+    ]));
+});
+
+test("un dictamen que no es 'cambiar' no ofrece Aplicar aunque traiga APU sugerido", () => {
+  // El backend garantiza que el código no sobrevive con otro dictamen; la
+  // interfaz decide por el dictamen igual, sin apoyarse en esa garantía.
+  const items = [{
+    ...ITEM, revision: { ...VEREDICTO_CAMBIAR, dictamen: "ok", apu_sugerido: "222" },
+  }];
+  render(<TablaConControl items={items} puedeEditar />);
+  expect(screen.queryByRole("button", { name: /^Aplicar$/ })).toBeNull();
+});
+
+test("sin rol editor no aparece Aplicar", () => {
+  render(<TablaConControl items={[{ ...ITEM, revision: VEREDICTO_CAMBIAR }]} />);
+  expect(screen.queryByRole("button", { name: /^Aplicar$/ })).toBeNull();
+});
+
+test("en corrida congelada no aparece Aplicar", () => {
+  render(
+    <TablaConControl items={[{ ...ITEM, revision: VEREDICTO_CAMBIAR }]} puedeEditar readOnly />,
+  );
+  expect(screen.queryByRole("button", { name: /^Aplicar$/ })).toBeNull();
+});
+
+test("si aplicar la sugerencia falla, lo dice con un toast de error", async () => {
+  const { aplicarSugerencias } = await import("@/api/corridas");
+  const { toast } = await import("sonner");
+  vi.mocked(aplicarSugerencias).mockRejectedValueOnce(new Error("fallo de red"));
+  vi.mocked(toast.error).mockClear();
+  render(<TablaConControl items={[{ ...ITEM, revision: VEREDICTO_CAMBIAR }]} puedeEditar />);
+  fireEvent.click(screen.getByRole("button", { name: /^Aplicar$/ }));
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith("fallo de red"));
+});
+
+test("filtra por el desplegable de Veredicto", () => {
+  const items = [
+    { ...ITEM, seq: 0, descripcion: "Alfa", revision: veredicto(0, "ok") },
+    { ...ITEM, seq: 1, descripcion: "Beta", revision: veredicto(1, "cambiar") },
+    { ...ITEM, seq: 2, descripcion: "Gama", revision: null },
+  ];
+  render(<TablaConControl items={items} />);
+  fireEvent.change(screen.getByLabelText("Filtrar Veredicto"), { target: { value: "cambiar" } });
+  expect(screen.queryByText("Alfa")).toBeNull();
+  expect(screen.getByText("Beta")).toBeTruthy();
+  expect(screen.queryByText("Gama")).toBeNull();
 });

@@ -477,11 +477,18 @@ def renombrar_corrida(alm: Almacen, corrida_id: int, nombre: str) -> Optional[di
 
 def confirmar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
                     apu_codigo: Optional[str] = None,
-                    shift: Optional[str] = None) -> Optional[dict]:
+                    shift: Optional[str] = None,
+                    asignaciones: Optional[dict[int, tuple[str, Optional[str]]]] = None,
+                    ) -> Optional[dict]:
     """Confirma varios ítems de una corrida en UN solo recosteo.
 
     `apu_codigo=None` confirma el APU que cada ítem ya tiene (sin reasignar);
     con `apu_codigo` se le asigna ese APU (codigo+turno) a todos los seqs.
+
+    `asignaciones` (seq -> (código, turno)) aplica un APU DISTINTO por fila en un
+    solo recosteo: es lo que usa "aplicar N sugerencias de la IA". Cuando se pasa,
+    los seq salen de ahí y `seqs` se ignora. Gana sobre `apu_codigo` fila por fila.
+
     Devuelve la vista de la corrida, o None si la corrida no existe, o si
     ninguno de los seqs pedidos existe en ella (pedir una lista vacía no
     cuenta: ahí no se pidió ningún seq inexistente, se pidió nada).
@@ -499,6 +506,8 @@ def confirmar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
     assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False),
                           lista_id=meta.lista_precios_id)
     seqs_pedidos = list(seqs)   # Iterable: consumirlo dos veces no es seguro
+    if asignaciones:
+        seqs_pedidos = list(asignaciones)
     # Dos pasadas. La primera resuelve (fila, código, turno) y valida que el APU
     # exista, SIN escribir: con un código que no existe, reassemble_with_choice
     # produce una composición vacía y el ítem queda costeado en $0 (regla de
@@ -520,10 +529,11 @@ def confirmar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
         if row is None:
             continue                      # seq ajeno a la corrida: se saltea
         encontrados += 1
-        codigo = apu_codigo or row.apu_codigo
+        propuesto = (asignaciones or {}).get(seq)
+        codigo = (propuesto[0] if propuesto else (apu_codigo or row.apu_codigo))
         if not codigo:
             continue                      # nada que confirmar (evita el $0)
-        turno = shift or row.shift
+        turno = (propuesto[1] if propuesto and propuesto[1] else shift) or row.shift
         if (codigo, turno) not in validados:
             # Turno EXACTO a propósito, más estricto que el fallback de `_build`
             # (assemble.py), que si el código existe con OTRO turno cae a ese turno

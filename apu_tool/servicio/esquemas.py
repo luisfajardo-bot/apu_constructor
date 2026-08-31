@@ -17,10 +17,20 @@ class ConfirmarIn(BaseModel):
     shift: Optional[str] = None
 
 
+class AsignacionIn(BaseModel):
+    """Una sugerencia aplicada: a esta fila, este APU."""
+    seq: int
+    apu_codigo: str
+    shift: Optional[str] = None
+
+
 class ConfirmarLoteIn(BaseModel):
     seqs: list[int]
     apu_codigo: Optional[str] = None
     shift: Optional[str] = None
+    # Un APU distinto por fila (aplicar sugerencias de la IA). Cuando viene, manda
+    # sobre `seqs` y `apu_codigo`.
+    asignaciones: Optional[list[AsignacionIn]] = None
 
 
 class LineaNuevaIn(BaseModel):

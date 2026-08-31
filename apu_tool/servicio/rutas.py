@@ -314,8 +314,14 @@ def confirmar(cid: int, seq: int, body: ConfirmarIn,
 def confirmar_lote(cid: int, body: ConfirmarLoteIn,
                    alm: Almacen = Depends(get_almacen),
                    _: object = Depends(requiere_rol("consulta"))):
+    # seq repetido: gana el último (dict por comprensión). Es una escritura idempotente
+    # sobre la misma fila y el cliente arma la lista de filas distintas; rechazar el lote
+    # entero por un duplicado costaría validación sin evitar ningún $0.
+    mapa = ({a.seq: (a.apu_codigo, a.shift) for a in body.asignaciones}
+            if body.asignaciones else None)
     try:
-        v = svc.confirmar_items(alm, cid, body.seqs, body.apu_codigo, body.shift)
+        v = svc.confirmar_items(alm, cid, body.seqs, body.apu_codigo, body.shift,
+                                asignaciones=mapa)
     except svc.CorridaCongelada:
         raise HTTPException(status_code=409,
                             detail="La corrida está congelada; actívala para modificar.")

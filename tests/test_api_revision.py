@@ -125,3 +125,96 @@ def test_consulta_no_puede_revisar(tmp_path):
     cid = _corrida_armada(alm)
     consulta = cliente(create_app(almacen=alm), rol="consulta")
     assert consulta.post(f"/api/corridas/{cid}/revision/stream").status_code == 403
+
+
+# --- Aplicar N sugerencias distintas en una sola llamada -----------------------
+
+def test_aplicar_sugerencias_distintas_en_una_llamada(tmp_path):
+    cli, alm = _cliente_api(tmp_path)
+    cid = _corrida_armada(alm)     # seq 0 y 1, ambos con APU "100"
+    r = cli.post(f"/api/corridas/{cid}/items/confirmar-lote", json={
+        "seqs": [],
+        "asignaciones": [
+            {"seq": 0, "apu_codigo": "200", "shift": "DIURNO"},
+            {"seq": 1, "apu_codigo": "100", "shift": "DIURNO"},
+        ],
+    })
+    assert r.status_code == 200, r.text
+    items = {i["seq"]: i for i in r.json()["items"]}
+    assert items[0]["apu_codigo"] == "200"
+    assert items[1]["apu_codigo"] == "100"
+
+
+def test_asignacion_con_apu_inexistente_falla_sin_aplicar_nada(tmp_path):
+    cli, alm = _cliente_api(tmp_path)
+    cid = _corrida_armada(alm)
+    r = cli.post(f"/api/corridas/{cid}/items/confirmar-lote", json={
+        "seqs": [],
+        "asignaciones": [
+            {"seq": 0, "apu_codigo": "200", "shift": "DIURNO"},
+            {"seq": 1, "apu_codigo": "NO_EXISTE", "shift": "DIURNO"},
+        ],
+    })
+    assert r.status_code == 400
+    v = cli.get(f"/api/corridas/{cid}").json()
+    assert v["items"][0]["apu_codigo"] == "100"    # nada se aplicó a medias
+
+
+def test_aplicar_borra_el_veredicto_de_esas_filas(tmp_path):
+    """El APU cambió: la opinión de la IA hablaba del anterior."""
+    cli, alm = _cliente_api(tmp_path)
+    cid = _corrida_armada(alm)
+    for seq in (0, 1):
+        alm.corridas.set_revision(cid, seq, {
+            "seq": seq, "dictamen": "cambiar", "apu_sugerido": "200",
+            "turno_sugerido": "DIURNO", "confianza": 0.8,
+            "justificacion": "es mecánica", "nivel": "profundo"})
+    r = cli.post(f"/api/corridas/{cid}/items/confirmar-lote", json={
+        "seqs": [],
+        "asignaciones": [{"seq": 0, "apu_codigo": "200", "shift": "DIURNO"},
+                         {"seq": 1, "apu_codigo": "200", "shift": "DIURNO"}],
+    })
+    assert r.status_code == 200, r.text
+    filas = alm.corridas.get_items(cid)
+    assert filas[0].revision is None and filas[1].revision is None
+
+
+def test_asignaciones_gana_sobre_apu_codigo(tmp_path):
+    cli, alm = _cliente_api(tmp_path)
+    cid = _corrida_armada(alm)
+    r = cli.post(f"/api/corridas/{cid}/items/confirmar-lote", json={
+        "seqs": [0, 1], "apu_codigo": "100", "shift": "DIURNO",
+        "asignaciones": [{"seq": 0, "apu_codigo": "200", "shift": "DIURNO"}],
+    })
+    assert r.status_code == 200, r.text
+    filas = {f.seq: f for f in alm.corridas.get_items(cid)}
+    assert filas[0].apu_codigo == "200"           # ganó la asignación
+    assert filas[0].status == "confirmed"
+    assert filas[1].status == "auto"              # `seqs` se ignoró
+
+
+def test_congelada_rechaza_las_asignaciones(tmp_path):
+    cli, alm = _cliente_api(tmp_path)
+    cid = _corrida_armada(alm)
+    alm.corridas.set_modo(cid, "congelada")
+    r = cli.post(f"/api/corridas/{cid}/items/confirmar-lote", json={
+        "seqs": [],
+        "asignaciones": [{"seq": 0, "apu_codigo": "200", "shift": "DIURNO"}],
+    })
+    assert r.status_code == 409
+    assert alm.corridas.get_items(cid)[0].apu_codigo == "100"
+
+
+def test_asignacion_con_seq_inexistente_se_saltea(tmp_path):
+    """Misma semántica que el camino viejo: el seq ajeno se saltea (404 solo si
+    NINGUNO de los pedidos existe)."""
+    cli, alm = _cliente_api(tmp_path)
+    cid = _corrida_armada(alm)
+    r = cli.post(f"/api/corridas/{cid}/items/confirmar-lote", json={
+        "seqs": [],
+        "asignaciones": [{"seq": 0, "apu_codigo": "200", "shift": "DIURNO"},
+                         {"seq": 999, "apu_codigo": "200", "shift": "DIURNO"}],
+    })
+    assert r.status_code == 200, r.text
+    filas = {f.seq: f for f in alm.corridas.get_items(cid)}
+    assert filas[0].apu_codigo == "200" and 999 not in filas

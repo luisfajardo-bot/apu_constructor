@@ -2,6 +2,7 @@
 import pytest
 
 from apu_tool.dominio import privacy, revision
+from tests.test_revision_motor import _ClienteFalso
 from apu_tool.nucleo.models import (
     CorridaItemRow, DePricedApu, DePricedComponent, LicitacionItem,
 )
@@ -94,3 +95,29 @@ def test_veredicto_serializa_plano():
     privacy.assert_no_money(d)
     assert d["seq"] == 3 and d["dictamen"] == "cambiar"
     assert v.dictamen in revision.DICTAMENES
+
+
+# --------------------------------------------- la frontera en la ruta REAL de `_pedir`
+# Los demás tests sustituyen `_pedir` entero y dejan su cuerpo sin ejecutar; ahí vive
+# `privacy.safe_json`, que es donde el invariante #1 se aplica en runtime. Estos dos
+# corren `_pedir` de verdad contra un cliente falso: si alguien cambiara `safe_json`
+# por `json.dumps`, muerden.
+def test_pedir_no_le_manda_el_precio_contractual_al_cliente():
+    c = _ClienteFalso('{"filas": []}')
+    r = revision.Revisor(enabled=True)
+    r._client = c
+    r._pedir("sistema", {}, revision.payload_barrido(_fila()), "low")
+    assert "999999" not in c.visto["messages"][0]["content"]
+    assert "precio_contractual" not in c.visto["messages"][0]["content"]
+
+
+def test_pedir_revienta_antes_de_llamar_al_cliente_si_hay_dinero():
+    """Preferimos fallar a filtrar: la excepción sale ANTES de tocar la red."""
+    c = _ClienteFalso('{"filas": []}')
+    r = revision.Revisor(enabled=True)
+    r._client = c
+    payload = revision.payload_barrido(_fila())
+    payload["actividad"]["costo_unitario"] = 12345
+    with pytest.raises(privacy.PrivacyViolation):
+        r._pedir("sistema", {}, payload, "low")
+    assert c.llamadas == 0

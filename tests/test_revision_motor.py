@@ -1,7 +1,9 @@
 """Barrido y profundización, con un revisor de doble (sin red)."""
+from types import SimpleNamespace
+
 import pytest
 
-from apu_tool.dominio import revision
+from apu_tool.dominio import privacy, revision
 from apu_tool.nucleo.models import (
     CorridaItemRow, DePricedApu, DePricedComponent, LicitacionItem,
 )
@@ -41,15 +43,45 @@ class RevisorDoble(revision.Revisor):
 
     def _pedir(self, system, schema, payload, effort):
         self.pedidos.append({"payload": payload, "effort": effort})
-        return self.respuestas.pop(0)
+        r = self.respuestas.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+
+class _ClienteFalso:
+    """Cliente de anthropic de mentira: `RevisorDoble` sustituye `_pedir` entero y deja
+    su cuerpo SIN EJECUTAR — y ahí vive `privacy.safe_json`, que es donde el invariante
+    #1 se aplica en runtime. Con este objeto `_pedir` corre de verdad."""
+
+    def __init__(self, texto="{}", bloques=None):
+        self.texto, self.bloques, self.visto, self.llamadas = texto, bloques, {}, 0
+
+    @property
+    def messages(self):
+        return self
+
+    def create(self, **kw):
+        self.visto, self.llamadas = kw, self.llamadas + 1
+        bloques = (self.bloques if self.bloques is not None
+                   else [SimpleNamespace(type="text", text=self.texto)])
+        return SimpleNamespace(content=bloques)
+
+
+def _revisor_con_cliente(cliente):
+    """Revisor real (su `_pedir` es el del módulo) con el SDK sustituido a mano."""
+    r = revision.Revisor(enabled=True)
+    r._client = cliente
+    return r
 
 
 def test_barrido_marca_solo_lo_que_la_ia_senala():
     filas = [_fila(0, "EXCAVACION MANUAL", "100"), _fila(1, "CONCRETO 3000 PSI", "200")]
     r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "ok"},
                                  {"seq": 1, "resultado": "revisar"}]}])
-    marcadas = r.barrer(filas)
+    marcadas, sin_respuesta = r.barrer(filas)
     assert marcadas == {1}
+    assert sin_respuesta == set()
 
 
 def test_barrido_parte_en_lotes_y_manda_el_indice_completo(monkeypatch):
@@ -67,8 +99,9 @@ def test_barrido_sin_respuesta_para_una_fila_no_la_da_por_buena():
     """Un lote que vuelve incompleto deja esas filas SIN veredicto, no en `ok`."""
     filas = [_fila(0, "A", "100"), _fila(1, "B", "200")]
     r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "ok"}]}])
-    assert r.barrer(filas) == set()
-    assert r.sin_respuesta == {1}
+    marcadas, sin_respuesta = r.barrer(filas)
+    assert marcadas == set()
+    assert sin_respuesta == {1}
 
 
 @pytest.mark.parametrize("respuesta", [
@@ -76,22 +109,60 @@ def test_barrido_sin_respuesta_para_una_fila_no_la_da_por_buena():
     {"filas": []},                                   # lote vacío
     {"filas": [{"seq": "ninguno", "resultado": "revisar"}]},   # seq basura
     {"filas": [{"resultado": "ok"}]},                # sin seq
+    {"filas": [{"seq": 0, "resultado": "quizas"}]},  # vocabulario que no existe
+    {"filas": [{"seq": 0, "resultado": None}]},      # resultado nulo
+    {"filas": [{"seq": 0}]},                         # sin resultado
+    {"filas": "ok"},                                 # `filas` no es una lista
+    {"filas": [42, "ok"]},                           # elementos que no son dicts
 ])
 def test_barrido_con_respuesta_inutil_deja_todo_el_lote_sin_respuesta(respuesta):
-    """Nadie sale en `ok` por accidente: sin veredicto legible, sin veredicto."""
+    """Nadie sale en `ok` por accidente: sin veredicto legible, sin veredicto.
+
+    Ojo con los casos de `resultado`: un vocabulario que no entendemos NO cuenta como
+    fila contestada. Darla por buena sería bendecir en silencio el APU que la IA no
+    llegó a mirar, justo al revés de lo que dice el prompt ("ante la duda, revisar").
+    """
     filas = [_fila(0, "A", "100"), _fila(1, "B", "200")]
     r = RevisorDoble([respuesta])
-    assert r.barrer(filas) == set()
-    assert r.sin_respuesta == {0, 1}
+    marcadas, sin_respuesta = r.barrer(filas)
+    assert marcadas == set()
+    assert sin_respuesta == {0, 1}
 
 
-def test_barrido_reinicia_sin_respuesta_en_cada_llamada():
+def test_barrido_tolera_espacios_y_mayusculas_en_el_resultado():
+    """El vocabulario se valida normalizado: " REVISAR " sí es una respuesta."""
+    filas = [_fila(0, "A", "100")]
+    r = RevisorDoble([{"filas": [{"seq": 0, "resultado": " REVISAR "}]}])
+    assert r.barrer(filas) == ({0}, set())
+
+
+def test_barrido_no_arrastra_estado_entre_llamadas():
     filas = [_fila(0, "A", "100")]
     r = RevisorDoble([{}, {"filas": [{"seq": 0, "resultado": "revisar"}]}])
-    r.barrer(filas)
-    assert r.sin_respuesta == {0}
-    assert r.barrer(filas) == {0}
-    assert r.sin_respuesta == set()
+    assert r.barrer(filas) == (set(), {0})
+    assert r.barrer(filas) == ({0}, set())
+
+
+def test_un_error_del_sdk_en_un_lote_no_tira_los_demas(monkeypatch):
+    """Un 429 o un timeout en el lote 2 no puede perder el trabajo ya pagado: ese lote
+    entero cae en `sin_respuesta` y el barrido sigue."""
+    monkeypatch.setattr(revision, "TAM_LOTE", 1)
+    filas = [_fila(i, f"ACTIVIDAD {i}", "100") for i in range(3)]
+    r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "revisar"}]},
+                      RuntimeError("429 rate limit"),
+                      {"filas": [{"seq": 2, "resultado": "ok"}]}])
+    marcadas, sin_respuesta = r.barrer(filas)
+    assert marcadas == {0}
+    assert sin_respuesta == {1}
+    assert len(r.pedidos) == 3          # el error no abortó el barrido
+
+
+def test_una_fuga_de_dinero_aborta_el_barrido_y_no_se_traga():
+    """El `except Exception` del barrido NO puede convertir una violación del
+    invariante #1 en un lote silenciosamente vacío."""
+    r = RevisorDoble([privacy.PrivacyViolation("costo_unitario")])
+    with pytest.raises(privacy.PrivacyViolation):
+        r.barrer([_fila(0, "A", "100")])
 
 
 def test_barrido_falla_si_la_ia_no_esta_disponible():
@@ -181,7 +252,7 @@ def test_barrido_ignora_un_seq_que_no_es_de_la_corrida():
     r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "ok"},
                                  {"seq": 1, "resultado": "ok"},
                                  {"seq": 99, "resultado": "revisar"}]}])
-    assert r.barrer(filas) == set()
+    assert r.barrer(filas) == (set(), set())
 
 
 # --------------------------------------------------------------- orquestador
@@ -285,8 +356,10 @@ def test_revisar_de_una_corrida_vacia_emite_started_y_done(alm_apus):
 
 
 def test_revisar_con_una_fila_sin_apu_asignado(alm_apus):
-    """Sin APU no hay `asignado` que pedirle a la biblioteca; se profundiza igual."""
+    """Sin APU no hay `asignado` que pedirle a la biblioteca; con candidatos vivos se
+    profundiza igual (sin ninguno se cortocircuita, ver el test del final)."""
     fila = _fila(0, "ACTIVIDAD RARA", None)
+    fila.candidatos = [{"apu_codigo": "200", "apu_nombre": "CONCRETO 3000 PSI"}]
     r = RevisorDoble([
         {"filas": [{"seq": 0, "resultado": "revisar"}]},
         {"dictamen": "sin_apu", "apu_sugerido": None, "turno_sugerido": None,
@@ -308,3 +381,108 @@ def test_revisar_es_un_generador_perezoso(alm_apus):
     assert r.pedidos == []                       # el barrido aún no se pidió
     assert next(gen)[0] == "barrido"
     assert len(r.pedidos) == 1
+
+
+# ------------------------------------------------- turno, confianza y mensajes
+@pytest.mark.parametrize("turno", ["TARDE", "diurno-nocturno", "", "  ", "SI"])
+def test_turno_sugerido_que_no_es_diurno_ni_nocturno_se_descarta(turno):
+    """El turno es parte de la clave del APU: uno inventado describe un APU que no
+    existe. `None` es correcto — el consumidor cae al turno de la fila."""
+    fila = _fila(3, "A", "100")
+    r = RevisorDoble([{"dictamen": "cambiar", "apu_sugerido": "200",
+                       "turno_sugerido": turno, "confianza": 0.9,
+                       "justificacion": "x"}])
+    v = r.profundizar(fila, asignado=_dp("100", "A"),
+                      candidatos=[_dp("200", "B")])
+    assert (v.dictamen, v.apu_sugerido, v.turno_sugerido) == ("cambiar", "200", None)
+
+
+def test_turno_sugerido_se_normaliza():
+    fila = _fila(3, "A", "100")
+    r = RevisorDoble([{"dictamen": "cambiar", "apu_sugerido": "200",
+                       "turno_sugerido": " nocturno ", "confianza": 0.9,
+                       "justificacion": "x"}])
+    v = r.profundizar(fila, asignado=_dp("100", "A"), candidatos=[_dp("200", "B")])
+    assert v.turno_sugerido == "NOCTURNO"
+
+
+@pytest.mark.parametrize("cruda,esperada", [(42, 1.0), (-3, 0.0), (0.85, 0.85)])
+def test_confianza_se_acota_entre_cero_y_uno(cruda, esperada):
+    """El prompt promete 0..1; una interfaz que pinte 42 como porcentaje diría 4200%."""
+    fila = _fila(3, "A", "100")
+    r = RevisorDoble([{"dictamen": "ok", "apu_sugerido": None, "turno_sugerido": None,
+                       "confianza": cruda, "justificacion": "encaja"}])
+    v = r.profundizar(fila, asignado=_dp("100", "A"), candidatos=[])
+    assert v.confianza == esperada
+
+
+def test_cambiar_sin_apu_sugerido_lo_dice_sin_hablar_de_None():
+    """Pedir cambiar sin decir por cuál es otro caso que sugerir uno inventado, y esta
+    justificación la lee una persona en la base."""
+    fila = _fila(3, "A", "100")
+    r = RevisorDoble([{"dictamen": "cambiar", "apu_sugerido": None,
+                       "turno_sugerido": None, "confianza": 0.9,
+                       "justificacion": "es mecánica"}])
+    v = r.profundizar(fila, asignado=_dp("100", "A"), candidatos=[_dp("200", "B")])
+    assert v.dictamen == "dudoso"
+    assert "None" not in v.justificacion
+    assert "no indicó por cuál" in v.justificacion
+    assert "es mecánica" in v.justificacion
+
+
+# ------------------------------------------------------ la puerta real al SDK
+def test_pedir_manda_los_parametros_esperados_del_sdk():
+    c = _ClienteFalso('{"filas": []}')
+    r = _revisor_con_cliente(c)
+    assert r._pedir("sistema", {"type": "object"}, {"a": 1}, "low") == {"filas": []}
+    assert c.visto["model"] == r.model
+    assert c.visto["system"] == "sistema"
+    assert c.visto["thinking"] == {"type": "adaptive"}
+    assert c.visto["max_tokens"] == 16000
+    assert c.visto["output_config"]["effort"] == "low"
+    assert c.visto["output_config"]["format"] == {"type": "json_schema",
+                                                  "schema": {"type": "object"}}
+    assert c.visto["messages"][0]["role"] == "user"
+
+
+@pytest.mark.parametrize("texto", ['[{"seq": 0}]', '"ok"', "42", "null", "no es json"])
+def test_pedir_devuelve_dict_vacio_si_la_respuesta_no_es_un_objeto(texto):
+    """`json.loads` valida sintaxis, no forma: una lista o un número parsean bien y
+    reventarían el `.get` del llamador."""
+    r = _revisor_con_cliente(_ClienteFalso(texto))
+    assert r._pedir("s", {}, {"a": 1}, "low") == {}
+
+
+def test_pedir_con_respuesta_solo_de_pensamiento_no_revienta():
+    """Caso real: la respuesta se corta durante el pensamiento y no hay bloque `text`."""
+    r = _revisor_con_cliente(_ClienteFalso(
+        bloques=[SimpleNamespace(type="thinking", thinking="mmm")]))
+    assert r._pedir("s", {}, {"a": 1}, "low") == {}
+
+
+def test_el_cliente_del_sdk_es_perezoso():
+    """Preguntar `disponible` no tiene por qué armar un cliente HTTP."""
+    r = revision.Revisor(enabled=True)
+    assert r.disponible is True
+    assert r._client is None
+
+
+def test_sin_api_key_no_hay_revision(monkeypatch):
+    from apu_tool import config
+    monkeypatch.delenv(config.AI_ENABLED_ENV, raising=False)
+    assert revision.Revisor().disponible is False
+
+
+# ---------------------------------- no gastar una llamada en lo que ya se sabe
+def test_revisar_no_llama_a_la_ia_si_no_hay_apu_ni_candidatos_vivos(alm_apus):
+    """Sin APU y con todos los candidatos fuera de la biblioteca, profundizar es
+    pagarle a la IA para que mire una lista vacía y conteste lo obvio."""
+    fila = _fila(0, "ACTIVIDAD RARA", None)
+    fila.candidatos = [{"apu_codigo": "9999", "apu_nombre": "FANTASMA"}]
+    r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "revisar"}]}])
+    eventos = list(revision.revisar(alm_apus, [fila], r))
+    v = next(p["veredicto"] for e, p in eventos if e == "veredicto")
+    assert (v["dictamen"], v["nivel"]) == ("sin_apu", "barrido")
+    assert len(r.pedidos) == 1          # solo el barrido: no se profundizó
+    done = next(p for e, p in eventos if e == "done")
+    assert done["sin_apu"] == 1

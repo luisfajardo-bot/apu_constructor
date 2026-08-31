@@ -34,13 +34,26 @@ from apu_tool import config
 from apu_tool.dominio import privacy
 from apu_tool.nucleo.models import CorridaItemRow, DePricedApu
 
-# Filas por llamada del barrido. Bajarlo mejora el foco de la IA y sube el costo;
-# subirlo hace lo contrario. Es la palanca si al barrido se le escapan objeciones.
+# Filas por llamada del barrido. Bajarlo mejora el foco de la IA y SUBE el costo: el
+# índice de la corrida entera viaja en CADA lote, así que el gasto en índice crece como
+# O(n²/TAM_LOTE) — subirlo reduce copias del índice a cambio de foco. Es la palanca si
+# al barrido se le escapan objeciones; si el costo llegara a doler, la palanca
+# siguiente no es este número sino `cache_control: {"type": "ephemeral"}` sobre el
+# bloque del índice, que es idéntico en todos los lotes.
 TAM_LOTE = 25
 
 # Vocabulario del VEREDICTO final (paso 2). El del barrido es otro (`ok | revisar`)
 # y no se mezclan: "revisar" tría, nunca dictamina.
 DICTAMENES = ("ok", "dudoso", "cambiar", "sin_apu")
+
+# Vocabulario del TRIAJE (paso 1). Se valida en `barrer` aunque el esquema JSON ya lo
+# restrinja, igual que `profundizar` revalida `dictamen`: un `resultado` que no
+# entendemos NO puede contar como "contestada y sin objeciones".
+RESULTADOS_BARRIDO = ("ok", "revisar")
+
+# Turnos válidos para `turno_sugerido`. El turno es parte de la clave del APU: un
+# código válido con un turno inventado describe un APU que no existe.
+TURNOS = (config.SHIFT_DIURNO, config.SHIFT_NOCTURNO)
 
 
 @dataclass(frozen=True)
@@ -140,7 +153,7 @@ _ESQUEMA_BARRIDO = {
                 "type": "object",
                 "properties": {
                     "seq": {"type": "integer"},
-                    "resultado": {"type": "string", "enum": ["ok", "revisar"]},
+                    "resultado": {"type": "string", "enum": list(RESULTADOS_BARRIDO)},
                 },
                 "required": ["seq", "resultado"],
                 "additionalProperties": False,
@@ -169,6 +182,9 @@ Reglas:
 - NUNCA recibirás precios ni costos, y no debes inventarlos ni pedirlos.
 - NUNCA inventes un código de APU. Si el que quieres no está entre los candidatos,
   el dictamen es "sin_apu" o "dudoso".
+- `turno_sugerido` es la jornada del APU que propones y es parte de su identidad:
+  SOLO valen "DIURNO" y "NOCTURNO". Cópialo del campo `shift` del candidato que
+  elegiste. Si el dictamen no es "cambiar", o no lo sabes, devuelve null.
 - La composición que ves es la de la BIBLIOTECA. Un proyecto puede ajustar distancias
   de acarreo al costear, así que los rendimientos de transporte pueden diferir; juzga
   la afinidad técnica de la actividad, no la exactitud numérica del rendimiento.
@@ -186,7 +202,7 @@ _ESQUEMA_PROFUNDO = {
         "dictamen": {"type": "string", "enum": list(DICTAMENES)},
         "apu_sugerido": {"type": ["string", "null"]},
         "turno_sugerido": {"type": ["string", "null"]},
-        "confianza": {"type": "number"},
+        "confianza": {"type": "number", "minimum": 0, "maximum": 1},
         "justificacion": {"type": "string"},
     },
     "required": ["dictamen", "apu_sugerido", "turno_sugerido", "confianza",
@@ -199,22 +215,15 @@ class Revisor:
     """Fachada sobre la IA para la revisión. Sin fallback determinístico.
 
     `_pedir` es la ÚNICA puerta al SDK: los tests heredan de esta clase y la
-    sustituyen, así no hace falta simular el cliente de anthropic.
+    sustituyen, así no hace falta simular el cliente de anthropic. El cliente se
+    construye ahí, la primera vez que hace falta: preguntar `disponible` no tiene por
+    qué armar un cliente HTTP.
     """
 
     def __init__(self, enabled: Optional[bool] = None, model: str = config.AI_MODEL):
         self.model = model
         self.enabled = config.ai_available() if enabled is None else enabled
         self._client = None
-        # Filas de las que la IA no dijo nada (lote truncado o JSON inválido). No se
-        # dan por buenas: quedan sin veredicto y se reportan.
-        self.sin_respuesta: set[int] = set()
-        if self.enabled:
-            try:
-                import anthropic
-                self._client = anthropic.Anthropic()
-            except Exception:
-                self.enabled = False
 
     @property
     def disponible(self) -> bool:
@@ -224,7 +233,15 @@ class Revisor:
     def _pedir(self, system: str, schema: dict, payload: dict, effort: str) -> dict:
         """Una llamada a la IA. Devuelve el JSON ya parseado, o {} si falló."""
         if self._client is None:
-            raise IANoDisponible("La revisión con IA necesita ANTHROPIC_API_KEY.")
+            if not self.enabled:
+                raise IANoDisponible("La revisión con IA necesita ANTHROPIC_API_KEY.")
+            try:
+                import anthropic
+                self._client = anthropic.Anthropic()
+            except Exception as exc:
+                self.enabled = False
+                raise IANoDisponible(
+                    "La revisión con IA necesita el SDK de anthropic.") from exc
         contenido = privacy.safe_json(payload)   # garantía dura: sin dinero
         resp = self._client.messages.create(
             model=self.model,
@@ -238,37 +255,66 @@ class Revisor:
         )
         texto = next((b.text for b in resp.content if b.type == "text"), "{}")
         try:
-            return json.loads(texto)
+            data = json.loads(texto)
         except Exception:
             return {}    # JSON truncado o inválido: nadie queda en "ok" por accidente
+        # `json.loads` valida sintaxis, no forma: `[{...}]`, `"ok"` o `42` parsean bien
+        # y reventarían el `.get` del llamador. Que caigan por el mismo camino.
+        return data if isinstance(data, dict) else {}
 
     # ------------------------------------------------------------------ barrido
-    def barrer(self, filas: list[CorridaItemRow]) -> set[int]:
-        """Devuelve los seq que merecen profundización. Deja en `self.sin_respuesta`
-        los que la IA no contestó: esos NO se dan por buenos."""
+    def barrer(self, filas: list[CorridaItemRow]) -> tuple[set[int], set[int]]:
+        """Triaje. Devuelve `(marcadas, sin_respuesta)`: los seq que merecen
+        profundización y los que la IA no contestó (lote truncado, JSON inválido,
+        vocabulario ilegible o error del SDK). Esos NO se dan por buenos.
+
+        `sin_respuesta` va en el valor de retorno y no como estado del objeto a
+        propósito: el orquestador natural ("si no está en marcadas, es ok")
+        convertiría justo las filas sin contestar en veredictos `ok`, que es lo único
+        que este módulo existe para evitar. Devolverlas obliga a mirarlas.
+        """
         if not self.disponible:
             raise IANoDisponible("La revisión con IA necesita ANTHROPIC_API_KEY.")
-        self.sin_respuesta = set()
         indice = indice_corrida(filas)
         marcadas: set[int] = set()
+        sin_respuesta: set[int] = set()
         for i in range(0, len(filas), TAM_LOTE):
             lote = filas[i:i + TAM_LOTE]
             payload = {"indice": indice,
                        "filas": [payload_barrido(f) for f in lote]}
-            data = self._pedir(_SISTEMA_BARRIDO, _ESQUEMA_BARRIDO, payload, "low")
+            try:
+                data = self._pedir(_SISTEMA_BARRIDO, _ESQUEMA_BARRIDO, payload, "low")
+            except (privacy.PrivacyViolation, IANoDisponible):
+                # El invariante #1 NUNCA se traga: sin este `raise`, el `except` de
+                # abajo convertiría una fuga de dinero en un lote vacío y silencioso.
+                # Sin IA tampoco hay revisión que reportar: se avisa, no se maquilla.
+                raise
+            except Exception:
+                # Un 429 o un timeout que sobreviva a los reintentos del SDK no puede
+                # tirar los lotes ya pagados: este cae entero en `sin_respuesta`.
+                data = {}
             vistos = set()
-            for r in (data or {}).get("filas", []):
+            crudas = data.get("filas")
+            for r in (crudas if isinstance(crudas, list) else []):
+                if not isinstance(r, dict):
+                    continue
                 try:
                     seq = int(r.get("seq"))
                 except (TypeError, ValueError):
                     continue
+                res = str(r.get("resultado") or "").strip().lower()
+                if res not in RESULTADOS_BARRIDO:
+                    # Vocabulario ilegible (falta, `null`, "okey", basura): la fila NO
+                    # queda contestada. Darla por buena es bendecir un APU en silencio,
+                    # y el prompt dice lo contrario: ante la duda, revisar.
+                    continue
                 vistos.add(seq)
-                if str(r.get("resultado")) == "revisar":
+                if res == "revisar":
                     marcadas.add(seq)
-            self.sin_respuesta |= {f.seq for f in lote if f.seq not in vistos}
+            sin_respuesta |= {f.seq for f in lote if f.seq not in vistos}
         # La IA puede devolver un `seq` que no le dimos: si no es de esta corrida no
         # hay fila que profundizar, y el orquestador la buscaría en vano.
-        return marcadas & {f.seq for f in filas}
+        return marcadas & {f.seq for f in filas}, sin_respuesta
 
     # ---------------------------------------------------------- profundización
     def profundizar(self, fila: CorridaItemRow, asignado: Optional[DePricedApu],
@@ -282,12 +328,16 @@ class Revisor:
         sugerido = data.get("apu_sugerido")
         sugerido = str(sugerido).strip() if sugerido else None
         turno = data.get("turno_sugerido")
-        turno = str(turno).strip() if turno else None
+        turno = str(turno).strip().upper() if turno else None
+        # El turno es parte de la clave del APU: uno inventado describe un APU que no
+        # existe. `None` es correcto — el consumidor cae al turno de la fila.
+        turno = turno if turno in TURNOS else None
         just = str(data.get("justificacion") or "").strip()
         try:
             conf = float(data.get("confianza") or 0.0)
         except (TypeError, ValueError):
             conf = 0.0
+        conf = min(max(conf, 0.0), 1.0)   # el prompt promete 0..1; acá se cumple
 
         validos = {a.codigo for a in candidatos}
         if dictamen not in DICTAMENES:
@@ -295,7 +345,12 @@ class Revisor:
             # por accidente. "dudoso" manda la decisión al humano, que es lo correcto.
             dictamen, sugerido, turno = "dudoso", None, None
             just = just or "La IA no devolvió un dictamen legible."
-        elif dictamen == "cambiar" and (sugerido is None or sugerido not in validos):
+        elif dictamen == "cambiar" and sugerido is None:
+            # Pidió cambiar pero no dijo por cuál: no hay propuesta que aplicar.
+            just = ("La IA pidió cambiar el APU pero no indicó por cuál. "
+                    f"{just}").strip()
+            dictamen, sugerido, turno = "dudoso", None, None
+        elif dictamen == "cambiar" and sugerido not in validos:
             # La IA no puede inventar un código. Si el que pide no estaba entre los
             # candidatos que le dimos, no existe para esta decisión.
             just = (f"La IA sugirió el APU {sugerido}, que no estaba entre los "
@@ -331,8 +386,7 @@ def revisar(almacen, filas: list[CorridaItemRow], revisor: Revisor,
     fachada de la IA permite sustituirlo en los tests sin montar una base.
     """
     yield ("started", {"total": len(filas)})
-    marcadas = revisor.barrer(filas)
-    sin_respuesta = set(revisor.sin_respuesta)
+    marcadas, sin_respuesta = revisor.barrer(filas)
     yield ("barrido", {"revisar": len(marcadas),
                        "sin_respuesta": sorted(sin_respuesta)})
 
@@ -346,8 +400,6 @@ def revisar(almacen, filas: list[CorridaItemRow], revisor: Revisor,
                           justificacion="Sin objeciones en el barrido.",
                           nivel="barrido")
         else:
-            asignado = (almacen.apus.get_depriced_apu(fila.apu_codigo, fila.shift)
-                        if fila.apu_codigo else None)
             # Un candidato que ya no está en la biblioteca se omite: no hay
             # composición que mostrarle a la IA, y no puede ser el sugerido.
             candidatos = []
@@ -355,7 +407,19 @@ def revisar(almacen, filas: list[CorridaItemRow], revisor: Revisor,
                 dp = almacen.apus.get_depriced_apu(c.get("apu_codigo"), fila.shift)
                 if dp is not None:
                     candidatos.append(dp)
-            v = revisor.profundizar(fila, asignado, candidatos)
+            if not fila.apu_codigo and not candidatos:
+                # Sin APU y sin un solo candidato vivo, profundizar es pagarle a la IA
+                # para que mire una lista vacía y conteste lo obvio.
+                v = Veredicto(seq=fila.seq, dictamen="sin_apu", apu_sugerido=None,
+                              turno_sugerido=None, confianza=1.0,
+                              justificacion=("La actividad no tiene APU asignado y "
+                                             "ningún candidato existe en la "
+                                             "biblioteca."),
+                              nivel="barrido")
+            else:
+                asignado = (almacen.apus.get_depriced_apu(fila.apu_codigo, fila.shift)
+                            if fila.apu_codigo else None)
+                v = revisor.profundizar(fila, asignado, candidatos)
         conteo[v.dictamen] = conteo.get(v.dictamen, 0) + 1
         yield ("veredicto", {"seq": fila.seq, "veredicto": v.to_dict()})
 

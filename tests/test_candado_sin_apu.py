@@ -6,6 +6,7 @@ va a mandar creyendo que está entero.
 """
 import pytest
 
+from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import (
     Apu, ApuComponent, CorridaItemRow, CorridaMeta, Insumo, LicitacionItem,
@@ -56,6 +57,12 @@ def test_congelar_falla_con_filas_sin_apu(alm):
     with pytest.raises(svc.FilasSinApu) as exc:
         svc.congelar(alm, cid)
     assert exc.value.seqs == [1]
+    # El mensaje dice cuántas líneas faltan, pero NO el seq interno (0-based, no es
+    # lo que la columna "Ítem" de la interfaz muestra): la interfaz ya tiene `seqs`
+    # en la respuesta para resaltar las filas exactas.
+    assert str(exc.value) == (
+        "1 línea(s) sin APU asignado. "
+        "Asígnalas antes de congelar o descargar el cuadro.")
     # No dejó la corrida a medio congelar.
     assert alm.corridas.get_corrida(cid).modo == "activa"
 
@@ -64,6 +71,10 @@ def test_cuadro_falla_con_filas_sin_apu(alm):
     cid = _corrida_con_fila_sin_apu(alm)
     with pytest.raises(svc.FilasSinApu):
         svc.generar_cuadro(alm, cid)
+    # No quedó nada a medio hacer: ni se congeló ni se marcó como finalizada.
+    meta = alm.corridas.get_corrida(cid)
+    assert meta.estado == "en_revision"
+    assert meta.cuadro_path is None
 
 
 def test_cuadro_congelado_legacy_tambien_falla(alm):
@@ -71,7 +82,10 @@ def test_cuadro_congelado_legacy_tambien_falla(alm):
     necesita su propio chequeo o el cuadro incompleto sale igual."""
     cid = _corrida_con_fila_sin_apu(alm)
     alm.corridas.set_modo(cid, "congelada")
+    # Una corrida congelada de verdad antes del candado tiene snapshot en TODAS las
+    # filas (congelar iteraba sobre todos los _rows), incluida la que no tiene APU.
     alm.corridas.set_snapshot(cid, 0, {"composicion": [], "costo_unitario": 0.0})
+    alm.corridas.set_snapshot(cid, 1, {"composicion": [], "costo_unitario": 0.0})
     with pytest.raises(svc.FilasSinApu):
         svc.generar_cuadro(alm, cid)
 
@@ -83,15 +97,27 @@ def test_activar_nunca_se_bloquea(alm):
     assert svc.activar(alm, cid)["modo"] == "activa"
 
 
-def test_con_todas_asignadas_pasa(alm):
+def test_con_todas_asignadas_pasa(alm, tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "salidas")
     cid = _corrida_con_fila_sin_apu(alm)
     svc.confirmar_items(alm, cid, [1], "100", "DIURNO")
     assert svc.congelar(alm, cid) is not None
     assert svc.generar_cuadro(alm, cid) is not None
 
 
-def test_endpoints_devuelven_409_con_los_seqs(tmp_path):
-    alm = _almacen(tmp_path)
+def test_corrida_vacia_no_bloquea(alm, tmp_path, monkeypatch):
+    """Cero ítems pasa el guard y emite un cuadro vacío (comportamiento previo,
+    correcto): es justo el caso que un refactor convierte en 409 por accidente."""
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "salidas")
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-08-31T10:00:00", archivo="vacia.xlsx",
+        turno_def="DIURNO", use_ai=None, estado="en_revision", cuadro_path=None,
+        nombre="vacia"))
+    assert svc.congelar(alm, cid) is not None
+    assert svc.generar_cuadro(alm, cid) is not None
+
+
+def test_endpoints_devuelven_409_con_los_seqs(alm):
     cli = cliente(create_app(almacen=alm), rol="admin")
     cid = _corrida_con_fila_sin_apu(alm)
     r = cli.post(f"/api/corridas/{cid}/congelar")

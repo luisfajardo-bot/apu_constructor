@@ -399,8 +399,11 @@ def congelar(cid: int, alm: Almacen = Depends(get_almacen),
     try:
         v = svc.congelar(alm, cid)
     except svc.FilasSinApu as e:
+        # Único endpoint con detail estructurado (el resto de este archivo usa
+        # string): `seqs` es lo que el frontend necesita para resaltar las filas
+        # y sacarlo de la prosa a punta de regex sería peor que esto.
         raise HTTPException(status_code=409,
-                            detail={"detail": str(e), "seqs": e.seqs})
+                            detail={"mensaje": str(e), "seqs": e.seqs})
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v
@@ -436,8 +439,8 @@ def cuadro(cid: int, alm: Almacen = Depends(get_almacen),
     except svc.FilasSinApu as e:
         raise HTTPException(
             status_code=409,
-            detail={"detail": f"{e} Si está congelada, actívala, asígnalas y "
-                              f"vuelve a congelar.",
+            detail={"mensaje": f"{e} Si está congelada, actívala, asígnalas y "
+                               f"vuelve a congelar.",
                     "seqs": e.seqs})
     if out is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")

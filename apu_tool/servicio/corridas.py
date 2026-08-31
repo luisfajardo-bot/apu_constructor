@@ -46,7 +46,7 @@ class FilasSinApu(RuntimeError):
         self.corrida_id = corrida_id
         self.seqs = seqs
         super().__init__(
-            f"{len(seqs)} línea(s) sin APU asignado (ítems {', '.join(str(s) for s in seqs)}). "
+            f"{len(seqs)} línea(s) sin APU asignado. "
             f"Asígnalas antes de congelar o descargar el cuadro.")
 
 
@@ -600,10 +600,11 @@ def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:
         return None
+    rows = alm.corridas.get_items(corrida_id)   # una sola lectura: guard + cuadro
     # Chequeo propio, no basta con el de `congelar`: si la corrida ya está congelada
     # con foto, la llamada a `congelar` de abajo se saltea, y una corrida congelada
     # ANTES de este candado sí puede traer filas sin APU.
-    faltan = seqs_sin_apu(alm.corridas.get_items(corrida_id))
+    faltan = seqs_sin_apu(rows)
     if faltan:
         raise FilasSinApu(corrida_id, faltan)
     config.ensure_dirs()
@@ -613,7 +614,6 @@ def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:
     if not (meta.modo == "congelada" and snaps):
         congelar(alm, corrida_id)
         snaps = alm.corridas.get_snapshots(corrida_id)
-    rows = alm.corridas.get_items(corrida_id)
     pricing = PricingEngine(alm, lista_id=meta.lista_precios_id)   # COMPARTIDO al generar el cuadro
     pricing.precargar((r.apu_codigo, r.shift) for r in rows
                       if r.apu_codigo and r.seq not in snaps)

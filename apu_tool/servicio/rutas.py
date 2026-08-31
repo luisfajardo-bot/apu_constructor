@@ -285,6 +285,21 @@ def revisar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
                              headers={"Cache-Control": "no-cache"})
 
 
+@router.post("/corridas/{cid}/componer/{seq}")
+def componer_item(cid: int, seq: int, alm: Almacen = Depends(get_almacen),
+                  _: object = Depends(requiere_rol("editor"))):
+    """Propone una composición para una fila sin APU. No crea nada en la biblioteca."""
+    try:
+        d = svc.componer_item(alm, cid, seq)
+    except svc.IANoDisponible as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if d is None:
+        raise HTTPException(status_code=404, detail="Ítem no encontrado.")
+    return d
+
+
 @router.get("/corridas/{cid}/items/{seq}")
 def get_item(cid: int, seq: int, alm: Almacen = Depends(get_almacen),
             _: object = Depends(requiere_rol("consulta"))):

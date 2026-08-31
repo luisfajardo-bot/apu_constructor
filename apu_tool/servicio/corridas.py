@@ -35,6 +35,26 @@ class CorridaCongelada(Exception):
         self.corrida_id = corrida_id
 
 
+class FilasSinApu(RuntimeError):
+    """La corrida tiene líneas sin APU asignado: no se congela ni se emite cuadro.
+
+    Un cuadro con líneas sin APU se ve completo y no lo está: las filas van en $0 y
+    quien lo recibe no tiene forma de saber que le faltan actividades. Se traba la
+    puerta y se dice exactamente qué seq faltan.
+    """
+    def __init__(self, corrida_id: int, seqs: list[int]):
+        self.corrida_id = corrida_id
+        self.seqs = seqs
+        super().__init__(
+            f"{len(seqs)} línea(s) sin APU asignado (ítems {', '.join(str(s) for s in seqs)}). "
+            f"Asígnalas antes de congelar o descargar el cuadro.")
+
+
+def seqs_sin_apu(rows) -> list[int]:
+    """Los seq de las filas que no tienen APU. Lista vacía = se puede cerrar."""
+    return [r.seq for r in rows if not r.apu_codigo]
+
+
 def _estructura(componentes) -> list[dict]:
     """Snapshot SIN dinero de una composición costeada (incluye tipo/ref_shift del componente)."""
     return [{"insumo_codigo": c.insumo_codigo, "insumo_nombre": c.insumo_nombre,
@@ -403,8 +423,11 @@ def congelar(alm: Almacen, corrida_id: int) -> Optional[dict]:
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:
         return None
-    pricing = PricingEngine(alm, lista_id=meta.lista_precios_id)   # COMPARTIDO al congelar
     _rows = alm.corridas.get_items(corrida_id)
+    faltan = seqs_sin_apu(_rows)
+    if faltan:
+        raise FilasSinApu(corrida_id, faltan)
+    pricing = PricingEngine(alm, lista_id=meta.lista_precios_id)   # COMPARTIDO al congelar
     pricing.precargar((r.apu_codigo, r.shift) for r in _rows if r.apu_codigo)
     for r in _rows:
         ens = _costear_row(alm, r, pricing)
@@ -577,6 +600,12 @@ def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:
         return None
+    # Chequeo propio, no basta con el de `congelar`: si la corrida ya está congelada
+    # con foto, la llamada a `congelar` de abajo se saltea, y una corrida congelada
+    # ANTES de este candado sí puede traer filas sin APU.
+    faltan = seqs_sin_apu(alm.corridas.get_items(corrida_id))
+    if faltan:
+        raise FilasSinApu(corrida_id, faltan)
     config.ensure_dirs()
     snaps = alm.corridas.get_snapshots(corrida_id)
     # Si ya está congelada y tiene snapshots, respeta la foto emitida (no recongela);

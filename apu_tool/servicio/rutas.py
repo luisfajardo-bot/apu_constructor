@@ -396,7 +396,11 @@ def borrar_lineas(cid: int, body: BorrarLineasIn,
 @router.post("/corridas/{cid}/congelar")
 def congelar(cid: int, alm: Almacen = Depends(get_almacen),
              _: object = Depends(requiere_rol("consulta"))):
-    v = svc.congelar(alm, cid)
+    try:
+        v = svc.congelar(alm, cid)
+    except svc.FilasSinApu as e:
+        raise HTTPException(status_code=409,
+                            detail={"detail": str(e), "seqs": e.seqs})
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v
@@ -427,7 +431,14 @@ def renombrar(cid: int, body: RenombrarCorridaIn,
 @router.get("/corridas/{cid}/cuadro")
 def cuadro(cid: int, alm: Almacen = Depends(get_almacen),
           _: object = Depends(requiere_rol("consulta"))):
-    out = svc.generar_cuadro(alm, cid)
+    try:
+        out = svc.generar_cuadro(alm, cid)
+    except svc.FilasSinApu as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"detail": f"{e} Si está congelada, actívala, asígnalas y "
+                              f"vuelve a congelar.",
+                    "seqs": e.seqs})
     if out is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return FileResponse(str(out), filename=out.name, media_type=_XLSX)

@@ -158,3 +158,26 @@ test("en una corrida congelada con líneas sin APU, Activar NO se bloquea", asyn
   expect((screen.getByRole("button", { name: /^activar$/i }) as HTMLButtonElement).disabled)
     .toBe(false);
 });
+
+test("la caja de filtro de APU muestra \"(sin APU)\", no el centinela crudo", async () => {
+  const { getCorrida } = await import("@/api/corridas");
+  (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
+    ...CORRIDA,
+    items: SIN_APU_ITEMS,
+  });
+
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Actividad rara");
+
+  fireEvent.click(screen.getByText(/1 sin APU/));
+  const caja = screen.getByLabelText("Filtrar APU") as HTMLInputElement;
+  expect(caja.value).toBe("(sin APU)");
+
+  // Se sale del estado como de cualquier otro filtro: escribir encima lo
+  // reemplaza por un filtro de texto normal.
+  fireEvent.change(caja, { target: { value: "APU A" } });
+  expect((screen.getByLabelText("Filtrar APU") as HTMLInputElement).value).toBe("APU A");
+  expect(screen.getByText("Excavación")).toBeTruthy();
+  expect(screen.queryByText("Actividad rara")).toBeNull();
+});

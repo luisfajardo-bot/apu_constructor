@@ -1,4 +1,5 @@
 import { TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { SIN_APU } from "@/lib/corridaTabla";
 import type { ClaveColumna, ControlCorridaTabla, FiltroRango } from "@/lib/corridaTabla";
 import { etiquetaEstado } from "@/components/corrida/EstadoBadge";
 
@@ -26,6 +27,9 @@ const COLS: Col[] = [
   { clave: "margen_total", label: "Margen", tipo: "num", ancho: "w-28", derecha: true },
   { clave: "margen_pct", label: "%", tipo: "num", ancho: "w-16", derecha: true },
 ];
+
+const esCentinela = (clave: ClaveColumna, control: ControlCorridaTabla) =>
+  clave === "apu" && control.filtros.apu === SIN_APU;
 
 function Rango({ clave, label, control }: { clave: ClaveColumna; label: string; control: ControlCorridaTabla }) {
   const r = control.filtros[clave] as FiltroRango;
@@ -82,7 +86,13 @@ export default function CabeceraFiltros({
           <TableHead key={c.clave} className={`${c.ancho} py-1 align-top`}>
             {c.tipo === "texto" && (
               <input
-                className={inputCls} value={control.filtros[c.clave] as string}
+                className={inputCls}
+                // El filtro de APU puede llevar el centinela de "sin APU" (lo pone el
+                // contador rojo de la corrida). En la caja se muestra legible, no crudo;
+                // y al enfocarla se selecciona todo, para que escribir encima lo
+                // reemplace de una por un filtro de texto normal.
+                value={esCentinela(c.clave, control) ? "(sin APU)" : (control.filtros[c.clave] as string)}
+                onFocus={(e) => { if (esCentinela(c.clave, control)) e.currentTarget.select(); }}
                 aria-label={`Filtrar ${c.label}`} placeholder="contiene…"
                 onChange={(e) => control.setFiltro(c.clave, e.target.value)}
               />

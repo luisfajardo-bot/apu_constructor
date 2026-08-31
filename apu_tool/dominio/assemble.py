@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from apu_tool import config
 from apu_tool.dominio.ai_assist import ApuAdvisor, ComposeResult
 from apu_tool.dominio.compose import InsumoRetriever
 from apu_tool.datos.almacen import Almacen
@@ -88,27 +87,25 @@ class Assembler:
                                MatchStatus.AUTO, result.confianza,
                                result.explicacion)
 
-        # Dudoso o nuevo: SIN IA. El mejor candidato por encima del piso de revisión
-        # se asigna marcado REVIEW; por debajo del piso la fila queda sin APU, en $0
-        # y con alerta. La IA ya no decide acá: audita después (dominio/revision.py).
+        # Dudoso o nuevo: SIN IA. El estado, la confianza y el motivo ya los decidió
+        # `Matcher.match` con los mismos umbrales — acá NO se re-derivan, o el día que
+        # alguien mueva MATCH_REVIEW los dos módulos dirán cosas distintas.
+        # La IA ya no decide acá: audita después (dominio/revision.py), proponiendo.
         # Un 25% de parecido de nombre producía un APU con pinta de autoritativo —
         # caso real de 2026-08-04: una "Localización y replanteo" costeada como
         # PEDESTAL DE CONCRETO, 2010 veces el costo correcto.
-        mejor = result.candidatos[0] if result.candidatos else None
-        if mejor is not None and mejor.score >= config.MATCH_REVIEW:
-            return self._build(item, mejor.apu_codigo, item.shift, MatchStatus.REVIEW,
-                               mejor.score,
-                               f"Mejor similaridad de nombre ({mejor.score:.0%}). "
-                               f"Sin confirmar.")
-        peor = f"{mejor.score:.0%}" if mejor is not None else "sin candidatos"
+        if result.status == MatchStatus.REVIEW and result.candidatos:
+            return self._build(item, result.candidatos[0].apu_codigo, item.shift,
+                               MatchStatus.REVIEW, result.confianza, result.explicacion)
         return AssembledApu(
             item=item, apu_codigo=None, apu_nombre="(sin base — armar manual)",
             unidad=item.unidad, shift=item.shift, componentes=[],
             costo_unitario=0.0, status=MatchStatus.NEW,
-            confianza=mejor.score if mejor is not None else 0.0, origen="manual",
-            explicacion=(f"Mejor coincidencia {peor}, por debajo del mínimo de "
-                         f"{config.MATCH_REVIEW:.0%} para asignar un APU. "
-                         f"Elige uno de los candidatos o ármalo a mano."),
+            confianza=result.confianza, origen="manual",
+            explicacion=(f"{result.explicacion} Elige uno de los candidatos o ármalo "
+                         f"a mano." if result.candidatos else
+                         f"{result.explicacion} Ármalo a mano o agrega el APU a la "
+                         f"biblioteca."),
         )
 
     def reassemble_with_choice(self, item: LicitacionItem, apu_codigo: str,

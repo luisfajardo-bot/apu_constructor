@@ -139,6 +139,6 @@ class Matcher:
         return MatchResult(
             item=item, status=MatchStatus.NEW, candidatos=cands,
             confianza=best.score,
-            explicacion=f"Sin coincidencia fuerte (mejor {best.score:.0%}). "
-                        f"Armar por analogía o manual.",
+            explicacion=f"Sin coincidencia fuerte (mejor {best.score:.0%}, por debajo "
+                        f"del mínimo de {config.MATCH_REVIEW:.0%} para asignar un APU).",
         )

@@ -93,3 +93,4 @@ def test_no_ai_keeps_manual(alm):
     assert a.status in (MatchStatus.NEW, MatchStatus.REVIEW)
     if a.status == MatchStatus.NEW:
         assert a.origen == "manual"
+    assert a.origen != "generado"

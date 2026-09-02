@@ -25,6 +25,15 @@ vi.mock("@/api/corridas", () => ({
     id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
     totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
   })),
+  componerItem: vi.fn(async () => ({
+    seq: 0, nombre: "SARDINEL A-10", unidad: "ML", shift: "DIURNO",
+    justificacion: "Nada parecido en la biblioteca; se compone desde A-80.",
+    confianza: 0.6,
+    componentes: [
+      { insumo_codigo: "1105", insumo_nombre: "CONCRETO 3000 PSI",
+        unidad: "M3", rendimiento: 0.045 },
+    ],
+  })),
 }));
 vi.mock("@/api/autoria", () => ({
   listarApus: vi.fn(async () => ({
@@ -44,6 +53,7 @@ vi.mock("@/api/autoria", () => ({
   crearApu: vi.fn(async () => ({})),
   editarApu: vi.fn(async () => ({})),
   getGruposApu: vi.fn(async () => ["PAVIMENTOS", "REDES DE ACUEDUCTO"]),
+  conflictoApu: vi.fn(async () => ({ campo: null, motivo: null })),
 }));
 vi.mock("@/api/insumos", () => ({
   listarInsumos: vi.fn(async () => ({ items: [], total: 0, limit: 15, offset: 0 })),
@@ -683,4 +693,107 @@ test("filtra por el desplegable de Veredicto", () => {
   expect(screen.queryByText("Alfa")).toBeNull();
   expect(screen.getByText("Beta")).toBeTruthy();
   expect(screen.queryByText("Gama")).toBeNull();
+});
+
+// ─── Componer un APU con IA a pedido (dictamen `sin_apu`) ────────────────────
+// La IA dictaminó que la biblioteca no tiene nada adecuado. El botón abre una
+// PROPUESTA; crear el APU sigue siendo el alta de siempre, y la hace el usuario.
+
+/** Veredicto `sin_apu`: el único que ofrece Componer. */
+const VEREDICTO_SIN_APU = {
+  seq: 0, dictamen: "sin_apu", apu_sugerido: null, turno_sugerido: null,
+  confianza: 0.8, justificacion: "No hay sardineles A-10.", nivel: "profundo",
+};
+
+test("con dictamen sin_apu y rol editor aparece Componer", () => {
+  render(
+    <TablaItems corridaId={1} items={[{ ...ITEM, revision: VEREDICTO_SIN_APU }]}
+      onConfirmado={() => {}} puedeEditar />,
+  );
+  expect(screen.getByRole("button", { name: /^Componer$/ })).toBeTruthy();
+});
+
+test("los demás dictámenes no ofrecen Componer", () => {
+  const items = [
+    { ...ITEM, seq: 0, descripcion: "Alfa", revision: veredicto(0, "ok") },
+    { ...ITEM, seq: 1, descripcion: "Beta", revision: veredicto(1, "cambiar") },
+    { ...ITEM, seq: 2, descripcion: "Gama", revision: veredicto(2, "dudoso") },
+  ];
+  render(<TablaItems corridaId={1} items={items} onConfirmado={() => {}} puedeEditar />);
+  expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
+});
+
+test("sin rol editor no aparece Componer", () => {
+  render(
+    <TablaItems corridaId={1} items={[{ ...ITEM, revision: VEREDICTO_SIN_APU }]}
+      onConfirmado={() => {}} />,
+  );
+  expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
+});
+
+test("en corrida congelada no aparece Componer", () => {
+  render(
+    <TablaItems corridaId={1} items={[{ ...ITEM, revision: VEREDICTO_SIN_APU }]}
+      onConfirmado={() => {}} puedeEditar readOnly />,
+  );
+  expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
+});
+
+test("Componer le pide a la IA la propuesta de ESA fila", async () => {
+  const { componerItem } = await import("@/api/corridas");
+  vi.mocked(componerItem).mockClear();
+  const items = [
+    { ...ITEM, seq: 0, descripcion: "Alfa", revision: veredicto(0, "ok") },
+    { ...ITEM, seq: 5, item: "2", descripcion: "SARDINEL A-10",
+      revision: { ...VEREDICTO_SIN_APU, seq: 5 } },
+  ];
+  render(<TablaItems corridaId={1} items={items} onConfirmado={() => {}} puedeEditar />);
+  fireEvent.click(screen.getByRole("button", { name: /^Componer$/ }));
+  await waitFor(() => expect(componerItem).toHaveBeenCalledWith(1, 5));
+  expect(await screen.findByText(/nada parecido en la biblioteca/i)).toBeTruthy();
+});
+
+test("un doble clic en Componer no le pide dos propuestas a la IA", async () => {
+  const { componerItem } = await import("@/api/corridas");
+  vi.mocked(componerItem).mockClear();
+  render(
+    <TablaItems corridaId={1} items={[{ ...ITEM, revision: VEREDICTO_SIN_APU }]}
+      onConfirmado={() => {}} puedeEditar />,
+  );
+  const boton = screen.getByRole("button", { name: /^Componer$/ });
+  fireEvent.click(boton);
+  fireEvent.click(boton);
+  await waitFor(() => expect(componerItem).toHaveBeenCalledTimes(1));
+});
+
+test("al crear el APU desde la propuesta, queda asignado a la fila", async () => {
+  const { aplicarSugerencias } = await import("@/api/corridas");
+  const { crearApu } = await import("@/api/autoria");
+  vi.mocked(aplicarSugerencias).mockClear();
+  vi.mocked(crearApu).mockClear();
+  const onConfirmado = vi.fn();
+  render(
+    <TablaItems corridaId={1} items={[{ ...ITEM, seq: 5, revision: { ...VEREDICTO_SIN_APU, seq: 5 } }]}
+      onConfirmado={onConfirmado} puedeEditar />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /^Componer$/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Crear APU con esto/i }));
+  // El alta arranca precargada con la propuesta; el usuario pone identidad y grupo.
+  expect(await screen.findByDisplayValue("SARDINEL A-10")).toBeTruthy();
+  expect(screen.getByDisplayValue("0.045")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/código/i), { target: { value: "9001" } });
+  fireEvent.change(screen.getByLabelText(/grupo/i, { selector: "select" }),
+                   { target: { value: "PAVIMENTOS" } });
+  await waitFor(() =>
+    expect((screen.getByRole("button", { name: /^Crear APU$/ }) as HTMLButtonElement).disabled)
+      .toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: /^Crear APU$/ }));
+  await waitFor(() => expect(crearApu).toHaveBeenCalled());
+  // Creado por el usuario y recién ahí asignado a la fila, con la corrida
+  // recosteada propagada por el mismo callback de siempre.
+  await waitFor(() =>
+    expect(aplicarSugerencias).toHaveBeenCalledWith(1, [
+      { seq: 5, apu_codigo: "9001", shift: "DIURNO" },
+    ]));
+  await waitFor(() => expect(onConfirmado).toHaveBeenCalled());
 });

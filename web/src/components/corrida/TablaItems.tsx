@@ -14,6 +14,7 @@ import SubApuBadge from "@/components/SubApuBadge";
 import BuscadorApu from "@/components/corrida/BuscadorApu";
 import CabeceraFiltros from "@/components/corrida/CabeceraFiltros";
 import { DialogoAgregarApu } from "@/components/autoria/DialogoAgregarApu";
+import DialogoComposicion from "@/components/corrida/DialogoComposicion";
 import { cop, pct } from "@/lib/moneda";
 import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
 import {
@@ -66,6 +67,9 @@ export default function TablaItems({
   // más reciente vive en un ref.
   const [cargandoDuplicar, setCargandoDuplicar] = useState<number | null>(null);
   const ultimoPedidoDuplicarRef = useRef<number | null>(null);
+  // Fila para la que se le está pidiendo a la IA una composición (dictamen
+  // `sin_apu`). Es una sola: el diálogo es modal, así que no hay dos en vuelo.
+  const [componer, setComponer] = useState<ItemCuadro | null>(null);
 
   // Selección para las acciones en lote. Guarda seqs, no índices: la tabla se
   // reordena y se filtra, y un índice dejaría de apuntar a la misma fila.
@@ -176,24 +180,49 @@ export default function TablaItems({
   // `seq` de la fila cuya sugerencia de la IA se está aplicando (null = ninguna).
   const [aplicandoIA, setAplicandoIA] = useState<number | null>(null);
 
+  /** Asigna un APU a UNA fila y propaga la corrida recosteada. Devuelve si salió
+   *  bien: el llamador que ACABA de crear el APU necesita decir algo más si el
+   *  APU quedó creado pero sin asignar. */
+  async function asignarA(
+    it: ItemCuadro, codigo: string, turno?: string | null,
+  ): Promise<boolean> {
+    setAplicandoIA(it.seq);
+    try {
+      const actualizada = await aplicarSugerencias(corridaId, [{
+        seq: it.seq,
+        apu_codigo: codigo,
+        ...(turno ? { shift: turno } : {}),
+      }]);
+      onConfirmado(actualizada);
+      toast.success(`${codigo} asignado al ítem ${it.item}`);
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo aplicar la sugerencia.");
+      return false;
+    } finally {
+      setAplicandoIA(null);
+    }
+  }
+
   /** Aplica el APU que sugirió la IA para ESA fila. La IA propone; acá aplica el
    *  usuario. Reusa el mismo callback de recosteo que la reasignación normal. */
   async function aplicarSugerencia(it: ItemCuadro) {
     const v = it.revision;
     if (!v || v.dictamen !== "cambiar" || !v.apu_sugerido) return;
-    setAplicandoIA(it.seq);
-    try {
-      const actualizada = await aplicarSugerencias(corridaId, [{
-        seq: it.seq,
-        apu_codigo: v.apu_sugerido,
-        ...(v.turno_sugerido ? { shift: v.turno_sugerido } : {}),
-      }]);
-      onConfirmado(actualizada);
-      toast.success(`${v.apu_sugerido} asignado al ítem ${it.item}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "No se pudo aplicar la sugerencia.");
-    } finally {
-      setAplicandoIA(null);
+    await asignarA(it, v.apu_sugerido, v.turno_sugerido);
+  }
+
+  /** El usuario creó un APU a partir de la propuesta de la IA: se le asigna a la
+   *  fila que lo pidió. El APU YA existe (lo creó el alta, con su propio toast);
+   *  si la asignación falla hay que decirlo, el silencio haría pensar que no pasó
+   *  nada. */
+  async function apuCompuesto(it: ItemCuadro, codigo: string, turno: string) {
+    setComponer(null);
+    const ok = await asignarA(it, codigo, turno);
+    if (!ok) {
+      toast.error(
+        `APU ${codigo} creado; no se pudo asignar al ítem — asignalo con Cambiar APU.`,
+      );
     }
   }
 
@@ -419,6 +448,7 @@ export default function TablaItems({
                         aplicando={aplicandoIA === it.seq}
                         bloqueado={aplicandoIA !== null}
                         onAplicar={() => aplicarSugerencia(it)}
+                        onComponer={() => setComponer(it)}
                       />
                     </TableCell>
                   )}
@@ -522,6 +552,18 @@ export default function TablaItems({
           inicial={duplicar.origen}
         />
       )}
+
+      {componer && (
+        <DialogoComposicion
+          key={`comp-${componer.seq}`}
+          open
+          corridaId={corridaId}
+          seq={componer.seq}
+          descripcion={componer.descripcion}
+          onOpenChange={(v) => { if (!v) setComponer(null); }}
+          onCreado={(codigo, turno) => apuCompuesto(componer, codigo, turno)}
+        />
+      )}
     </div>
   );
 }
@@ -531,16 +573,22 @@ export default function TablaItems({
 // (nunca por "hay apu_sugerido"): que el backend solo deje sobrevivir un código
 // con dictamen `cambiar` es garantía suya, no algo de lo que dependa la interfaz.
 
-function CeldaVeredicto({ item, puedeAplicar, aplicando, bloqueado, onAplicar }: {
+function CeldaVeredicto({
+  item, puedeAplicar, aplicando, bloqueado, onAplicar, onComponer,
+}: {
   item: ItemCuadro;
   puedeAplicar: boolean;
   aplicando: boolean;
   bloqueado: boolean;
   onAplicar: () => void;
+  onComponer: () => void;
 }) {
   const v = item.revision;
   if (!v) return <span className="text-muted-foreground">&mdash;</span>;
   const ofreceAplicar = puedeAplicar && v.dictamen === "cambiar" && !!v.apu_sugerido;
+  // `sin_apu` = la IA concluyó que la biblioteca no tiene nada adecuado. Recién ahí
+  // se ofrece la composición generativa, y solo porque la pide una persona.
+  const ofreceComponer = puedeAplicar && v.dictamen === "sin_apu";
   return (
     <span className="inline-flex items-center gap-1">
       <span
@@ -558,6 +606,17 @@ function CeldaVeredicto({ item, puedeAplicar, aplicando, bloqueado, onAplicar }:
           onClick={onAplicar}
         >
           {aplicando ? "Aplicando…" : "Aplicar"}
+        </Button>
+      )}
+      {ofreceComponer && (
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={bloqueado}
+          title="Pedirle a la IA una composición para esta actividad (no crea nada)"
+          onClick={onComponer}
+        >
+          Componer
         </Button>
       )}
     </span>

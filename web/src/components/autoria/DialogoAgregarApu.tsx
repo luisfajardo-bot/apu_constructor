@@ -127,9 +127,13 @@ export function DialogoAgregarApu({
   const [grupos, setGrupos] = useState<string[]>([]);
   const [conflicto, setConflicto] = useState<ConflictoAlta | null>(null);
 
+  // Precarga la cabecera y la composición desde `inicial`. Corre en los tres modos:
+  // editar y duplicar traen un APU de la biblioteca, y `crear` la usa para arrancar
+  // de una propuesta de la IA (ver DialogoComposicion) — ahí `codigo` y `grupo`
+  // vienen vacíos a propósito, para que los elija el usuario. Sin `inicial` (el
+  // caso normal de crear) no hace nada.
   useEffect(() => {
     if (!open || !inicial) return;
-    if (modo !== "editar" && modo !== "duplicar") return;
     const duplicando = modo === "duplicar";
     codigoTocadoRef.current = false;
     setCab({

@@ -22,6 +22,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 50 plane
 ## Otros
 
 - [[Otros/estado-agregar-lineas-corrida|Estado — agregar líneas a una corrida activa]]
+- [[Otros/estado-ia-revisora|Estado — la IA pasa de armar a revisar]]
 - [[Otros/estado-login-google|Dónde quedó el login con Google]]
 - [[Otros/listas-precios-np|Listas de precios y APUs de No Previstos (NP)]]
 - [[Otros/smoke-test-listas-np|Smoke test — Listas de precios / APUs de No Previstos (NP)]]

@@ -40,8 +40,11 @@ python run_gui.py           # interfaz tkinter
 python -m pytest tests/ -q  # pruebas
 ```
 
-La IA se activa solo si existe `ANTHROPIC_API_KEY`; sin ella se usa un fallback
-determinístico y todo corre igual. Modelo por defecto: `claude-sonnet-5`
+La IA se activa solo si existe `ANTHROPIC_API_KEY`. **El armado nunca la usa**: es
+determinístico y corre igual. Sin la llave lo que no hay es revisión ni composición a
+pedido (el botón queda deshabilitado; el endpoint responde 503) — y no hay fallback
+determinístico para la revisión a propósito: sería el matcher auditándose a sí mismo.
+Modelo por defecto: `claude-sonnet-5`
 (`apu_tool/config.py::AI_MODEL`, se cambia con la env `APU_AI_MODEL`). Si lo
 cambias, el modelo debe soportar pensamiento adaptativo, `effort` y salida
 estructurada: es lo que pide `dominio/ai_assist.py`.
@@ -50,11 +53,12 @@ estructurada: es lo que pide `dominio/ai_assist.py`.
 
 ```
 Excel histórico ──seed──► SQLite/Postgres (precios, apus, corridas, perfiles, auditoría)
-lista licitación ──► matching ──► IA acotada (sin dinero) ──► confirma usuario
-                                       └─► motor de precios ──► cuadro resumen (Excel)
+lista licitación ──► matching determinístico ──► confirma usuario ──► motor de precios
+                                                          └─► cuadro resumen (Excel)
+corrida armada ──► revisión con IA (sin dinero) ──► propone veredicto ──► confirma usuario
 
 Interfaces sobre el mismo pipeline (dominio/pipeline.py):
-  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 50 endpoints) + web/ (React) para multiusuario
+  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, ENDPOINTS endpoints) + web/ (React) para multiusuario
 ```
 
 `apu_tool/config.py` es transversal, fuera de cualquier paquete: rutas, umbrales de
@@ -96,7 +100,8 @@ matching, modelo de IA, clasificación de precios.
 | `cruce.py`               | cruce insumo-de-APU ↔ insumo-de-catálogo por código+nombre |
 | `compose.py`             | candidatos de insumos para composición generativa |
 | `privacy.py`             | frontera de precios para la IA (invariante #1) |
-| `ai_assist.py`           | IA acotada (Anthropic SDK) + fallback determinístico |
+| `ai_assist.py`           | IA acotada (Anthropic SDK): compone un APU a pedido |
+| `revision.py`            | revisión con IA de una corrida ya armada (propone, no aplica) |
 | `assemble.py`            | orquestador por ítem |
 | `pricing.py`             | motor de costos (**ÚNICO** que ve dinero) |
 | `alertas.py`             | alertas de costeo (por qué un ítem necesita revisión) |
@@ -116,8 +121,9 @@ matching, modelo de IA, clasificación de precios.
 | `auth.py`              | autenticación (Supabase Auth) + autorización por rol |
 | `limites.py`           | límite de tamaño de subida + rate limiting |
 | `seguridad_headers.py` | middleware de headers de seguridad (HSTS, CSP, etc.) |
-| `corridas.py`          | lógica de servicio de corridas (armado en vivo) |
+| `corridas.py`          | lógica de servicio de corridas (armado en vivo, revisión con IA, componer) |
 | `insumos.py`           | lógica de servicio para editar insumos |
+| `insumos_ocultos.py`   | insumos ocultos: eco de un APU, sin uso real (no se borran) |
 | `listas.py`            | listas de precios (tarifas): Principal + una por obra de NP |
 | `autoria.py`           | alta de insumos/APUs nuevos |
 | `subapus.py`           | migración: marca componentes que son sub-APU |
@@ -172,6 +178,11 @@ matching, modelo de IA, clasificación de precios.
   costea con el histórico pero con alerta (`sin_precio_catalogo`) — antes era un
   underbid silencioso. API: `GET/POST /api/listas-precios`, `PATCH
   /api/listas-precios/{id}` (sin DELETE, a propósito).
+- **Veredicto de la revisión.** El dictamen por fila se guarda en
+  `corrida_item.revision_json` (los dos backends) y se **borra solo** cuando la fila cambia
+  de APU: `corridas.actualizar_eleccion` escribe `revision_json=NULL` y es el único punto
+  de paso de un cambio de APU en una fila. Un veredicto sobre el APU anterior no dice nada
+  del nuevo. Es caché, no verdad: se puede volver a revisar cuando sea.
 - **Salidas:** `salidas/` (cuadros) y `ejemplos/` (licitaciones de ejemplo).
 - Fuentes de precio: `PRECIO IDU` se trata como **público**; el resto
   (`COSTO INTERNO`, `COMPRAS…`, etc.) como **interno/confidencial**
@@ -184,7 +195,13 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
 
 ## No hacer
 
-- No le pases dinero a la IA (invariante #1).
+- No le pases dinero a la IA (invariante #1). Ojo: `assert_no_money` mira **nombres de
+  clave**, no valores, así que nunca metas en un payload texto generado por el motor de
+  costos (alertas, explicaciones del pricing) — ahí el monto viaja dentro del string.
+- No metas la IA en el armado. Arma el programa; la IA audita después
+  (`dominio/revision.py`) y siempre propone: aplicar es del usuario.
+- No emitas un cuadro con filas sin APU: el candado de `congelar`/`generar_cuadro` está
+  para eso, no lo esquives.
 - No edites el Excel fuente ni borres `data/`, `salidas/`, `ejemplos/`.
 - No dupliques lógica de orquestación: reúsala desde `pipeline.py`.
 - No hagas que una lista que no sea Principal caiga al precio histórico ni al de

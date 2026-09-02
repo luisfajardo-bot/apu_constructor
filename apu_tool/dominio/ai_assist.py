@@ -1,19 +1,23 @@
 ﻿"""
-Capa de IA acotada para decidir la ESTRUCTURA de los APUs.
+Capa de IA acotada para COMPONER la estructura de un APU, a pedido.
 
-Qué hace la IA:
-  - Para ítems dudosos o nuevos, elige cuál APU del histórico es el más adecuado
-    como base (por afinidad técnica de la actividad y de sus insumos), con un nivel
-    de confianza y una justificación corta.
+Qué hace la IA acá:
+  - Para una actividad sin APU adecuado en la biblioteca, y SOLO cuando el usuario
+    lo pide explícitamente (`Assembler.generar_composicion`, endpoint de componer),
+    propone una composición: qué insumos y con qué rendimiento. Es una PROPUESTA;
+    se confirma por el alta normal de APUs, nadie la costea a espaldas del usuario.
 
 Qué NO hace la IA:
+  - No participa del armado de corridas. El armado es determinístico (assemble.py):
+    elige entre los APUs del histórico o deja la fila SIN APU, nunca inventa.
   - No ve precios, costos ni totales (ver privacy.py). Recibe únicamente
     actividades, insumos, unidades y rendimientos.
-  - No calcula dinero. El costo lo arma el motor determinístico (pricing.py) a
-    partir del APU que la IA eligió.
+  - No calcula dinero. El costo lo arma el motor determinístico (pricing.py).
 
-Si no hay credenciales (ANTHROPIC_API_KEY) o falla la llamada, se usa un fallback
-determinístico basado en el matcher. El programa nunca depende de la IA para correr.
+La auditoría de una corrida YA armada vive aparte, en `dominio/revision.py`.
+
+Sin credenciales (ANTHROPIC_API_KEY) `compose_apu` devuelve None y el ítem queda
+manual: el programa nunca depende de la IA para correr.
 """
 from __future__ import annotations
 
@@ -24,42 +28,7 @@ from typing import Optional
 from apu_tool import config
 from apu_tool.dominio import privacy
 from apu_tool.dominio.compose import CandidateInsumo, candidate_insumo_to_dict
-from apu_tool.nucleo.models import DePricedApu, LicitacionItem, MatchCandidate
-
-_SYSTEM_PROMPT = """\
-Eres un ingeniero de costos de obra civil. Te dan una ACTIVIDAD de una licitación y
-una lista de APUs candidatos del histórico de la empresa (cada uno con su unidad y su
-composición de insumos con rendimientos). Tu tarea es elegir cuál APU candidato es la
-mejor base para armar el APU de la actividad, por afinidad técnica.
-
-Reglas:
-- Decides SOLO con base en la actividad, las unidades, los insumos y los rendimientos.
-- NUNCA recibirás precios ni costos, y no debes inventarlos ni pedirlos.
-- Si ningún candidato es razonable, devuelve apu_codigo = null.
-- Prefiere coincidencia de unidad y de tipo de trabajo (excavación, concreto, etc.).
-
-Responde EXCLUSIVAMENTE con un JSON válido con este esquema:
-{"apu_codigo": <string|null>, "confianza": <number 0..1>, "justificacion": <string corto>}
-"""
-
-_RESPONSE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "apu_codigo": {"type": ["string", "null"]},
-        "confianza": {"type": "number"},
-        "justificacion": {"type": "string"},
-    },
-    "required": ["apu_codigo", "confianza", "justificacion"],
-    "additionalProperties": False,
-}
-
-
-@dataclass
-class AIDecision:
-    apu_codigo: Optional[str]
-    confianza: float
-    justificacion: str
-    fuente: str  # "ia" o "deterministico"
+from apu_tool.nucleo.models import DePricedApu, LicitacionItem
 
 
 @dataclass
@@ -120,7 +89,7 @@ _COMPOSE_SCHEMA = {
 
 
 class ApuAdvisor:
-    """Fachada sobre la IA con fallback determinístico."""
+    """Fachada sobre la IA. Sin credenciales, `compose_apu` devuelve None."""
 
     def __init__(self, enabled: Optional[bool] = None, model: str = config.AI_MODEL):
         self.model = model
@@ -131,27 +100,7 @@ class ApuAdvisor:
                 import anthropic
                 self._client = anthropic.Anthropic()
             except Exception:
-                self.enabled = False  # sin SDK -> fallback
-
-    # ------------------------------------------------------------------ API
-    def choose_apu(
-        self,
-        item: LicitacionItem,
-        candidatos: list[MatchCandidate],
-        depriced_apus: dict[str, DePricedApu],
-    ) -> AIDecision:
-        """Elige el mejor APU base. `depriced_apus` mapea codigo -> composición SIN dinero."""
-        if not candidatos:
-            return AIDecision(None, 0.0, "Sin candidatos.", "deterministico")
-
-        if self.enabled and self._client is not None:
-            try:
-                return self._choose_with_ai(item, candidatos, depriced_apus)
-            except Exception as exc:  # cualquier fallo -> fallback, nunca rompe
-                dec = self._choose_deterministic(candidatos)
-                dec.justificacion += f" (IA no disponible: {type(exc).__name__})"
-                return dec
-        return self._choose_deterministic(candidatos)
+                self.enabled = False  # sin SDK -> compose_apu devuelve None
 
     def compose_apu(
         self,
@@ -204,80 +153,4 @@ class ApuAdvisor:
             componentes=comps,
             justificacion=str(data.get("justificacion", "")).strip(),
             confianza=float(data.get("confianza", 0.0)),
-        )
-
-    # --------------------------------------------------------------- interno
-    def _choose_deterministic(self, candidatos: list[MatchCandidate]) -> AIDecision:
-        best = candidatos[0]
-        # PISO: por debajo de MATCH_REVIEW el "mejor" candidato es ruido, no una
-        # elección. Devolvía candidatos[0] sin mirar umbral, así que un 25% de
-        # parecido de nombre producía un APU asignado y un precio de seis cifras con
-        # pinta de autoritativo. Caso real de producción (2026-08-04): una
-        # "Localización y replanteo" quedó costeada como PEDESTAL DE CONCRETO —
-        # 2010 veces el costo correcto, y el margen etiquetado "0.0%".
-        #
-        # Con apu_codigo=None, assemble_item intenta la composición generativa y, si
-        # no hay IA, marca el ítem como manual en $0 CON alerta. Los candidatos se
-        # siguen guardando aparte (corridas.py), así que la lista con "Elegir" sigue
-        # ahí: no deja al usuario sin salida, le pide la decisión que no se puede
-        # tomar sola. Mejor un $0 con alerta que un número inventado.
-        #
-        # El piso NO se aplica a _choose_with_ai a propósito: la IA sí ve la
-        # composición de cada candidato (insumos, rendimientos, unidad), así que
-        # puede elegir con criterio uno cuyo nombre puntúe bajo. Filtrarla por
-        # similaridad de nombre la reduciría a un matcher fuzzy con más pasos.
-        if best.score < config.MATCH_REVIEW:
-            return AIDecision(
-                apu_codigo=None, confianza=best.score,
-                justificacion=(
-                    f"Mejor coincidencia {best.score:.0%}, por debajo del mínimo de "
-                    f"{config.MATCH_REVIEW:.0%} para asignar un APU. "
-                    f"Elige uno de los candidatos o ármalo a mano."
-                ),
-                fuente="deterministico",
-            )
-        return AIDecision(
-            apu_codigo=best.apu_codigo, confianza=best.score,
-            justificacion=f"Mejor similaridad de nombre ({best.score:.0%}).",
-            fuente="deterministico",
-        )
-
-    def _choose_with_ai(
-        self,
-        item: LicitacionItem,
-        candidatos: list[MatchCandidate],
-        depriced_apus: dict[str, DePricedApu],
-    ) -> AIDecision:
-        payload = {
-            "actividad": privacy.licitacion_item_to_dict(item),
-            "candidatos": [
-                privacy.depriced_apu_to_dict(depriced_apus[c.apu_codigo])
-                for c in candidatos
-                if c.apu_codigo in depriced_apus
-            ],
-        }
-        # Verificación dura: si esto contuviera dinero, lanza PrivacyViolation.
-        user_content = privacy.safe_json(payload)
-
-        resp = self._client.messages.create(
-            model=self.model,
-            # Techo, no gasto: el pensamiento adaptativo comparte este límite con
-            # el JSON de respuesta.
-            max_tokens=16000,
-            system=_SYSTEM_PROMPT,
-            thinking={"type": "adaptive"},
-            output_config={
-                "effort": "medium",
-                "format": {"type": "json_schema", "schema": _RESPONSE_SCHEMA},
-            },
-            messages=[{"role": "user", "content": user_content}],
-        )
-        text = next((b.text for b in resp.content if b.type == "text"), "{}")
-        data = json.loads(text)
-        cod = data.get("apu_codigo")
-        return AIDecision(
-            apu_codigo=str(cod) if cod else None,
-            confianza=float(data.get("confianza", 0.0)),
-            justificacion=str(data.get("justificacion", "")).strip(),
-            fuente="ia",
         )

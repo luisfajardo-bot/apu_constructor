@@ -3,8 +3,9 @@ Matcher determinístico de actividades contra el catálogo de APUs.
 
 No usa IA ni dinero: compara la descripción de cada ítem de licitación contra los
 nombres de los APUs históricos, filtrando por turno. Devuelve candidatos
-ordenados por similaridad. La decisión sobre los dudosos la toma luego la IA o el
-usuario (ver assemble.py).
+ordenados por similaridad. La decisión sobre los dudosos la toma el usuario (ver
+assemble.py); la IA solo audita después, sobre la corrida ya armada
+(ver revision.py), y lo que emite es una propuesta.
 
 Algoritmo: normalización + combinación de similaridad de secuencia (difflib) y de
 tokens (Jaccard). Vive en `nucleo/relevancia.py` (lo comparte la búsqueda por

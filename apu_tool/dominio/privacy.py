@@ -6,13 +6,13 @@ costos internos, totales). Solo puede ver actividades, insumos, unidades y
 rendimientos para decidir la ESTRUCTURA de los APUs.
 
 Este módulo construye los payloads que se envían a la IA y verifica, de forma
-programática, que no contengan ningún número que pueda ser dinero. Si algo se
-filtra, `assert_no_money` levanta una excepción: preferimos fallar a filtrar.
+programática, que no traigan ninguna clave monetaria. Si algo se filtra,
+`assert_no_money` levanta una excepción: preferimos fallar a filtrar. El chequeo
+es por nombre de clave, NO por valor — ver la limitación en su docstring.
 """
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from apu_tool.nucleo.models import DePricedApu, DePricedComponent, LicitacionItem
@@ -24,9 +24,6 @@ _FORBIDDEN_KEYS = {
     "valor_total", "margen", "price", "cost", "amount", "total",
     "fuente_precio",
 }
-
-# Claves que SÍ son cantidades (no dinero) y por tanto se permiten.
-_ALLOWED_NUMERIC_KEYS = {"rendimiento", "cantidad", "seq", "score", "confianza"}
 
 
 def depriced_component_to_dict(c: DePricedComponent) -> dict[str, Any]:
@@ -64,7 +61,17 @@ def licitacion_item_to_dict(item: LicitacionItem) -> dict[str, Any]:
 def assert_no_money(payload: Any) -> None:
     """Valida recursivamente que `payload` no contenga campos monetarios.
 
-    Levanta PrivacyViolation si encuentra una clave prohibida con valor.
+    Levanta PrivacyViolation si encuentra una clave de `_FORBIDDEN_KEYS`.
+
+    LIMITACIÓN REAL, léela antes de agregar un payload nuevo: el chequeo es por
+    **nombre de clave**, no por valor. Un monto embebido en un string de texto
+    libre — `{"nota": "el m3 sale a $180.000"}` — pasa el guardián sin que salte
+    nada, porque `nota` no está en la denylist y nadie mira el contenido.
+
+    De ahí la regla operativa: **nunca metas en un payload hacia la IA texto
+    generado por el motor de costos** (mensajes de `alertas.py`, explicaciones de
+    `pricing.py`, cualquier cadena armada donde se ve dinero). Manda campos
+    estructurados con nombre propio, que sí son los que este chequeo cubre.
     """
     def walk(node: Any, path: str) -> None:
         if isinstance(node, dict):

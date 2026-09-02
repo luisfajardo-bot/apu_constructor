@@ -59,7 +59,7 @@ flowchart TD
 
 | Archivo | Responsabilidad |
 | --- | --- |
-| `ai_assist.py` | Capa de IA acotada para decidir la ESTRUCTURA de los APUs. |
+| `ai_assist.py` | Capa de IA acotada para COMPONER la estructura de un APU, a pedido. |
 | `alertas.py` | Alertas de costeo: motivos por los que un ítem necesita revisión de costo. |
 | `assemble.py` | Orquestador del pipeline por ítem. |
 | `compose.py` | Recuperación de insumos candidatos para la composición generativa. |

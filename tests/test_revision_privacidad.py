@@ -90,7 +90,8 @@ def test_un_precio_colado_revienta():
 def test_veredicto_serializa_plano():
     v = revision.Veredicto(seq=3, dictamen="cambiar", apu_sugerido="200",
                            turno_sugerido="DIURNO", confianza=0.8,
-                           justificacion="la actividad es mecanica", nivel="barrido")
+                           justificacion="la actividad es mecanica", nivel="barrido",
+                           apu_evaluado="100")
     d = v.to_dict()
     privacy.assert_no_money(d)
     assert d["seq"] == 3 and d["dictamen"] == "cambiar"

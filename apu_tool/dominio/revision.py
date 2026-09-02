@@ -27,7 +27,7 @@ determinístico sería el matcher auditándose a sí mismo.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Iterator, Optional
 
 from apu_tool import config
@@ -65,6 +65,14 @@ class Veredicto:
     confianza: float
     justificacion: str
     nivel: str                       # barrido | profundo
+    # El APU que la fila tenía CUANDO se la evaluó (None = no tenía ninguno). Es la
+    # red contra la carrera: la revisión lee las filas al abrir el request y corre
+    # por minutos, así que el usuario puede reasignar la fila mientras la IA piensa
+    # y el veredicto llegaría a la base hablando de un APU que ya no está. Quien
+    # hidrata la vista compara y descarta el que no coincide (`_vista_item` en
+    # `servicio/corridas.py`). Sin default a propósito: que un sitio nuevo que
+    # construya un Veredicto sin decir qué evaluó falle al construirlo, no después.
+    apu_evaluado: Optional[str]
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -366,7 +374,7 @@ class Revisor:
 
         return Veredicto(seq=fila.seq, dictamen=dictamen, apu_sugerido=sugerido,
                          turno_sugerido=turno, confianza=conf, justificacion=just,
-                         nivel="profundo")
+                         nivel="profundo", apu_evaluado=fila.apu_codigo or None)
 
 
 # -------------------------------------------------------------- orquestador
@@ -429,7 +437,7 @@ def revisar(almacen, filas: list[CorridaItemRow], revisor: Revisor,
             v = Veredicto(seq=fila.seq, dictamen="ok", apu_sugerido=None,
                           turno_sugerido=None, confianza=0.0,
                           justificacion="Sin objeciones en el barrido.",
-                          nivel="barrido")
+                          nivel="barrido", apu_evaluado=fila.apu_codigo or None)
         else:
             # Un candidato que ya no está en la biblioteca se omite: no hay
             # composición que mostrarle a la IA, y no puede ser el sugerido.
@@ -446,11 +454,23 @@ def revisar(almacen, filas: list[CorridaItemRow], revisor: Revisor,
                               justificacion=("La actividad no tiene APU asignado y "
                                              "ningún candidato existe en la "
                                              "biblioteca."),
-                              nivel="barrido")
+                              nivel="barrido", apu_evaluado=fila.apu_codigo or None)
             else:
                 asignado = (almacen.apus.get_depriced_apu(fila.apu_codigo, fila.shift)
                             if fila.apu_codigo else None)
                 v = revisor.profundizar(fila, asignado, candidatos)
+        if v.dictamen == "ok" and not fila.apu_codigo:
+            # Una fila sin APU es un HUECO, no una fila correcta: va en $0 y traba el
+            # congelar. Un "ok" ahí contradice al candado rojo de la misma pantalla, y
+            # "el APU asignado es el correcto" no significa nada cuando no hay APU.
+            # Los dos caminos que pueden llegar acá con "ok" —el barrido que contestó
+            # "ok" para una fila con `apu_asignado: null`, y una profundización que
+            # dictamina "ok" sin asignado— pasan por este punto, así que el degradado
+            # va acá y no duplicado en cada rama.
+            v = replace(v, dictamen="sin_apu", apu_sugerido=None, turno_sugerido=None,
+                        justificacion=("La actividad no tiene APU asignado: no hay "
+                                       f"nada que dar por bueno. {v.justificacion}"
+                                       ).strip())
         conteo[v.dictamen] = conteo.get(v.dictamen, 0) + 1
         yield ("veredicto", {"seq": fila.seq, "veredicto": v.to_dict()})
 

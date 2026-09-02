@@ -39,6 +39,13 @@ export const FILTROS_VACIOS: FiltrosColumna = {
 /** Valor centinela del filtro de APU: deja solo las filas SIN APU asignado. */
 export const SIN_APU = "__sin__";
 
+/** Valor centinela del filtro de Veredicto: deja solo las filas SIN veredicto (la IA
+ *  no las contestó, o se agregaron después de revisar). Centinela propio y no el de
+ *  APU: son dos columnas distintas y compartirlo ataría el filtro de una al de la
+ *  otra. Un valor imposible como dictamen, así que el filtro exacto del resto del
+ *  vocabulario (`valorVeredicto(it) !== f.veredicto`) sigue igual. */
+export const SIN_VEREDICTO = "__sin_veredicto__";
+
 /** Etiqueta corta y color de cada dictamen de la revisión con IA. Los colores
  *  salen del vocabulario de "significado" de index.css (positivo / revisar /
  *  info / destructivo), no de la paleta cruda de Tailwind. */
@@ -50,6 +57,7 @@ export const VEREDICTO_UI: Record<DictamenIA, { label: string; cls: string }> = 
 };
 
 export function etiquetaVeredicto(dictamen: string): string {
+  if (dictamen === SIN_VEREDICTO) return "— sin revisar";
   return VEREDICTO_UI[dictamen as DictamenIA]?.label ?? dictamen;
 }
 
@@ -110,7 +118,11 @@ export function filtrar(items: ItemCuadro[], f: FiltrosColumna, soloRevision: bo
       if (it.apu_codigo) return false;
     } else if (!contiene(`${it.apu_codigo} ${it.apu_nombre}`, f.apu)) return false;
     if (f.status && it.status !== f.status) return false;
-    if (f.veredicto && valorVeredicto(it) !== f.veredicto) return false;
+    // El vacío SIGNIFICA algo en Veredicto (la IA no contestó esa fila), así que
+    // tiene su propio centinela: sin esto no habría forma de encontrar esas filas.
+    if (f.veredicto === SIN_VEREDICTO) {
+      if (it.revision) return false;
+    } else if (f.veredicto && valorVeredicto(it) !== f.veredicto) return false;
     if (!enRango(it.precio_contractual, f.precio_contractual)) return false;
     if (!enRango(it.costo_unitario, f.costo_unitario)) return false;
     if (!enRango(it.contractual_total, f.contractual_total)) return false;
@@ -164,13 +176,21 @@ export function opcionesDe(
   clave: "unidad" | "status" | "veredicto",
 ): string[] {
   const set = new Set<string>();
+  let hayVacio = false;
   for (const it of items) {
     const v = clave === "unidad" ? it.unidad
       : clave === "status" ? it.status
       : valorVeredicto(it);
     if (v) set.add(v);
+    else hayVacio = true;
   }
-  return [...set].sort((a, b) => a.localeCompare(b, "es-CO", { numeric: true }));
+  const ordenadas = [...set].sort((a, b) => a.localeCompare(b, "es-CO", { numeric: true }));
+  // Solo Veredicto ofrece el vacío como opción: en Und y Estado un vacío es un dato
+  // que falta, acá es el resultado de que la IA no contestara esa fila — y sin la
+  // opción no hay forma de filtrarlas. Va al final y aparte del sort: es un
+  // centinela, no un valor del vocabulario.
+  if (clave === "veredicto" && hayVacio) ordenadas.push(SIN_VEREDICTO);
+  return ordenadas;
 }
 
 export function siguienteOrden(prev: EstadoOrden, clave: ClaveColumna): EstadoOrden {

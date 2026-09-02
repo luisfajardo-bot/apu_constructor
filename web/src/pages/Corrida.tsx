@@ -205,10 +205,22 @@ export default function Corrida() {
         }),
       );
       await recargarCorrida();
-      toast.success(
+      const cuenta =
         `Revisión lista: ${resumen.cambiar} por cambiar, ${resumen.dudoso} dudosas, `
-        + `${resumen.sin_apu} sin APU.`,
-      );
+        + `${resumen.sin_apu} sin APU.`;
+      // Una fila que la IA no contestó NO está aprobada: queda sin auditar. Si el
+      // aviso final las omitiera (o las diera por buenas en un tono de éxito
+      // tranquilo), el usuario leería "0 por cambiar" con 40 filas sin mirar. De ahí
+      // el `warning` y el texto explícito; encontrarlas es el centinela del filtro.
+      if (resumen.sin_veredicto > 0) {
+        toast.warning(
+          `${cuenta} ${resumen.sin_veredicto} sin revisar (la IA no las contestó): `
+          + "no significa que estén bien. Fíltralas con «— sin revisar» en la "
+          + "columna Veredicto y vuelve a revisar.",
+        );
+      } else {
+        toast.success(cuenta);
+      }
     } catch (e) {
       // Un stream que se corta a mitad NO pierde lo ya dictaminado: el backend lo
       // guarda veredicto por veredicto. Se recarga igual y se dice qué pasó.

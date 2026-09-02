@@ -333,6 +333,23 @@ def _assembled_desde_snapshot(row: CorridaItemRow, snap: dict) -> AssembledApu:
 
 def _vista_item(ens: AssembledApu, seq: int, status: str,
                 revision: Optional[dict] = None) -> dict:
+    # Un veredicto sobre OTRO APU no dice nada del actual: no se manda. Es la red
+    # contra la carrera de `revisar_corrida_stream`, que lee las filas al abrir el
+    # request y corre por minutos — la tabla no se bloquea mientras tanto, así que el
+    # usuario puede reasignar la fila 7 (lo que borra su veredicto) y el `set_revision`
+    # de la revisión, ya en vuelo, lo escribe después: quedaría un `✔ ok` pegado a un
+    # APU que la IA nunca vio. Se filtra al hidratar y no en el stream para no pagar
+    # una lectura por fila (el N+1 contra Postgres que este repo ya arregló). Es
+    # auto-sanador: el veredicto zombi no se muestra nunca más y no hay que limpiar
+    # nada en la base. Un veredicto viejo, guardado antes de que existiera el campo,
+    # no trae la clave: eso es "no sé qué evalué", y se muestra.
+    if revision is not None and "apu_evaluado" in revision:
+        if (revision["apu_evaluado"] or None) != (ens.apu_codigo or None):
+            revision = None
+        else:
+            # El campo es del backend: al frontend le basta con no recibir el
+            # veredicto descartado, así que no viaja (menos superficie de contrato).
+            revision = {k: v for k, v in revision.items() if k != "apu_evaluado"}
     return {
         # Veredicto de la IA (o None si esa fila no se revisó). Default None para que
         # los llamadores del armado no tengan que pasarlo: ahí todavía no hay revisión.

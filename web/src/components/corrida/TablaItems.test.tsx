@@ -695,6 +695,33 @@ test("filtra por el desplegable de Veredicto", () => {
   expect(screen.queryByText("Gama")).toBeNull();
 });
 
+test("el desplegable de Veredicto encuentra las filas sin revisar", () => {
+  // El caso que importa: la IA falló 40 de 300 filas. Sin esta opción esas filas
+  // salen con un guion igual que cualquier otra y no hay forma de localizarlas.
+  const items = [
+    { ...ITEM, seq: 0, descripcion: "Alfa", revision: veredicto(0, "ok") },
+    { ...ITEM, seq: 1, descripcion: "Beta", revision: null },
+    { ...ITEM, seq: 2, descripcion: "Gama", revision: null },
+  ];
+  render(<TablaConControl items={items} />);
+  const select = screen.getByLabelText("Filtrar Veredicto") as HTMLSelectElement;
+  const sinRevisar = [...select.options].find((o) => o.text === "— sin revisar");
+  expect(sinRevisar).toBeTruthy();
+
+  fireEvent.change(select, { target: { value: sinRevisar!.value } });
+  expect(screen.queryByText("Alfa")).toBeNull();
+  expect(screen.getByText("Beta")).toBeTruthy();
+  expect(screen.getByText("Gama")).toBeTruthy();
+});
+
+test("si todas las filas tienen veredicto, no se ofrece \"sin revisar\"", () => {
+  render(<TablaConControl items={[
+    { ...ITEM, seq: 0, descripcion: "Alfa", revision: veredicto(0, "ok") },
+  ]} />);
+  const select = screen.getByLabelText("Filtrar Veredicto") as HTMLSelectElement;
+  expect([...select.options].map((o) => o.text)).toEqual(["(todas)", "✔ ok"]);
+});
+
 // ─── Componer un APU con IA a pedido (dictamen `sin_apu`) ────────────────────
 // La IA dictaminó que la biblioteca no tiene nada adecuado. El botón abre una
 // PROPUESTA; crear el APU sigue siendo el alta de siempre, y la hace el usuario.

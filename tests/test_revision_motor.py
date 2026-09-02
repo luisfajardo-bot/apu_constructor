@@ -546,3 +546,80 @@ def test_revisar_no_llama_a_la_ia_si_no_hay_apu_ni_candidatos_vivos(alm_apus):
     assert len(r.pedidos) == 1          # solo el barrido: no se profundizó
     done = next(p for e, p in eventos if e == "done")
     assert done["sin_apu"] == 1
+
+
+# ----------------------------------- el veredicto dice QUÉ APU evaluó (carrera)
+# La revisión lee las filas al abrir el request y corre por minutos, con la tabla sin
+# bloquear: el usuario puede reasignar una fila mientras la IA piensa. El veredicto
+# lleva el APU que evaluó para que quien hidrata la vista pueda descartarlo si ya no
+# coincide (ver tests/test_api_revision.py).
+def test_el_veredicto_del_barrido_dice_que_apu_evaluo(alm_apus):
+    filas = [_fila(0, "EXCAVACION MANUAL", "100")]
+    r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "ok"}]}])
+    eventos = list(revision.revisar(alm_apus, filas, r))
+    v = next(p["veredicto"] for e, p in eventos if e == "veredicto")
+    assert (v["dictamen"], v["apu_evaluado"]) == ("ok", "100")
+
+
+def test_el_veredicto_profundo_dice_que_apu_evaluo():
+    fila = _fila(3, "EXCAVACION MECANICA", "100")
+    r = RevisorDoble([{"dictamen": "cambiar", "apu_sugerido": "200",
+                       "turno_sugerido": "DIURNO", "confianza": 0.9,
+                       "justificacion": "es mecánica"}])
+    v = r.profundizar(fila, asignado=_dp("100", "EXCAVACION MANUAL"),
+                      candidatos=[_dp("200", "EXCAVACION MECANICA")])
+    # El evaluado es el que TENÍA la fila, no el sugerido: son cosas distintas.
+    assert (v.apu_evaluado, v.apu_sugerido) == ("100", "200")
+
+
+def test_una_fila_sin_apu_evalua_None_y_no_un_string_vacio(alm_apus):
+    """`None` y `""` significan lo mismo acá, y quien compara normaliza; el veredicto
+    de una fila sin APU guarda `None` para que el JSON no traiga un código falso."""
+    fila = _fila(0, "ACTIVIDAD RARA", "")
+    r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "revisar"}]}])
+    eventos = list(revision.revisar(alm_apus, [fila], r))
+    v = next(p["veredicto"] for e, p in eventos if e == "veredicto")
+    assert v["apu_evaluado"] is None
+
+
+# ------------------------------------ una fila sin APU nunca puede salir en "ok"
+def test_barrido_ok_en_una_fila_sin_apu_degrada_a_sin_apu(alm_apus):
+    """El prompt le pide "revisar" a las filas sin APU, pero eso es una instrucción,
+    no una restricción: si contesta "ok", un ✔ verde contradiría al candado rojo que
+    cuenta esa misma fila como hueco y traba el congelar."""
+    filas = [_fila(0, "ACTIVIDAD SIN APU", None)]
+    r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "ok"}]}])
+    eventos = list(revision.revisar(alm_apus, filas, r))
+    v = next(p["veredicto"] for e, p in eventos if e == "veredicto")
+    assert v["dictamen"] == "sin_apu"
+    assert "no tiene APU asignado" in v["justificacion"]
+    done = next(p for e, p in eventos if e == "done")
+    assert (done["ok"], done["sin_apu"]) == (0, 1)
+
+
+def test_profundizacion_ok_en_una_fila_sin_apu_degrada_a_sin_apu(alm_apus):
+    """"El APU asignado es el correcto" no significa nada sin APU asignado."""
+    fila = _fila(0, "ACTIVIDAD SIN APU", None)
+    fila.candidatos = [{"apu_codigo": "200", "apu_nombre": "CONCRETO 3000 PSI"}]
+    r = RevisorDoble([
+        {"filas": [{"seq": 0, "resultado": "revisar"}]},
+        {"dictamen": "ok", "apu_sugerido": None, "turno_sugerido": None,
+         "confianza": 0.9, "justificacion": "encaja"},
+    ])
+    eventos = list(revision.revisar(alm_apus, [fila], r))
+    v = next(p["veredicto"] for e, p in eventos if e == "veredicto")
+    assert v["dictamen"] == "sin_apu"
+    assert v["nivel"] == "profundo"          # el degradado no borra de dónde salió
+    assert "encaja" in v["justificacion"]    # ni lo que dijo la IA
+    done = next(p for e, p in eventos if e == "done")
+    assert (done["ok"], done["sin_apu"]) == (0, 1)
+
+
+def test_un_ok_con_apu_asignado_no_se_toca(alm_apus):
+    """El degradado mira SOLO las filas sin APU: el camino normal sigue igual."""
+    filas = [_fila(0, "EXCAVACION MANUAL", "100")]
+    r = RevisorDoble([{"filas": [{"seq": 0, "resultado": "ok"}]}])
+    eventos = list(revision.revisar(alm_apus, filas, r))
+    v = next(p["veredicto"] for e, p in eventos if e == "veredicto")
+    assert v["dictamen"] == "ok"
+    assert v["justificacion"] == "Sin objeciones en el barrido."

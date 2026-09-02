@@ -121,8 +121,13 @@ class ApuAdvisor:
             "insumos_disponibles": [candidate_insumo_to_dict(i) for i in insumos],
             "ejemplos": [privacy.depriced_apu_to_dict(a) for a in ejemplos],
         }
+        # FUERA del try: el invariante #1 nunca se traga. Adentro, una PrivacyViolation
+        # saldría por el `except` de abajo y el usuario leería "la IA no pudo componer
+        # esta actividad" mientras nadie se enteraría de que salió el guardián. No hay
+        # fuga (el payload no llega a la red), pero un guardián silenciado no es un
+        # guardián. Mismo criterio que `revision.py::barrer_lote`, que la re-lanza.
+        user_content = privacy.safe_json(payload)  # garantía: sin dinero
         try:
-            user_content = privacy.safe_json(payload)  # garantía: sin dinero
             resp = self._client.messages.create(
                 model=self.model,
                 # Techo, no gasto: cubre el pensamiento adaptativo MÁS el JSON.

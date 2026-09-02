@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import {
   filtrar, ordenar, opcionesDe, siguienteOrden, hayFiltrosActivos,
-  normalizar, valorVeredicto, FILTROS_VACIOS,
+  normalizar, valorVeredicto, etiquetaVeredicto, FILTROS_VACIOS, SIN_VEREDICTO,
 } from "./corridaTabla";
 import type { ItemCuadro } from "./tipos";
 
@@ -150,12 +150,43 @@ test("filtrar: el desplegable de Veredicto es coincidencia exacta", () => {
   expect(filtrar(items, f, false).map((i) => i.descripcion)).toEqual(["B"]);
 });
 
-test("opcionesDe: veredicto ignora las filas sin revisar", () => {
+test("opcionesDe: veredicto ofrece el centinela de \"sin revisar\" al final", () => {
+  // Es la única columna donde el vacío significa algo: la IA no contestó esa fila.
+  // Sin la opción no hay forma de encontrarla (era el bug: 40 filas sin auditar y
+  // sin manera de filtrarlas).
   const items = [
     item({ revision: veredicto("ok") }),
     item({ revision: veredicto("cambiar") }),
     item({ revision: veredicto("ok") }),
     item({ revision: null }),
   ];
-  expect(opcionesDe(items, "veredicto")).toEqual(["cambiar", "ok"]);
+  expect(opcionesDe(items, "veredicto")).toEqual(["cambiar", "ok", SIN_VEREDICTO]);
+});
+
+test("opcionesDe: sin filas sin revisar, no se ofrece el centinela", () => {
+  const items = [item({ revision: veredicto("ok") })];
+  expect(opcionesDe(items, "veredicto")).toEqual(["ok"]);
+});
+
+test("opcionesDe: unidad y status siguen ignorando el vacío", () => {
+  const items = [item({ unidad: "M3", status: "auto" }),
+                 item({ unidad: "", status: "" })];
+  expect(opcionesDe(items, "unidad")).toEqual(["M3"]);
+  expect(opcionesDe(items, "status")).toEqual(["auto"]);
+});
+
+test("filtrar: el centinela de Veredicto deja solo las filas sin veredicto", () => {
+  const items = [
+    item({ descripcion: "A", revision: veredicto("ok") }),
+    item({ descripcion: "B", revision: veredicto("cambiar") }),
+    item({ descripcion: "C", revision: null }),
+    item({ descripcion: "D", revision: null }),
+  ];
+  const f = { ...FILTROS_VACIOS, veredicto: SIN_VEREDICTO };
+  expect(filtrar(items, f, false).map((i) => i.descripcion)).toEqual(["C", "D"]);
+});
+
+test("etiquetaVeredicto: el centinela se lee en palabras, no como código", () => {
+  expect(etiquetaVeredicto(SIN_VEREDICTO)).toBe("— sin revisar");
+  expect(etiquetaVeredicto("cambiar")).toBe("↔ cambiar");
 });

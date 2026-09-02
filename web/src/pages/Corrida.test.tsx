@@ -5,7 +5,9 @@ vi.mock("react-router-dom", () => ({ useParams: () => ({ id: "1" }) }));
 vi.mock("@/lib/armado", () => ({
   useArmadoVivo: () => ({ corridaId: null, estado: "idle", filas: [], total: 0 }),
 }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
+}));
 // Corrida usa useAuth() para calcular `puedeEditar` (rol -> TablaItems y botón
 // "Revisar con IA"). El rol es mutable para poder probar el caso sin permisos.
 let rol: "consulta" | "editor" | "admin" = "editor";
@@ -320,6 +322,49 @@ test("al terminar recarga la corrida y avisa el resumen", async () => {
     expect(vi.mocked(getCorrida).mock.calls.length).toBe(antes + 1));
   expect(vi.mocked(toast.success).mock.calls[0][0])
     .toBe("Revisión lista: 1 por cambiar, 1 dudosas, 0 sin APU.");
+});
+
+test("si quedaron filas sin revisar, el aviso lo dice y no suena a éxito", async () => {
+  // El agujero que esto tapa: con la IA fallando 40 de 300 filas el usuario leía
+  // "0 por cambiar, 0 dudosas, 0 sin APU" y se quedaba con 40 filas sin auditar.
+  const { revisarCorridaStream } = await import("@/api/corridas");
+  const { toast } = await import("sonner");
+  vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.warning).mockClear();
+  vi.mocked(revisarCorridaStream).mockResolvedValueOnce(
+    { ...RESUMEN, cambiar: 0, dudoso: 0, sin_veredicto: 40 });
+
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+  fireEvent.click(boton(/revisar 2 líneas con IA/i));
+
+  await waitFor(() => expect(vi.mocked(toast.warning)).toHaveBeenCalledTimes(1));
+  const msg = vi.mocked(toast.warning).mock.calls[0][0] as string;
+  expect(msg).toMatch(/40 sin revisar/);
+  expect(msg).toMatch(/no las contestó/);
+  // Y que no se lea como un visto bueno: dice explícitamente que no están bien.
+  expect(msg).toMatch(/no significa que estén bien/i);
+  // El tono importa: un toast de éxito con 40 filas sin auditar es el bug.
+  expect(vi.mocked(toast.success)).not.toHaveBeenCalled();
+});
+
+test("sin filas sin revisar, el aviso sigue siendo un éxito seco", async () => {
+  const { revisarCorridaStream } = await import("@/api/corridas");
+  const { toast } = await import("sonner");
+  vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.warning).mockClear();
+  vi.mocked(revisarCorridaStream).mockResolvedValueOnce(RESUMEN);
+
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+  fireEvent.click(boton(/revisar 2 líneas con IA/i));
+
+  await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(toast.success).mock.calls[0][0])
+    .toBe("Revisión lista: 1 por cambiar, 1 dudosas, 0 sin APU.");
+  expect(vi.mocked(toast.warning)).not.toHaveBeenCalled();
 });
 
 test("si el stream falla a mitad, recarga igual y lo dice", async () => {

@@ -360,3 +360,77 @@ def test_consulta_no_puede_componer(tmp_path, monkeypatch):
     _con_advisor(monkeypatch, _compuesto())
     consulta = cliente(create_app(almacen=alm), rol="consulta")
     assert consulta.post(f"/api/corridas/{cid}/componer/0").status_code == 403
+
+
+# --- El veredicto lleva el APU que evaluó: red contra la carrera ---------------
+# `revisar_corrida_stream` lee las filas al abrir el request y corre por minutos, con
+# la tabla sin bloquear. Si el usuario reasigna una fila mientras la IA piensa, el
+# `set_revision` en vuelo escribe el veredicto DESPUÉS del `revision_json=NULL` de
+# `actualizar_eleccion`: quedaría un `✔ ok` pegado a un APU que la IA nunca vio.
+
+def _veredicto(seq, **extra):
+    v = {"seq": seq, "dictamen": "ok", "apu_sugerido": None, "turno_sugerido": None,
+         "confianza": 0.9, "justificacion": "encaja", "nivel": "barrido"}
+    v.update(extra)
+    return v
+
+
+def test_un_veredicto_sobre_otro_apu_no_llega_a_la_vista(tmp_path):
+    cli, alm = _cliente_api(tmp_path)
+    cid = _corrida_armada(alm)                       # las dos filas con el APU 100
+    alm.corridas.set_revision(cid, 0, _veredicto(0, apu_evaluado="999"))
+    body = cli.get(f"/api/corridas/{cid}").json()
+    assert body["items"][0]["apu_codigo"] == "100"
+    assert body["items"][0]["revision"] is None      # el veredicto era de otro APU
+
+
+def test_el_veredicto_del_apu_que_la_fila_tiene_hoy_si_llega(tmp_path):
+    cli, alm = _cliente_api(tmp_path)
+    cid = _corrida_armada(alm)
+    alm.corridas.set_revision(cid, 0, _veredicto(0, apu_evaluado="100"))
+    body = cli.get(f"/api/corridas/{cid}").json()
+    assert body["items"][0]["revision"]["dictamen"] == "ok"
+
+
+def test_un_veredicto_viejo_sin_apu_evaluado_se_sigue_mostrando(tmp_path):
+    """Los guardados antes de que existiera el campo no traen la clave: eso es "no sé
+    qué evalué", no "evalué None". Descartarlos borraría veredictos buenos."""
+    cli, alm = _cliente_api(tmp_path)
+    cid = _corrida_armada(alm)
+    alm.corridas.set_revision(cid, 0, _veredicto(0))
+    body = cli.get(f"/api/corridas/{cid}").json()
+    assert body["items"][0]["revision"]["dictamen"] == "ok"
+
+
+def test_apu_evaluado_no_viaja_al_frontend(tmp_path):
+    """El filtrado es del backend; mandarlo sería superficie de contrato sin uso."""
+    cli, alm = _cliente_api(tmp_path)
+    cid = _corrida_armada(alm)
+    alm.corridas.set_revision(cid, 0, _veredicto(0, apu_evaluado="100"))
+    body = cli.get(f"/api/corridas/{cid}").json()
+    assert "apu_evaluado" not in body["items"][0]["revision"]
+
+
+def test_la_carrera_no_deja_un_ok_pegado_a_un_apu_que_la_ia_no_vio(tmp_path, monkeypatch):
+    """La secuencia completa: la revisión dictamina `ok` con el APU 100, el usuario
+    reasigna la fila al 200 (lo que borra el veredicto) y el `set_revision` de la
+    revisión, ya en vuelo, lo escribe después. Auto-sanador: no hay que limpiar la
+    base, el veredicto zombi simplemente no se muestra."""
+    cli, alm = _cliente_api(tmp_path)
+    cid = _corrida_armada(alm)
+    monkeypatch.setattr(svc, "Revisor", lambda: _RevisorDoble([
+        {"filas": [{"seq": 0, "resultado": "ok"}, {"seq": 1, "resultado": "ok"}]}]))
+    assert cli.post(f"/api/corridas/{cid}/revision/stream").status_code == 200
+    en_vuelo = alm.corridas.get_items(cid)[0].revision
+    assert en_vuelo["apu_evaluado"] == "100"
+
+    r = cli.post(f"/api/corridas/{cid}/items/confirmar-lote", json={
+        "seqs": [], "asignaciones": [{"seq": 0, "apu_codigo": "200", "shift": "DIURNO"}]})
+    assert r.status_code == 200, r.text
+    assert alm.corridas.get_items(cid)[0].revision is None   # lo borró el confirm
+    alm.corridas.set_revision(cid, 0, en_vuelo)              # el write que llegó tarde
+
+    items = {i["seq"]: i for i in cli.get(f"/api/corridas/{cid}").json()["items"]}
+    assert items[0]["apu_codigo"] == "200"
+    assert items[0]["revision"] is None
+    assert items[1]["revision"]["dictamen"] == "ok"          # la fila que nadie tocó

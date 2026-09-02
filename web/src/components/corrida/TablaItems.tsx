@@ -584,7 +584,20 @@ function CeldaVeredicto({
   onComponer: () => void;
 }) {
   const v = item.revision;
-  if (!v) return <span className="text-muted-foreground">&mdash;</span>;
+  // Sin veredicto. NO se puede distinguir "la IA no contestó esta fila" de "esta
+  // fila nunca se revisó": las dos llegan como `revision: null` y el backend no
+  // guarda las no contestadas (a propósito: un "no contestada" persistido sería un
+  // 5º dictamen). Así que el texto del title dice las dos posibilidades en vez de
+  // afirmar una. Cuántas quedaron sin contestar lo dice el aviso final de la
+  // revisión, y encontrarlas es el filtro "— sin revisar" de esta columna.
+  if (!v) {
+    return (
+      <span className="text-muted-foreground"
+        title="Sin veredicto: la IA no contestó esta fila, o la fila no se ha revisado.">
+        &mdash;
+      </span>
+    );
+  }
   const ofreceAplicar = puedeAplicar && v.dictamen === "cambiar" && !!v.apu_sugerido;
   // `sin_apu` = la IA concluyó que la biblioteca no tiene nada adecuado. Recién ahí
   // se ofrece la composición generativa, y solo porque la pide una persona.

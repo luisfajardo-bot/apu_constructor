@@ -94,3 +94,34 @@ def test_no_ai_keeps_manual(alm):
     if a.status == MatchStatus.NEW:
         assert a.origen == "manual"
     assert a.origen != "generado"
+
+
+def test_una_fuga_de_dinero_al_componer_no_se_disfraza_de_None(alm, monkeypatch):
+    """El `except Exception: return None` de `compose_apu` NO puede tragarse el
+    guardián del invariante #1: el usuario leería "la IA no pudo componer esta
+    actividad" y nadie se enteraría. Gemelo del arreglo de `revision.py::barrer_lote`.
+    """
+    from apu_tool.dominio import ai_assist, privacy
+
+    llamadas = []
+
+    class _Cliente:
+        @property
+        def messages(self):
+            return self
+
+        def create(self, **kw):
+            llamadas.append(kw)
+            return None
+
+    monkeypatch.setattr(ai_assist, "candidate_insumo_to_dict",
+                        lambda i: {"codigo": i.codigo, "precio_unitario": 40000})
+    advisor = ApuAdvisor(enabled=False)
+    advisor.enabled, advisor._client = True, _Cliente()
+    item = LicitacionItem("1", "ALGO NUEVO", "M2", 1, 1000, "DIURNO")
+    insumos, ejemplos = InsumoRetriever(alm).retrieve(item.descripcion, "DIURNO")
+    assert insumos                      # si no hay insumos, `compose_apu` sale antes
+
+    with pytest.raises(privacy.PrivacyViolation):
+        advisor.compose_apu(item, insumos, ejemplos)
+    assert llamadas == []               # y revienta ANTES de tocar la red

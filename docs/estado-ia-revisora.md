@@ -35,18 +35,21 @@ los dos backends, y tres endpoints:
 
 | Endpoint | Rol | Qué hace |
 |----------|-----|----------|
-| `POST /corridas/{id}/revision/stream` | editor | SSE: `started`, `barriendo` (uno por lote), `barrido`, `veredicto` (uno por fila), `done` |
+| `POST /corridas/{id}/revision/stream` | editor | SSE: `started`, `barriendo` (uno por lote), `barrido`, `veredicto` (uno por fila), `done`, y `error` si la IA falta o se cae con el stream ya abierto |
 | `POST /corridas/{id}/componer/{seq}` | editor | propone una composición; **no escribe nada** |
 | `POST /corridas/{id}/items/confirmar-lote` | consulta | extendido con `asignaciones`: un APU distinto por fila (aplicar sugerencias en lote) |
 
 ## Estado
 
-Terminada y verde. Verificación en serie del 2026-09-02, tras la limpieza de código muerto:
+Terminada y verde. Verificación en serie del 2026-09-02, tras cerrar los hallazgos de la
+revisión final (`sin_veredicto` visible en la interfaz, la carrera del veredicto pegado a
+otro APU, el `ok` imposible en una fila sin APU y la `PrivacyViolation` disfrazada al
+componer):
 
 ```
-python -m pytest tests/ -q   → 989 passed, 16 skipped, 1 warning (slowapi, preexistente)
+python -m pytest tests/ -q   → 1001 passed, 16 skipped, 1 warning (slowapi, preexistente)
 npm run build                → OK (tsc -b + vite)
-npm test                     → 50 archivos, 282 pruebas
+npm test                     → 50 archivos, 290 pruebas
 npm run lint                 → 11 warnings, todos preexistentes
 ```
 
@@ -76,12 +79,36 @@ desplegó nada: la rama no es `master`.
   advertencia, es un hueco: la fila va en $0 y el cuadro **se ve completo sin estarlo**.
   Trabar todas las alertas convertiría el candado en un botón de "ignorar" que se aprende a
   ignorar; trabar solo el hueco lo mantiene creíble.
-- **El veredicto se borra cuando la fila cambia de APU.** `corridas.actualizar_eleccion`
-  escribe `revision_json=NULL` — es el único punto de paso de un cambio de APU en una fila,
-  así que no hay forma de esquivarlo. Un veredicto que decía "ok" sobre el APU anterior no
-  dice nada del nuevo, y dejarlo pegado sería la mentira más creíble de la pantalla: un
-  visto bueno con un APU que la IA nunca vio. Es caché, no verdad: se puede volver a revisar
-  cuando sea.
+- **El veredicto se borra en TODO confirm, no solo cuando cambia el APU.**
+  `corridas.actualizar_eleccion` escribe `revision_json=NULL` y es el único punto de paso
+  de un confirm — así que "Confirmar el APU actual" (mismo código, mismo turno) también
+  borra el veredicto. O sea: reconfirmar una fila `⚠ dudoso` para dejar registro de que la
+  miraste te borra la justificación que decía por qué. Con una revisión costando US$2–3 la
+  diferencia importa, pero el comportamiento es **conservador** (se pierde una
+  justificación, no se gana una mentira) y no se cambió: lo que estaba mal era el
+  documento, que decía "cuando cambia el APU".
+- **El veredicto dice QUÉ APU evaluó, y se descarta si ya no coincide.** Borrar al
+  confirmar no alcanza: `revisar_corrida_stream` lee las filas al **abrir** el request y el
+  generador corre por minutos con la tabla sin bloquear (el `readOnly` del frontend solo
+  mira si la corrida está congelada). Secuencia real: la revisión dictamina `ok` sobre la
+  fila 7 con el APU A → el usuario la reasigna al B (`revision_json=NULL`) → el
+  `set_revision` de la revisión, ya en vuelo, escribe el `ok` **después**. Quedaba una fila
+  con el APU B y un visto bueno sobre el A, que es la mentira más creíble de la pantalla.
+  De ahí `Veredicto.apu_evaluado` (el `apu_codigo` de la fila en el momento de evaluarla) y
+  el descarte en `_vista_item`: un veredicto sobre otro APU no dice nada del actual. Tres
+  decisiones dentro de esa: se filtra al **hidratar** y no dentro del stream, porque una
+  lectura por fila reintroduciría el N+1 contra Postgres que este repo ya arregló una vez;
+  es **auto-sanador**, el veredicto zombi no se vuelve a mostrar y no hay que limpiar la
+  base; y la **ausencia** de la clave (veredictos guardados antes del campo) se trata como
+  "no sé qué evalué, muéstralo", no como "evalué None". El campo **no viaja al frontend**:
+  filtrar en el backend alcanza y es menos superficie de contrato.
+- **Una fila sin APU nunca puede salir en `ok`.** El cortocircuito de `sin_apu` solo cubre
+  "sin APU **y** sin candidatos vivos"; el resto se degrada en `revisar`, que es el único
+  punto por el que pasan los dos caminos posibles (el barrido contestando `ok` a una fila
+  con `apu_asignado: null` —el prompt le pide `revisar`, pero eso es una instrucción, no
+  una restricción— y una profundización que dictamina `ok` sin asignado, donde "el APU
+  asignado es el correcto" no significa nada). Un `✔ ok` verde sobre una fila que el
+  candado rojo cuenta como hueco es la pantalla contradiciéndose.
 - **El `Revisor` se instancia por request**, no compartido en `app.state`: compartirlo
   mezclaría estado entre peticiones.
 - **`revisar()` recibe el `almacen` por parámetro** en vez de guardarlo en el `Revisor`. Así
@@ -92,7 +119,16 @@ desplegó nada: la rama no es `master`.
   para poder pintar "0 de N" en vez de un indeterminado.
 - **Las filas que el barrido no contestó quedan SIN veredicto**, contadas en
   `sin_veredicto`. No se inventa un `ok`: "no contestada" y "sin objeciones" no son lo
-  mismo, y confundirlas es exactamente el underbid silencioso que este repo evita.
+  mismo, y confundirlas es exactamente el underbid silencioso que este repo evita. Y se
+  **ven**: con `sin_veredicto > 0` el aviso final es un `toast.warning` (no un `success`)
+  que dice "N sin revisar (la IA no las contestó): no significa que estén bien", y la
+  columna Veredicto ofrece la opción **«— sin revisar»** (centinela `SIN_VEREDICTO` en
+  `lib/corridaTabla.ts`, hermano del `SIN_APU`) para filtrarlas. Lo que **no** se puede es
+  distinguir en la celda "la IA no contestó esta fila" de "esta fila nunca se revisó": las
+  dos llegan como `revision: null`, y persistir la diferencia sería un 5º dictamen guardado
+  en la base — justo el vocabulario que este módulo evita ampliar. La celda dice las dos
+  posibilidades en el `title` y no afirma ninguna; contarlas es el aviso, encontrarlas es
+  el filtro.
 - **`componer_item` devuelve solo estructura**, sin costos: mandar el costo de un APU que
   todavía no existe es ruido, y el precio de cada insumo ya se ve en el catálogo.
 
@@ -147,6 +183,30 @@ desplegó nada: la rama no es `master`.
 - **Un `seq` o un código de APU inventados por la IA se descartan**, no degradan a error:
   `marcadas &= {f.seq for f in filas}` y la validación de `apu_sugerido` (que degrada a
   `dudoso`). Si la IA alucina mucho, el síntoma será "muchos dudosos", no un fallo ruidoso.
+- **El candado de "sin APU" NO está en la puerta de la CLI ni de la GUI.** `pipeline.py`
+  (`run_pipeline`, `build_desde_presupuesto`) y el "Exportar" de Tkinter llaman
+  `write_report` sin pasar por `seqs_sin_apu`: el candado vive en `congelar` y
+  `generar_cuadro`, que son web. Es alcance consciente —la feature es web-only— y el cuadro
+  de la CLI ya trae hoja `ALERTAS` con esas filas resaltadas, así que ahí el hueco se ve;
+  lo que no hay es puerta trabada. Si se decide hacerlo global, el punto de paso es
+  `pipeline.py`, no `report.py`.
+- **El backend no rechaza revisar una corrida en estado `armando`.** El guard vive solo en
+  el frontend (`motivoNoRevisar`); forzando el POST, la revisión corre sobre una corrida a
+  medio armar. Encaja con el patrón preexistente de `congelar`/`confirmar` (que tampoco
+  miran `estado`, solo `modo`), pero la asimetría con el guard de `congelada` —ese sí es del
+  backend, con su 409— queda escrita acá: es una decisión, no un olvido.
+- **Un veredicto `cambiar` no se invalida si el APU sugerido se borra de la biblioteca.**
+  El clic en `Aplicar` da un 400 accionable (`confirmar_items` valida código+turno antes de
+  escribir), así que el daño está contenido; lo que queda es una sugerencia muerta
+  invitando a reintentar. En lote es peor de leer: un solo APU borrado tumba las N
+  sugerencias, porque la validación es atómica a propósito (nada se aplica a medias).
+- **La composición propuesta llega al alta con los precios en 0.** `componer_item` devuelve
+  estructura sin costos (a propósito), así que en el diálogo de alta la columna "Costo" y la
+  edición bidireccional costo↔rendimiento quedan muertas — justo cuando el diálogo le pide
+  al usuario revisar los rendimientos. El precio de cada insumo sí se ve en el catálogo.
+- **Aplicar una sugerencia de la IA no queda en auditoría.** `confirmar_items` no llama
+  `registrar_auditoria` (preexistente: tampoco lo hacía confirmar a mano). Ahora hay una
+  fuente de cambios nueva, así que no se puede reconstruir quién aplicó qué propuso la IA.
 
 ## Verificación manual en el navegador
 
@@ -175,13 +235,21 @@ navegador va antes del push.**
    - al terminar, el toast `Revisión lista: {n} por cambiar, {n} dudosas, {n} sin APU.`
      cuadra con lo que muestra la tabla, y las filas `sin_veredicto` salen con `—`, no
      con `✔ ok`;
+   - **si la IA dejó filas sin contestar** (el caso que hay que provocar, p. ej. bajando
+     `max_tokens` o cortando la red a mitad del barrido): el aviso es **amarillo** y dice
+     `{n} sin revisar (la IA no las contestó): no significa que estén bien`, y el
+     desplegable de la columna Veredicto ofrece **`— sin revisar`**, que deja exactamente
+     esas filas. Sin las dos cosas, 40 filas sin auditar en 300 son invisibles;
    - si corta a mitad, el toast tiene que decir que "los veredictos que alcanzó a guardar
      se conservan" y esos veredictos tienen que estar ahí al recargar.
 4. **Aplicar sugerencias.** Por fila: botón `Aplicar` en la celda Veredicto (solo con
    dictamen `↔ cambiar`). En lote: `Aplicar {N} sugerencias` en la cabecera. En los dos
    casos el total de la corrida recalcula y **el veredicto de la fila aplicada
-   desaparece** (lo borra `actualizar_eleccion`): que no quede un `✔ ok` viejo pegado a un
-   APU nuevo. Mientras una fila está en vuelo, los `Aplicar` de las demás se deshabilitan.
+   desaparece** (lo borra `actualizar_eleccion`, en cualquier confirm): que no quede un
+   `✔ ok` viejo pegado a un APU nuevo. Mientras una fila está en vuelo, los `Aplicar` de
+   las demás se deshabilitan. **La carrera, a mano:** con la revisión corriendo, reasignar
+   una fila que ya salió `ok`; al terminar, esa fila tiene que quedar **sin** veredicto
+   (lo descarta `apu_evaluado`), no con el `ok` del APU viejo.
 5. **Diálogo de composición** (botón `Componer`, solo en filas `✖ sin APU`), título
    `Componer un APU con IA para: {actividad}`:
    - **no se cierra solo** (el escarmiento de `DialogoTexto`);

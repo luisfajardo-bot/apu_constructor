@@ -179,10 +179,15 @@ matching, modelo de IA, clasificación de precios.
   underbid silencioso. API: `GET/POST /api/listas-precios`, `PATCH
   /api/listas-precios/{id}` (sin DELETE, a propósito).
 - **Veredicto de la revisión.** El dictamen por fila se guarda en
-  `corrida_item.revision_json` (los dos backends) y se **borra solo** cuando la fila cambia
-  de APU: `corridas.actualizar_eleccion` escribe `revision_json=NULL` y es el único punto
-  de paso de un cambio de APU en una fila. Un veredicto sobre el APU anterior no dice nada
-  del nuevo. Es caché, no verdad: se puede volver a revisar cuando sea.
+  `corrida_item.revision_json` (los dos backends) y se **borra solo en cualquier confirm**
+  de la fila, cambie el APU o no: `corridas.actualizar_eleccion` escribe `revision_json=NULL`
+  y es el único punto de paso, así que "Confirmar el APU actual" también lo borra (es
+  conservador a propósito: se pierde una justificación, no se gana una mentira). Además el
+  veredicto guarda `apu_evaluado`, el APU que la fila tenía cuando la IA la evaluó, y
+  `_vista_item` **no manda** el veredicto si ya no coincide con el `apu_codigo` de hoy: la
+  revisión corre por minutos sobre filas leídas al abrir el request, así que un
+  `set_revision` puede llegar después de una reasignación. Un veredicto sobre otro APU no
+  dice nada del actual. Es caché, no verdad: se puede volver a revisar cuando sea.
 - **Salidas:** `salidas/` (cuadros) y `ejemplos/` (licitaciones de ejemplo).
 - Fuentes de precio: `PRECIO IDU` se trata como **público**; el resto
   (`COSTO INTERNO`, `COMPRAS…`, etc.) como **interno/confidencial**
@@ -201,7 +206,10 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
 - No metas la IA en el armado. Arma el programa; la IA audita después
   (`dominio/revision.py`) y siempre propone: aplicar es del usuario.
 - No emitas un cuadro con filas sin APU: el candado de `congelar`/`generar_cuadro` está
-  para eso, no lo esquives.
+  para eso, no lo esquives. Ojo: el candado es **de la web**, no global — `pipeline.py`
+  (CLI/GUI) llama `write_report` sin pasar por `seqs_sin_apu`, y ahí el hueco se ve en la
+  hoja `ALERTAS` del cuadro, no en una puerta trabada. Si lo haces global, el punto de paso
+  es `pipeline.py`.
 - No edites el Excel fuente ni borres `data/`, `salidas/`, `ejemplos/`.
 - No dupliques lógica de orquestación: reúsala desde `pipeline.py`.
 - No hagas que una lista que no sea Principal caiga al precio histórico ni al de

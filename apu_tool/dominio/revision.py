@@ -32,6 +32,9 @@ from typing import Any, Iterator, Optional
 
 from apu_tool import config
 from apu_tool.dominio import privacy
+from apu_tool.dominio.ai_assist import (
+    MSG_CREDENCIAL, IANoDisponible, credencial_invalida,
+)
 from apu_tool.nucleo.models import CorridaItemRow, DePricedApu
 
 # Filas por llamada del barrido. Bajarlo mejora el foco de la IA y SUBE el costo: el
@@ -123,9 +126,10 @@ def payload_profundo(fila: CorridaItemRow, asignado: Optional[DePricedApu],
 
 
 # ------------------------------------------------------------------- revisor
-class IANoDisponible(RuntimeError):
-    """No hay ANTHROPIC_API_KEY (o falta el SDK). La revisión no tiene fallback:
-    un revisor determinístico sería el matcher auditándose a sí mismo."""
+# Re-exportada: `IANoDisponible` vive en la fachada de la IA (las dos puertas al SDK
+# la levantan), pero medio repo la importa desde acá. Sin fallback determinístico a
+# propósito: un revisor así sería el matcher auditándose a sí mismo, diría "ok" justo
+# en las filas donde ya está convencido, y eso no informa — da falsa tranquilidad.
 
 
 _SISTEMA_BARRIDO = """\
@@ -250,7 +254,30 @@ class Revisor:
                 raise IANoDisponible(
                     "La revisión con IA necesita el SDK de anthropic.") from exc
         contenido = privacy.safe_json(payload)   # garantía dura: sin dinero
-        resp = self._client.messages.create(
+        try:
+            resp = self._pedir_al_sdk(system, schema, contenido, effort)
+        except Exception as exc:
+            # Un 401/403 NO puede caer en el `except Exception` de `barrer_lote`: ahí
+            # se convierte en un lote `sin_respuesta`, y con la llave rota son TODOS
+            # los lotes. El usuario leería "N sin revisar" y iría a mirar la corrida
+            # en vez del servidor. `IANoDisponible` ya la re-lanza `barrer_lote` y
+            # sube hasta el 503 (o el evento `error` del SSE, con el stream abierto).
+            if credencial_invalida(exc):
+                raise IANoDisponible(MSG_CREDENCIAL) from exc
+            raise
+        texto = next((b.text for b in resp.content if b.type == "text"), "{}")
+        try:
+            data = json.loads(texto)
+        except Exception:
+            return {}    # JSON truncado o inválido: nadie queda en "ok" por accidente
+        # `json.loads` valida sintaxis, no forma: `[{...}]`, `"ok"` o `42` parsean bien
+        # y reventarían el `.get` del llamador. Que caigan por el mismo camino.
+        return data if isinstance(data, dict) else {}
+
+    def _pedir_al_sdk(self, system: str, schema: dict, contenido: str, effort: str):
+        """La llamada pelada al SDK, aparte para que el `try` de arriba envuelva SOLO
+        la red y no el parseo de la respuesta."""
+        return self._client.messages.create(
             model=self.model,
             # Techo, no gasto: cubre el pensamiento adaptativo MÁS el JSON.
             max_tokens=16000,
@@ -260,14 +287,6 @@ class Revisor:
                            "format": {"type": "json_schema", "schema": schema}},
             messages=[{"role": "user", "content": contenido}],
         )
-        texto = next((b.text for b in resp.content if b.type == "text"), "{}")
-        try:
-            data = json.loads(texto)
-        except Exception:
-            return {}    # JSON truncado o inválido: nadie queda en "ok" por accidente
-        # `json.loads` valida sintaxis, no forma: `[{...}]`, `"ok"` o `42` parsean bien
-        # y reventarían el `.get` del llamador. Que caigan por el mismo camino.
-        return data if isinstance(data, dict) else {}
 
     # ------------------------------------------------------------------ barrido
     def barrer_lote(self, lote: list[CorridaItemRow],

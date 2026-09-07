@@ -9,7 +9,9 @@ from apu_tool.dominio.ai_assist import (
     ApuAdvisor,
     ComposedComponent,
     ComposeResult,
+    IANoDisponible,
 )
+from apu_tool.dominio.compose import CandidateInsumo
 from apu_tool.dominio.assemble import Assembler
 from apu_tool.dominio.compose import InsumoRetriever
 from apu_tool.datos.almacen import Almacen
@@ -125,3 +127,48 @@ def test_una_fuga_de_dinero_al_componer_no_se_disfraza_de_None(alm, monkeypatch)
     with pytest.raises(privacy.PrivacyViolation):
         advisor.compose_apu(item, insumos, ejemplos)
     assert llamadas == []               # y revienta ANTES de tocar la red
+
+
+class _ErrorSDK(Exception):
+    """Como en test_revision_motor: solo importa `status_code` (el SDK es opcional)."""
+    def __init__(self, status_code):
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
+
+
+class _ClienteQueFalla:
+    def __init__(self, status_code):
+        self.status_code = status_code
+
+    @property
+    def messages(self):
+        return self
+
+    def create(self, **kw):
+        raise _ErrorSDK(self.status_code)
+
+
+def _advisor_que_falla(status_code):
+    a = ApuAdvisor(enabled=False)      # no construye anthropic.Anthropic()
+    a.enabled = True
+    a._client = _ClienteQueFalla(status_code)
+    return a
+
+
+_ITEM = LicitacionItem(item="1", descripcion="JARDINERA EN CONCRETO", unidad="M3",
+                       cantidad=1, precio_contractual=0, shift="DIURNO")
+_INSUMOS = [CandidateInsumo("322", "CONCRETO 3000 PSI", "M3")]
+
+
+@pytest.mark.parametrize("codigo", [401, 403])
+def test_credencial_invalida_al_componer_no_se_lee_como_actividad_imposible(codigo):
+    """Con la llave rota, `compose_apu` devolvía None y el diálogo decía "la IA no pudo
+    componer esta actividad": mandaba a armar a mano en vez de a revisar el servidor."""
+    with pytest.raises(IANoDisponible, match="ANTHROPIC_API_KEY"):
+        _advisor_que_falla(codigo).compose_apu(_ITEM, _INSUMOS, [])
+
+
+@pytest.mark.parametrize("codigo", [429, 500])
+def test_un_fallo_pasajero_al_componer_sigue_devolviendo_none(codigo):
+    """Guarda: un 429 o un 500 se sigue tragando (el usuario reintenta el botón)."""
+    assert _advisor_que_falla(codigo).compose_apu(_ITEM, _INSUMOS, []) is None

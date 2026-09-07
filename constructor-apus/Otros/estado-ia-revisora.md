@@ -55,7 +55,7 @@ otro APU, el `ok` imposible en una fila sin APU y la `PrivacyViolation` disfraza
 componer):
 
 ```
-python -m pytest tests/ -q   → 888 passed, 15 skipped, 1 warning (slowapi, preexistente)
+python -m pytest tests/ -q   → 897 passed, 15 skipped, 1 warning (slowapi, preexistente)
 npm run build                → OK (tsc -b + vite)
 npm test                     → 46 archivos, 259 pruebas
 npm run lint                 → 11 warnings, todos preexistentes
@@ -163,6 +163,18 @@ desplegó nada: la rama no es `master`.
   una vez, no en bucle). Si algún día duele, la optimización natural **no** es bajar
   `TAM_LOTE` sino `cache_control: {"type": "ephemeral"}` sobre el bloque del índice, que es
   byte por byte idéntico en todos los lotes.
+- **Una credencial rota se distingue de un fallo pasajero.** `config.ai_available()`
+  solo mira que la variable de entorno EXISTA, así que con una `ANTHROPIC_API_KEY`
+  vencida o revocada el botón queda habilitado. Antes ese 401 caía en el
+  `except Exception` del barrido y salía como "N sin revisar" (y en componer, como "la
+  IA no pudo componer esta actividad"): el usuario iba a mirar la corrida en vez del
+  servidor. Ahora las dos puertas al SDK miran `status_code` — 401/403 levantan
+  `IANoDisponible` con un mensaje que nombra la llave (503, o evento `error` del SSE si
+  el stream ya está abierto); 429, 500 y los timeouts se siguen tragando igual que
+  antes. Se mira el código HTTP y no la clase del SDK porque `anthropic` es dependencia
+  opcional. Lo que NO se hace es probar la llave al abrir la corrida: sería una llamada
+  de red por carga de pantalla para adelantar un error que el clic ya explica.
+
 - **`assert_no_money` mira solo nombres de clave, no valores.** Un monto embebido en un
   string de texto libre pasa el guardián sin que salte nada. De ahí la regla operativa, ya
   escrita en el docstring de la función y en "No hacer" de `CLAUDE.md`: **nunca meter en un

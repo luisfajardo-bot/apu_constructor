@@ -31,6 +31,29 @@ from apu_tool.dominio.compose import CandidateInsumo, candidate_insumo_to_dict
 from apu_tool.nucleo.models import DePricedApu, LicitacionItem
 
 
+class IANoDisponible(RuntimeError):
+    """La IA no se puede usar por CONFIGURACIÓN del servidor: falta
+    `ANTHROPIC_API_KEY`, falta el SDK, o la credencial que hay no sirve. Es distinto
+    de "la IA no contestó" (un 429, un timeout, un JSON truncado): eso se reintenta,
+    esto hay que ir a arreglarlo. Vive acá, en la fachada de la IA, porque las dos
+    puertas al SDK la necesitan — `compose_apu` y `revision.Revisor._pedir`."""
+
+
+MSG_CREDENCIAL = ("La credencial de la IA (ANTHROPIC_API_KEY) no es válida o fue "
+                  "revocada: revísala en el servidor.")
+
+# 401 = credencial inválida/revocada; 403 = sin permiso (p. ej. para este modelo).
+# Se mira `status_code` y no la clase del SDK a propósito: `anthropic` es dependencia
+# OPCIONAL y este módulo se importa siempre, así que no se puede hacer
+# `except anthropic.AuthenticationError` sin volverla obligatoria.
+_ESTADOS_DE_CREDENCIAL = (401, 403)
+
+
+def credencial_invalida(exc: BaseException) -> bool:
+    """¿Este fallo es de credencial, y no un 429/500/timeout que conviene tragarse?"""
+    return getattr(exc, "status_code", None) in _ESTADOS_DE_CREDENCIAL
+
+
 @dataclass
 class ComposedComponent:
     insumo_codigo: str
@@ -143,7 +166,12 @@ class ApuAdvisor:
             )
             text = next((b.text for b in resp.content if b.type == "text"), "{}")
             data = json.loads(text)
-        except Exception:
+        except Exception as exc:
+            # Una llave rota devolvía None y el diálogo decía "la IA no pudo componer
+            # esta actividad": mandaba al usuario a armar a mano un APU que la IA sí
+            # sabía hacer, mientras el problema estaba en el servidor.
+            if credencial_invalida(exc):
+                raise IANoDisponible(MSG_CREDENCIAL) from exc
             return None
 
         comps: list[ComposedComponent] = []

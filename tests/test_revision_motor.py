@@ -623,3 +623,42 @@ def test_un_ok_con_apu_asignado_no_se_toca(alm_apus):
     v = next(p["veredicto"] for e, p in eventos if e == "veredicto")
     assert v["dictamen"] == "ok"
     assert v["justificacion"] == "Sin objeciones en el barrido."
+
+
+class _ErrorSDK(Exception):
+    """Se parece a un `anthropic.APIStatusError` en lo único que se mira: `status_code`.
+    No se importa el SDK: es dependencia opcional y en CI puede no estar."""
+    def __init__(self, status_code):
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
+
+
+class _ClienteQueFalla:
+    """Cliente cuyo `messages.create` revienta con el código HTTP que se le pida."""
+    def __init__(self, status_code):
+        self.status_code = status_code
+
+    @property
+    def messages(self):
+        return self
+
+    def create(self, **kw):
+        raise _ErrorSDK(self.status_code)
+
+
+@pytest.mark.parametrize("codigo", [401, 403])
+def test_credencial_invalida_no_se_disfraza_de_fila_sin_respuesta(codigo):
+    """Una llave vencida o revocada NO puede salir como "la IA no contestó": el
+    barrido entero caería en `sin_respuesta` y el usuario iría a buscar el problema
+    a la corrida en vez de al servidor. Aborta con un mensaje que nombra la llave."""
+    r = _revisor_con_cliente(_ClienteQueFalla(codigo))
+    with pytest.raises(revision.IANoDisponible, match="ANTHROPIC_API_KEY"):
+        _barrer(r, [_fila(0, "EXCAVACION MANUAL", "100")])
+
+
+@pytest.mark.parametrize("codigo", [429, 500, 529])
+def test_un_fallo_pasajero_sigue_cayendo_en_sin_respuesta(codigo):
+    """Guarda del arreglo de arriba: distinguir la credencial NO puede convertir un
+    429 o un 500 en un aborto. Esos se tragan, el lote se pierde y el barrido sigue."""
+    r = _revisor_con_cliente(_ClienteQueFalla(codigo))
+    assert _barrer(r, [_fila(0, "EXCAVACION MANUAL", "100")]) == (set(), {0})

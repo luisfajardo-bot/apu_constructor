@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 51 planes, 57 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 51 planes, 58 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -32,6 +32,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 51 plane
 | Fecha | Título |
 | --- | --- |
 | 2026-09-07 | [[Specs/2026-09-07-igualar-costo-contractual-design|Igualar el costo unitario al precio contractual]] |
+| 2026-09-07 | [[Specs/2026-09-07-armado-reanudable-design|Armado reanudable — el armado deja la petición y pasa a ser trabajo del servidor]] |
 | 2026-08-31 | [[Specs/2026-08-31-ia-revisora-post-armado-design|IA revisora post-armado (y candado de filas sin APU)]] |
 | 2026-08-18 | [[Specs/2026-08-18-agregar-lineas-corrida-design|Agregar líneas a una corrida activa]] |
 | 2026-08-10 | [[Specs/2026-08-10-sin-duplicados-alta-design|Alta sin códigos ni nombres repetidos (insumos y APUs)]] |

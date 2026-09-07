@@ -49,12 +49,14 @@ que `modo` y `snapshot_json`. `CorridaItemRow.costo_manual: Optional[float] = No
 Método nuevo en el contrato de `datos/repositorio.py` y en los dos backends:
 
 ```python
-def set_costo_manual(self, corrida_id: int, costos: dict[int, float]) -> None
+def set_costo_manual(self, corrida_id: int, costos: dict[int, float], conn=None) -> None
 ```
 
 `costos` es `{seq: costo}` — ya trae los seqs, no hace falta pasarlos aparte. Escribe
 `costo_manual` y `status='confirmed'` en un solo lote. Es una sola acción del usuario
-("esta fila la resuelvo así"), así que es una sola escritura.
+("esta fila la resuelvo así"), así que es una sola escritura. El `conn=None` opcional es
+el mismo patrón que `borrar_items`: deja meter la escritura en la transacción que también
+registra la auditoría.
 
 `actualizar_eleccion` (`corridas_db.py:148` y `pg/corridas_pg.py:93`) suma
 `costo_manual=NULL` al `revision_json=NULL` que ya escribe. Es el borrado automático.

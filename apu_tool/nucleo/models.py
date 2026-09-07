@@ -274,3 +274,6 @@ class CorridaItemRow:
     componentes: list[dict]       # [{insumo_codigo, insumo_nombre, unidad, rendimiento}] (sin dinero)
     candidatos: list[dict]        # [{apu_codigo, apu_nombre, score, motivo}] (sin dinero)
     revision: Optional[dict] = None   # veredicto de la IA (sin dinero); None = sin revisar
+    # Costo unitario puesto a mano (proyectos especiales). None = costear normal desde
+    # la composición. NUNCA entra a un payload de la IA: es dinero (ver privacy.py).
+    costo_manual: Optional[float] = None

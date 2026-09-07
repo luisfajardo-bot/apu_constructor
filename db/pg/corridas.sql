@@ -47,7 +47,11 @@ CREATE TABLE IF NOT EXISTS corridas.corrida_item (
     candidatos_json  TEXT,
     snapshot_json    TEXT,
     -- Veredicto de la IA revisora sobre el APU de esta fila. NULL = nunca revisada.
-    revision_json    TEXT
+    revision_json    TEXT,
+    -- Costo unitario declarado por una persona (proyectos especiales: la actividad vale
+    -- lo que dice el contrato y armarle el APU no paga). NULL = costeo normal desde la
+    -- composición. Se borra en actualizar_eleccion: si la fila cambia de APU, manda el APU.
+    costo_manual     DOUBLE PRECISION
 );
 CREATE INDEX IF NOT EXISTS ix_corrida_item ON corridas.corrida_item(corrida_id, seq);
 
@@ -55,6 +59,7 @@ CREATE INDEX IF NOT EXISTS ix_corrida_item ON corridas.corrida_item(corrida_id, 
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS modo TEXT NOT NULL DEFAULT 'activa';
 ALTER TABLE corridas.corrida_item ADD COLUMN IF NOT EXISTS snapshot_json TEXT;
 ALTER TABLE corridas.corrida_item ADD COLUMN IF NOT EXISTS revision_json TEXT;
+ALTER TABLE corridas.corrida_item ADD COLUMN IF NOT EXISTS costo_manual DOUBLE PRECISION;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS carpeta_id BIGINT
     REFERENCES corridas.carpeta(id) ON DELETE RESTRICT;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS nombre TEXT;

@@ -86,11 +86,13 @@ class CorridasPg:
                             explicacion: str, componentes: list[dict]) -> None:
         with self.cx.connection() as conn:
             conn.execute(
-                # El APU cambió: el veredicto de la IA hablaba del anterior. Se borra
-                # acá, el único punto por el que pasa un cambio del APU elegido en la fila.
+                # El APU cambió: el veredicto de la IA hablaba del anterior, y un costo
+                # puesto a mano ya no manda (la fila volvió a tener composición real).
+                # Se borran acá, el único punto por el que pasa un cambio del APU elegido.
                 "UPDATE corridas.corrida_item SET status=%s, apu_codigo=%s, apu_nombre=%s, "
                 "unidad=%s, shift=%s, origen=%s, confianza=%s, explicacion=%s, "
-                "componentes_json=%s, revision_json=NULL WHERE corrida_id=%s AND seq=%s",
+                "componentes_json=%s, revision_json=NULL, costo_manual=NULL "
+                "WHERE corrida_id=%s AND seq=%s",
                 (status, apu_codigo, apu_nombre, unidad, shift, origen, confianza,
                  explicacion, json.dumps(componentes, ensure_ascii=False),
                  corrida_id, seq))
@@ -150,6 +152,21 @@ class CorridasPg:
                 (None if payload is None else json.dumps(payload, ensure_ascii=False),
                  int(corrida_id), int(seq)))
 
+    def set_costo_manual(self, corrida_id: int, costos: dict[int, float], conn=None) -> None:
+        """Fija el costo unitario a mano de varias filas y las deja en `confirmed`.
+        `costos` es {seq: costo}. Ver el docstring del contrato en repositorio.py."""
+        if not costos:
+            return
+        filas = [(float(c), int(corrida_id), int(s)) for s, c in costos.items()]
+        sql = ("UPDATE corridas.corrida_item SET costo_manual=%s, status='confirmed' "
+               "WHERE corrida_id=%s AND seq=%s")
+        if conn is not None:
+            with conn.cursor() as cur:
+                cur.executemany(sql, filas)
+            return
+        with self.cx.connection() as c, c.cursor() as cur:
+            cur.executemany(sql, filas)
+
     # ---- lectura ----
     def _row_to_item(self, r) -> CorridaItemRow:
         return CorridaItemRow(
@@ -160,7 +177,8 @@ class CorridasPg:
             confianza=r["confianza"] or 0.0, explicacion=r["explicacion"] or "",
             componentes=json.loads(r["componentes_json"] or "[]"),
             candidatos=json.loads(r["candidatos_json"] or "[]"),
-            revision=(json.loads(r["revision_json"]) if r["revision_json"] else None))
+            revision=(json.loads(r["revision_json"]) if r["revision_json"] else None),
+            costo_manual=(None if r["costo_manual"] is None else float(r["costo_manual"])))
 
     def _row_to_meta(self, r) -> CorridaMeta:
         return CorridaMeta(

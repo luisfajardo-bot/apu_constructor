@@ -66,6 +66,8 @@ class CorridasDB:
                 conn.execute("ALTER TABLE corrida_item ADD COLUMN snapshot_json TEXT")
             if "revision_json" not in icols:
                 conn.execute("ALTER TABLE corrida_item ADD COLUMN revision_json TEXT")
+            if "costo_manual" not in icols:
+                conn.execute("ALTER TABLE corrida_item ADD COLUMN costo_manual REAL")
             sc = conn.execute("SELECT id FROM carpeta WHERE nombre='Sin clasificar' "
                               "AND parent_id IS NULL").fetchone()
             if sc is None:
@@ -151,11 +153,12 @@ class CorridasDB:
                             explicacion: str, componentes: list[dict]) -> None:
         with self.connect() as conn:
             conn.execute(
-                # El APU cambió: el veredicto de la IA hablaba del anterior. Se borra
-                # acá, el único punto por el que pasa un cambio del APU elegido en la fila.
+                # El APU cambió: el veredicto de la IA hablaba del anterior, y un costo
+                # puesto a mano ya no manda (la fila volvió a tener composición real).
+                # Se borran acá, el único punto por el que pasa un cambio del APU elegido.
                 "UPDATE corrida_item SET status=?, apu_codigo=?, apu_nombre=?, unidad=?, "
                 "shift=?, origen=?, confianza=?, explicacion=?, componentes_json=?, "
-                "revision_json=NULL "
+                "revision_json=NULL, costo_manual=NULL "
                 "WHERE corrida_id=? AND seq=?",
                 (status, apu_codigo, apu_nombre, unidad, shift, origen, confianza,
                  explicacion, json.dumps(componentes, ensure_ascii=False),
@@ -212,6 +215,24 @@ class CorridasDB:
                 (None if payload is None else json.dumps(payload, ensure_ascii=False),
                  int(corrida_id), int(seq)))
 
+    def set_costo_manual(self, corrida_id: int, costos: dict[int, float], conn=None) -> None:
+        """Fija el costo unitario a mano de varias filas y las deja en `confirmed`.
+
+        `costos` es {seq: costo}. Es UNA acción del usuario ("estas filas las resuelvo
+        así"), así que es una escritura por lote: el status va junto porque la fila
+        quedó resuelta a propósito y seguir contándola en "en revisión" mentiría en
+        los totales."""
+        if not costos:
+            return
+        filas = [(float(c), int(corrida_id), int(s)) for s, c in costos.items()]
+        sql = ("UPDATE corrida_item SET costo_manual=?, status='confirmed' "
+               "WHERE corrida_id=? AND seq=?")
+        if conn is not None:
+            conn.executemany(sql, filas)
+            return
+        with self.connect() as c:
+            c.executemany(sql, filas)
+
     # ---- lectura ----
     def _row_to_item(self, r: sqlite3.Row) -> CorridaItemRow:
         return CorridaItemRow(
@@ -222,7 +243,8 @@ class CorridasDB:
             confianza=r["confianza"] or 0.0, explicacion=r["explicacion"] or "",
             componentes=json.loads(r["componentes_json"] or "[]"),
             candidatos=json.loads(r["candidatos_json"] or "[]"),
-            revision=(json.loads(r["revision_json"]) if r["revision_json"] else None))
+            revision=(json.loads(r["revision_json"]) if r["revision_json"] else None),
+            costo_manual=(None if r["costo_manual"] is None else float(r["costo_manual"])))
 
     def _row_to_meta(self, r: sqlite3.Row) -> CorridaMeta:
         return CorridaMeta(

@@ -45,7 +45,11 @@ CREATE TABLE IF NOT EXISTS corrida_item (
   candidatos_json  TEXT,
   snapshot_json    TEXT,
   -- Veredicto de la IA revisora sobre el APU de esta fila. NULL = nunca revisada.
-  revision_json    TEXT
+  revision_json    TEXT,
+  -- Costo unitario declarado por una persona (proyectos especiales: la actividad vale
+  -- lo que dice el contrato y armarle el APU no paga). NULL = costeo normal desde la
+  -- composición. Se borra en actualizar_eleccion: si la fila cambia de APU, manda el APU.
+  costo_manual     REAL
 );
 
 CREATE INDEX IF NOT EXISTS ix_corrida_item ON corrida_item(corrida_id, seq);

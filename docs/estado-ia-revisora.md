@@ -1,8 +1,14 @@
 # Estado — la IA pasa de armar a revisar
 
-Rama `feat/ia-revisora-post-armado`, sacada de `feat/distancias-transporte-proyecto`
-(base `7be02a9`, 2026-08-31). **No sale de `master`**: la rama de distancias todavía espera
-PR, así que este trabajo va encima y se mergea después de aquella.
+Rama `feat/ia-revisora-post-armado`, **rebaseada sobre `origin/master`** (`7fdc6dd`) el
+2026-09-07. Nació encima de `feat/distancias-transporte-proyecto` (base `7be02a9`), pero
+esa rama sigue esperando la demo con el superior y esta ya está lista, así que se
+independizó para poder mergearse primero. Al rebasear se quitaron los tres restos de
+distancias que el 3-way merge había arrastrado: el `contexto=` de `PricingEngine`/
+`Assembler` en `servicio/corridas.py`, el párrafo del prompt de `dominio/revision.py` que
+le avisaba a la IA que un proyecto puede ajustar los km de acarreo, y dos tests de
+`Corrida.test.tsx` que son de aquella feature. **Cuando distancias entre habrá que
+reponer esos tres puntos** — el orden de merge invirtió quién arrastra a quién.
 
 - Spec: `docs/superpowers/specs/2026-08-31-ia-revisora-post-armado-design.md`
 - Plan: `docs/superpowers/plans/2026-08-31-ia-revisora-post-armado.md`
@@ -41,15 +47,15 @@ los dos backends, y tres endpoints:
 
 ## Estado
 
-Terminada y verde. Verificación en serie del 2026-09-02, tras cerrar los hallazgos de la
+Terminada y verde. Verificación en serie del 2026-09-07 (tras el rebase a master), después de cerrar los hallazgos de la
 revisión final (`sin_veredicto` visible en la interfaz, la carrera del veredicto pegado a
 otro APU, el `ok` imposible en una fila sin APU y la `PrivacyViolation` disfrazada al
 componer):
 
 ```
-python -m pytest tests/ -q   → 1001 passed, 16 skipped, 1 warning (slowapi, preexistente)
+python -m pytest tests/ -q   → 888 passed, 15 skipped, 1 warning (slowapi, preexistente)
 npm run build                → OK (tsc -b + vite)
-npm test                     → 50 archivos, 290 pruebas
+npm test                     → 46 archivos, 259 pruebas
 npm run lint                 → 11 warnings, todos preexistentes
 ```
 

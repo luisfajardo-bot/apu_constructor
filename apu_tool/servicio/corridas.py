@@ -661,10 +661,9 @@ def componer_item(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
     if not advisor.enabled:
         raise IANoDisponible(
             "Componer un APU con IA necesita ANTHROPIC_API_KEY en el servidor.")
-    # Misma tarifa y mismas desviaciones del proyecto que el resto de la corrida
-    # (ver `agregar_items`): la propuesta se compone contra los mismos insumos.
-    assembler = Assembler(alm, advisor=advisor, lista_id=meta.lista_precios_id,
-                          contexto=_contexto(alm, meta))
+    # Misma tarifa que el resto de la corrida (ver `agregar_items`): la propuesta
+    # se compone contra los mismos insumos.
+    assembler = Assembler(alm, advisor=advisor, lista_id=meta.lista_precios_id)
     ens = assembler.generar_composicion(row.item)
     if ens is None:
         raise ValueError("La IA no pudo componer esta actividad. "

@@ -193,9 +193,8 @@ Reglas:
 - `turno_sugerido` es la jornada del APU que propones y es parte de su identidad:
   SOLO valen "DIURNO" y "NOCTURNO". Cópialo del campo `shift` del candidato que
   elegiste. Si el dictamen no es "cambiar", o no lo sabes, devuelve null.
-- La composición que ves es la de la BIBLIOTECA. Un proyecto puede ajustar distancias
-  de acarreo al costear, así que los rendimientos de transporte pueden diferir; juzga
-  la afinidad técnica de la actividad, no la exactitud numérica del rendimiento.
+- La composición que ves es la de la BIBLIOTECA: juzga la afinidad técnica de la
+  actividad, no la exactitud numérica del rendimiento.
 - La justificación va en una frase corta, en español.
 
 Responde EXCLUSIVAMENTE con un JSON válido con este esquema:

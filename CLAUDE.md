@@ -58,7 +58,7 @@ lista licitación ──► matching determinístico ──► confirma usuario 
 corrida armada ──► revisión con IA (sin dinero) ──► propone veredicto ──► confirma usuario
 
 Interfaces sobre el mismo pipeline (dominio/pipeline.py):
-  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, ENDPOINTS endpoints) + web/ (React) para multiusuario
+  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 58 endpoints) + web/ (React) para multiusuario
 ```
 
 `apu_tool/config.py` es transversal, fuera de cualquier paquete: rutas, umbrales de

@@ -129,9 +129,13 @@ def _build_desglose(ws, apus: list[AssembledApu]) -> None:
     ws.freeze_panes = "A2"
     for a in apus:
         if not a.componentes:
-            nota = ("(costo puesto a mano — igualado al contractual)" if a.costo_a_mano
+            # Sin APU y costeada a mano, `apu_nombre` es "(sin base — armar manual)":
+            # contradiría a la celda de al lado. El nombre real es la actividad.
+            nombre = (a.item.descripcion if a.costo_a_mano and not a.apu_codigo
+                      else a.apu_nombre)
+            nota = ("(costo puesto a mano)" if a.costo_a_mano
                     else "(sin composición — armar manual)")
-            ws.append([a.item.item, a.apu_codigo or "", a.apu_nombre,
+            ws.append([a.item.item, a.apu_codigo or "", nombre,
                        "", nota, "", "", "", "", "", ""])
             continue
         for c in a.componentes:

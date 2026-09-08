@@ -221,11 +221,14 @@ class CorridasDB:
         `costos` es {seq: costo}. Es UNA acción del usuario ("estas filas las resuelvo
         así"), así que es una escritura por lote: el status va junto porque la fila
         quedó resuelta a propósito y seguir contándola en "en revisión" mentiría en
-        los totales."""
+        los totales. Poner el costo a mano ES un confirm, por la misma razón que lo
+        es `actualizar_eleccion`: borra `revision_json` porque el veredicto hablaba
+        de una fila que ya no es esta."""
         if not costos:
             return
         filas = [(float(c), int(corrida_id), int(s)) for s, c in costos.items()]
-        sql = ("UPDATE corrida_item SET costo_manual=?, status='confirmed' "
+        sql = ("UPDATE corrida_item SET costo_manual=?, status='confirmed', "
+               "revision_json=NULL "
                "WHERE corrida_id=? AND seq=?")
         if conn is not None:
             conn.executemany(sql, filas)

@@ -154,11 +154,13 @@ class CorridasPg:
 
     def set_costo_manual(self, corrida_id: int, costos: dict[int, float], conn=None) -> None:
         """Fija el costo unitario a mano de varias filas y las deja en `confirmed`.
-        `costos` es {seq: costo}. Ver el docstring del contrato en repositorio.py."""
+        `costos` es {seq: costo}. Poner el costo a mano ES un confirm: borra
+        `revision_json` (ver el docstring del contrato en repositorio.py)."""
         if not costos:
             return
         filas = [(float(c), int(corrida_id), int(s)) for s, c in costos.items()]
-        sql = ("UPDATE corridas.corrida_item SET costo_manual=%s, status='confirmed' "
+        sql = ("UPDATE corridas.corrida_item SET costo_manual=%s, status='confirmed', "
+               "revision_json=NULL "
                "WHERE corrida_id=%s AND seq=%s")
         if conn is not None:
             with conn.cursor() as cur:

@@ -133,7 +133,7 @@ def _build_apus(ws, apus: list[AssembledApu]) -> None:
         _style_header(ws, ws.max_row, len(sub))
 
         if not a.componentes:
-            nota = ("(costo puesto a mano — igualado al contractual)" if a.costo_a_mano
+            nota = ("(costo puesto a mano)" if a.costo_a_mano
                     else "(sin composición — armar manual)")
             ws.append(["", nota, "", "", "", "", "", ""])
         for c in a.componentes:

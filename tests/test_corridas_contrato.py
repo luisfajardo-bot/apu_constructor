@@ -116,6 +116,16 @@ def test_set_costo_manual_vacio_no_escribe(repo):
     assert fila.status == "new"      # sin esto el test no podría fallar: ya era None
 
 
+def test_set_costo_manual_borra_el_veredicto(repo):
+    """Poner el costo a mano ES un confirm: el veredicto de la IA hablaba de una fila
+    que ya no es esta. Si sobreviviera, el badge quedaría al lado de un 'no tiene APU'."""
+    cid = _corrida_con(repo, _item(0, 1500.0))
+    repo.set_revision(cid, 0, {"dictamen": "sin_apu", "apu_evaluado": None})
+    assert repo.get_items(cid)[0].revision is not None
+    repo.set_costo_manual(cid, {0: 1500.0})
+    assert repo.get_items(cid)[0].revision is None
+
+
 def test_conn_del_llamador_commitea(repo):
     """El camino de producción: la escritura entra en la transacción del llamador
     (junto con la auditoría) y queda cuando esa transacción sale OK."""

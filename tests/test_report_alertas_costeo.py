@@ -34,6 +34,22 @@ def test_alertas_lista_motivo_de_costeo(tmp_path):
     assert any(t and "en $0" in t for t in textos)
 
 
+def test_desglose_costo_a_mano_muestra_nota_y_nombre_de_actividad(tmp_path):
+    """Sin APU y costeada a mano: la nota dice '(costo puesto a mano)' y el nombre de
+    la fila es la actividad, no el placeholder '(sin base — armar manual)' — que
+    contradiría a la celda de al lado."""
+    a_mano = AssembledApu(item=_item(), apu_codigo=None,
+                          apu_nombre="(sin base — armar manual)", unidad="m3",
+                          shift="DIURNO", componentes=[], costo_unitario=1500.0,
+                          status=MatchStatus.NEW, confianza=0.0)
+    sin_composicion = _apu([], 0.0)
+    out = write_report([a_mano, sin_composicion], tmp_path / "c.xlsx")
+    ws = openpyxl.load_workbook(out)["DESGLOSE"]
+    assert ws.cell(row=2, column=5).value == "(costo puesto a mano)"
+    assert ws.cell(row=2, column=3).value == "Losa"    # item.descripcion, no el placeholder
+    assert ws.cell(row=3, column=5).value == "(sin composición — armar manual)"
+
+
 def test_resumen_prioridad_alerta_costeo_sobre_margen_negativo(tmp_path):
     # Ítem 1: componente en $0 (alerta de costeo) Y margen negativo -> gana _ALERT_FILL.
     apu_con_alerta = _apu([_comp(0.0, 0.0)], costo=150.0)

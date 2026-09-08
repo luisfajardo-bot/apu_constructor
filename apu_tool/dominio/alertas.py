@@ -36,11 +36,10 @@ def alertas_costeo(a: AssembledApu) -> list[str]:
         elif c.calidad_cruce in _MOTIVO_CRUCE:
             motivos.append(f"{etiqueta}: {_MOTIVO_CRUCE[c.calidad_cruce]}")
     # Costo declarado por una persona, no calculado por el motor (proyectos
-    # especiales). Se marca SIEMPRE, activa y congelada. Va antes de la regla del $0
-    # para dar el motivo real en vez del genérico, igual que `sin_precio_lista`.
+    # especiales). Se marca SIEMPRE, activa y congelada.
     if a.costo_a_mano:
-        motivos.append("costo puesto a mano (igualado al contractual)")
-    if not motivos and a.costo_unitario <= 0:               # ítem sin composición / sin costo
+        motivos.append("costo puesto a mano")
+    if not motivos and not (a.costo_unitario > 0):         # ítem sin composición / sin costo / NaN
         motivos.append("APU en $0 (sin composición o sin costo)")
     return motivos
 

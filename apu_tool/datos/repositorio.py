@@ -195,8 +195,10 @@ class RepositorioCorridas(Protocol):
     def set_costo_manual(self, corrida_id: int, costos: dict[int, float], conn=None) -> None:
         """Costo unitario puesto a mano, {seq: costo}, y la fila queda `confirmed`.
 
-        Lo BORRA `actualizar_eleccion`: si la fila cambia de APU, manda el APU. Es el
-        único punto de paso, así que no hace falta acordarse de limpiarlo."""
+        Poner el costo a mano ES un confirm, así que también borra `revision_json`
+        (el veredicto hablaba de una fila que ya no es esta), la misma razón por la
+        que lo borra `actualizar_eleccion`. Y `actualizar_eleccion` a su vez BORRA
+        `costo_manual`: si la fila cambia de APU, manda el APU."""
         ...
     def set_carpeta(self, corrida_id: int, carpeta_id: int, conn=None) -> None: ...
     def listar_corridas(self) -> list[CorridaMeta]: ...

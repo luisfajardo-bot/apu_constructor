@@ -60,10 +60,11 @@ def test_costo_a_mano_siempre_se_marca():
     """Nada silencioso: un costo que puso una persona tiene que distinguirse de
     uno que calculó el motor."""
     motivos = alertas_costeo(_ensamble([], 92106000.0))
-    assert motivos == ["costo puesto a mano (igualado al contractual)"]
+    assert motivos == ["costo puesto a mano"]
 
 
-def test_sin_composicion_y_sin_costo_sigue_siendo_el_cero_de_antes():
-    """No romper el mensaje que ya existía para las filas en $0."""
-    motivos = alertas_costeo(_ensamble([], 0.0))
-    assert motivos == ["APU en $0 (sin composición o sin costo)"]
+def test_costo_nan_tambien_alerta():
+    """`nan <= 0` y `nan > 0` son ambos False: sin `not (x > 0)` un NaN era la única
+    fila que salía sin ninguna alerta, contra la regla "un $0 SIEMPRE es alerta"."""
+    assert alertas_costeo(_ensamble([], float("nan"))) == [
+        "APU en $0 (sin composición o sin costo)"]

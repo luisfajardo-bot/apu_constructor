@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 51 planes, 58 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 52 planes, 58 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -94,6 +94,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 51 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-09-08 | [[Planes/2026-09-08-armado-reanudable|Armado reanudable — Implementation Plan]] |
 | 2026-09-07 | [[Planes/2026-09-07-igualar-costo-contractual|Igualar el costo unitario al precio contractual — Plan de implementación]] |
 | 2026-08-31 | [[Planes/2026-08-31-ia-revisora-post-armado|IA revisora post-armado — Plan de implementación]] |
 | 2026-08-18 | [[Planes/2026-08-18-agregar-lineas-corrida|Agregar líneas a una corrida activa — Plan de implementación]] |

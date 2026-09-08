@@ -1246,6 +1246,38 @@ de ahí el `[0, 1]` esperado.
 Run: `cd web && npx vitest run src/components/corrida/TablaItems.test.tsx`
 Expected: FAIL — no encuentra el botón ni el texto "a mano".
 
+- [ ] **Step 2b: Realinear el gemelo del redondeo**
+
+> La Tarea 5 arregló `apu_tool/nucleo/redondeo.py::mul_redondeado`, que con un `a*b`
+> NaN reventaba en `math.floor(nan + 0.5)` (`nan <= 0` es False). El gemelo del
+> frontend quedó divergente: en JS `NaN <= 0` también es `false`, así que no revienta
+> — devuelve `NaN` y lo pinta en la tabla, que es peor porque no se nota. El archivo
+> se declara "Gemelo de apu_tool/nucleo/redondeo.py" en su primera línea: divergirlos
+> es justamente lo que ese comentario existe para evitar.
+
+En `web/src/lib/redondeo.ts`:
+
+```ts
+export function mulRedondeado(a: number, b: number): number {
+  const p = a * b;
+  // `!(p > 0)` y NO `p <= 0`: toda comparación con NaN es false, así que un NaN se
+  // colaría a Math.round(NaN) = NaN y se pintaría "NaN" en la tabla. Mismo arreglo
+  // que en el gemelo de Python (apu_tool/nucleo/redondeo.py).
+  if (!(p > 0)) return 0;
+  // Math.round en JS es medio-hacia-+∞: Math.round(0.5)=1, Math.round(1312.5)=1313.
+  const r = Math.round(p);
+  return r !== 0 ? r : 1;
+}
+```
+
+Y el test en `web/src/lib/redondeo.test.ts`, siguiendo la forma que ese archivo ya usa:
+
+```ts
+test("un NaN queda en 0 y no se pinta NaN", () => {
+  expect(mulRedondeado(NaN, 1000)).toBe(0);
+});
+```
+
 - [ ] **Step 3: El tipo**
 
 En `web/src/lib/tipos.ts`, en `ItemCuadro`, después de `margen_total`:

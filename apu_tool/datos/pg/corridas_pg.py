@@ -217,14 +217,27 @@ class CorridasPg:
                 (instancia, ahora, cid, limite_vencimiento))
             return cid if cur.rowcount > 0 else None
 
-    def latir_armado(self, corrida_id: int, ahora: str) -> None:
+    # Fencing: con `instancia` el UPDATE solo aplica si esa instancia SIGUE siendo la
+    # dueña. Sin esto, un worker viejo que ya perdió la reclama (venció durante un
+    # deploy) le suelta la del dueño nuevo. Opcional porque el camino sincrónico
+    # (CLI/GUI) arma sin que nadie haya reclamado: ahí no hay dueño que verificar.
+    @staticmethod
+    def _fencing(instancia: Optional[str]) -> tuple[str, list]:
+        return ("", []) if instancia is None else (" AND armando_por=%s", [instancia])
+
+    def latir_armado(self, corrida_id: int, ahora: str,
+                     instancia: Optional[str] = None) -> None:
+        dueno, extra = self._fencing(instancia)
         with self.cx.connection() as conn:
-            conn.execute("UPDATE corridas.corrida SET armando_desde=%s WHERE id=%s",
-                         (ahora, int(corrida_id)))
+            conn.execute(
+                f"UPDATE corridas.corrida SET armando_desde=%s WHERE id=%s{dueno}",
+                [ahora, int(corrida_id)] + extra)
 
     def finalizar_armado(self, corrida_id: int, estado: str,
                          duracion_ms: Optional[int] = None,
-                         error: Optional[str] = None) -> None:
+                         error: Optional[str] = None,
+                         instancia: Optional[str] = None) -> None:
+        dueno, extra = self._fencing(instancia)
         with self.cx.connection() as conn:
             conn.execute(
                 # COALESCE en la duración y no en el error a propósito: duracion_ms=None
@@ -235,8 +248,8 @@ class CorridasPg:
                 "UPDATE corridas.corrida "
                 "   SET estado=%s, armando_por=NULL, armando_desde=NULL, "
                 "       duracion_ms=COALESCE(%s, duracion_ms), ultimo_error=%s "
-                " WHERE id=%s",
-                (estado, duracion_ms, error, int(corrida_id)))
+                f" WHERE id=%s{dueno}",
+                [estado, duracion_ms, error, int(corrida_id)] + extra)
 
     def reencolar_armado(self, corrida_id: int) -> None:
         with self.cx.connection() as conn:

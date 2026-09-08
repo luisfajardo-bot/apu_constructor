@@ -358,6 +358,61 @@ def test_reencolar_la_deja_lista_para_tomar_ya(repo):
     assert repo.reclamar_armado("B", "2026-01-03T10:00:05", "2026-01-03T09:57:05") == cid
 
 
+# ---- fencing: el que ya no es dueño no toca la reclama ajena ----
+
+def _reclama_robada(repo) -> int:
+    """El montaje del deploy de Render: A arma, su reclama vence mientras drena, y B
+    (la instancia nueva) se la lleva. A sigue vivo y todavía se cree el dueño."""
+    cid = _en_cola(repo, "2026-01-01T00:00:00")
+    repo.reclamar_armado("A", "2026-01-03T10:00:00", "2026-01-03T09:57:00")
+    assert repo.reclamar_armado("B", "2026-01-03T10:10:00", "2026-01-03T10:07:00") == cid
+    return cid
+
+
+def test_un_zombi_no_le_suelta_la_reclama_al_dueno_nuevo(repo):
+    """A ya no es el dueño: su `finalizar_armado` no puede sacar de la cola una
+    corrida que B está armando. Sin el fencing, A la marcaría 'en_revision' con B a
+    medio armar; y con estado='armando' una tercera instancia la reclamaría y
+    quedarían DOS armando la misma corrida."""
+    cid = _reclama_robada(repo)
+    repo.finalizar_armado(cid, "en_revision", duracion_ms=1234, instancia="A")
+    m = repo.get_corrida(cid)
+    assert (m.estado, m.armando_por, m.armando_desde, m.duracion_ms) == (
+        "armando", "B", "2026-01-03T10:10:00", None)
+
+
+def test_un_zombi_no_puede_latir_sobre_la_reclama_ajena(repo):
+    """Peor que inútil: el latido de A le estiraría a B una reclama que B ya no
+    estuviera renovando, y taparía que B murió."""
+    cid = _reclama_robada(repo)
+    repo.latir_armado(cid, "2026-01-03T10:30:00", instancia="A")
+    assert repo.get_corrida(cid).armando_desde == "2026-01-03T10:10:00"
+
+
+def test_el_dueno_de_verdad_si_late_y_finaliza(repo):
+    """La otra mitad: el fencing no puede trabar a quien SÍ es el dueño."""
+    cid = _reclama_robada(repo)
+    repo.latir_armado(cid, "2026-01-03T10:30:00", instancia="B")
+    assert repo.get_corrida(cid).armando_desde == "2026-01-03T10:30:00"
+    repo.finalizar_armado(cid, "en_revision", duracion_ms=1234, instancia="B")
+    m = repo.get_corrida(cid)
+    assert (m.estado, m.armando_por, m.duracion_ms) == ("en_revision", None, 1234)
+
+
+def test_sin_instancia_se_puede_latir_y_finalizar_lo_que_nadie_reclamo(repo):
+    """El camino sincrónico (`construir_corrida`, CLI y GUI): se crea y se arma en el
+    acto, sin worker y sin reclama, así que `armando_por` es NULL y no hay dueño que
+    verificar. Si el fencing fuera obligatorio, ese camino dejaría de escribir EN
+    SILENCIO (NULL no matchea nada) y la corrida quedaría colgada en 'armando'."""
+    cid = _en_cola(repo, "2026-01-01T00:00:00")
+    assert repo.get_corrida(cid).armando_por is None
+    repo.latir_armado(cid, "2026-01-03T10:30:00")
+    assert repo.get_corrida(cid).armando_desde == "2026-01-03T10:30:00"
+    repo.finalizar_armado(cid, "en_revision", duracion_ms=1234)
+    m = repo.get_corrida(cid)
+    assert (m.estado, m.duracion_ms) == ("en_revision", 1234)
+
+
 def test_posicion_en_cola_cuenta_las_mas_viejas(repo):
     a = _en_cola(repo, "2026-01-01T00:00:00")
     b = _en_cola(repo, "2026-01-02T00:00:00")

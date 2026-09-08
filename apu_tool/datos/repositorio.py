@@ -224,16 +224,27 @@ class RepositorioCorridas(Protocol):
         poco ni siquiera tenía UNIQUE(corrida_id, seq).
 
         `limite_vencimiento` es el ISO por debajo del cual una reclama se considera
-        muerta (ahora - config.ARMADO_TTL_RECLAMA_S)."""
+        muerta (ahora - config.ARMADO_TTL_RECLAMA_S).
+
+        OJO: el vencimiento se mide con el reloj del que llama, no con el de la base.
+        Una instancia adelantada le puede robar una reclama viva a otra, y un latido
+        con hora futura deja la corrida intocable hasta que el tiempo real la alcance.
+        En Render los relojes van por NTP y esto no se ve; si algún día molesta, el
+        arreglo es tomar `now()` de la base en vez de recibir los ISO de afuera."""
         ...
 
-    def latir_armado(self, corrida_id: int, ahora: str) -> None:
-        """Refresca `armando_desde` para que la reclama no venza mientras se trabaja."""
+    def latir_armado(self, corrida_id: int, ahora: str,
+                     instancia: Optional[str] = None) -> None:
+        """Refresca `armando_desde` para que la reclama no venza mientras se trabaja.
+
+        Con `instancia` solo late si esa instancia SIGUE siendo la dueña (ver el
+        fencing de `finalizar_armado`); con None late igual, sea de quien sea."""
         ...
 
     def finalizar_armado(self, corrida_id: int, estado: str,
                          duracion_ms: Optional[int] = None,
-                         error: Optional[str] = None) -> None:
+                         error: Optional[str] = None,
+                         instancia: Optional[str] = None) -> None:
         """Fija `estado`, libera la reclama y guarda la duración o el motivo.
 
         Con `estado='en_revision'` o `'armado_detenido'` saca la corrida de la cola
@@ -245,7 +256,16 @@ class RepositorioCorridas(Protocol):
 
         `duracion_ms=None` significa "no la sé", NO "borrala": la duración vieja
         queda. `error` sí se pisa siempre, incluso con None: terminar bien tiene que
-        limpiar el motivo del intento que falló."""
+        limpiar el motivo del intento que falló.
+
+        `instancia` es el FENCING y es opcional. Si viene, el UPDATE solo aplica
+        mientras esa instancia siga siendo la dueña (`armando_por`): en un deploy de
+        Render el worker viejo sigue armando mientras drena, su reclama vence, el
+        nuevo la toma, y sin esto el viejo le soltaría la reclama al dueño legítimo
+        (con `estado='armando'` es peor: una tercera instancia la reclama y quedan
+        dos armando la misma corrida). Es opcional porque el camino sincrónico
+        (`construir_corrida`, el de CLI y GUI) crea y arma en el acto, sin worker y
+        sin reclama: ahí no hay dueño que verificar. El worker siempre la pasa."""
         ...
 
     def reencolar_armado(self, corrida_id: int) -> None:

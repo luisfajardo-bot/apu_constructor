@@ -612,6 +612,63 @@ def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
     return confirmar_items(alm, corrida_id, [seq], apu_codigo, shift or None)
 
 
+def igualar_costo_al_contractual(alm: Almacen, corrida_id: int, seqs: Iterable[int],
+                                 actor=None) -> Optional[dict]:
+    """Copia el precio contractual de cada fila marcada como su costo unitario.
+
+    Para proyectos especiales: actividades globales que valen lo que dice el contrato
+    y a las que armarles el APU no paga. El margen de esas filas queda en 0 a
+    propósito.
+
+    Es una COPIA de una vez, no un vínculo vivo: si mañana cambia el contractual, el
+    costo se queda donde estaba y aparece un margen ≠ 0 — visible, para que el usuario
+    decida. Un costo que persiguiera al contractual escondería el cambio.
+
+    Se deshace solo: `actualizar_eleccion` borra el `costo_manual` cuando la fila
+    cambia de APU, así que armar el APU de verdad y asignarlo devuelve la fila al
+    costeo normal sin ningún botón que acordarse de apretar.
+
+    Devuelve la vista de la corrida con dos claves extra —`igualadas` y `rechazadas`
+    (seqs con contractual ≤ 0, que no se tocan por la regla "nada en $0")— o None si
+    la corrida no existe. Lanza CorridaCongelada si está congelada.
+    """
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    if meta.modo == "congelada":
+        raise CorridaCongelada(corrida_id)
+    pedidos = {int(s) for s in seqs}
+    filas = [r for r in alm.corridas.get_items(corrida_id) if r.seq in pedidos]
+    costos: dict[int, float] = {}
+    rechazadas: list[int] = []
+    for r in filas:
+        # `not (x > 0)` y NO `x <= 0`: con NaN, `nan <= 0` es False y el NaN se
+        # colaría al costo, envenenando todos los totales de ahí para abajo.
+        if not (r.item.precio_contractual > 0):
+            rechazadas.append(r.seq)   # igualar a 0 es el $0 que la regla prohíbe
+        else:
+            costos[r.seq] = float(r.item.precio_contractual)
+    if costos:
+        with alm.transaccion("corridas") as conn:
+            alm.corridas.set_costo_manual(corrida_id, costos, conn=conn)
+            # Se audita como `precio.editar`, que ya se audita: una persona fijando
+            # plata a mano. `antes` guarda el costo a mano previo (None la primera vez).
+            registrar_auditoria(
+                alm, conn, actor, "corrida.igualar_costo", "corrida", corrida_id,
+                antes={"lineas": [{"seq": r.seq, "costo_manual": r.costo_manual}
+                                  for r in filas if r.seq in costos]},
+                despues={"lineas": [{"seq": s, "costo_manual": c}
+                                    for s, c in sorted(costos.items())]},
+                contexto={"rechazadas": sorted(rechazadas)})
+        if meta.estado == "finalizada":
+            alm.corridas.set_estado(corrida_id, "en_revision")   # el cuadro ya no dice la verdad
+    vista = vista_corrida(alm, corrida_id)
+    if vista is not None:
+        vista["igualadas"] = sorted(costos)
+        vista["rechazadas"] = sorted(rechazadas)
+    return vista
+
+
 def revisar_corrida_stream(alm: Almacen, corrida_id: int):
     """Revisa una corrida ya armada. Devuelve None si la corrida no existe; el
     generador de eventos SSE si sí.

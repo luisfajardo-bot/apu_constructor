@@ -41,3 +41,10 @@ def test_assert_no_money_detects_nested_violation():
 def test_rendimiento_is_allowed():
     ok = {"componentes": [{"rendimiento": 1.5, "cantidad": 10}]}
     privacy.assert_no_money(ok)  # cantidades no son dinero
+
+
+def test_costo_manual_es_campo_prohibido():
+    """assert_no_money mira NOMBRES de clave: el campo nuevo tiene que estar en la
+    denylist aunque hoy ningún payload de la IA lo arme."""
+    with pytest.raises(privacy.PrivacyViolation):
+        privacy.assert_no_money({"seq": 1, "costo_manual": 92106000.0})

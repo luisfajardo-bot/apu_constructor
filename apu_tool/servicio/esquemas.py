@@ -51,6 +51,10 @@ class BorrarLineasIn(BaseModel):
     seqs: list[int]
 
 
+class IgualarCostoIn(BaseModel):
+    seqs: list[int]
+
+
 class CambioIn(BaseModel):
     insumo_id: int
     precio: float

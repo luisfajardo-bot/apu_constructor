@@ -85,3 +85,63 @@ def test_apu_sin_composicion_no_se_confunde_con_costo_a_mano(alm):
     fila = svc.vista_corrida(alm, cid)["items"][0]
     assert fila["costo_unitario"] == 0.0
     assert fila["costo_manual"] is False
+
+
+def test_igualar_en_lote_copia_el_contractual_de_cada_fila(alm):
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-07T10:00:00", archivo="x.xlsx", turno_def="DIURNO",
+        use_ai=None, estado="en_revision", cuadro_path=None, nombre="x"))
+    for seq, precio in ((0, 92106000.0), (1, 10115000.0)):
+        alm.corridas.agregar_item(cid, CorridaItemRow(
+            seq=seq,
+            item=LicitacionItem(item=str(seq), descripcion=f"ESPECIAL {seq}", unidad="GLB",
+                                cantidad=1.0, precio_contractual=precio, shift="DIURNO"),
+            status="new", apu_codigo=None, apu_nombre="", unidad="GLB", shift="DIURNO",
+            origen="historico", confianza=0.0, explicacion="", componentes=[],
+            candidatos=[]))
+    v = svc.igualar_costo_al_contractual(alm, cid, [0, 1])
+    assert v["igualadas"] == [0, 1]
+    assert [f["costo_unitario"] for f in v["items"]] == [92106000.0, 10115000.0]
+    assert all(f["status"] == "confirmed" for f in v["items"])
+
+
+def test_contractual_en_cero_se_rechaza(alm):
+    """Regla de negocio: nada en $0. Igualar a 0 es justo lo que la regla prohíbe."""
+    cid = _corrida(alm, contractual=0.0)
+    v = svc.igualar_costo_al_contractual(alm, cid, [0])
+    assert v["rechazadas"] == [0]
+    assert v["igualadas"] == []
+    assert alm.corridas.get_items(cid)[0].costo_manual is None
+
+
+def test_contractual_nan_se_rechaza(alm):
+    """`nan <= 0` es False: sin el `not (x > 0)` el NaN se colaría al costo y
+    envenenaría todos los totales."""
+    cid = _corrida(alm, contractual=float("nan"))
+    v = svc.igualar_costo_al_contractual(alm, cid, [0])
+    assert v["rechazadas"] == [0]
+    assert alm.corridas.get_items(cid)[0].costo_manual is None
+
+
+def test_congelada_no_se_toca(alm):
+    cid = _corrida(alm, contractual=1000.0)
+    alm.corridas.set_modo(cid, "congelada")
+    with pytest.raises(svc.CorridaCongelada):
+        svc.igualar_costo_al_contractual(alm, cid, [0])
+
+
+def test_corrida_inexistente_devuelve_none(alm):
+    assert svc.igualar_costo_al_contractual(alm, 9999, [0]) is None
+
+
+def test_finalizada_vuelve_a_revision(alm):
+    """El cuadro emitido ya no dice la verdad."""
+    cid = _corrida(alm, contractual=1000.0, estado="finalizada")
+    svc.igualar_costo_al_contractual(alm, cid, [0])
+    assert alm.corridas.get_corrida(cid).estado == "en_revision"
+
+
+def test_seq_ajeno_se_saltea(alm):
+    cid = _corrida(alm, contractual=1000.0)
+    v = svc.igualar_costo_al_contractual(alm, cid, [0, 77])
+    assert v["igualadas"] == [0]

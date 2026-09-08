@@ -37,8 +37,8 @@ from apu_tool.servicio import limites
 from pydantic import BaseModel
 from apu_tool.servicio.esquemas import (
     AgregarLineasIn, ApuEditIn, ApuNuevoIn, BorrarLineasIn, CambiosIn, ConfirmarIn,
-    ConfirmarLoteIn, EstadoIn, InsumoNuevoIn, ListaPreciosIn, RolIn, StatusOut,
-    UsuarioInvitarIn)
+    ConfirmarLoteIn, EstadoIn, IgualarCostoIn, InsumoNuevoIn, ListaPreciosIn, RolIn,
+    StatusOut, UsuarioInvitarIn)
 
 
 class CarpetaIn(BaseModel):
@@ -343,6 +343,25 @@ def confirmar_lote(cid: int, body: ConfirmarLoteIn,
                             detail="La corrida está congelada; actívala para modificar.")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return v
+
+
+@router.post("/corridas/{cid}/igualar-costo")
+def igualar_costo(cid: int, body: IgualarCostoIn,
+                  alm: Almacen = Depends(get_almacen),
+                  actor=Depends(requiere_rol("editor"))):
+    # Rol `editor` a propósito, MÁS ESTRICTO que sus vecinos (confirmar-lote, congelar
+    # y generar-cuadro piden "consulta", que es el hallazgo Alto "el rol consulta
+    # escribe/borra" de la auditoría 2026-08-28, todavía sin arreglar). No se les
+    # cambia el rol a esos —le sacaría el acceso a gente que hoy trabaja— pero un
+    # endpoint nuevo que DECLARA DINERO no se le abre a un rol de solo lectura.
+    try:
+        v = svc.igualar_costo_al_contractual(alm, cid, body.seqs, actor)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para modificar.")
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v

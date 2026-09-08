@@ -2,7 +2,8 @@ import openpyxl
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.licitacion import write_sample_licitacion
-from apu_tool.nucleo.models import Apu, ApuComponent, Insumo, LicitacionItem
+from apu_tool.nucleo.models import (
+    Apu, ApuComponent, CorridaItemRow, CorridaMeta, Insumo, LicitacionItem)
 from apu_tool.servicio.app import create_app
 from tests.conftest import cliente
 
@@ -436,3 +437,67 @@ def test_api_agregar_linea_con_cantidad_negativa_es_422(tmp_path):
         {"descripcion": "Concreto clase D", "cantidad": -5}]})
     assert r.status_code == 422        # pydantic rechaza antes del servicio
     assert len(cli.get(f"/api/corridas/{cid}").json()["items"]) == 1
+
+
+def _cli_rol(tmp_path, rol: str):
+    """Cliente con un rol dado + su Almacen. Para los tests de autorización."""
+    alm = Almacen(precios_path=tmp_path / "p.db", apus_path=tmp_path / "a.db",
+                  corridas_path=tmp_path / "c.db")
+    alm.init_schema()
+    return cliente(create_app(almacen=alm), rol=rol), alm
+
+
+def _corrida_especial(alm, contractual: float = 92106000.0) -> int:
+    """Una corrida con una fila SIN APU: el caso de los proyectos especiales."""
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-07T10:00:00", archivo="x.xlsx", turno_def="DIURNO",
+        use_ai=None, estado="en_revision", cuadro_path=None, nombre="x"))
+    alm.corridas.agregar_item(cid, CorridaItemRow(
+        seq=0,
+        item=LicitacionItem(item="1", descripcion="PRUEBA DE CARGA 6 PUENTES",
+                            unidad="GLB", cantidad=1.0,
+                            precio_contractual=contractual, shift="DIURNO"),
+        status="new", apu_codigo=None, apu_nombre="", unidad="GLB", shift="DIURNO",
+        origen="historico", confianza=0.0, explicacion="", componentes=[], candidatos=[]))
+    return cid
+
+
+def test_igualar_costo_endpoint(tmp_path):
+    """Feliz: 200, la fila queda con el contractual como costo y marcada."""
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_especial(alm)
+    r = cli.post(f"/api/corridas/{cid}/igualar-costo", json={"seqs": [0]})
+    assert r.status_code == 200, r.text
+    fila = r.json()["items"][0]
+    assert fila["costo_unitario"] == fila["precio_contractual"] == 92106000.0
+    assert fila["costo_manual"] is True
+    assert r.json()["igualadas"] == [0]
+
+
+def test_igualar_costo_404_si_no_existe(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    r = cli.post("/api/corridas/9999/igualar-costo", json={"seqs": [0]})
+    assert r.status_code == 404
+
+
+def test_igualar_costo_409_si_congelada(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_especial(alm)
+    alm.corridas.set_modo(cid, "congelada")
+    r = cli.post(f"/api/corridas/{cid}/igualar-costo", json={"seqs": [0]})
+    assert r.status_code == 409
+
+
+def test_igualar_costo_rol_consulta_prohibido(tmp_path):
+    """Un endpoint que declara dinero no se le abre al rol de solo lectura."""
+    cli, alm = _cli_rol(tmp_path, "consulta")
+    cid = _corrida_especial(alm)
+    r = cli.post(f"/api/corridas/{cid}/igualar-costo", json={"seqs": [0]})
+    assert r.status_code == 403
+
+
+def test_igualar_costo_rol_editor_permitido(tmp_path):
+    cli, alm = _cli_rol(tmp_path, "editor")
+    cid = _corrida_especial(alm)
+    r = cli.post(f"/api/corridas/{cid}/igualar-costo", json={"seqs": [0]})
+    assert r.status_code == 200, r.text

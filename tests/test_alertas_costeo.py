@@ -54,3 +54,16 @@ def test_item_sin_componentes_en_cero():
 def test_cruce_huerfano_con_precio_positivo():
     motivos = alertas_costeo(_ensamble([_comp(calidad="huerfano")], 10.0))
     assert motivos == ["7 Cemento: sin insumo en catálogo"]
+
+
+def test_costo_a_mano_siempre_se_marca():
+    """Nada silencioso: un costo que puso una persona tiene que distinguirse de
+    uno que calculó el motor."""
+    motivos = alertas_costeo(_ensamble([], 92106000.0))
+    assert motivos == ["costo puesto a mano (igualado al contractual)"]
+
+
+def test_sin_composicion_y_sin_costo_sigue_siendo_el_cero_de_antes():
+    """No romper el mensaje que ya existía para las filas en $0."""
+    motivos = alertas_costeo(_ensamble([], 0.0))
+    assert motivos == ["APU en $0 (sin composición o sin costo)"]

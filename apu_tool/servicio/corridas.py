@@ -370,11 +370,7 @@ def _vista_item(ens: AssembledApu, seq: int, status: str,
         "status": status, "confianza": round(ens.confianza, 4),
         "precio_contractual": ens.item.precio_contractual,
         "costo_unitario": ens.costo_unitario, "margen_unitario": ens.margen_unitario,
-        # Costo puesto a mano. Derivado del ensamble, no de la fila, así los dos call
-        # sites de `_vista_item` quedan sin tocar y funciona igual con la corrida
-        # congelada (el snapshot reconstruye `composicion: []` y el mismo costo). La
-        # firma es inequívoca: sin componentes el motor no puede dar un costo positivo.
-        "costo_manual": not ens.componentes and ens.costo_unitario > 0,
+        "costo_manual": ens.costo_a_mano,
         "margen_pct": ens.margen_pct, "contractual_total": ens.contractual_total,
         "costo_total": ens.costo_total, "margen_total": ens.margen_total,
         "alertas_costeo": alertas_costeo(ens),

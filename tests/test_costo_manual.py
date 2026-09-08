@@ -65,3 +65,23 @@ def test_sin_costo_manual_la_vista_no_lo_marca(alm):
     fila = svc.vista_corrida(alm, cid)["items"][0]
     assert fila["costo_manual"] is False
     assert fila["costo_unitario"] == 40000.0
+
+
+def test_costo_a_mano_en_cero_no_se_marca_y_alerta_como_cero(alm):
+    """Un costo a mano de 0 NO es un costo a mano válido. Sin badge, y con la alerta
+    del $0, que es la verdad."""
+    cid = _corrida(alm, contractual=1000.0)
+    alm.corridas.set_costo_manual(cid, {0: 0.0})
+    fila = svc.vista_corrida(alm, cid)["items"][0]
+    assert fila["costo_manual"] is False
+    assert any("$0" in m for m in fila["alertas_costeo"])
+
+
+def test_apu_sin_composicion_no_se_confunde_con_costo_a_mano(alm):
+    """Falsificación directa de "sin componentes el motor no puede dar costo > 0":
+    un APU vacío cuesta 0, así que la firma no se activa."""
+    alm.apus.insert_apus([Apu("VACIO", "APU SIN COMPOSICION", "M3", "DIURNO", "MOV")])
+    cid = _corrida(alm, contractual=1000.0, apu="VACIO")
+    fila = svc.vista_corrida(alm, cid)["items"][0]
+    assert fila["costo_unitario"] == 0.0
+    assert fila["costo_manual"] is False

@@ -129,8 +129,10 @@ def _build_desglose(ws, apus: list[AssembledApu]) -> None:
     ws.freeze_panes = "A2"
     for a in apus:
         if not a.componentes:
+            nota = ("(costo puesto a mano — igualado al contractual)" if a.costo_a_mano
+                    else "(sin composición — armar manual)")
             ws.append([a.item.item, a.apu_codigo or "", a.apu_nombre,
-                       "", "(sin composición — armar manual)", "", "", "", "", "", ""])
+                       "", nota, "", "", "", "", "", ""])
             continue
         for c in a.componentes:
             ws.append([a.item.item, a.apu_codigo or "", a.apu_nombre,

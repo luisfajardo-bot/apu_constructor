@@ -237,6 +237,20 @@ class AssembledApu:
         base = self.item.precio_contractual
         return (self.margen_unitario / base) if base else 0.0
 
+    @property
+    def costo_a_mano(self) -> bool:
+        """El costo lo declaró una persona, no lo calculó el motor.
+
+        Firma: sin componentes y con costo positivo. Es inequívoca porque el costo del
+        motor es la suma de los componentes — sin componentes esa suma es 0 (un APU
+        vacío, un sub-APU en ciclo o un insumo huérfano igual devuelven componentes).
+        Vive acá y no en cada consumidor porque la leen cuatro lugares (la vista de la
+        API, las alertas y los dos escritores de Excel) y `> 0` cambiado en uno solo
+        sería un drift silencioso. Funciona igual con la corrida congelada: el snapshot
+        guarda `composicion: []` con el mismo costo.
+        """
+        return not self.componentes and self.costo_unitario > 0
+
 
 # ---------------------------------------------------------------------------
 # Estado de aplicación: la corrida (armado web en progreso)

@@ -1020,6 +1020,156 @@ git commit -m "feat(api): POST /corridas/{id}/igualar-costo, rol editor y audita
 
 ---
 
+## Tarea 5b: Correcciones de la revisión de la Tarea 3
+
+> Siete hallazgos del revisor de calidad de la Tarea 3, todos aceptados. Van juntos
+> porque son chicos y se pisan entre sí.
+
+**Files:**
+- Modify: `apu_tool/datos/corridas_db.py` + `apu_tool/datos/pg/corridas_pg.py` (`set_costo_manual`)
+- Modify: `apu_tool/datos/repositorio.py` (docstring del contrato)
+- Modify: `apu_tool/dominio/alertas.py` (string, comentario, NaN)
+- Modify: `apu_tool/dominio/report.py` + `report_categorizado.py` (string + nombre contradictorio)
+- Test: `tests/test_alertas_costeo.py`, `tests/test_corridas_contrato.py`,
+  `tests/test_report_alertas_costeo.py`, `tests/test_report_categorizado_alertas.py`
+
+- [ ] **Step 1: El veredicto de la IA también se borra en este confirm**
+
+`set_costo_manual` escribe `status='confirmed'` pero deja el `revision_json`. `CLAUDE.md`
+dice que `actualizar_eleccion` es **el único punto de paso** que lo borra, y eso dejó de
+ser cierto: hay un segundo confirm. El síntoma concreto: una fila global no tiene APU, así
+que `revision.py` degrada cualquier veredicto a `sin_apu`; con `apu_evaluado=None` y
+`apu_codigo=None` el filtro de rancidez de `_vista_item` **lo deja pasar**, y el badge
+`[a mano]` termina al lado de un "no tiene APU asignado: no hay nada que dar por bueno".
+Y la justificación de ese veredicto ("va en $0 y traba el congelar") es justo lo que la
+Tarea 4 volvió falso.
+
+En los dos backends, agregar `revision_json=NULL` al UPDATE de `set_costo_manual`:
+
+```sql
+-- SQLite (corridas_db.py)
+UPDATE corrida_item SET costo_manual=?, status='confirmed', revision_json=NULL
+WHERE corrida_id=? AND seq=?
+-- Postgres (corridas_pg.py)
+UPDATE corridas.corrida_item SET costo_manual=%s, status='confirmed', revision_json=NULL
+WHERE corrida_id=%s AND seq=%s
+```
+
+Y ampliar el docstring en los tres lugares (los dos backends y el `Protocol`): poner el
+costo a mano **es** un confirm, así que borra el veredicto por la misma razón que
+`actualizar_eleccion` — el veredicto hablaba de una fila que ya no es esta.
+
+Test en `tests/test_corridas_contrato.py` (dual-backend, con el `repo` que ya existe):
+
+```python
+def test_set_costo_manual_borra_el_veredicto(repo):
+    """Poner el costo a mano ES un confirm: el veredicto de la IA hablaba de una fila
+    que ya no es esta. Si sobreviviera, el badge quedaría al lado de un 'no tiene APU'."""
+    cid = _corrida_con(repo, _item(0, 1500.0))
+    repo.set_revision(cid, 0, {"dictamen": "sin_apu", "apu_evaluado": None})
+    assert repo.get_items(cid)[0].revision is not None
+    repo.set_costo_manual(cid, {0: 1500.0})
+    assert repo.get_items(cid)[0].revision is None
+```
+
+- [ ] **Step 2: El string deja de prometer de dónde salió el número**
+
+La firma ve **forma**, no procedencia: no puede saber que el monto vino del contractual.
+El spec ya nombra los costos a mano arbitrarios como el paso siguiente, y el día que eso
+salga el string miente. Se acorta ahora, que hay un solo escritor:
+
+- `apu_tool/dominio/alertas.py`: `"costo puesto a mano (igualado al contractual)"` → `"costo puesto a mano"`
+- los dos `report*.py`: `"(costo puesto a mano — igualado al contractual)"` → `"(costo puesto a mano)"`
+- `tests/test_alertas_costeo.py`: el `assert motivos == [...]` del test nuevo se actualiza.
+  Los tests de la Tarea 4 usan `"costo puesto a mano" in m` (subcadena), así que no se mueven.
+
+- [ ] **Step 3: Un NaN deja de ser la única fila sin alerta**
+
+En `alertas_costeo`, `nan <= 0` es `False` **y** `nan > 0` es `False`: hoy un costo NaN no
+produce ninguna alerta, lo que contradice "un $0 SIEMPRE es alerta". Es preexistente y las
+Tareas 4/5 impiden que llegue por el botón, pero la capa de alertas queda ciega. Se cierra
+gratis y sigue atrapando los negativos:
+
+```python
+    if not motivos and not (a.costo_unitario > 0):         # ítem sin composición / sin costo / NaN
+        motivos.append("APU en $0 (sin composición o sin costo)")
+```
+
+Y borrar del comentario de arriba la frase "Va antes de la regla del $0 para dar el motivo
+real en vez del genérico, igual que `sin_precio_lista`": las dos ramas son mutuamente
+excluyentes (`> 0` vs no), así que no hay ninguna prioridad — el comentario invita a razonar
+sobre una interacción imposible.
+
+- [ ] **Step 4: Borrar el test duplicado**
+
+`test_sin_composicion_y_sin_costo_sigue_siendo_el_cero_de_antes` (Tarea 3) es
+byte-idéntico a `test_item_sin_componentes_en_cero`, que ya existía en
+`tests/test_alertas_costeo.py:50`. No fija nada nuevo: borrarlo.
+
+(El otro test que "ya pasaba", `test_costo_a_mano_en_cero_no_se_marca_y_alerta_como_cero`,
+SÍ se queda: es el único guardia de que el predicado es `> 0` y no `>= 0` / `is not None`.
+Solo hay que corregirle el docstring, que lo presenta como un test que fallaría.)
+
+- [ ] **Step 5: La hoja DESGLOSE deja de contradecirse en celdas vecinas**
+
+Para estas filas el `apu_nombre` persistido es `"(sin base — armar manual)"`, así que la
+fila del DESGLOSE queda `… | (sin base — armar manual) | (costo puesto a mano) | …`: dos
+celdas pegadas diciendo lo contrario. Cuando la fila se costeó a mano y no tiene APU, el
+nombre a mostrar es el de la actividad de la licitación.
+
+En `apu_tool/dominio/report.py`:
+
+```python
+    for a in apus:
+        if not a.componentes:
+            # Sin APU y costeada a mano, `apu_nombre` es "(sin base — armar manual)":
+            # contradiría a la celda de al lado. El nombre real es la actividad.
+            nombre = (a.item.descripcion if a.costo_a_mano and not a.apu_codigo
+                      else a.apu_nombre)
+            nota = ("(costo puesto a mano)" if a.costo_a_mano
+                    else "(sin composición — armar manual)")
+            ws.append([a.item.item, a.apu_codigo or "", nombre,
+                       "", nota, "", "", "", "", "", ""])
+            continue
+```
+
+En `report_categorizado.py` la nota no va acompañada del nombre en la misma fila, así que
+solo cambia el string (Step 2). La `explicacion` del matcher que ALERTAS antepone
+("Nada parecido en la biblioteca; ármalo a mano…") **se queda**: sigue siendo verdad y es
+justamente por eso que el usuario costeó a mano. Se documenta en la Tarea 7, no se toca.
+
+- [ ] **Step 6: Los tests que faltaban de los dos escritores de Excel**
+
+Es la salida que llega al escritorio de una persona y es la única rama nueva sin test.
+El arnés ya existe: `tests/test_report_alertas_costeo.py` y
+`tests/test_report_categorizado_alertas.py` abren el workbook con `openpyxl` e indexan
+celdas. Copiar su forma exacta y agregar a cada uno un test que:
+
+1. arme un `AssembledApu` sin componentes con costo positivo (costo a mano) y otro sin
+   componentes con costo 0 (sin composición de verdad);
+2. escriba el cuadro a `tmp_path`;
+3. abra la hoja del desglose y afirme que la primera dice `"(costo puesto a mano)"` y la
+   segunda `"(sin composición — armar manual)"`.
+
+Si el arnés de esos archivos no permite las dos filas en un solo cuadro, hacer dos tests.
+**No inventar un arnés nuevo:** seguir el que esos archivos ya usan.
+
+- [ ] **Step 7: Suite y commit**
+
+Run: `python -m pytest tests/ -q`
+Expected: sube por los tests nuevos y baja 1 por el duplicado borrado. Reportar el número real.
+
+```bash
+git add apu_tool/datos/corridas_db.py apu_tool/datos/pg/corridas_pg.py \
+        apu_tool/datos/repositorio.py apu_tool/dominio/alertas.py \
+        apu_tool/dominio/report.py apu_tool/dominio/report_categorizado.py \
+        tests/test_alertas_costeo.py tests/test_corridas_contrato.py \
+        tests/test_report_alertas_costeo.py tests/test_report_categorizado_alertas.py
+git commit -m "fix(costo-manual): poner el costo a mano tambien borra el veredicto de la IA"
+```
+
+---
+
 ## Tarea 6: El botón y el badge
 
 **Files:**
@@ -1332,7 +1482,25 @@ En `CLAUDE.md`, en **Datos**, después del párrafo del "Veredicto de la revisi�
   único punto de paso por el que cambia el APU de una fila: armar el APU de verdad y
   asignarlo devuelve la fila al costeo normal. Igualar a un contractual ≤ 0 se rechaza
   (regla "nada en $0"). El endpoint es `POST /api/corridas/{id}/igualar-costo`, rol
-  `editor` — más estricto que sus vecinos a propósito, porque declara dinero.
+  `editor` — más estricto que sus vecinos a propósito, porque declara dinero. En el
+  cuadro, la hoja DESGLOSE muestra la actividad de la licitación (no el
+  `"(sin base — armar manual)"` del matcher) y la nota `"(costo puesto a mano)"`; la
+  `explicacion` del matcher sigue apareciendo en ALERTAS a propósito: que no hubiera
+  nada parecido en la biblioteca es justamente por lo que se costeó a mano.
+```
+
+- [ ] **Step 2b: Corregir el "único punto de paso" del veredicto**
+
+En `CLAUDE.md`, sección **Datos**, párrafo del "Veredicto de la revisión": hoy dice que
+`corridas.actualizar_eleccion` "es el único punto de paso" que borra `revision_json`.
+Con esta feature hay dos. Reemplazar esa frase por:
+
+```markdown
+`corridas.actualizar_eleccion` escribe `revision_json=NULL`, así que "Confirmar el APU
+actual" también lo borra (es conservador a propósito: se pierde una justificación, no se
+gana una mentira). El **segundo** punto de paso es `corridas.set_costo_manual`: poner el
+costo a mano también es un confirm de la fila, y por la misma razón borra el veredicto —
+hablaba de una fila que ya no es esta.
 ```
 
 - [ ] **Step 3: Suite completa de Python**

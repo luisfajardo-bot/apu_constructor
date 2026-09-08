@@ -473,7 +473,7 @@ export default function TablaItems({
                     {it.apu_codigo}
                   </TableCell>
                   <TableCell className="text-xs">
-                    <EstadoBadge status={it.status} />
+                    <EstadoBadge status={it.status} costoManual={it.costo_manual} />
                   </TableCell>
                   {hayVeredicto && (
                     <TableCell className="text-xs">
@@ -715,7 +715,7 @@ function DetalleExpandido({
     <div className="flex flex-col gap-3">
       {/* APU header */}
       <div className="flex items-center gap-3 flex-wrap text-xs">
-        <EstadoBadge status={detalle.status} />
+        <EstadoBadge status={detalle.status} costoManual={detalle.costo_manual} />
         <span className="font-mono text-muted-foreground">APU: {detalle.apu_codigo}</span>
         <span className="text-muted-foreground truncate max-w-xs">{detalle.apu_nombre}</span>
       </div>

@@ -884,3 +884,28 @@ test("confirmar el APU actual no toca las filas con costo a mano", async () => {
   fireEvent.click(await screen.findByText(/Confirmar el APU actual/i));
   await waitFor(() => expect(confirmarLote).toHaveBeenCalledWith(1, [1]));
 });
+
+/** El badge de estado EN LA FILA. El <option> del filtro de la cabecera lleva el mismo
+ *  texto, así que un getByText pelado encuentra dos nodos (igual que celdaVeredicto). */
+const badgeEstado = (texto: string) =>
+  screen.queryAllByText(texto).filter((el) => el.tagName === "SPAN");
+
+test("la fila con costo a mano muestra el estado CONTRACTUAL, no CONFIRM", () => {
+  render(
+    <TablaConControl
+      items={[{ ...ITEM, seq: 0, status: "confirmed", costo_manual: true }]}
+    />,
+  );
+  expect(badgeEstado("CONTRACTUAL")).toHaveLength(1);
+  expect(badgeEstado("CONFIRM")).toHaveLength(0);
+});
+
+test("una fila confirmada normal sigue mostrando CONFIRM", () => {
+  render(
+    <TablaConControl
+      items={[{ ...ITEM, seq: 0, status: "confirmed", costo_manual: false }]}
+    />,
+  );
+  expect(badgeEstado("CONFIRM")).toHaveLength(1);
+  expect(badgeEstado("CONTRACTUAL")).toHaveLength(0);
+});

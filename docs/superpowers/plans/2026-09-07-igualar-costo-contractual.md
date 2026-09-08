@@ -461,29 +461,29 @@ git commit -m "feat(corridas): el costeo respeta el costo puesto a mano"
 
 ---
 
-## Tarea 3: La alerta que lo hace visible
+## Tarea 3: Una sola definición de la firma, y que se vea en el cuadro
+
+> **Revisado tras la Tarea 2.** La firma "sin componentes + costo > 0" iba camino a
+> cuatro copias escritas a mano (`_vista_item`, `alertas_costeo`, y los DOS escritores
+> de Excel). Se define **una vez** como propiedad de `AssembledApu`, que ya es la dueña
+> de las otras derivadas de dinero (`costo_total`, `margen_pct`). Y `report.py` no
+> estaba en el plan: hoy imprime "(sin composición — armar manual)" para exactamente
+> esta firma, así que el cuadro se contradiría con su propia hoja ALERTAS.
 
 **Files:**
+- Modify: `apu_tool/nucleo/models.py` (`AssembledApu`, propiedad nueva)
+- Modify: `apu_tool/servicio/corridas.py` (`_vista_item` pasa a usar la propiedad)
 - Modify: `apu_tool/dominio/alertas.py:24-42` (`alertas_costeo`)
-- Test: `tests/test_alertas_costeo.py` (existente, agregar tests)
+- Modify: `apu_tool/dominio/report.py:131-134`
+- Modify: `apu_tool/dominio/report_categorizado.py:135-136`
+- Test: `tests/test_alertas_costeo.py` (existente), `tests/test_costo_manual.py` (existente)
 
-- [ ] **Step 1: Escribir el test que falla**
+- [ ] **Step 1: Escribir los tests que fallan**
 
-Agregar al final de `tests/test_alertas_costeo.py` (reusar los helpers que ya tenga
-el archivo para armar un `AssembledApu`; si no hay, usar este):
+En `tests/test_alertas_costeo.py` **reusar el `_ensamble(comps, costo_unitario)` que ya
+existe en la línea 11** (no escribir otro) y agregar al final:
 
 ```python
-def _ensamble(componentes, costo_unitario, cantidad=1.0, contractual=100.0):
-    from apu_tool.nucleo.models import AssembledApu, LicitacionItem, MatchStatus
-    item = LicitacionItem(item="1", descripcion="PRUEBA DE CARGA", unidad="GLB",
-                          cantidad=cantidad, precio_contractual=contractual,
-                          shift="DIURNO")
-    return AssembledApu(item=item, apu_codigo=None, apu_nombre="", unidad="GLB",
-                        shift="DIURNO", componentes=componentes,
-                        costo_unitario=costo_unitario, status=MatchStatus.CONFIRMED,
-                        confianza=1.0)
-
-
 def test_costo_a_mano_siempre_se_marca():
     """Nada silencioso: un costo que puso una persona tiene que distinguirse de
     uno que calculó el motor."""
@@ -497,38 +497,121 @@ def test_sin_composicion_y_sin_costo_sigue_siendo_el_cero_de_antes():
     assert motivos == ["APU en $0 (sin composición o sin costo)"]
 ```
 
-- [ ] **Step 2: Correr el test para verificar que falla**
+Y en `tests/test_costo_manual.py`, los dos tests que fijan la premisa de la firma —
+hoy es un invariante derivado que nada sujeta:
 
-Run: `python -m pytest tests/test_alertas_costeo.py -q`
-Expected: FAIL en `test_costo_a_mano_siempre_se_marca` — devuelve `[]` (con costo > 0 y sin componentes hoy no hay ningún motivo).
+```python
+def test_costo_a_mano_en_cero_no_se_marca_y_alerta_como_cero(alm):
+    """La fila que Important #1 describe: un costo a mano de 0 NO es un costo a mano
+    válido. Sin badge, y con la alerta del $0, que es la verdad."""
+    cid = _corrida(alm, contractual=1000.0)
+    alm.corridas.set_costo_manual(cid, {0: 0.0})
+    fila = svc.vista_corrida(alm, cid)["items"][0]
+    assert fila["costo_manual"] is False
+    assert any("$0" in m for m in fila["alertas_costeo"])
 
-- [ ] **Step 3: Agregar el motivo**
+
+def test_apu_sin_composicion_no_se_confunde_con_costo_a_mano(alm):
+    """Falsificación directa de "sin componentes el motor no puede dar costo > 0":
+    un APU vacío cuesta 0, así que la firma no se activa."""
+    alm.apus.insert_apus([Apu("VACIO", "APU SIN COMPOSICION", "M3", "DIURNO", "MOV")])
+    cid = _corrida(alm, contractual=1000.0, apu="VACIO")
+    fila = svc.vista_corrida(alm, cid)["items"][0]
+    assert fila["costo_unitario"] == 0.0
+    assert fila["costo_manual"] is False
+```
+
+- [ ] **Step 2: Correr los tests para verificar que fallan**
+
+Run: `python -m pytest tests/test_alertas_costeo.py tests/test_costo_manual.py -q`
+Expected: FAIL en `test_costo_a_mano_siempre_se_marca` (devuelve `[]`: hoy con costo > 0
+y sin componentes no hay ningún motivo) y en `test_costo_a_mano_en_cero_no_se_marca_y_alerta_como_cero`
+(hoy no hay alerta del $0 porque `costo_manual` no la dispara). Los otros dos pasan ya.
+
+- [ ] **Step 3: La propiedad, definida una sola vez**
+
+En `apu_tool/nucleo/models.py`, en `AssembledApu`, junto a las otras propiedades derivadas:
+
+```python
+    @property
+    def costo_a_mano(self) -> bool:
+        """El costo lo declaró una persona, no lo calculó el motor.
+
+        Firma: sin componentes y con costo positivo. Es inequívoca porque el costo del
+        motor es la suma de los componentes — sin componentes esa suma es 0 (un APU
+        vacío, un sub-APU en ciclo o un insumo huérfano igual devuelven componentes).
+        Vive acá y no en cada consumidor porque la leen cuatro lugares (la vista de la
+        API, las alertas y los dos escritores de Excel) y `> 0` cambiado en uno solo
+        sería un drift silencioso. Funciona igual con la corrida congelada: el snapshot
+        guarda `composicion: []` con el mismo costo.
+        """
+        return not self.componentes and self.costo_unitario > 0
+```
+
+- [ ] **Step 4: Los cuatro consumidores usan la propiedad**
+
+En `apu_tool/servicio/corridas.py`, `_vista_item` (reemplaza la expresión que la Tarea 2
+dejó inline, el comentario largo ya no hace falta porque vive en la propiedad):
+
+```python
+        "costo_manual": ens.costo_a_mano,
+```
 
 En `apu_tool/dominio/alertas.py`, en `alertas_costeo`, entre el `for` de componentes y
 el chequeo del $0:
 
 ```python
     # Costo declarado por una persona, no calculado por el motor (proyectos
-    # especiales). Firma inequívoca: sin componentes el motor no puede dar un costo
-    # positivo. Se marca SIEMPRE — activa y congelada, porque el snapshot reconstruye
-    # `composicion: []` con el mismo costo. Va antes de la regla del $0 para dar el
-    # motivo real en vez del genérico, igual que `sin_precio_lista`.
-    if not a.componentes and a.costo_unitario > 0:
+    # especiales). Se marca SIEMPRE, activa y congelada. Va antes de la regla del $0
+    # para dar el motivo real en vez del genérico, igual que `sin_precio_lista`.
+    if a.costo_a_mano:
         motivos.append("costo puesto a mano (igualado al contractual)")
     if not motivos and a.costo_unitario <= 0:               # ítem sin composición / sin costo
         motivos.append("APU en $0 (sin composición o sin costo)")
 ```
 
-- [ ] **Step 4: Correr el test para verificar que pasa**
+En `apu_tool/dominio/report.py`, la fila sin composición de la hoja DESGLOSE
+(línea ~131): hoy dice siempre "armar manual", que para una fila costeada a mano es
+falso — le estaría pidiendo al lector que arme lo que el equipo decidió no armar:
 
-Run: `python -m pytest tests/test_alertas_costeo.py -q`
+```python
+    for a in apus:
+        if not a.componentes:
+            nota = ("(costo puesto a mano — igualado al contractual)" if a.costo_a_mano
+                    else "(sin composición — armar manual)")
+            ws.append([a.item.item, a.apu_codigo or "", a.apu_nombre,
+                       "", nota, "", "", "", "", "", ""])
+            continue
+```
+
+En `apu_tool/dominio/report_categorizado.py` (línea ~135), lo mismo:
+
+```python
+        if not a.componentes:
+            nota = ("(costo puesto a mano — igualado al contractual)" if a.costo_a_mano
+                    else "(sin composición — armar manual)")
+            ws.append(["", nota, "", "", "", "", "", ""])
+```
+
+- [ ] **Step 5: Correr los tests para verificar que pasan**
+
+Run: `python -m pytest tests/test_alertas_costeo.py tests/test_costo_manual.py -q`
 Expected: PASS (todos, los viejos incluidos)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Correr la suite entera**
+
+Run: `python -m pytest tests/ -q`
+Expected: PASS. `_vista_item` cambió de expresión inline a propiedad: mismo resultado,
+así que ningún test de la vista debería moverse.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add apu_tool/dominio/alertas.py tests/test_alertas_costeo.py
-git commit -m "feat(alertas): el costo puesto a mano se marca siempre"
+git add apu_tool/nucleo/models.py apu_tool/servicio/corridas.py \
+        apu_tool/dominio/alertas.py apu_tool/dominio/report.py \
+        apu_tool/dominio/report_categorizado.py \
+        tests/test_alertas_costeo.py tests/test_costo_manual.py
+git commit -m "feat(alertas): el costo puesto a mano se marca siempre, y una sola vez"
 ```
 
 ---
@@ -562,6 +645,17 @@ def test_fila_pelada_sigue_bloqueando(alm):
     """Sin APU y sin costo: el candado tiene que seguir trabado."""
     cid = _corrida_con_fila_sin_apu(alm)
     assert svc.seqs_sin_apu(alm.corridas.get_items(cid)) != []
+    with pytest.raises(svc.FilasSinApu):
+        svc.congelar(alm, cid)
+
+
+def test_costo_a_mano_en_cero_no_abre_el_candado(alm):
+    """El candado se defiende solo: un costo a mano de 0 no es un costo declarado.
+    Si abriera, saldría al cuadro una fila en $0 sin APU, sin badge y sin alerta."""
+    cid = _corrida_con_fila_sin_apu(alm)
+    seq_malo = [r.seq for r in alm.corridas.get_items(cid) if not r.apu_codigo][0]
+    alm.corridas.set_costo_manual(cid, {seq_malo: 0.0})
+    assert svc.seqs_sin_apu(alm.corridas.get_items(cid)) == [seq_malo]
     with pytest.raises(svc.FilasSinApu):
         svc.congelar(alm, cid)
 
@@ -607,13 +701,22 @@ En `apu_tool/servicio/corridas.py`:
 
 ```python
 def seqs_sin_apu(rows) -> list[int]:
-    """Los seq de las filas que no tienen APU NI costo declarado a mano.
+    """Los seq de las filas que no tienen APU NI un costo declarado POSITIVO.
     Lista vacía = se puede cerrar.
 
     El candado existe para que no salga un cuadro con filas en $0 sin que nadie se
     entere. Una fila con costo puesto a mano no es ninguna de las dos cosas: el monto
-    lo declaró una persona y la hoja ALERTAS la nombra (ver `alertas_costeo`)."""
-    return [r.seq for r in rows if not r.apu_codigo and r.costo_manual is None]
+    lo declaró una persona y la hoja ALERTAS la nombra (ver `alertas_costeo`).
+
+    Pide `> 0` y NO `is not None` a propósito: el candado se defiende solo. Con
+    `is not None`, un `costo_manual` de 0.0 (o NaN) abriría la puerta mientras el badge
+    y la alerta —que piden `costo_unitario > 0`— lo ignoran, y saldría al cuadro una
+    fila en $0 sin APU, sin badge y sin alerta. La validación del servicio
+    (`igualar_costo_al_contractual`) ya rechaza el contractual ≤ 0, pero el candado no
+    puede depender de que su único llamador se porte bien. `not (x or 0) > 0` también
+    cierra el NaN: `not (nan > 0)` es True."""
+    return [r.seq for r in rows
+            if not r.apu_codigo and not (r.costo_manual or 0) > 0]
 ```
 
 - [ ] **Step 4: Correr el test para verificar que pasa**
@@ -637,7 +740,7 @@ git commit -m "feat(corridas): el costo a mano abre el candado del cuadro"
 - Modify: `apu_tool/servicio/corridas.py` (función nueva, después de `confirmar_item`)
 - Modify: `apu_tool/servicio/esquemas.py:50-52` (DTO nuevo junto a `BorrarLineasIn`)
 - Modify: `apu_tool/servicio/rutas.py` (endpoint nuevo, después de `confirmar_lote`)
-- Test: `tests/test_costo_manual.py` (agregar), `tests/test_privacidad.py` (agregar)
+- Test: `tests/test_costo_manual.py` (agregar), `tests/test_privacy.py` (agregar)
 
 - [ ] **Step 1: Escribir los tests que fallan**
 
@@ -695,7 +798,7 @@ def test_seq_ajeno_se_saltea(alm):
     assert v["igualadas"] == [0]
 ```
 
-Agregar a `tests/test_privacidad.py`:
+Agregar a `tests/test_privacy.py`:
 
 ```python
 def test_costo_manual_es_campo_prohibido():
@@ -709,7 +812,7 @@ def test_costo_manual_es_campo_prohibido():
 
 - [ ] **Step 2: Correr los tests para verificar que fallan**
 
-Run: `python -m pytest tests/test_costo_manual.py tests/test_privacidad.py -q`
+Run: `python -m pytest tests/test_costo_manual.py tests/test_privacy.py -q`
 Expected: FAIL — `AttributeError: module 'apu_tool.servicio.corridas' has no attribute 'igualar_costo_al_contractual'` y, en privacidad, `DID NOT RAISE PrivacyViolation`.
 
 - [ ] **Step 3: La llave prohibida**
@@ -823,7 +926,7 @@ def igualar_costo(cid: int, body: IgualarCostoIn,
 
 - [ ] **Step 7: Correr los tests para verificar que pasan**
 
-Run: `python -m pytest tests/test_costo_manual.py tests/test_privacidad.py -q`
+Run: `python -m pytest tests/test_costo_manual.py tests/test_privacy.py -q`
 Expected: PASS
 
 - [ ] **Step 8: Test del endpoint (rol + 409 + 404)**
@@ -911,7 +1014,7 @@ Expected: PASS
 ```bash
 git add apu_tool/dominio/privacy.py apu_tool/servicio/corridas.py \
         apu_tool/servicio/esquemas.py apu_tool/servicio/rutas.py \
-        tests/test_costo_manual.py tests/test_privacidad.py tests/test_api_corridas.py
+        tests/test_costo_manual.py tests/test_privacy.py tests/test_api_corridas.py
 git commit -m "feat(api): POST /corridas/{id}/igualar-costo, rol editor y auditado"
 ```
 
@@ -1088,6 +1191,83 @@ Y el botón en la barra pegajosa, después de "Confirmar el APU actual":
                          que valen lo que dice el contrato.">
             Igualar costo al contractual
           </Button>
+```
+
+- [ ] **Step 6b: Que "Confirmar el APU actual" no destruya el costo a mano**
+
+> **Añadido tras la revisión de la Tarea 2.** `actualizar_eleccion` borra el
+> `costo_manual` en CUALQUIER confirm. Una fila con costo a mano y **sin** APU ya está
+> a salvo (`accionLote` filtra las que no tienen `apu_codigo`), pero una con costo a
+> mano **y** APU asignado —la forma que `test_costo_manual_manda_sobre_la_composicion`
+> declara soportada— pasaría de $92.106.000 a $40.000 con un clic, con toast de éxito y
+> sin aviso. Y la fila ya está en `confirmed`, así que el botón se lee como un no-op.
+> Reasignar un APU distinto **sí** debe borrarlo (ahí la fila recuperó composición
+> real); confirmar el que ya tiene, no.
+
+En `web/src/components/corrida/TablaItems.tsx`, en `accionLote` (línea ~232), agregar el
+filtro al camino "sin APU explícito":
+
+```tsx
+    // Sin APU explícito, las filas sin APU no tienen nada que confirmar, y las que
+    // tienen costo a mano lo PERDERÍAN (actualizar_eleccion borra costo_manual en
+    // cualquier confirm). Se filtran acá para no mandarle al backend seqs que
+    // arruinarían la fila sin que el usuario lo haya pedido.
+    const objetivo = apu
+      ? seleccionadas
+      : visible
+          .filter((it) => marcadas.has(it.seq) && it.apu_codigo && !it.costo_manual)
+          .map((it) => it.seq);
+```
+
+Y el test que lo fija, en `web/src/components/corrida/TablaItems.test.tsx`:
+
+```tsx
+test("confirmar el APU actual no toca las filas con costo a mano", async () => {
+  const { confirmarLote } = await import("@/api/corridas");
+  render(
+    <TablaConControl
+      items={[
+        { ...ITEM, seq: 0, item: "1", costo_manual: true },
+        { ...ITEM, seq: 1, item: "2", costo_manual: false },
+      ]}
+    />,
+  );
+  fireEvent.click(screen.getByLabelText(/Marcar todas las líneas/i));
+  fireEvent.click(await screen.findByText(/Confirmar el APU actual/i));
+  await waitFor(() => expect(confirmarLote).toHaveBeenCalledWith(1, [1]));
+});
+```
+
+- [ ] **Step 6c: Que el detalle de la fila muestre el costo a mano**
+
+> **Añadido tras la revisión de la Tarea 2.** El panel de detalle esconde la sección de
+> composición cuando está vacía (`TablaItems.tsx:766`), y el costo unitario solo se
+> imprime en el encabezado de esa sección: expandir una fila costeada a mano no muestra
+> ningún costo.
+
+En `apu_tool/servicio/corridas.py`, en el dict que devuelve `detalle_item`, exponer el
+flag igual que en la vista de la tabla:
+
+```python
+        "costo_manual": ens.costo_a_mano,
+```
+
+Y en `web/src/lib/tipos.ts`, en `DetalleItem`, `costo_manual: boolean;`. Y en el panel
+de detalle de `TablaItems.tsx`, junto al `{detalle.composicion.length > 0 && (`, una
+rama para el caso contrario:
+
+```tsx
+      {detalle.composicion.length === 0 && detalle.costo_manual && (
+        <section>
+          <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+            Costo puesto a mano &mdash; costo unitario{" "}
+            <span className="font-mono">{cop(detalle.costo_unitario)}</span>
+          </h4>
+          <p className="text-xs text-muted-foreground">
+            Igualado al precio contractual. Asignale un APU para volver al costeo normal.
+          </p>
+        </section>
+      )}
 ```
 
 - [ ] **Step 7: Correr los tests y el build**

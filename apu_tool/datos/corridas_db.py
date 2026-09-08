@@ -58,6 +58,16 @@ class CorridasDB:
                 conn.execute("ALTER TABLE corrida ADD COLUMN nombre TEXT")
             if "lista_precios_id" not in cols:
                 conn.execute("ALTER TABLE corrida ADD COLUMN lista_precios_id INTEGER")
+            if "plan_json" not in cols:
+                conn.execute("ALTER TABLE corrida ADD COLUMN plan_json TEXT")
+            if "intentos" not in cols:
+                conn.execute("ALTER TABLE corrida ADD COLUMN intentos INTEGER NOT NULL DEFAULT 0")
+            if "ultimo_error" not in cols:
+                conn.execute("ALTER TABLE corrida ADD COLUMN ultimo_error TEXT")
+            if "armando_por" not in cols:
+                conn.execute("ALTER TABLE corrida ADD COLUMN armando_por TEXT")
+            if "armando_desde" not in cols:
+                conn.execute("ALTER TABLE corrida ADD COLUMN armando_desde TEXT")
             # Backfill idempotente: corridas viejas muestran su archivo hasta renombrarse.
             conn.execute("UPDATE corrida SET nombre = archivo "
                          "WHERE nombre IS NULL OR nombre = ''")
@@ -258,17 +268,29 @@ class CorridasDB:
             duracion_ms=r["duracion_ms"], modo=(r["modo"] or "activa"),
             carpeta_id=(r["carpeta_id"] if "carpeta_id" in r.keys() else None),
             nombre=((r["nombre"] if "nombre" in r.keys() else None) or r["archivo"]),
-            lista_precios_id=(r["lista_precios_id"] if "lista_precios_id" in r.keys() else None))
+            lista_precios_id=(r["lista_precios_id"] if "lista_precios_id" in r.keys() else None),
+            intentos=(r["intentos"] if "intentos" in r.keys() else 0) or 0,
+            ultimo_error=(r["ultimo_error"] if "ultimo_error" in r.keys() else None),
+            armando_por=(r["armando_por"] if "armando_por" in r.keys() else None),
+            armando_desde=(r["armando_desde"] if "armando_desde" in r.keys() else None))
 
     def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
         with self.connect() as conn:
             r = conn.execute("SELECT * FROM corrida WHERE id=?", (corrida_id,)).fetchone()
         return self._row_to_meta(r) if r else None
 
+    # Columnas explícitas y NO `SELECT *`: `plan_json` pesa ~400 KB en una corrida de
+    # 1900 ítems y este listado trae TODAS las corridas. Con `*`, abrir "Mis corridas"
+    # arrastraría decenas de MB que nadie mira.
+    _COLS_META = ("id, creada_en, archivo, turno_def, use_ai, estado, cuadro_path, "
+                  "duracion_ms, modo, carpeta_id, nombre, lista_precios_id, "
+                  "intentos, ultimo_error, armando_por, armando_desde")
+
     def listar_corridas(self) -> list[CorridaMeta]:
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM corrida ORDER BY creada_en DESC, id DESC").fetchall()
+                f"SELECT {self._COLS_META} FROM corrida "
+                "ORDER BY creada_en DESC, id DESC").fetchall()
         return [self._row_to_meta(r) for r in rows]
 
     def eliminar_corrida(self, corrida_id: int, conn=None) -> bool:

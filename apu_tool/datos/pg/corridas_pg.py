@@ -191,7 +191,11 @@ class CorridasPg:
             duracion_ms=r["duracion_ms"], modo=(r["modo"] or "activa"),
             carpeta_id=r["carpeta_id"],
             nombre=(r["nombre"] or r["archivo"]),
-            lista_precios_id=r.get("lista_precios_id"))
+            lista_precios_id=r.get("lista_precios_id"),
+            intentos=r.get("intentos") or 0,
+            ultimo_error=r.get("ultimo_error"),
+            armando_por=r.get("armando_por"),
+            armando_desde=r.get("armando_desde"))
 
     def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
         with self.cx.connection() as conn:
@@ -199,10 +203,18 @@ class CorridasPg:
                              (corrida_id,)).fetchone()
         return self._row_to_meta(r) if r else None
 
+    # Columnas explícitas y NO `SELECT *`: `plan_json` pesa ~400 KB en una corrida de
+    # 1900 ítems y este listado trae TODAS las corridas. Con `*`, abrir "Mis corridas"
+    # arrastraría decenas de MB que nadie mira.
+    _COLS_META = ("id, creada_en, archivo, turno_def, use_ai, estado, cuadro_path, "
+                  "duracion_ms, modo, carpeta_id, nombre, lista_precios_id, "
+                  "intentos, ultimo_error, armando_por, armando_desde")
+
     def listar_corridas(self) -> list[CorridaMeta]:
         with self.cx.connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM corridas.corrida ORDER BY creada_en DESC, id DESC").fetchall()
+                f"SELECT {self._COLS_META} FROM corridas.corrida "
+                "ORDER BY creada_en DESC, id DESC").fetchall()
         return [self._row_to_meta(r) for r in rows]
 
     def eliminar_corrida(self, corrida_id: int, conn=None) -> bool:

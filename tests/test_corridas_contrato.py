@@ -146,3 +146,16 @@ def test_conn_del_llamador_descarta_si_revienta(repo):
     fila = repo.get_items(cid)[0]
     assert fila.costo_manual is None
     assert fila.status == "new"
+
+
+def test_corrida_nace_con_los_campos_del_armado_en_cero(repo):
+    """Los campos del armado tienen default seguro: una corrida vieja (o recién
+    creada) no está reclamada por nadie y no acumuló intentos."""
+    cid = repo.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-07T10:00:00", archivo="x.xlsx", turno_def="DIURNO",
+        use_ai=None, estado="en_revision", cuadro_path=None, nombre="x"))
+    m = repo.get_corrida(cid)
+    assert m.intentos == 0
+    assert m.ultimo_error is None
+    assert m.armando_por is None
+    assert m.armando_desde is None

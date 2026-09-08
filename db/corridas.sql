@@ -25,7 +25,15 @@ CREATE TABLE IF NOT EXISTS corrida (
   -- Tarifa de la corrida. NULL = Principal. Sin FK: lista_precios vive en precios.db,
   -- otro archivo SQLite (mismo trato que corrida_item.apu_codigo). La integridad se
   -- cuida no borrando listas (la API no expone DELETE).
-  lista_precios_id INTEGER
+  lista_precios_id INTEGER,
+  -- Las líneas ya interpretadas del Excel, en orden. Única fuente de qué falta armar:
+  -- el archivo subido no se guarda. Lleva precio_contractual (dinero) -> la clave
+  -- `plan_json` está en privacy._FORBIDDEN_KEYS.
+  plan_json     TEXT,
+  intentos      INTEGER NOT NULL DEFAULT 0,
+  ultimo_error  TEXT,
+  armando_por   TEXT,
+  armando_desde TEXT
 );
 
 CREATE TABLE IF NOT EXISTS corrida_item (

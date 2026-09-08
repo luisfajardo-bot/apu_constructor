@@ -271,6 +271,13 @@ class CorridaMeta:
     # Tarifa contra la que se costea la corrida. None = Principal (el catálogo).
     # Se fija AL CREAR y no cambia: una corrida nunca debe mudar de tarifa por accidente.
     lista_precios_id: Optional[int] = None
+    # --- armado como trabajo del servidor (ver docs/superpowers/specs/2026-09-07-armado-reanudable-design.md) ---
+    # `estado='armando'` ES la cola: nadie saca una corrida de ahí salvo el worker al
+    # terminarla o `reencolar_armado`. Un set_estado sin guarda la borra de la cola.
+    intentos: int = 0                      # +1 por cada reclama; al pasar el tope -> 'armado_detenido'
+    ultimo_error: Optional[str] = None     # por qué se detuvo, en español, para la pantalla
+    armando_por: Optional[str] = None      # id de la instancia que la reclamó
+    armando_desde: Optional[str] = None    # ISO 8601 del último latido de esa reclama
 
 
 @dataclass

@@ -27,7 +27,12 @@ CREATE TABLE IF NOT EXISTS corridas.corrida (
     -- Tarifa de la corrida. NULL = Principal. Sin FK: lista_precios vive en el
     -- catálogo de precios, mismo trato que corrida_item.apu_codigo. La integridad
     -- se cuida no borrando listas (la API no expone DELETE).
-    lista_precios_id BIGINT
+    lista_precios_id BIGINT,
+    plan_json     TEXT,
+    intentos      INTEGER NOT NULL DEFAULT 0,
+    ultimo_error  TEXT,
+    armando_por   TEXT,
+    armando_desde TEXT
 );
 
 CREATE TABLE IF NOT EXISTS corridas.corrida_item (
@@ -65,6 +70,11 @@ ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS carpeta_id BIGINT
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS nombre TEXT;
 UPDATE corridas.corrida SET nombre = archivo WHERE nombre IS NULL OR nombre = '';
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS lista_precios_id BIGINT;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS plan_json TEXT;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS intentos INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS ultimo_error TEXT;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS armando_por TEXT;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS armando_desde TEXT;
 
 -- Bootstrap "Sin clasificar" + backfill de corridas sin carpeta (idempotente).
 INSERT INTO corridas.carpeta (nombre, creada_en)

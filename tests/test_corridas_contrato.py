@@ -179,3 +179,35 @@ def test_listar_corridas_no_pierde_ninguna_columna(repo):
     completa = repo.get_corrida(cid)
     # Lo que trae el listado tiene que ser IDÉNTICO a leerla de a una.
     assert listada == completa
+
+
+def test_plan_se_guarda_y_se_lee_igual(repo):
+    cid = repo.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-07T10:00:00", archivo="x.xlsx", turno_def="DIURNO",
+        use_ai=None, estado="en_revision", cuadro_path=None, nombre="x"))
+    assert repo.get_plan(cid) is None          # sin plan todavía
+    repo.set_plan(cid, '[{"descripcion": "EXCAVACION"}]')
+    assert repo.get_plan(cid) == '[{"descripcion": "EXCAVACION"}]'
+
+
+def test_max_seq_dice_donde_reanudar(repo):
+    """-1 con la corrida vacía, para que `max_seq + 1` dé 0 y arranque del principio."""
+    cid = repo.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-07T10:00:00", archivo="x.xlsx", turno_def="DIURNO",
+        use_ai=None, estado="en_revision", cuadro_path=None, nombre="x"))
+    assert repo.max_seq(cid) == -1
+    repo.agregar_item(cid, _item(0, 1000.0))
+    repo.agregar_item(cid, _item(1, 1000.0))
+    assert repo.max_seq(cid) == 1
+
+
+def test_max_seq_ignora_los_huecos(repo):
+    """Con la fila 1 borrada, reanudar por CONTEO daría 1 y duplicaría la fila 1.
+    Por eso se usa el máximo y no la cantidad."""
+    cid = repo.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-07T10:00:00", archivo="x.xlsx", turno_def="DIURNO",
+        use_ai=None, estado="en_revision", cuadro_path=None, nombre="x"))
+    for s in (0, 1, 2):
+        repo.agregar_item(cid, _item(s, 1000.0))
+    repo.borrar_items(cid, [1])
+    assert repo.max_seq(cid) == 2

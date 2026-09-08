@@ -246,6 +246,26 @@ class CorridasDB:
         with self.connect() as c:
             c.executemany(sql, filas)
 
+    def set_plan(self, corrida_id: int, plan_json: str, conn=None) -> None:
+        sql = "UPDATE corrida SET plan_json=? WHERE id=?"
+        if conn is not None:
+            conn.execute(sql, (plan_json, int(corrida_id)))
+            return
+        with self.connect() as c:
+            c.execute(sql, (plan_json, int(corrida_id)))
+
+    def get_plan(self, corrida_id: int) -> Optional[str]:
+        with self.connect() as conn:
+            r = conn.execute("SELECT plan_json FROM corrida WHERE id=?",
+                             (int(corrida_id),)).fetchone()
+        return r["plan_json"] if r else None
+
+    def max_seq(self, corrida_id: int) -> int:
+        with self.connect() as conn:
+            r = conn.execute("SELECT MAX(seq) AS m FROM corrida_item WHERE corrida_id=?",
+                             (int(corrida_id),)).fetchone()
+        return -1 if (r is None or r["m"] is None) else int(r["m"])
+
     # ---- lectura ----
     def _row_to_item(self, r: sqlite3.Row) -> CorridaItemRow:
         return CorridaItemRow(

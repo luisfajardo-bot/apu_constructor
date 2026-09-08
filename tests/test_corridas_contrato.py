@@ -159,3 +159,23 @@ def test_corrida_nace_con_los_campos_del_armado_en_cero(repo):
     assert m.ultimo_error is None
     assert m.armando_por is None
     assert m.armando_desde is None
+
+
+def test_listar_corridas_no_pierde_ninguna_columna(repo):
+    """Guarda de `_COLS_META`: `listar_corridas` dejó de usar `SELECT *` (plan_json
+    pesa ~400 KB por corrida y ese listado las trae todas), y `_row_to_meta` decide
+    campo por campo con "está en la fila?". O sea: si una columna se cae de la lista
+    explícita, ese campo NO explota — queda en su default, EN SILENCIO, y una corrida
+    se lista con el modo o la tarifa equivocados.
+
+    Por eso se crea con valores distintos del default en todo lo que se pueda: si
+    alguno vuelve como default, es que su columna se perdió."""
+    cid = repo.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-07T11:00:00", archivo="lista.xlsx",
+        turno_def="NOCTURNO", use_ai=True, estado="finalizada",
+        cuadro_path="salidas/cuadro.xlsx", duracion_ms=4321, modo="congelada",
+        nombre="Mi corrida", lista_precios_id=7))
+    listada = next(c for c in repo.listar_corridas() if c.id == cid)
+    completa = repo.get_corrida(cid)
+    # Lo que trae el listado tiene que ser IDÉNTICO a leerla de a una.
+    assert listada == completa

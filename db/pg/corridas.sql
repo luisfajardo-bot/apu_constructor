@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS corridas.corrida (
     -- catálogo de precios, mismo trato que corrida_item.apu_codigo. La integridad
     -- se cuida no borrando listas (la API no expone DELETE).
     lista_precios_id BIGINT,
+    -- Las líneas ya interpretadas del Excel, en orden. Única fuente de qué falta
+    -- armar: el archivo subido no se guarda. OJO: lleva `precio_contractual`, o sea
+    -- DINERO; nunca puede viajar en un payload hacia la IA (invariante #1).
     plan_json     TEXT,
     intentos      INTEGER NOT NULL DEFAULT 0,
     ultimo_error  TEXT,

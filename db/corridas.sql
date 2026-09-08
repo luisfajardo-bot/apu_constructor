@@ -27,8 +27,9 @@ CREATE TABLE IF NOT EXISTS corrida (
   -- cuida no borrando listas (la API no expone DELETE).
   lista_precios_id INTEGER,
   -- Las líneas ya interpretadas del Excel, en orden. Única fuente de qué falta armar:
-  -- el archivo subido no se guarda. Lleva precio_contractual (dinero) -> la clave
-  -- `plan_json` está en privacy._FORBIDDEN_KEYS.
+  -- el archivo subido no se guarda. OJO: lleva `precio_contractual` dentro, o sea
+  -- DINERO, así que esta columna nunca puede viajar en un payload hacia la IA
+  -- (invariante #1). El guardián `privacy.assert_no_money` mira nombres de clave.
   plan_json     TEXT,
   intentos      INTEGER NOT NULL DEFAULT 0,
   ultimo_error  TEXT,

@@ -762,7 +762,9 @@ def igualar_costo_al_contractual(alm: Almacen, corrida_id: int, seqs: Iterable[i
     costos: dict[int, float] = {}
     rechazadas: list[int] = []
     for r in filas:
-        if r.item.precio_contractual <= 0:
+        # `not (x > 0)` y NO `x <= 0`: con NaN, `nan <= 0` es False y el NaN se
+        # colaría al costo, envenenando todos los totales de ahí para abajo.
+        if not (r.item.precio_contractual > 0):
             rechazadas.append(r.seq)   # igualar a 0 es el $0 que la regla prohíbe
         else:
             costos[r.seq] = float(r.item.precio_contractual)

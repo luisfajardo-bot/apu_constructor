@@ -1,5 +1,11 @@
 # Armado reanudable — el armado deja la petición y pasa a ser trabajo del servidor
 
+> **Revisado el 2026-09-08**, después de que entrara a master *igualar el costo al
+> contractual* (`59e789b`). Esa feature cambió la definición del candado del cuadro y
+> agregó un punto que escribe `estado`; las dos cosas tocan este diseño y están
+> incorporadas abajo. También se corrigió un error propio: `max(seq)+1` **sí** puede
+> retroceder.
+
 ## El problema, medido
 
 Las listas de licitación reales de esta empresa traen **1000–2000 ítems**. El armado
@@ -106,8 +112,18 @@ al salir). Su bucle:
    con un `UPDATE ... WHERE` condicional para que la reclama sea atómica y no un «leo y
    después escribo». Incrementa `intentos` al reclamar.
 2. **Calcular desde dónde seguir**: `max(seq) + 1` de `corrida_item`. No se cuentan
-   filas: si alguna vez falta una, contar reanudaría en el lugar equivocado y
-   duplicaría; `max(seq)+1` nunca retrocede.
+   filas: con un hueco en el medio (una línea borrada), contar reanudaría en el lugar
+   equivocado y duplicaría.
+
+   **`max(seq)+1` sí puede retroceder, y por eso se cierra la puerta.** Si se borran
+   las ÚLTIMAS líneas mientras arma y después la instancia muere, el máximo baja y el
+   worker re-arma justo lo que se acababa de borrar. Hoy no puede pasar porque durante
+   el armado no se ven las filas (`Corrida.tsx:131`); este diseño las hace visibles y
+   operables, así que abre el agujero. **`borrar_items` pasa a rechazar la corrida en
+   `armando`**, con el mismo mensaje y por la misma razón que ya lo hace `agregar_items`
+   (`corridas.py:233`). Es una guarda de una línea y deja el bucle en una escritura por
+   ítem; la alternativa (un contador de `proximo_seq` en la corrida) obliga a escribirlo
+   junto con cada fila y duplica las escrituras del camino que ya es el cuello de botella.
 3. **Armar** los ítems de `plan_json` desde ese índice, con el mismo `_armar_fila` de
    hoy y un `Assembler` compartido. Cada fila se guarda al armarla, como ahora.
 4. **Latir**: refrescar `armando_desde` **cada 25 ítems**, para que la reclama no venza
@@ -123,7 +139,11 @@ evento, y sin el poll una corrida a medias esperaría a que alguien cree otra.
 
 - **Un ítem revienta** → se atrapa, la fila queda armada **sin APU** con el motivo en
   `explicacion`, y el armado **sigue**. Un ítem venenoso cuesta una fila, no la corrida.
-  Cae solo en el candado de «filas sin APU», que ya existe y ya impide emitir el cuadro.
+  Cae solo en el candado de `seqs_sin_apu`, que desde la feature de igualar el costo al
+  contractual (master, 2026-09-07) es «sin APU **ni costo declarado positivo**». La fila
+  envenenada no tiene `costo_manual`, así que el candado la sigue atrapando — y además
+  ahora hay salida: se la puede **igualar al contractual** y emitir el cuadro sin armarle
+  el APU, que es exactamente para lo que se construyó ese botón.
 - **El proceso muere entero** (reinicio, OOM, deploy) → no hay nada que atrapar. La
   reclama vence, la instancia siguiente retoma, y `intentos` sube. Superado el tope de 3,
   `armado_detenido`.
@@ -131,6 +151,21 @@ evento, y sin el poll una corrida a medias esperaría a que alguien cree otra.
 **La cola es la base, no la memoria.** «Corridas en `armando` ordenadas por antigüedad»
 *es* la cola; tu posición es cuántas hay más viejas que la tuya. Nada se pierde en un
 reinicio.
+
+### Invariante nuevo: `estado` deja de ser una etiqueta
+
+Con este diseño `armando` **es** la cola de trabajo, no un rótulo informativo. De ahí
+sale una regla que antes no existía:
+
+> Nadie saca una corrida de `armando` salvo el worker al terminarla (o `reanudar`, que
+> la vuelve a meter). Un `set_estado` sin guarda la borra de la cola para siempre y
+> nadie se entera: queda a medio armar, sin worker que la retome y sin error que mirar.
+
+Auditados los cinco puntos que escriben `estado` en `servicio/corridas.py` a la fecha
+(`:162`, `:262`, `:291`, `:665`, `:839`): cuatro están guardados por
+`estado == "finalizada"` —incluido el `:665` que agregó la feature de igualar el costo—
+y el quinto es el fin del armado. **Ninguno lo rompe hoy.** Se escribe acá y se cubre
+con un test porque el próximo que agregue un `set_estado` no va a tener este contexto.
 
 ### API
 
@@ -188,9 +223,13 @@ cuando ese valor derivó.
 4. **`plan_json` engorda la base.** ~400 KB por corrida de 1900 ítems; 100 corridas ≈ 40 MB
    contra los 500 MB del Supabase free. No alarma hoy, pero crece. Se guarda también
    después de terminar: es el registro de qué se pidió armar.
-5. **`plan_json` lleva `precio_contractual`, o sea dinero.** No rompe el invariante #1
-   —la revisión arma su payload campo por campo y nunca toca esta columna— pero queda
-   escrito para que a nadie se le ocurra mandar el plan entero a la IA.
+5. **`plan_json` lleva `precio_contractual`, o sea dinero: entra en `_FORBIDDEN_KEYS`.**
+   No es una advertencia en prosa, es una tarea. `CLAUDE.md` lo pide literal («Si agregas
+   un campo monetario nuevo, añádelo a `_FORBIDDEN_KEYS`») y la feature de igualar acaba
+   de sentar el precedente agregando `costo_manual`. Hoy no filtra —la revisión arma su
+   payload campo por campo y nunca vuelca la fila— pero el guardián solo mira **nombres
+   de clave**, así que la clave tiene que estar en la lista antes de que a alguien se le
+   ocurra mandar el plan entero.
 6. **Borrar la corrida mientras se arma** ya está resuelto: `agregar_item` lanza
    `CorridaEliminada` y el worker pasa al siguiente trabajo.
 
@@ -201,6 +240,10 @@ cuando ese valor derivó.
   siendo lo primero a hacer: sin eso, la instancia se reinicia 7 veces al día y esta
   feature solo hace que el armado sobreviva a cada reinicio en vez de evitarlos.
 - **No toca CLI ni GUI:** siguen armando síncrono, sin worker ni cola.
+- **No cambia igualar el costo al contractual.** Se puede seguir usando sobre las filas
+  ya armadas mientras el resto de la corrida se arma: escribe sobre `seq` que ya existen
+  y el worker solo agrega `seq` nuevos, así que no se pisan. Lo único que se bloquea
+  durante `armando` es **borrar**, por el punto de reanudación.
 - **No hace reanudable la revisión con IA**, que tiene exactamente el mismo problema de
   forma (un SSE largo que un reinicio mata). Queda para después, y este worker es donde
   va a vivir cuando le toque.
@@ -214,6 +257,11 @@ cuando ese valor derivó.
   ninguna; con un hueco en los `seq`, tampoco.
 - **Errores:** un ítem que revienta deja la fila sin APU con el motivo y el armado sigue;
   la corrida borrada a mitad corta limpio.
+- **Borrar durante `armando` da error** (no borra y no mueve el punto de reanudación), y
+  la misma corrida en `en_revision` sí deja borrar.
+- **`estado` como cola:** ninguna operación de fila (confirmar, igualar el costo al
+  contractual, borrar) saca la corrida de `armando`.
+- **Privacidad:** `assert_no_money` rechaza un payload con la clave `plan_json`.
 - **Cola:** el orden es por antigüedad y la posición reportada coincide.
 - **Contrato de los dos backends:** las columnas nuevas y los métodos de reclama, en
   `tests/test_paridad_backends.py` y en el contrato compartido que corre contra Postgres real.

@@ -182,14 +182,32 @@ matching, modelo de IA, clasificación de precios.
   /api/listas-precios/{id}` (sin DELETE, a propósito).
 - **Veredicto de la revisión.** El dictamen por fila se guarda en
   `corrida_item.revision_json` (los dos backends) y se **borra solo en cualquier confirm**
-  de la fila, cambie el APU o no: `corridas.actualizar_eleccion` escribe `revision_json=NULL`
-  y es el único punto de paso, así que "Confirmar el APU actual" también lo borra (es
-  conservador a propósito: se pierde una justificación, no se gana una mentira). Además el
+  de la fila, cambie el APU o no: `corridas.actualizar_eleccion` escribe `revision_json=NULL`,
+  así que "Confirmar el APU actual" también lo borra (es conservador a propósito: se pierde
+  una justificación, no se gana una mentira). Hay un **segundo** punto de paso:
+  `corridas.set_costo_manual`, porque poner el costo a mano también es un confirm de la
+  fila y el veredicto hablaba de una fila que ya no es esta. Además el
   veredicto guarda `apu_evaluado`, el APU que la fila tenía cuando la IA la evaluó, y
   `_vista_item` **no manda** el veredicto si ya no coincide con el `apu_codigo` de hoy: la
   revisión corre por minutos sobre filas leídas al abrir el request, así que un
   `set_revision` puede llegar después de una reasignación. Un veredicto sobre otro APU no
   dice nada del actual. Es caché, no verdad: se puede volver a revisar cuando sea.
+- **Costo puesto a mano.** `corrida_item.costo_manual` (los dos backends) es el costo
+  unitario que declaró una persona para una fila: lo escribe el botón "Igualar costo al
+  contractual", que copia el `precio_contractual` de las filas marcadas. Es para los
+  **proyectos especiales** — actividades globales que valen lo que dice el contrato y a las
+  que armarles el APU no paga. Es una **copia de una vez**, no un vínculo: si cambia el
+  contractual, el costo se queda y el margen ≠ 0 se ve. `_costear_row` sale temprano cuando
+  está puesta (no consulta el catálogo), `seqs_sin_apu` deja pasar esas filas y
+  `alertas_costeo` las marca siempre ("costo puesto a mano"), así que salen en la hoja
+  ALERTAS y el DESGLOSE muestra la actividad de la licitación en vez del
+  `"(sin base — armar manual)"` del matcher. La `explicacion` del matcher sigue apareciendo
+  en ALERTAS a propósito: que no hubiera nada parecido en la biblioteca es justamente por lo
+  que se costeó a mano. Se **borra sola** en `actualizar_eleccion`: armar el APU de verdad y
+  asignarlo devuelve la fila al costeo normal. Igualar a un contractual ≤ 0 (o NaN) se
+  rechaza (regla "nada en $0"), y el candado exige `> 0` y no `is not None` para no depender
+  de que su único llamador se porte bien. Endpoint: `POST /api/corridas/{id}/igualar-costo`,
+  rol `editor` — más estricto que sus vecinos a propósito, porque declara dinero.
 - **Salidas:** `salidas/` (cuadros) y `ejemplos/` (licitaciones de ejemplo).
 - Fuentes de precio: `PRECIO IDU` se trata como **público**; el resto
   (`COSTO INTERNO`, `COMPRAS…`, etc.) como **interno/confidencial**
@@ -207,11 +225,13 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   costos (alertas, explicaciones del pricing) — ahí el monto viaja dentro del string.
 - No metas la IA en el armado. Arma el programa; la IA audita después
   (`dominio/revision.py`) y siempre propone: aplicar es del usuario.
-- No emitas un cuadro con filas sin APU: el candado de `congelar`/`generar_cuadro` está
-  para eso, no lo esquives. Ojo: el candado es **de la web**, no global — `pipeline.py`
-  (CLI/GUI) llama `write_report` sin pasar por `seqs_sin_apu`, y ahí el hueco se ve en la
-  hoja `ALERTAS` del cuadro, no en una puerta trabada. Si lo haces global, el punto de paso
-  es `pipeline.py`.
+- No emitas un cuadro con filas sin APU **ni costo declarado**: el candado de
+  `congelar`/`generar_cuadro` (`seqs_sin_apu`) está para eso, no lo esquives. Una fila con
+  `costo_manual` positivo sí pasa, a propósito (ver "Costo puesto a mano"), y no pasa
+  callada. Ojo: el candado es **de la web**, no global — `pipeline.py` (CLI/GUI) llama
+  `write_report` sin pasar por `seqs_sin_apu`, y ahí el hueco se ve en la hoja `ALERTAS`
+  del cuadro, no en una puerta trabada. Si lo haces global, el punto de paso es
+  `pipeline.py`.
 - No edites el Excel fuente ni borres `data/`, `salidas/`, `ejemplos/`.
 - No dupliques lógica de orquestación: reúsala desde `pipeline.py`.
 - No hagas que una lista que no sea Principal caiga al precio histórico ni al de

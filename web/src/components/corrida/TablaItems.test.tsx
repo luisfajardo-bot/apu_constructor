@@ -835,20 +835,58 @@ test("al crear el APU desde la propuesta, queda asignado a la fila", async () =>
 // ─── Igualar costo al contractual (proyectos especiales) ────────────────────
 
 test("con filas marcadas aparece el botón de igualar al contractual", async () => {
-  render(<TablaConControl items={itemsCuatro()} />);
+  render(<TablaConControl items={itemsCuatro()} puedeEditar />);
   fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
   expect(await screen.findByText(/Igualar costo al contractual/i)).toBeTruthy();
 });
 
 test("igualar manda los seqs marcados", async () => {
   const { igualarCostoAlContractual } = await import("@/api/corridas");
-  render(<TablaConControl items={itemsCuatro()} />);
+  render(<TablaConControl items={itemsCuatro()} puedeEditar />);
   fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
   fireEvent.click(screen.getByLabelText("Marcar ítem 2"));
   fireEvent.click(await screen.findByText(/Igualar costo al contractual/i));
   await waitFor(() =>
     expect(igualarCostoAlContractual).toHaveBeenCalledWith(1, [0, 1]),
   );
+});
+
+test("sin permiso de editor no hay botón de igualar", async () => {
+  render(<TablaConControl items={itemsCuatro()} puedeEditar={false} />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  // La barra sí aparece (confirmar y borrar los puede un rol consulta), el botón no.
+  expect(await screen.findByText(/Confirmar el APU actual/i)).toBeTruthy();
+  expect(screen.queryByText(/Igualar costo al contractual/i)).toBeNull();
+});
+
+test("una respuesta con rechazadas muestra un toast de error", async () => {
+  const { igualarCostoAlContractual } = await import("@/api/corridas");
+  const { toast } = await import("sonner");
+  vi.mocked(toast.error).mockClear();
+  vi.mocked(igualarCostoAlContractual).mockResolvedValueOnce({
+    id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
+    totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
+    igualadas: [], rechazadas: [0],
+  });
+  render(<TablaConControl items={itemsCuatro()} puedeEditar />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  fireEvent.click(await screen.findByText(/Igualar costo al contractual/i));
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+    expect.stringContaining("Sin tocar por contractual en $0"),
+  ));
+});
+
+test("si igualar falla, muestra un toast de error y NO limpia la selección", async () => {
+  const { igualarCostoAlContractual } = await import("@/api/corridas");
+  const { toast } = await import("sonner");
+  vi.mocked(toast.error).mockClear();
+  vi.mocked(igualarCostoAlContractual).mockRejectedValueOnce(new Error("boom"));
+  render(<TablaConControl items={itemsCuatro()} puedeEditar />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  fireEvent.click(await screen.findByText(/Igualar costo al contractual/i));
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith("boom"));
+  // La selección sobrevive a propósito: el usuario puede reintentar sin volver a marcar.
+  expect(await screen.findByText(/1 línea marcada/i)).toBeTruthy();
 });
 
 test("la fila con costo a mano muestra el badge", () => {

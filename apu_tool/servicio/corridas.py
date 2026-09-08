@@ -63,7 +63,7 @@ def seqs_sin_apu(rows) -> list[int]:
     `is not None`, un `costo_manual` de 0.0 (o NaN) abriría la puerta mientras el badge
     y la alerta —que piden `costo_unitario > 0`— lo ignoran, y saldría al cuadro una
     fila en $0 sin APU, sin badge y sin alerta. La validación del servicio
-    (`igualar_costo_al_contractual`, Tarea 5) ya rechaza el contractual ≤ 0, pero el
+    (`igualar_costo_al_contractual`) ya rechaza el contractual ≤ 0, pero el
     candado no puede depender de que su único llamador se porte bien. `not (x or 0) > 0`
     también cierra el NaN: `not (nan > 0)` es True."""
     return [r.seq for r in rows

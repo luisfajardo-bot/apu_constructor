@@ -479,12 +479,16 @@ def revisar(almacen, filas: list[CorridaItemRow], revisor: Revisor,
                 v = revisor.profundizar(fila, asignado, candidatos)
         if v.dictamen == "ok" and not fila.apu_codigo:
             # Una fila sin APU es un HUECO, no una fila correcta: va en $0 y traba el
-            # congelar. Un "ok" ahí contradice al candado rojo de la misma pantalla, y
-            # "el APU asignado es el correcto" no significa nada cuando no hay APU.
-            # Los dos caminos que pueden llegar acá con "ok" —el barrido que contestó
-            # "ok" para una fila con `apu_asignado: null`, y una profundización que
-            # dictamina "ok" sin asignado— pasan por este punto, así que el degradado
-            # va acá y no duplicado en cada rama.
+            # congelar. Excepción: con `costo_manual > 0` (proyectos especiales,
+            # igualados al contractual) ninguna de las dos cosas es cierta — no
+            # costea en $0 ni traba el candado — así que ahí el degradado solo dice
+            # "esta fila no tiene APU", no "esta fila está rota". Un "ok" contradice
+            # igual al candado rojo de la misma pantalla, y "el APU asignado es el
+            # correcto" no significa nada cuando no hay APU. Los dos caminos que
+            # pueden llegar acá con "ok" —el barrido que contestó "ok" para una fila
+            # con `apu_asignado: null`, y una profundización que dictamina "ok" sin
+            # asignado— pasan por este punto, así que el degradado va acá y no
+            # duplicado en cada rama.
             v = replace(v, dictamen="sin_apu", apu_sugerido=None, turno_sugerido=None,
                         justificacion=("La actividad no tiene APU asignado: no hay "
                                        f"nada que dar por bueno. {v.justificacion}"

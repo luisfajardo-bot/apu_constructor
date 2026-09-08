@@ -276,10 +276,13 @@ export default function TablaItems({
       const rechazadas = actualizada.rechazadas ?? [];
       toast.success(`${n} ${n === 1 ? "línea igualada" : "líneas igualadas"} al contractual`);
       if (rechazadas.length > 0) {
-        // Nada silencioso: si no se tocó una fila, se dice por qué.
-        toast.error(
-          `Sin tocar por contractual en $0: ${rechazadas.map((s) => `#${s}`).join(", ")}`,
-        );
+        // Nada silencioso: si no se tocó una fila, se dice por qué. `seq` es una
+        // clave interna; se nombra por `item` (la columna que el usuario sí ve).
+        const etiquetas = rechazadas.map((s) => {
+          const it = items.find((x) => x.seq === s);
+          return it ? it.item : `#${s}`;
+        });
+        toast.error(`Sin tocar por contractual en $0: ${etiquetas.join(", ")}`);
       }
     } catch (e) {
       // La selección NO se limpia: el usuario puede reintentar sin volver a marcar.
@@ -574,11 +577,13 @@ export default function TablaItems({
           <Button size="xs" variant="outline" disabled={enLote} onClick={() => accionLote()}>
             {enLote ? "Aplicando…" : "Confirmar el APU actual"}
           </Button>
-          <Button size="xs" variant="outline" disabled={enLote}
-                  onClick={igualarAlContractual}
-                  title="Copia el precio contractual como costo. Para actividades globales que valen lo que dice el contrato.">
-            Igualar costo al contractual
-          </Button>
+          {puedeEditar && (
+            <Button size="xs" variant="outline" disabled={enLote}
+                    onClick={igualarAlContractual}
+                    title="Copia el precio contractual como costo. Para actividades globales que valen lo que dice el contrato.">
+              {enLote ? "Aplicando…" : "Igualar costo al contractual"}
+            </Button>
+          )}
           <Button size="xs" variant="destructive" disabled={enLote}
                   onClick={borrarSeleccionadas}>
             Borrar

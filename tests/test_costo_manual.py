@@ -88,6 +88,21 @@ def test_apu_sin_composicion_no_se_confunde_con_costo_a_mano(alm):
     assert fila["costo_manual"] is False
 
 
+def test_detalle_item_marca_costo_manual_y_composicion_vacia(alm):
+    cid = _corrida(alm, contractual=92106000.0, apu="100")
+    alm.corridas.set_costo_manual(cid, {0: 92106000.0})
+    detalle = svc.detalle_item(alm, cid, 0)
+    assert detalle["costo_manual"] is True
+    assert detalle["composicion"] == []
+
+
+def test_detalle_item_sin_costo_manual(alm):
+    cid = _corrida(alm, contractual=1000.0, apu="100")
+    detalle = svc.detalle_item(alm, cid, 0)
+    assert detalle["costo_manual"] is False
+    assert detalle["composicion"] != []
+
+
 def test_igualar_en_lote_copia_el_contractual_de_cada_fila(alm):
     cid = alm.corridas.crear_corrida(CorridaMeta(
         id=None, creada_en="2026-09-07T10:00:00", archivo="x.xlsx", turno_def="DIURNO",

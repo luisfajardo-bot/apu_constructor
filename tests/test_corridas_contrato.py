@@ -237,14 +237,18 @@ def test_reclamar_toma_la_mas_vieja_y_solo_una_vez(repo):
     Es lo que cierra la ventana del deploy, cuando la instancia nueva arranca
     mientras la vieja todavia esta armando."""
     vieja = _en_cola(repo, "2026-01-01T00:00:00")
-    _en_cola(repo, "2026-01-02T00:00:00")
+    nueva = _en_cola(repo, "2026-01-02T00:00:00")
 
     ganada = repo.reclamar_armado("instancia-A", "2026-01-03T10:00:00", "2026-01-03T09:57:00")
     assert ganada == vieja                      # la más vieja primero
 
-    # Segunda pasada con la reclama todavía fresca: NO la puede volver a tomar.
+    # Segunda pasada con la reclama todavía fresca: NO la puede volver a tomar, y sigue
+    # de largo con la que viene. Se afirma el POSITIVO (`== nueva`) y no `!= vieja`,
+    # porque `None` también sería `!= vieja`: si el SELECT dejara de filtrar las
+    # reclamas vivas, la corrida ya reclamada taparía la cola entera y ningún worker
+    # podría tomar nunca la segunda. Eso pasaría el `!=` sin que nadie se entere.
     otra = repo.reclamar_armado("instancia-B", "2026-01-03T10:00:10", "2026-01-03T09:57:10")
-    assert otra != vieja
+    assert otra == nueva
 
 
 def test_una_reclama_vencida_se_puede_retomar(repo):
@@ -399,6 +403,26 @@ def test_el_dueno_de_verdad_si_late_y_finaliza(repo):
     assert (m.estado, m.armando_por, m.duracion_ms) == ("en_revision", None, 1234)
 
 
+def test_latir_y_finalizar_avisan_si_la_reclama_ya_no_es_tuya(repo):
+    """El `bool` es el AVISO. El fencing evita que A pise a B, pero A no se entera de
+    que lo desplazaron: seguiría armando en paralelo durante horas. El latido corre
+    cada tanto, así que es el punto barato donde A puede darse cuenta y parar limpio.
+
+    Se afirman los DOS sentidos: si devolviera `True` siempre (o `False` siempre) el
+    aviso no sirve para nada."""
+    cid = _reclama_robada(repo)                 # A perdió la reclama, ahora es de B
+    assert repo.latir_armado(cid, "2026-01-03T10:30:00", instancia="A") is False
+    assert repo.latir_armado(cid, "2026-01-03T10:30:00", instancia="B") is True
+    assert repo.finalizar_armado(cid, "en_revision", instancia="A") is False
+    assert repo.finalizar_armado(cid, "en_revision", instancia="B") is True
+
+
+def test_latir_y_finalizar_sobre_una_corrida_que_no_existe_dan_false(repo):
+    """La borraron mientras se armaba: el worker se entera por el mismo camino."""
+    assert repo.latir_armado(999999, "2026-01-03T10:30:00") is False
+    assert repo.finalizar_armado(999999, "en_revision") is False
+
+
 def test_sin_instancia_se_puede_latir_y_finalizar_lo_que_nadie_reclamo(repo):
     """El camino sincrónico (`construir_corrida`, CLI y GUI): se crea y se arma en el
     acto, sin worker y sin reclama, así que `armando_por` es NULL y no hay dueño que
@@ -406,9 +430,9 @@ def test_sin_instancia_se_puede_latir_y_finalizar_lo_que_nadie_reclamo(repo):
     SILENCIO (NULL no matchea nada) y la corrida quedaría colgada en 'armando'."""
     cid = _en_cola(repo, "2026-01-01T00:00:00")
     assert repo.get_corrida(cid).armando_por is None
-    repo.latir_armado(cid, "2026-01-03T10:30:00")
+    assert repo.latir_armado(cid, "2026-01-03T10:30:00") is True
     assert repo.get_corrida(cid).armando_desde == "2026-01-03T10:30:00"
-    repo.finalizar_armado(cid, "en_revision", duracion_ms=1234)
+    assert repo.finalizar_armado(cid, "en_revision", duracion_ms=1234) is True
     m = repo.get_corrida(cid)
     assert (m.estado, m.duracion_ms) == ("en_revision", 1234)
 
@@ -437,6 +461,21 @@ def test_posicion_en_cola_desempata_por_id(repo):
     b = _en_cola(repo, "2026-01-01T00:00:00")
     assert (repo.posicion_en_cola(a), repo.posicion_en_cola(b)) == (0, 1)
     assert repo.reclamar_armado("A", "2026-01-03T10:00:00", "2026-01-03T09:57:00") == a
+
+
+def test_la_cola_va_por_fecha_y_no_por_id(repo):
+    """La NUEVA se crea primero, así que se queda con el id MENOR y los dos criterios
+    se contradicen. Sin esto, ordenar por `id` a secas da la misma respuesta que
+    ordenar por `(creada_en, id)` y ningún test nota la diferencia — que es justo lo
+    que pasaba: la cola es por antigüedad de la corrida, no por orden de alta.
+
+    Importa el día que `creada_en` deje de venir de un solo lugar (una importación,
+    una migración, una corrida creada con la fecha del archivo): ahí el id y la fecha
+    divergen de verdad y la cola tiene que seguir la fecha."""
+    nueva = _en_cola(repo, "2026-01-02T00:00:00")     # id menor, fecha mayor
+    vieja = _en_cola(repo, "2026-01-01T00:00:00")     # id mayor, fecha menor
+    assert (repo.posicion_en_cola(vieja), repo.posicion_en_cola(nueva)) == (0, 1)
+    assert repo.reclamar_armado("A", "2026-01-03T10:00:00", "2026-01-03T09:57:00") == vieja
 
 
 class _ConnEspia:

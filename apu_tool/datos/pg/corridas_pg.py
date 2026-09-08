@@ -198,6 +198,13 @@ class CorridasPg:
                 "SELECT id FROM corridas.corrida "
                 " WHERE estado='armando' "
                 "   AND (armando_desde IS NULL OR armando_desde < %s) "
+                # El desempate `, id ASC` no lo puede cazar ningún test: con dos
+                # corridas del mismo segundo, el orden de un empate es INDEFINIDO y
+                # los dos motores hoy devuelven el de inserción, que da la misma
+                # respuesta. Está igual porque "indefinido" cambia con el plan, un
+                # índice nuevo o una versión de Postgres, y `posicion_en_cola` promete
+                # el MISMO orden: sin el desempate, la pantalla puede decir un puesto
+                # y la reclama servir otro. No lo borres porque "ningún test lo cubre".
                 " ORDER BY creada_en ASC, id ASC LIMIT 1",
                 (limite_vencimiento,)).fetchone()
             if r is None:
@@ -205,6 +212,9 @@ class CorridasPg:
             cid = int(r["id"])
             # El WHERE se repite entero: entre el SELECT y el UPDATE otro worker pudo
             # haberla reclamado. Si rowcount es 0, la perdimos y no devolvemos nada.
+            # Volvemos con las manos vacías aunque quede más cola atrás, a propósito:
+            # el worker cicla y en la vuelta siguiente agarra la que sigue. Reintentar
+            # acá sería un bucle de reintentos escondido adentro de un método de datos.
             # En READ COMMITTED (lo que usa Supabase) esto alcanza: si el otro worker
             # ya tomó el lock de la fila, este UPDATE espera y, al soltarse, Postgres
             # RE-EVALÚA el WHERE contra la versión nueva —que ya tiene armando_desde
@@ -222,24 +232,25 @@ class CorridasPg:
     # deploy) le suelta la del dueño nuevo. Opcional porque el camino sincrónico
     # (CLI/GUI) arma sin que nadie haya reclamado: ahí no hay dueño que verificar.
     @staticmethod
-    def _fencing(instancia: Optional[str]) -> tuple[str, list]:
+    def _fencing(instancia: Optional[str]) -> tuple[str, list[str]]:
         return ("", []) if instancia is None else (" AND armando_por=%s", [instancia])
 
     def latir_armado(self, corrida_id: int, ahora: str,
-                     instancia: Optional[str] = None) -> None:
+                     instancia: Optional[str] = None) -> bool:
         dueno, extra = self._fencing(instancia)
         with self.cx.connection() as conn:
-            conn.execute(
+            cur = conn.execute(
                 f"UPDATE corridas.corrida SET armando_desde=%s WHERE id=%s{dueno}",
                 [ahora, int(corrida_id)] + extra)
+            return cur.rowcount > 0
 
     def finalizar_armado(self, corrida_id: int, estado: str,
                          duracion_ms: Optional[int] = None,
                          error: Optional[str] = None,
-                         instancia: Optional[str] = None) -> None:
+                         instancia: Optional[str] = None) -> bool:
         dueno, extra = self._fencing(instancia)
         with self.cx.connection() as conn:
-            conn.execute(
+            cur = conn.execute(
                 # COALESCE en la duración y no en el error a propósito: duracion_ms=None
                 # es "no la sé" (la de antes vale), error=None es "ya no hay error".
                 # Sin cast a propósito: psycopg manda el NULL sin tipo y Postgres lo
@@ -250,6 +261,7 @@ class CorridasPg:
                 "       duracion_ms=COALESCE(%s, duracion_ms), ultimo_error=%s "
                 f" WHERE id=%s{dueno}",
                 [estado, duracion_ms, error, int(corrida_id)] + extra)
+            return cur.rowcount > 0
 
     def reencolar_armado(self, corrida_id: int) -> None:
         with self.cx.connection() as conn:
@@ -271,7 +283,7 @@ class CorridasPg:
                 " WHERE estado='armando' AND (creada_en, id) < "
                 "       (SELECT creada_en, id FROM corridas.corrida WHERE id=%s)",
                 (int(corrida_id),)).fetchone()
-        return int(r["n"]) if r else 0
+        return int(r["n"])      # un COUNT(*) sin GROUP BY siempre trae exactamente 1 fila
 
     # ---- lectura ----
     def _row_to_item(self, r) -> CorridaItemRow:

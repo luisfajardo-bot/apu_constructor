@@ -220,11 +220,14 @@ class RepositorioCorridas(Protocol):
 
         ES UN SOLO UPDATE CONDICIONAL, no un "leo y después escribo": durante un
         deploy la instancia nueva arranca mientras la vieja todavía drena, y sin
-        atomicidad las dos armarían la misma corrida sobre una tabla que hasta hace
-        poco ni siquiera tenía UNIQUE(corrida_id, seq).
+        atomicidad las dos armarían la misma corrida. `corrida_item` NO tiene
+        UNIQUE(corrida_id, seq) —llega en una tarea posterior—, así que hoy nada
+        detecta las filas duplicadas después del hecho: esta reclama es la única
+        defensa que hay.
 
         `limite_vencimiento` es el ISO por debajo del cual una reclama se considera
-        muerta (ahora - config.ARMADO_TTL_RECLAMA_S).
+        muerta (ahora - config.ARMADO_TTL_RECLAMA_S, constante de una tarea posterior;
+        todavía no existe).
 
         OJO: el vencimiento se mide con el reloj del que llama, no con el de la base.
         Una instancia adelantada le puede robar una reclama viva a otra, y un latido
@@ -234,17 +237,23 @@ class RepositorioCorridas(Protocol):
         ...
 
     def latir_armado(self, corrida_id: int, ahora: str,
-                     instancia: Optional[str] = None) -> None:
+                     instancia: Optional[str] = None) -> bool:
         """Refresca `armando_desde` para que la reclama no venza mientras se trabaja.
 
         Con `instancia` solo late si esa instancia SIGUE siendo la dueña (ver el
-        fencing de `finalizar_armado`); con None late igual, sea de quien sea."""
+        fencing de `finalizar_armado`); con None late igual, sea de quien sea.
+
+        Devuelve si el UPDATE aplicó, y eso es el AVISO: el fencing impide que un
+        worker desplazado pise al dueño nuevo, pero no lo entera de que lo
+        desplazaron. Un `False` acá es la forma barata (cada tanto, no por ítem) de
+        que un worker que perdió la reclama se dé cuenta y pare limpio, en vez de
+        seguir armando en paralelo durante horas."""
         ...
 
     def finalizar_armado(self, corrida_id: int, estado: str,
                          duracion_ms: Optional[int] = None,
                          error: Optional[str] = None,
-                         instancia: Optional[str] = None) -> None:
+                         instancia: Optional[str] = None) -> bool:
         """Fija `estado`, libera la reclama y guarda la duración o el motivo.
 
         Con `estado='en_revision'` o `'armado_detenido'` saca la corrida de la cola
@@ -265,7 +274,14 @@ class RepositorioCorridas(Protocol):
         (con `estado='armando'` es peor: una tercera instancia la reclama y quedan
         dos armando la misma corrida). Es opcional porque el camino sincrónico
         (`construir_corrida`, el de CLI y GUI) crea y arma en el acto, sin worker y
-        sin reclama: ahí no hay dueño que verificar. El worker siempre la pasa."""
+        sin reclama: ahí no hay dueño que verificar. El worker siempre la pasa.
+
+        Devuelve si el UPDATE aplicó: `False` con `instancia` significa que la reclama
+        ya no es tuya (ver `latir_armado`).
+
+        Con `estado='armado_detenido'` pasá SIEMPRE el `error`: una corrida detenida
+        sin motivo no le dice a nadie qué se rompió ni si vale la pena reanudarla, y
+        el motivo tiene que quedar visible."""
         ...
 
     def reencolar_armado(self, corrida_id: int) -> None:

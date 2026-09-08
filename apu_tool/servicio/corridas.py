@@ -52,8 +52,22 @@ class FilasSinApu(RuntimeError):
 
 
 def seqs_sin_apu(rows) -> list[int]:
-    """Los seq de las filas que no tienen APU. Lista vacía = se puede cerrar."""
-    return [r.seq for r in rows if not r.apu_codigo]
+    """Los seq de las filas que no tienen APU NI un costo declarado POSITIVO.
+    Lista vacía = se puede cerrar.
+
+    El candado existe para que no salga un cuadro con filas en $0 sin que nadie se
+    entere. Una fila con costo puesto a mano no es ninguna de las dos cosas: el monto
+    lo declaró una persona y la hoja ALERTAS la nombra (ver `alertas_costeo`).
+
+    Pide `> 0` y NO `is not None` a propósito: el candado se defiende solo. Con
+    `is not None`, un `costo_manual` de 0.0 (o NaN) abriría la puerta mientras el badge
+    y la alerta —que piden `costo_unitario > 0`— lo ignoran, y saldría al cuadro una
+    fila en $0 sin APU, sin badge y sin alerta. La validación del servicio
+    (`igualar_costo_al_contractual`, Tarea 5) ya rechaza el contractual ≤ 0, pero el
+    candado no puede depender de que su único llamador se porte bien. `not (x or 0) > 0`
+    también cierra el NaN: `not (nan > 0)` es True."""
+    return [r.seq for r in rows
+            if not r.apu_codigo and not (r.costo_manual or 0) > 0]
 
 
 def _estructura(componentes) -> list[dict]:

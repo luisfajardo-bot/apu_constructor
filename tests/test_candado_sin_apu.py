@@ -126,3 +126,65 @@ def test_endpoints_devuelven_409_con_los_seqs(alm):
     r = cli.get(f"/api/corridas/{cid}/cuadro")
     assert r.status_code == 409
     assert r.json()["detail"]["seqs"] == [1]
+
+
+def test_costo_a_mano_abre_el_candado(alm):
+    """La fila sin APU pero con costo declarado ya no bloquea: es el caso de uso
+    entero (proyectos especiales que no se arman). El candado sigue existiendo para
+    las filas que de verdad no tienen nada."""
+    cid = _corrida_con_fila_sin_apu(alm)
+    seq_malo = [r.seq for r in alm.corridas.get_items(cid) if not r.apu_codigo][0]
+    contractual = {r.seq: r.item.precio_contractual
+                   for r in alm.corridas.get_items(cid)}[seq_malo]
+    alm.corridas.set_costo_manual(cid, {seq_malo: contractual})
+    assert svc.seqs_sin_apu(alm.corridas.get_items(cid)) == []
+    assert svc.congelar(alm, cid) is not None      # no levanta FilasSinApu
+
+
+def test_fila_pelada_sigue_bloqueando(alm):
+    """Sin APU y sin costo: el candado tiene que seguir trabado."""
+    cid = _corrida_con_fila_sin_apu(alm)
+    assert svc.seqs_sin_apu(alm.corridas.get_items(cid)) != []
+    with pytest.raises(svc.FilasSinApu):
+        svc.congelar(alm, cid)
+
+
+def test_costo_a_mano_en_cero_no_abre_el_candado(alm):
+    """El candado se defiende solo: un costo a mano de 0 no es un costo declarado.
+    Si abriera, saldría al cuadro una fila en $0 sin APU, sin badge y sin alerta."""
+    cid = _corrida_con_fila_sin_apu(alm)
+    seq_malo = [r.seq for r in alm.corridas.get_items(cid) if not r.apu_codigo][0]
+    alm.corridas.set_costo_manual(cid, {seq_malo: 0.0})
+    assert svc.seqs_sin_apu(alm.corridas.get_items(cid)) == [seq_malo]
+    with pytest.raises(svc.FilasSinApu):
+        svc.congelar(alm, cid)
+
+
+def test_el_cuadro_nombra_la_fila_con_costo_a_mano(alm):
+    """Que salga en el cuadro no significa que salga callada: la hoja ALERTAS la nombra."""
+    from apu_tool.dominio.alertas import filas_alertadas
+    from apu_tool.dominio.pricing import PricingEngine
+    cid = _corrida_con_fila_sin_apu(alm)
+    seq_malo = [r.seq for r in alm.corridas.get_items(cid) if not r.apu_codigo][0]
+    alm.corridas.set_costo_manual(cid, {seq_malo: 92106000.0})
+    rows = alm.corridas.get_items(cid)
+    meta = alm.corridas.get_corrida(cid)
+    ensambles = svc._ensamblar_corrida(alm, meta, rows, PricingEngine(alm))
+    motivos = {a.item.item: ac for a, ac in filas_alertadas(ensambles)}
+    assert any("costo puesto a mano" in m
+               for ms in motivos.values() for m in ms)
+
+
+def test_congelada_sigue_marcando_el_costo_a_mano(alm):
+    """El snapshot guarda `composicion: []` con el mismo costo, así que la firma que
+    reconoce `alertas_costeo` sobrevive a congelar. Sin esto, el cuadro de una corrida
+    congelada emitiría la fila sin decir que el costo lo puso una persona."""
+    cid = _corrida_con_fila_sin_apu(alm)
+    seq_malo = [r.seq for r in alm.corridas.get_items(cid) if not r.apu_codigo][0]
+    alm.corridas.set_costo_manual(cid, {seq_malo: 92106000.0})
+    svc.congelar(alm, cid)
+    assert alm.corridas.get_corrida(cid).modo == "congelada"
+    fila = {f["seq"]: f for f in svc.vista_corrida(alm, cid)["items"]}[seq_malo]
+    assert fila["costo_unitario"] == 92106000.0
+    assert fila["costo_manual"] is True
+    assert any("costo puesto a mano" in m for m in fila["alertas_costeo"])

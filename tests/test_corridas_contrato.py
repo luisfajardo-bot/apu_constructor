@@ -5,6 +5,8 @@ SQLite corre siempre; Postgres solo con TEST_DATABASE_URL. Existe porque
 brecha ya dejó pasar un bug de CorridasPg.
 """
 import os
+from contextlib import contextmanager
+
 import pytest
 
 from apu_tool.nucleo.models import CorridaItemRow, CorridaMeta, LicitacionItem
@@ -216,3 +218,242 @@ def test_max_seq_ignora_los_huecos(repo):
         repo.agregar_item(cid, _item(s, 1000.0))
     repo.borrar_items(cid, [1, 2])
     assert repo.max_seq(cid) == 3
+
+
+# ---- la cola del armado: reclama atómica ----
+
+def _en_cola(repo, creada_en: str, estado: str = "armando") -> int:
+    """Una corrida con la fecha y el estado que hace falta para probar la cola.
+
+    Mismo `crear_corrida(CorridaMeta(...))` de arriba: lo único que varía entre estos
+    tests es `creada_en` (el orden de la cola) y `estado` (quién entra a la cola)."""
+    return repo.crear_corrida(CorridaMeta(
+        id=None, creada_en=creada_en, archivo="x.xlsx", turno_def="DIURNO",
+        use_ai=None, estado=estado, cuadro_path=None, nombre="x"))
+
+
+def test_reclamar_toma_la_mas_vieja_y_solo_una_vez(repo):
+    """La reclama es un UPDATE condicional: dos workers compitiendo, uno solo gana.
+    Es lo que cierra la ventana del deploy, cuando la instancia nueva arranca
+    mientras la vieja todavia esta armando."""
+    vieja = _en_cola(repo, "2026-01-01T00:00:00")
+    _en_cola(repo, "2026-01-02T00:00:00")
+
+    ganada = repo.reclamar_armado("instancia-A", "2026-01-03T10:00:00", "2026-01-03T09:57:00")
+    assert ganada == vieja                      # la más vieja primero
+
+    # Segunda pasada con la reclama todavía fresca: NO la puede volver a tomar.
+    otra = repo.reclamar_armado("instancia-B", "2026-01-03T10:00:10", "2026-01-03T09:57:10")
+    assert otra != vieja
+
+
+def test_una_reclama_vencida_se_puede_retomar(repo):
+    cid = _en_cola(repo, "2026-01-01T00:00:00")
+    repo.reclamar_armado("instancia-A", "2026-01-03T10:00:00", "2026-01-03T09:57:00")
+    # El límite de vencimiento ya pasó la hora del latido de A: la instancia murió.
+    assert repo.reclamar_armado("instancia-B", "2026-01-03T10:10:00",
+                                "2026-01-03T10:07:00") == cid
+
+
+def test_reclamar_sube_los_intentos(repo):
+    cid = _en_cola(repo, "2026-01-01T00:00:00")
+    repo.reclamar_armado("A", "2026-01-03T10:00:00", "2026-01-03T09:57:00")
+    assert repo.get_corrida(cid).intentos == 1
+    repo.reclamar_armado("B", "2026-01-03T10:10:00", "2026-01-03T10:07:00")
+    assert repo.get_corrida(cid).intentos == 2
+
+
+def test_reclamar_perdida_no_toca_la_corrida(repo):
+    """El que pierde la carrera no deja rastro: ni sube `intentos` ni se roba la
+    reclama. Si el perdedor sumara, dos deploys seguidos agotarían el tope de
+    reintentos sin que hubiera fallado nada de verdad."""
+    cid = _en_cola(repo, "2026-01-01T00:00:00")
+    assert repo.reclamar_armado("A", "2026-01-03T10:00:00", "2026-01-03T09:57:00") == cid
+    # B llega con la reclama de A todavía viva: no hay nada más en la cola.
+    assert repo.reclamar_armado("B", "2026-01-03T10:00:01", "2026-01-03T09:57:01") is None
+    m = repo.get_corrida(cid)
+    assert (m.intentos, m.armando_por, m.armando_desde) == (
+        1, "A", "2026-01-03T10:00:00")
+
+
+def test_reclamar_ignora_lo_que_no_esta_armando(repo):
+    _en_cola(repo, "2026-01-01T00:00:00", estado="en_revision")
+    _en_cola(repo, "2026-01-01T00:00:00", estado="armado_detenido")
+    assert repo.reclamar_armado("A", "2026-01-03T10:00:00", "2026-01-03T09:57:00") is None
+
+
+def test_latir_corre_el_vencimiento(repo):
+    cid = _en_cola(repo, "2026-01-01T00:00:00")
+    repo.reclamar_armado("A", "2026-01-03T10:00:00", "2026-01-03T09:57:00")
+    repo.latir_armado(cid, "2026-01-03T10:20:00")
+    # Un límite que habría vencido la reclama original ya no alcanza.
+    assert repo.reclamar_armado("B", "2026-01-03T10:21:00", "2026-01-03T10:18:00") is None
+
+
+def test_finalizar_libera_la_reclama(repo):
+    cid = _en_cola(repo, "2026-01-01T00:00:00")
+    repo.reclamar_armado("A", "2026-01-03T10:00:00", "2026-01-03T09:57:00")
+    repo.finalizar_armado(cid, "en_revision", duracion_ms=1234)
+    m = repo.get_corrida(cid)
+    assert (m.estado, m.armando_por, m.duracion_ms) == ("en_revision", None, 1234)
+
+
+def test_finalizar_en_armando_suelta_la_reclama_sin_salir_de_la_cola(repo):
+    """El camino del fallo que no es de un ítem: la corrida SIGUE en la cola y se
+    puede retomar YA, sin esperar el TTL, pero `intentos` no se toca (el tope de
+    reintentos tiene que seguir contando lo que de verdad se intentó)."""
+    cid = _en_cola(repo, "2026-01-01T00:00:00")
+    repo.reclamar_armado("A", "2026-01-03T10:00:00", "2026-01-03T09:57:00")
+    repo.finalizar_armado(cid, "armando", error="se cayó la base")
+    m = repo.get_corrida(cid)
+    assert (m.estado, m.armando_por, m.armando_desde, m.intentos) == (
+        "armando", None, None, 1)
+    # Un límite que NO habría vencido la reclama de A: igual se puede retomar.
+    assert repo.reclamar_armado("B", "2026-01-03T10:00:05", "2026-01-03T09:57:05") == cid
+
+
+def test_finalizar_sin_duracion_no_borra_la_que_habia(repo):
+    """`duracion_ms=None` significa "no la sé", no "borrala": el camino de detener
+    una corrida no puede tirar la duración de un armado anterior."""
+    cid = _en_cola(repo, "2026-01-01T00:00:00")
+    repo.finalizar_armado(cid, "en_revision", duracion_ms=999)
+    repo.finalizar_armado(cid, "armado_detenido", error="se murió")
+    assert repo.get_corrida(cid).duracion_ms == 999
+
+
+def test_detener_guarda_el_motivo(repo):
+    cid = _en_cola(repo, "2026-01-01T00:00:00")
+    repo.finalizar_armado(cid, "armado_detenido", error="El Excel no se pudo leer.")
+    m = repo.get_corrida(cid)
+    assert (m.estado, m.ultimo_error) == ("armado_detenido", "El Excel no se pudo leer.")
+
+
+def test_finalizar_ok_borra_el_error_viejo(repo):
+    """Terminar bien no puede dejar colgado el motivo del intento que falló: la
+    pantalla mostraría un error al lado de una corrida que salió perfecta."""
+    cid = _en_cola(repo, "2026-01-01T00:00:00")
+    repo.finalizar_armado(cid, "armando", error="se cayó la base")
+    repo.finalizar_armado(cid, "en_revision", duracion_ms=10)
+    assert repo.get_corrida(cid).ultimo_error is None
+
+
+def test_reencolar_limpia_intentos_y_error(repo):
+    cid = _en_cola(repo, "2026-01-01T00:00:00", estado="armado_detenido")
+    repo.finalizar_armado(cid, "armado_detenido", error="se murió")
+    repo.reencolar_armado(cid)
+    m = repo.get_corrida(cid)
+    assert (m.estado, m.intentos, m.ultimo_error) == ("armando", 0, None)
+
+
+def test_reencolar_la_deja_lista_para_tomar_ya(repo):
+    """"Reanudar a mano" tiene que servir de inmediato. Si `reencolar_armado` dejara
+    la reclama vieja puesta, la corrida volvería a la cola pero ningún worker podría
+    tocarla hasta que venciera el TTL: la pantalla diría "en cola" sin que pase nada."""
+    cid = _en_cola(repo, "2026-01-01T00:00:00")
+    repo.reclamar_armado("A", "2026-01-03T10:00:00", "2026-01-03T09:57:00")
+    repo.reencolar_armado(cid)
+    m = repo.get_corrida(cid)
+    assert (m.armando_por, m.armando_desde) == (None, None)
+    # Límite que NO habría vencido la reclama de A: igual se puede tomar.
+    assert repo.reclamar_armado("B", "2026-01-03T10:00:05", "2026-01-03T09:57:05") == cid
+
+
+def test_posicion_en_cola_cuenta_las_mas_viejas(repo):
+    a = _en_cola(repo, "2026-01-01T00:00:00")
+    b = _en_cola(repo, "2026-01-02T00:00:00")
+    assert repo.posicion_en_cola(a) == 0
+    assert repo.posicion_en_cola(b) == 1
+
+
+def test_posicion_en_cola_solo_cuenta_lo_que_esta_en_la_cola(repo):
+    """Una corrida vieja que ya terminó no ocupa lugar: si contara, la pantalla
+    diría "3ª en la cola" cuando es la próxima."""
+    _en_cola(repo, "2026-01-01T00:00:00", estado="en_revision")
+    _en_cola(repo, "2026-01-01T00:00:00", estado="armado_detenido")
+    b = _en_cola(repo, "2026-01-02T00:00:00")
+    assert repo.posicion_en_cola(b) == 0
+
+
+def test_posicion_en_cola_desempata_por_id(repo):
+    """Dos corridas creadas en el mismo segundo (el ISO va al segundo) no pueden
+    compartir posición: el desempate por id es el mismo que usa la reclama, así que
+    la posición que se muestra es la que de verdad se va a servir."""
+    a = _en_cola(repo, "2026-01-01T00:00:00")
+    b = _en_cola(repo, "2026-01-01T00:00:00")
+    assert (repo.posicion_en_cola(a), repo.posicion_en_cola(b)) == (0, 1)
+    assert repo.reclamar_armado("A", "2026-01-03T10:00:00", "2026-01-03T09:57:00") == a
+
+
+class _ConnEspia:
+    """Deja pasar todo a la conexión real y dispara `sabotaje` justo ANTES del 2º
+    execute: en `reclamar_armado` eso cae exactamente entre el SELECT y el UPDATE.
+
+    Antes y no después del 1º a propósito: en SQLite el cursor del SELECT retiene un
+    lock de lectura hasta que se libera, así que sabotear con el cursor todavía vivo
+    deja al saboteador esperando ("database is locked") en vez de ganar la carrera.
+    """
+
+    def __init__(self, real, sabotaje):
+        self._real, self._sabotaje, self._n = real, sabotaje, 0
+
+    def execute(self, *a, **k):
+        self._n += 1
+        if self._n == 2 and self._sabotaje is not None:
+            disparar, self._sabotaje = self._sabotaje, None
+            disparar()
+        return self._real.execute(*a, **k)
+
+    def __getattr__(self, nombre):
+        return getattr(self._real, nombre)
+
+
+@contextmanager
+def _sabotear_entre_el_select_y_el_update(repo, sabotaje):
+    """Mete `sabotaje` JUSTO entre el SELECT y el UPDATE de `reclamar_armado`.
+
+    Es la ÚNICA forma de ejercitar la rama del `rowcount`, que es lo que hace atómica
+    la reclama: en un test secuencial el SELECT ya filtra la corrida reclamada y el
+    UPDATE ni se intenta, así que la guarda quedaría sin red y se podría borrar sin que
+    fallara nada. Se parchea la fábrica de conexiones, que es lo único que difiere
+    entre los dos backends (`CorridasDB.connect` / `Conexion.connection`), así que
+    esto corre igual contra SQLite y contra Postgres.
+    """
+    cx = getattr(repo, "cx", None)
+    objetivo, attr = (cx, "connection") if cx is not None else (repo, "connect")
+    original = getattr(objetivo, attr)
+    ya_disparo = []
+
+    @contextmanager
+    def fabrica():
+        with original() as real:
+            if ya_disparo:                 # la llamada anidada del sabotaje va derecho
+                yield real
+            else:
+                ya_disparo.append(True)
+                yield _ConnEspia(real, sabotaje)
+
+    setattr(objetivo, attr, fabrica)
+    try:
+        yield
+    finally:
+        setattr(objetivo, attr, original)
+
+
+def test_reclamar_no_devuelve_una_corrida_que_perdio_en_el_ultimo_instante(repo):
+    """La carrera real del deploy, forzada: A hace el SELECT, B se la lleva entera, y
+    recién ahí A intenta el UPDATE. El UPDATE repite el WHERE, no aplica, y A tiene
+    que salir con las manos vacías. Si A devolviera el id igual, las DOS instancias
+    armarían la misma corrida y el cuadro saldría con actividades duplicadas.
+
+    Sin este test la guarda del `rowcount` se puede borrar y la suite queda verde.
+    """
+    cid = _en_cola(repo, "2026-01-01T00:00:00")
+
+    def se_la_lleva_B():
+        assert repo.reclamar_armado("B", "2026-01-03T10:00:00", "2026-01-03T09:57:00") == cid
+
+    with _sabotear_entre_el_select_y_el_update(repo, se_la_lleva_B):
+        assert repo.reclamar_armado("A", "2026-01-03T10:00:01", "2026-01-03T09:57:01") is None
+
+    m = repo.get_corrida(cid)
+    assert (m.armando_por, m.intentos) == ("B", 1)   # A no dejó rastro

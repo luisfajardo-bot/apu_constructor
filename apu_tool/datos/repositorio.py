@@ -212,6 +212,51 @@ class RepositorioCorridas(Protocol):
         `max_seq + 1`. Se usa el MÁXIMO y no la cantidad: con una fila borrada en el
         medio, contar reanudaría sobre un seq que ya existe."""
         ...
+
+    def reclamar_armado(self, instancia: str, ahora: str,
+                        limite_vencimiento: str) -> Optional[int]:
+        """Toma la corrida en 'armando' más vieja que nadie esté armando, y devuelve
+        su id (None si no hay ninguna). Sube `intentos`.
+
+        ES UN SOLO UPDATE CONDICIONAL, no un "leo y después escribo": durante un
+        deploy la instancia nueva arranca mientras la vieja todavía drena, y sin
+        atomicidad las dos armarían la misma corrida sobre una tabla que hasta hace
+        poco ni siquiera tenía UNIQUE(corrida_id, seq).
+
+        `limite_vencimiento` es el ISO por debajo del cual una reclama se considera
+        muerta (ahora - config.ARMADO_TTL_RECLAMA_S)."""
+        ...
+
+    def latir_armado(self, corrida_id: int, ahora: str) -> None:
+        """Refresca `armando_desde` para que la reclama no venza mientras se trabaja."""
+        ...
+
+    def finalizar_armado(self, corrida_id: int, estado: str,
+                         duracion_ms: Optional[int] = None,
+                         error: Optional[str] = None) -> None:
+        """Fija `estado`, libera la reclama y guarda la duración o el motivo.
+
+        Con `estado='en_revision'` o `'armado_detenido'` saca la corrida de la cola
+        (es el único camino de salida junto con `reencolar_armado`). El worker
+        también la llama con `estado='armando'` tras un fallo que no es de un ítem:
+        ahí la corrida SIGUE en la cola, solo se suelta la reclama para que se pueda
+        reintentar de inmediato en vez de esperar el TTL. `intentos` no se toca, así
+        que el tope sigue aplicando.
+
+        `duracion_ms=None` significa "no la sé", NO "borrala": la duración vieja
+        queda. `error` sí se pisa siempre, incluso con None: terminar bien tiene que
+        limpiar el motivo del intento que falló."""
+        ...
+
+    def reencolar_armado(self, corrida_id: int) -> None:
+        """Vuelve a poner la corrida en la cola desde cero: 'armando', intentos en 0,
+        sin error y sin reclama. Lo usa el endpoint de reanudar a mano."""
+        ...
+
+    def posicion_en_cola(self, corrida_id: int) -> int:
+        """Cuántas corridas en 'armando' son más viejas que esta. 0 = es la próxima."""
+        ...
+
     def set_carpeta(self, corrida_id: int, carpeta_id: int, conn=None) -> None: ...
     def listar_corridas(self) -> list[CorridaMeta]: ...
     def eliminar_corrida(self, corrida_id: int, conn=None) -> bool: ...

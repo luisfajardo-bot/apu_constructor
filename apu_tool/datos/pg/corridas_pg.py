@@ -190,6 +190,76 @@ class CorridasPg:
                 (int(corrida_id),)).fetchone()
         return -1 if (r is None or r["m"] is None) else int(r["m"])
 
+    # ---- la cola del armado (corrida.estado == 'armando' ES la cola) ----
+    def reclamar_armado(self, instancia: str, ahora: str,
+                        limite_vencimiento: str) -> Optional[int]:
+        with self.cx.connection() as conn:
+            r = conn.execute(
+                "SELECT id FROM corridas.corrida "
+                " WHERE estado='armando' "
+                "   AND (armando_desde IS NULL OR armando_desde < %s) "
+                " ORDER BY creada_en ASC, id ASC LIMIT 1",
+                (limite_vencimiento,)).fetchone()
+            if r is None:
+                return None
+            cid = int(r["id"])
+            # El WHERE se repite entero: entre el SELECT y el UPDATE otro worker pudo
+            # haberla reclamado. Si rowcount es 0, la perdimos y no devolvemos nada.
+            # En READ COMMITTED (lo que usa Supabase) esto alcanza: si el otro worker
+            # ya tomó el lock de la fila, este UPDATE espera y, al soltarse, Postgres
+            # RE-EVALÚA el WHERE contra la versión nueva —que ya tiene armando_desde
+            # fresco— y no la toca. El perdedor sale con rowcount 0, sin sumar intentos.
+            cur = conn.execute(
+                "UPDATE corridas.corrida "
+                "   SET armando_por=%s, armando_desde=%s, intentos=intentos+1 "
+                " WHERE id=%s AND estado='armando' "
+                "   AND (armando_desde IS NULL OR armando_desde < %s)",
+                (instancia, ahora, cid, limite_vencimiento))
+            return cid if cur.rowcount > 0 else None
+
+    def latir_armado(self, corrida_id: int, ahora: str) -> None:
+        with self.cx.connection() as conn:
+            conn.execute("UPDATE corridas.corrida SET armando_desde=%s WHERE id=%s",
+                         (ahora, int(corrida_id)))
+
+    def finalizar_armado(self, corrida_id: int, estado: str,
+                         duracion_ms: Optional[int] = None,
+                         error: Optional[str] = None) -> None:
+        with self.cx.connection() as conn:
+            conn.execute(
+                # COALESCE en la duración y no en el error a propósito: duracion_ms=None
+                # es "no la sé" (la de antes vale), error=None es "ya no hay error".
+                # Sin cast a propósito: psycopg manda el NULL sin tipo y Postgres lo
+                # resuelve por el otro brazo del COALESCE (integer). Verificado contra
+                # un Postgres real; poner ::integer sería una diferencia sin motivo.
+                "UPDATE corridas.corrida "
+                "   SET estado=%s, armando_por=NULL, armando_desde=NULL, "
+                "       duracion_ms=COALESCE(%s, duracion_ms), ultimo_error=%s "
+                " WHERE id=%s",
+                (estado, duracion_ms, error, int(corrida_id)))
+
+    def reencolar_armado(self, corrida_id: int) -> None:
+        with self.cx.connection() as conn:
+            conn.execute(
+                "UPDATE corridas.corrida "
+                "   SET estado='armando', intentos=0, ultimo_error=NULL, "
+                "       armando_por=NULL, armando_desde=NULL "
+                " WHERE id=%s", (int(corrida_id),))
+
+    def posicion_en_cola(self, corrida_id: int) -> int:
+        with self.cx.connection() as conn:
+            r = conn.execute(
+                # Mismo criterio de orden que la reclama (creada_en, id): si acá se
+                # desempatara distinto, la pantalla diría un puesto y se serviría otro.
+                # La comparación de tuplas contra una subconsulta de una sola fila es
+                # la misma forma en los dos motores; con la corrida inexistente da NULL
+                # y no cuenta nada, igual que en SQLite.
+                "SELECT COUNT(*) AS n FROM corridas.corrida "
+                " WHERE estado='armando' AND (creada_en, id) < "
+                "       (SELECT creada_en, id FROM corridas.corrida WHERE id=%s)",
+                (int(corrida_id),)).fetchone()
+        return int(r["n"]) if r else 0
+
     # ---- lectura ----
     def _row_to_item(self, r) -> CorridaItemRow:
         return CorridaItemRow(

@@ -75,6 +75,17 @@ export function confirmarLote(
   });
 }
 
+/** Copia el precio contractual de cada línea marcada como su costo unitario.
+ *  Para proyectos especiales: valen lo que dice el contrato y armarles el APU no paga.
+ *  Devuelve la corrida recosteada (misma forma que `confirmarLote`) más `igualadas`
+ *  y `rechazadas` (las de contractual ≤ 0, que no se tocan). */
+export function igualarCostoAlContractual(
+  id: number,
+  seqs: number[],
+): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/igualar-costo`, { seqs });
+}
+
 /** Aplica N sugerencias de la IA en un solo recosteo: un APU (y turno) distinto
  *  por fila. Devuelve la corrida recosteada (misma forma que `confirmar`). */
 export function aplicarSugerencias(

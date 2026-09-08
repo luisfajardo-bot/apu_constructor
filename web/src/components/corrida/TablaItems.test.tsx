@@ -8,6 +8,7 @@ vi.mock("@/api/corridas", () => ({
     seq: 0, descripcion: "Concreto", apu_codigo: "111", apu_turno: "DIURNO",
     apu_nombre: "APU VIEJO",
     status: "matched", explicacion: "", candidatos: [], composicion: [], costo_unitario: 0,
+    costo_manual: false,
   })),
   confirmar: vi.fn(async () => ({
     id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
@@ -33,6 +34,11 @@ vi.mock("@/api/corridas", () => ({
       { insumo_codigo: "1105", insumo_nombre: "CONCRETO 3000 PSI",
         unidad: "M3", rendimiento: 0.045 },
     ],
+  })),
+  igualarCostoAlContractual: vi.fn(async () => ({
+    id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
+    totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
+    igualadas: [0], rechazadas: [],
   })),
 }));
 vi.mock("@/api/autoria", () => ({
@@ -65,6 +71,7 @@ const ITEM = {
   apu_codigo: "111", apu_nombre: "APU VIEJO", status: "matched", confianza: 1,
   precio_contractual: 0, costo_unitario: 0, margen_unitario: 0, margen_pct: 0,
   contractual_total: 0, costo_total: 0, margen_total: 0, revision: null,
+  costo_manual: false,
 };
 
 /** Veredicto "cambiar" con APU y turno sugeridos: el único que ofrece Aplicar. */
@@ -250,7 +257,7 @@ test("Confirmar el APU actual manda solo las filas que tienen APU", async () => 
   fireEvent.click(screen.getByLabelText(/Marcar todas las líneas/i));
   fireEvent.click(screen.getByRole("button", { name: /Confirmar el APU actual/i }));
   await waitFor(() =>
-    expect(confirmarLote).toHaveBeenCalledWith(1, [0, 1, 3], undefined, undefined));
+    expect(confirmarLote).toHaveBeenCalledWith(1, [0, 1, 3]));
 });
 
 test("después de asignar se limpia la selección", async () => {
@@ -823,4 +830,57 @@ test("al crear el APU desde la propuesta, queda asignado a la fila", async () =>
       { seq: 5, apu_codigo: "9001", shift: "DIURNO" },
     ]));
   await waitFor(() => expect(onConfirmado).toHaveBeenCalled());
+});
+
+// ─── Igualar costo al contractual (proyectos especiales) ────────────────────
+
+test("con filas marcadas aparece el botón de igualar al contractual", async () => {
+  render(<TablaConControl items={itemsCuatro()} />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  expect(await screen.findByText(/Igualar costo al contractual/i)).toBeTruthy();
+});
+
+test("igualar manda los seqs marcados", async () => {
+  const { igualarCostoAlContractual } = await import("@/api/corridas");
+  render(<TablaConControl items={itemsCuatro()} />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  fireEvent.click(screen.getByLabelText("Marcar ítem 2"));
+  fireEvent.click(await screen.findByText(/Igualar costo al contractual/i));
+  await waitFor(() =>
+    expect(igualarCostoAlContractual).toHaveBeenCalledWith(1, [0, 1]),
+  );
+});
+
+test("la fila con costo a mano muestra el badge", () => {
+  render(
+    <TablaConControl
+      items={[{ ...ITEM, seq: 0, costo_unitario: 92106000, costo_manual: true }]}
+    />,
+  );
+  expect(screen.getByText("a mano")).toBeTruthy();
+});
+
+test("sin costo a mano no hay badge", () => {
+  render(<TablaConControl items={[{ ...ITEM, seq: 0, costo_manual: false }]} />);
+  expect(screen.queryByText("a mano")).toBeNull();
+});
+
+test("en solo lectura no hay botón de igualar", () => {
+  render(<TablaConControl items={itemsCuatro()} readOnly={true} />);
+  expect(screen.queryByText(/Igualar costo al contractual/i)).toBeNull();
+});
+
+test("confirmar el APU actual no toca las filas con costo a mano", async () => {
+  const { confirmarLote } = await import("@/api/corridas");
+  render(
+    <TablaConControl
+      items={[
+        { ...ITEM, seq: 0, item: "1", costo_manual: true },
+        { ...ITEM, seq: 1, item: "2", costo_manual: false },
+      ]}
+    />,
+  );
+  fireEvent.click(screen.getByLabelText(/Marcar todas las líneas/i));
+  fireEvent.click(await screen.findByText(/Confirmar el APU actual/i));
+  await waitFor(() => expect(confirmarLote).toHaveBeenCalledWith(1, [1]));
 });

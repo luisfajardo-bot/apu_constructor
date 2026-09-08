@@ -466,6 +466,7 @@ def detalle_item(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
             "costo": c.costo, "calidad_cruce": c.calidad_cruce}
             for c in ens.componentes],
         "costo_unitario": ens.costo_unitario,
+        "costo_manual": ens.costo_a_mano,
     }
 
 

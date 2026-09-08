@@ -113,6 +113,8 @@ export interface ItemCuadro {
   contractual_total: number;
   costo_total: number;
   margen_total: number;
+  /** El costo lo puso una persona (igualado al contractual), no lo calculó el motor. */
+  costo_manual: boolean;
   // Veredicto de la última revisión con IA, o null si esta fila no se revisó.
   revision: VeredictoIA | null;
 }
@@ -178,6 +180,7 @@ export interface DetalleItem {
   candidatos: Candidato[];
   composicion: LineaComposicion[];
   costo_unitario: number;
+  costo_manual: boolean;
 }
 
 export interface Insumo {
@@ -286,6 +289,10 @@ export interface CorridaDetalle {
   lista_nombre: string;
   // Apaga el botón "Revisar con IA" cuando el servidor no tiene ANTHROPIC_API_KEY.
   ia_disponible: boolean;
+  /** Solo en la respuesta de `igualarCostoAlContractual`. */
+  igualadas?: number[];
+  /** Seqs con contractual ≤ 0: no se tocan (regla "nada en $0"). */
+  rechazadas?: number[];
 }
 
 export interface ListaInsumos {

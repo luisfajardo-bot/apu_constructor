@@ -19,6 +19,7 @@ import { cop, pct } from "@/lib/moneda";
 import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
 import {
   getItem, confirmar, confirmarLote, borrarLineas, aplicarSugerencias,
+  igualarCostoAlContractual,
 } from "@/api/corridas";
 import { getApuDetalle } from "@/api/autoria";
 import type { ItemCuadro, DetalleItem, CorridaDetalle, ApuDetalle } from "@/lib/tipos";
@@ -228,18 +229,27 @@ export default function TablaItems({
 
   /** `apu` undefined = confirmar el APU que cada línea ya tiene. */
   async function accionLote(apu?: { codigo: string; turno: string }) {
-    // Sin APU explícito, las filas sin APU no tienen nada que confirmar: se filtran
-    // acá para no mandarle al backend seqs que va a saltear igual.
+    // Sin APU explícito, las filas sin APU no tienen nada que confirmar, y las que
+    // tienen costo a mano lo PERDERÍAN (el backend borra costo_manual en cualquier
+    // confirm). Se filtran acá para no mandarle al backend seqs que arruinarían la
+    // fila sin que el usuario lo haya pedido.
     const objetivo = apu
       ? seleccionadas
-      : visible.filter((it) => marcadas.has(it.seq) && it.apu_codigo).map((it) => it.seq);
+      : visible
+          .filter((it) => marcadas.has(it.seq) && it.apu_codigo && !it.costo_manual)
+          .map((it) => it.seq);
     if (objetivo.length === 0) {
-      toast.error("Ninguna de las líneas marcadas tiene APU para confirmar.");
+      toast.error("Ninguna de las líneas marcadas tiene APU para confirmar (o todas tienen costo puesto a mano).");
       return;
     }
     setEnLote(true);
     try {
-      const actualizada = await confirmarLote(corridaId, objetivo, apu?.codigo, apu?.turno);
+      // `confirmarLote` ya trata un apu_codigo/shift ausente igual que uno explícito
+      // en `undefined` (arma el mismo cuerpo del POST), así que no pasarlos cuando no
+      // hay APU no cambia el pedido — solo deja la llamada más clara.
+      const actualizada = apu
+        ? await confirmarLote(corridaId, objetivo, apu.codigo, apu.turno)
+        : await confirmarLote(corridaId, objetivo);
       onConfirmado(actualizada);
       limpiarSeleccion();
       const n = objetivo.length;
@@ -249,6 +259,31 @@ export default function TablaItems({
     } catch (e) {
       // La selección NO se limpia: el usuario puede reintentar sin volver a marcar.
       toast.error(e instanceof Error ? e.message : "No se pudo aplicar el cambio en lote.");
+    } finally {
+      setEnLote(false);
+    }
+  }
+
+  /** Copia el contractual como costo en las filas marcadas (proyectos especiales). */
+  async function igualarAlContractual() {
+    if (seleccionadas.length === 0) return;
+    setEnLote(true);
+    try {
+      const actualizada = await igualarCostoAlContractual(corridaId, seleccionadas);
+      onConfirmado(actualizada);
+      limpiarSeleccion();
+      const n = actualizada.igualadas?.length ?? seleccionadas.length;
+      const rechazadas = actualizada.rechazadas ?? [];
+      toast.success(`${n} ${n === 1 ? "línea igualada" : "líneas igualadas"} al contractual`);
+      if (rechazadas.length > 0) {
+        // Nada silencioso: si no se tocó una fila, se dice por qué.
+        toast.error(
+          `Sin tocar por contractual en $0: ${rechazadas.map((s) => `#${s}`).join(", ")}`,
+        );
+      }
+    } catch (e) {
+      // La selección NO se limpia: el usuario puede reintentar sin volver a marcar.
+      toast.error(e instanceof Error ? e.message : "No se pudo igualar el costo.");
     } finally {
       setEnLote(false);
     }
@@ -457,6 +492,13 @@ export default function TablaItems({
                   </TableCell>
                   <TableCell className="text-xs text-right font-mono tabular-nums">
                     {cop(it.costo_unitario)}
+                    {it.costo_manual && (
+                      <span className="ml-1 rounded bg-muted px-1 text-[10px] font-sans
+                                       font-medium text-muted-foreground"
+                            title="Costo puesto a mano (igualado al contractual)">
+                        a mano
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell className="text-xs text-right font-mono tabular-nums">
                     {cop(it.contractual_total)}
@@ -531,6 +573,11 @@ export default function TablaItems({
           </div>
           <Button size="xs" variant="outline" disabled={enLote} onClick={() => accionLote()}>
             {enLote ? "Aplicando…" : "Confirmar el APU actual"}
+          </Button>
+          <Button size="xs" variant="outline" disabled={enLote}
+                  onClick={igualarAlContractual}
+                  title="Copia el precio contractual como costo. Para actividades globales que valen lo que dice el contrato.">
+            Igualar costo al contractual
           </Button>
           <Button size="xs" variant="destructive" disabled={enLote}
                   onClick={borrarSeleccionadas}>
@@ -760,6 +807,18 @@ function DetalleExpandido({
 
       {errorConfirm && (
         <p className="text-xs text-destructive">{errorConfirm}</p>
+      )}
+
+      {detalle.composicion.length === 0 && detalle.costo_manual && (
+        <section>
+          <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+            Costo puesto a mano &mdash; costo unitario{" "}
+            <span className="font-mono">{cop(detalle.costo_unitario)}</span>
+          </h4>
+          <p className="text-xs text-muted-foreground">
+            Igualado al precio contractual. Asignale un APU para volver al costeo normal.
+          </p>
+        </section>
       )}
 
       {/* Composition table */}

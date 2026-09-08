@@ -202,12 +202,17 @@ def test_max_seq_dice_donde_reanudar(repo):
 
 
 def test_max_seq_ignora_los_huecos(repo):
-    """Con la fila 1 borrada, reanudar por CONTEO daría 1 y duplicaría la fila 1.
-    Por eso se usa el máximo y no la cantidad."""
+    """El worker reanuda en `max_seq + 1`. Si contara filas en vez de mirar el máximo,
+    con un hueco reanudaría sobre un `seq` que YA existe y la fila entraría duplicada.
+
+    El hueco es de DOS filas a propósito: borrando una sola no-máxima de una secuencia
+    contigua, `COUNT(*)` y `MAX(seq)` dan siempre lo mismo y el test no distinguiría
+    una implementación de la otra. Con 0,1,2,3 menos la 1 y la 2 quedan COUNT=2 y
+    MAX=3, que es lo único que separa las dos implementaciones."""
     cid = repo.crear_corrida(CorridaMeta(
         id=None, creada_en="2026-09-07T10:00:00", archivo="x.xlsx", turno_def="DIURNO",
         use_ai=None, estado="en_revision", cuadro_path=None, nombre="x"))
-    for s in (0, 1, 2):
+    for s in (0, 1, 2, 3):
         repo.agregar_item(cid, _item(s, 1000.0))
-    repo.borrar_items(cid, [1])
-    assert repo.max_seq(cid) == 2
+    repo.borrar_items(cid, [1, 2])
+    assert repo.max_seq(cid) == 3

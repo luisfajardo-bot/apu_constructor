@@ -293,6 +293,16 @@ def _costear_row(alm: Almacen, row: CorridaItemRow,
 
     `lista_id`: tarifa a usar cuando se crea el motor aquí (None = Principal). Si llega
     un `pricing` compartido, la lista viaja DENTRO de él y este parámetro se ignora."""
+    if row.costo_manual is not None:
+        # Costo declarado por una persona (proyectos especiales: la actividad vale lo
+        # que dice el contrato y armarle el APU no paga). No se consulta el catálogo:
+        # no hay composición que costear. La firma "sin componentes + costo > 0" es la
+        # que `alertas_costeo` reconoce para marcar la fila, activa y congelada.
+        return AssembledApu(
+            item=row.item, apu_codigo=row.apu_codigo, apu_nombre=row.apu_nombre,
+            unidad=row.unidad or row.item.unidad, shift=row.shift, componentes=[],
+            costo_unitario=row.costo_manual, status=MatchStatus(row.status),
+            confianza=row.confianza, explicacion=row.explicacion, origen=row.origen)
     pricing = pricing or PricingEngine(alm, lista_id=lista_id)
     seed = ((row.apu_codigo or "", row.shift),)
     costed = None
@@ -360,6 +370,11 @@ def _vista_item(ens: AssembledApu, seq: int, status: str,
         "status": status, "confianza": round(ens.confianza, 4),
         "precio_contractual": ens.item.precio_contractual,
         "costo_unitario": ens.costo_unitario, "margen_unitario": ens.margen_unitario,
+        # Costo puesto a mano. Derivado del ensamble, no de la fila, así los dos call
+        # sites de `_vista_item` quedan sin tocar y funciona igual con la corrida
+        # congelada (el snapshot reconstruye `composicion: []` y el mismo costo). La
+        # firma es inequívoca: sin componentes el motor no puede dar un costo positivo.
+        "costo_manual": not ens.componentes and ens.costo_unitario > 0,
         "margen_pct": ens.margen_pct, "contractual_total": ens.contractual_total,
         "costo_total": ens.costo_total, "margen_total": ens.margen_total,
         "alertas_costeo": alertas_costeo(ens),

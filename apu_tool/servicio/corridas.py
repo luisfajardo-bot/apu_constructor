@@ -14,6 +14,7 @@ from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
+from weakref import WeakKeyDictionary
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
@@ -556,6 +557,51 @@ def _totales(ensambles: list[AssembledApu], rows) -> dict:
             "n_alertas_costeo": sum(1 for e in ensambles if alertas_costeo(e))}
 
 
+# Cuántas líneas tenía el plan de cada corrida, contadas UNA vez por proceso:
+# {repo de corridas: {(id, creada_en): total}}.
+#
+# `vista_corrida` se llama en cada poll de la pantalla (cada 5 s) y el plan de una
+# licitación de 1900 ítems pesa ~400 KB: traerlo entero para contar sus elementos es el
+# mismo trabajo con la misma respuesta, porque el plan se escribe al crear la corrida y
+# NO vuelve a cambiar (agregar o borrar líneas está prohibido mientras el plan esté a
+# medias, ver `_plan_a_medias`).
+#
+# Va colgado del repo de corridas y no en un dict por id: los tests (y una máquina con
+# varias bases) tienen muchos `Almacen` distintos, y SQLite REUSA el id de la última
+# corrida borrada. `creada_en` está en la clave por lo mismo, dentro de una base. Y
+# `WeakKeyDictionary` se limpia sola cuando el Almacen muere, así que esto no crece.
+_TOTAL_PLAN: "WeakKeyDictionary[object, dict[tuple[int, str], int]]" = WeakKeyDictionary()
+
+
+def _total_del_plan(alm: Almacen, meta: CorridaMeta, hechos: int) -> int:
+    """Cuántas líneas hay que armar. Sale del PLAN y no de las filas: durante el
+    armado, las filas son justo las que faltan contar."""
+    memo = _TOTAL_PLAN.setdefault(alm.corridas, {})
+    clave = (meta.id, meta.creada_en)
+    if clave not in memo:
+        crudo = alm.corridas.get_plan(meta.id)
+        if not crudo:
+            # Sin plan no hay total que saber (corrida anterior a esta feature, o
+            # muerta entre `crear_corrida` y `set_plan`). No se memoriza: `hechos` es
+            # de hoy, no del plan.
+            return hechos
+        memo[clave] = len(json.loads(crudo))
+    return memo[clave]
+
+
+def _progreso_armado(alm: Almacen, meta: CorridaMeta, hechos: int) -> Optional[dict]:
+    """Cómo va el armado, o None cuando la corrida ya terminó de armarse: ahí la
+    pantalla no muestra nada (un progreso al 100 % que no se apaga es peor que nada).
+
+    `posicion_en_cola` y `ultimo_error` son lo que explica una corrida que no avanza:
+    está esperando su turno, o se rindió y hay que reanudarla a mano."""
+    if meta.estado not in ARMANDO_O_A_MEDIAS:
+        return None
+    return {"hechos": hechos, "total": _total_del_plan(alm, meta, hechos),
+            "posicion_en_cola": alm.corridas.posicion_en_cola(meta.id),
+            "intentos": meta.intentos, "ultimo_error": meta.ultimo_error}
+
+
 def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:
@@ -574,6 +620,9 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
         "lista_nombre": _nombre_lista(alm, meta.lista_precios_id),
         "duracion_ms": meta.duracion_ms, "items": items,
         "totales": _totales(ensambles, rows),
+        # Cómo va el armado que corre en el servidor (None si ya terminó). La pantalla
+        # ya pide esta vista, así que el progreso no necesita endpoint propio.
+        "armado": _progreso_armado(alm, meta, len(rows)),
         # Para que el botón "Revisar con IA" se apague solo donde no hay clave. Va
         # acá y no solo en /api/status (que ya trae el mismo booleano como `ia`)
         # porque la página de corrida pide esta vista y no /status.

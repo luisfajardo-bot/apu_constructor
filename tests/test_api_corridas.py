@@ -1,3 +1,5 @@
+import json
+
 import openpyxl
 import pytest
 
@@ -6,6 +8,7 @@ from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.licitacion import write_sample_licitacion
 from apu_tool.nucleo.models import (
     Apu, ApuComponent, CorridaItemRow, CorridaMeta, Insumo, LicitacionItem)
+from apu_tool.servicio import armador
 from apu_tool.servicio import corridas as svc
 from apu_tool.servicio.app import create_app
 from tests.conftest import cliente
@@ -45,16 +48,9 @@ def _xlsx_lic(tmp_path):
 
 
 def test_flujo_corrida_completo(tmp_path):
+    """De la corrida armada al cuadro: ver, confirmar y descargar."""
     cli, _ = _cliente(tmp_path)
-    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
-    lic = _xlsx_lic(tmp_path)
-    with open(lic, "rb") as f:
-        r = cli.post("/api/corridas",
-                     data={"turno": "DIURNO", "use_ai": "false", "carpeta_id": str(obra["id"])},
-                     files={"archivo": ("lic.xlsx", f,
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
-    assert r.status_code == 200, r.text
-    cid = r.json()["id"]
+    cid = _corrida_api(cli, tmp_path)
 
     v = cli.get(f"/api/corridas/{cid}")
     assert v.status_code == 200
@@ -295,17 +291,33 @@ def test_renombrar_corrida_requiere_editor(tmp_path):
     assert r_editor.status_code == 200 and r_editor.json()["nombre"] == "Nuevo"
 
 
+def _id_del_stream(body: str) -> int:
+    """El id de la corrida, que viaja en el primer evento del SSE (`started`)."""
+    for linea in body.splitlines():
+        if linea.startswith("data: "):
+            return json.loads(linea[len("data: "):])["id"]
+    raise AssertionError(f"el stream no trajo ningún evento: {body[:200]}")
+
+
 def _corrida_api(cli, tmp_path):
-    """Crea una corrida de 1 ítem por la API y devuelve su id."""
+    """Crea una corrida de 1 ítem YA ARMADA por la API y devuelve su id.
+
+    Va por `/corridas/stream`, que todavía arma dentro de la petición, y no por
+    `POST /corridas`, que desde el armado como trabajo del servidor solo ENCOLA: los
+    tests de acá abajo operan sobre las filas, y una corrida recién encolada no tiene
+    ninguna hasta que el worker la arme. Cuando la 10b se lleve el SSE, esto pasa a
+    armar con el worker.
+    """
     obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
     lic = _xlsx_lic(tmp_path)
     with open(lic, "rb") as f:
-        r = cli.post("/api/corridas",
+        r = cli.post("/api/corridas/stream",
                      data={"turno": "DIURNO", "use_ai": "false",
                            "carpeta_id": str(obra["id"])},
                      files={"archivo": ("lic.xlsx", f, _XLSX_MIME)})
     assert r.status_code == 200, r.text
-    return r.json()["id"]
+    assert "event: done" in r.text, r.text          # armada de punta a punta
+    return _id_del_stream(r.text)
 
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -722,3 +734,239 @@ def test_no_se_tocan_las_lineas_de_una_corrida_detenida_a_medio_armar(tmp_path):
     svc.agregar_items(alm, cid, [_item_plan("LINEA A MANO")])
     descripciones = [r.item.descripcion for r in alm.corridas.get_items(cid)]
     assert descripciones == [f"PLAN {i}" for i in range(5)] + ["LINEA A MANO"]
+
+
+# --------------------------------------------------------------------------
+# La API ENCOLA en vez de armar: crear una corrida responde al instante y el
+# armado lo toma el worker desde la cola (`estado='armando'` ES la cola).
+# --------------------------------------------------------------------------
+def _xlsx_lic3(tmp_path):
+    """Tres líneas: un `total` de 3 no se confunde con "una fila" ni con "ninguna"."""
+    p = tmp_path / "lic3.xlsx"
+    write_sample_licitacion(p, [LicitacionItem(
+        item=str(i + 1), descripcion="Concreto clase D", unidad="M3", cantidad=10.0,
+        precio_contractual=400000.0, shift="DIURNO") for i in range(3)])
+    return p
+
+
+def _post_corrida(cli, tmp_path, carpeta_id):
+    with open(_xlsx_lic3(tmp_path), "rb") as f:
+        return cli.post("/api/corridas",
+                        data={"turno": "DIURNO", "use_ai": "false",
+                              "carpeta_id": str(carpeta_id)},
+                        files={"archivo": ("lic3.xlsx", f, _XLSX_MIME)})
+
+
+def test_post_corridas_encola_y_no_arma_nada(tmp_path):
+    """La prueba de que ENCOLÓ: responde con el total del plan y CERO filas armadas.
+
+    Antes esta petición armaba las 1900 líneas adentro (1-3 h) y Render la mataba a
+    los 30 min: la corrida no terminaba nunca."""
+    cli, alm = _cliente(tmp_path)
+    r = _post_corrida(cli, tmp_path, _carpeta(cli))
+    assert r.status_code == 200, r.text
+    cuerpo = r.json()
+    assert cuerpo["estado"] == "armando" and cuerpo["total"] == 3
+    cid = cuerpo["id"]
+    assert alm.corridas.get_items(cid) == []                 # NADA armado: eso es del worker
+    assert alm.corridas.get_corrida(cid).estado == "armando"
+    assert len(svc.plan_de(alm, cid)) == 3                   # y el plan quedó para el worker
+
+
+def test_post_corridas_despierta_al_worker(tmp_path):
+    """Sin el `hay_trabajo.set()` la corrida se arma igual, pero recién cuando el
+    worker termine su espera de respaldo (`ARMADO_POLL_S`, 30 s): media pantalla de
+    "esperando" por nada."""
+    cli, _ = _cliente(tmp_path)
+    armador.hay_trabajo.clear()
+    assert _post_corrida(cli, tmp_path, _carpeta(cli)).status_code == 200
+    assert armador.hay_trabajo.is_set()
+    armador.hay_trabajo.clear()
+
+
+def test_post_sample_encola_y_no_arma_nada(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    armador.hay_trabajo.clear()
+    r = cli.post("/api/sample")
+    assert r.status_code == 200, r.text
+    cuerpo = r.json()
+    assert cuerpo["estado"] == "armando" and cuerpo["total"] >= 1
+    assert alm.corridas.get_items(cuerpo["id"]) == []
+    assert len(svc.plan_de(alm, cuerpo["id"])) == cuerpo["total"]
+    assert armador.hay_trabajo.is_set()
+    armador.hay_trabajo.clear()
+
+
+def _encolada_a_medias(alm, cli, n=5, armados=2) -> int:
+    """Una corrida encolada de `n` líneas con las primeras `armados` ya armadas."""
+    items = [_item_plan(f"PLAN {i}", item=str(i + 1)) for i in range(n)]
+    cid = svc.crear_corrida_encolada(alm, "x.xlsx", items, "DIURNO", None,
+                                     carpeta_id=_carpeta(cli))
+    for _ in svc.armar_pendientes(alm, cid, items[:armados]):
+        pass
+    return cid
+
+
+def test_get_corrida_informa_el_progreso_del_armado(tmp_path):
+    """El bloque que va a leer la pantalla mientras el worker arma."""
+    cli, alm = _cliente(tmp_path)
+    cid = _encolada_a_medias(alm, cli)
+    # Igualdad del dict entero y no clave por clave: la pantalla lee estas cinco y
+    # ninguna otra; una clave de más o de menos tiene que romper acá.
+    assert cli.get(f"/api/corridas/{cid}").json()["armado"] == {
+        # `total` sale del PLAN y no de las filas: durante el armado, las filas son
+        # justo las que faltan contar (hay 2 de 5).
+        "hechos": 2, "total": 5, "posicion_en_cola": 0,
+        "intentos": 0, "ultimo_error": None}
+
+
+def test_armado_es_none_cuando_la_corrida_ya_se_armo(tmp_path):
+    """Con esto la pantalla decide si muestra el progreso: en una corrida terminada
+    tiene que ser None, no un progreso al 100 % que no se apaga nunca."""
+    cli, alm = _cliente(tmp_path)
+    cid = _encolada_a_medias(alm, cli)
+    alm.corridas.finalizar_armado(cid, "en_revision")
+    assert cli.get(f"/api/corridas/{cid}").json()["armado"] is None
+    alm.corridas.set_estado(cid, "finalizada")
+    assert cli.get(f"/api/corridas/{cid}").json()["armado"] is None
+
+
+def _detenida(alm, cli, error="se murió la instancia") -> int:
+    """Una corrida que se rindió a medio armar, con un intento contado."""
+    cid = _encolada_a_medias(alm, cli)
+    alm.corridas.reclamar_armado("inst-1", "2026-09-09T10:00:00", "2026-09-09T09:00:00")
+    alm.corridas.finalizar_armado(cid, "armado_detenido", error=error,
+                                  instancia="inst-1")
+    return cid
+
+
+def test_progreso_de_una_corrida_detenida_trae_intentos_y_motivo(tmp_path):
+    """`armado_detenido` también informa: es el estado desde el que una persona decide
+    si reanuda, y para eso necesita ver cuántas veces se intentó y qué se rompió."""
+    cli, alm = _cliente(tmp_path)
+    cid = _detenida(alm, cli)
+    assert cli.get(f"/api/corridas/{cid}").json()["armado"] == {
+        "hechos": 2, "total": 5, "posicion_en_cola": 0,
+        "intentos": 1, "ultimo_error": "se murió la instancia"}
+
+
+def test_posicion_en_cola_con_varias_encoladas(tmp_path):
+    """El puesto en la cola es lo que le explica al usuario por qué su corrida no
+    arranca todavía."""
+    cli, alm = _cliente(tmp_path)
+    carpeta = _carpeta(cli)
+    cids = [svc.crear_corrida_encolada(alm, "x.xlsx", [_item_plan("PLAN")], "DIURNO",
+                                       None, carpeta_id=carpeta)
+            for _ in range(3)]
+    puestos = [cli.get(f"/api/corridas/{c}").json()["armado"]["posicion_en_cola"]
+               for c in cids]
+    assert puestos == [0, 1, 2]
+    alm.corridas.finalizar_armado(cids[0], "en_revision")      # la primera termina...
+    assert [cli.get(f"/api/corridas/{c}").json()["armado"]["posicion_en_cola"]
+            for c in cids[1:]] == [0, 1]                       # ...y las otras adelantan
+
+
+def test_progreso_sin_plan_no_inventa_el_total(tmp_path):
+    """Una corrida en 'armando' SIN plan (creada antes de esta feature, o muerta entre
+    `crear_corrida` y `set_plan`): el total cae a lo que hay armado. Decir 0 dejaría
+    una barra de progreso de 1 de 0."""
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_especial(alm)                 # una fila, creada sin pasar por encolar
+    alm.corridas.set_estado(cid, "armando")
+    armado = cli.get(f"/api/corridas/{cid}").json()["armado"]
+    assert (armado["hechos"], armado["total"]) == (1, 1)
+
+
+def test_el_total_del_plan_se_cuenta_una_sola_vez(tmp_path, monkeypatch):
+    """El plan de una licitación de 1900 ítems pesa ~400 KB y la pantalla pollea cada
+    5 s: traerlo entero en cada poll para contar elementos es el mismo trabajo con la
+    misma respuesta (el plan se escribe al crear la corrida y no vuelve a cambiar)."""
+    cli, alm = _cliente(tmp_path)
+    cid = _encolada_a_medias(alm, cli)
+    real = alm.corridas.get_plan
+    lecturas: list[int] = []
+
+    def _espia(corrida_id):
+        lecturas.append(corrida_id)
+        return real(corrida_id)
+
+    monkeypatch.setattr(alm.corridas, "get_plan", _espia)
+    totales = [cli.get(f"/api/corridas/{cid}").json()["armado"]["total"]
+               for _ in range(3)]
+    assert totales == [5, 5, 5]                  # la respuesta no cambia...
+    assert lecturas == [cid]                     # ...y el plan se leyó UNA vez
+
+
+def test_reanudar_devuelve_a_la_cola_una_corrida_detenida(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    cid = _detenida(alm, cli)
+    armador.hay_trabajo.clear()
+    r = cli.post(f"/api/corridas/{cid}/reanudar")
+    assert r.status_code == 200, r.text
+    assert r.json()["estado"] == "armando"
+    # Vuelve a la cola DESDE CERO: con `intentos` en el tope, el worker la detendría
+    # de nuevo sin armar una sola fila y el botón no serviría para nada.
+    assert r.json()["armado"] == {"hechos": 2, "total": 5, "posicion_en_cola": 0,
+                                  "intentos": 0, "ultimo_error": None}
+    meta = alm.corridas.get_corrida(cid)
+    assert (meta.estado, meta.intentos, meta.ultimo_error) == ("armando", 0, None)
+    assert armador.hay_trabajo.is_set()          # el worker arranca YA, no en 30 s
+    armador.hay_trabajo.clear()
+
+
+def test_reanudar_no_pierde_lo_ya_armado(tmp_path):
+    """Reanudar es CONTINUAR: las filas ya armadas siguen ahí y el worker entra en
+    `max_seq + 1`. Si borrara, reanudar costaría el armado entero de nuevo."""
+    cli, alm = _cliente(tmp_path)
+    cid = _detenida(alm, cli)
+    assert cli.post(f"/api/corridas/{cid}/reanudar").status_code == 200
+    assert [r.seq for r in alm.corridas.get_items(cid)] == [0, 1]
+    assert alm.corridas.max_seq(cid) == 1
+
+
+def test_reanudar_inexistente_404(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    assert cli.post("/api/corridas/999/reanudar").status_code == 404
+
+
+def test_reanudar_una_que_ya_esta_en_la_cola_es_409(tmp_path):
+    """Reencolar algo que ya está en la cola le pone `intentos` en 0: el tope no
+    llegaría nunca y una corrida que falla en serio se reintentaría para siempre."""
+    cli, alm = _cliente(tmp_path)
+    cid = _encolada_a_medias(alm, cli)                     # sigue en 'armando'
+    r = cli.post(f"/api/corridas/{cid}/reanudar")
+    assert r.status_code == 409
+    assert "cola" in r.json()["detail"]
+    assert alm.corridas.get_corrida(cid).estado == "armando"
+
+
+def test_reanudar_una_corrida_ya_terminada_es_409(tmp_path):
+    """Solo se reanuda un armado que se RINDIÓ. Una corrida terminada reencolada
+    volvería a 'armando' —solo lectura, y sin worker corriendo se queda ahí para
+    siempre— y una 'finalizada' perdería su estado sin que nadie lo pidiera."""
+    cli, alm = _cliente(tmp_path)
+    cid = _encolada_a_medias(alm, cli)
+    alm.corridas.finalizar_armado(cid, "en_revision")
+    assert cli.post(f"/api/corridas/{cid}/reanudar").status_code == 409
+    assert alm.corridas.get_corrida(cid).estado == "en_revision"
+    alm.corridas.set_estado(cid, "finalizada")
+    assert cli.post(f"/api/corridas/{cid}/reanudar").status_code == 409
+    assert alm.corridas.get_corrida(cid).estado == "finalizada"
+
+
+def test_reanudar_rol_consulta_prohibido(tmp_path):
+    """Relanza horas de trabajo del servidor: no es para el rol de solo lectura.
+    Mismo criterio que `igualar-costo`."""
+    cli, alm = _cli_rol(tmp_path, "consulta")
+    cid = _corrida_especial(alm)
+    alm.corridas.finalizar_armado(cid, "armado_detenido", error="x")
+    assert cli.post(f"/api/corridas/{cid}/reanudar").status_code == 403
+    assert alm.corridas.get_corrida(cid).estado == "armado_detenido"
+
+
+def test_reanudar_rol_editor_permitido(tmp_path):
+    cli, alm = _cli_rol(tmp_path, "editor")
+    cid = _corrida_especial(alm)
+    alm.corridas.finalizar_armado(cid, "armado_detenido", error="x")
+    assert cli.post(f"/api/corridas/{cid}/reanudar").status_code == 200
+    assert alm.corridas.get_corrida(cid).estado == "armando"

@@ -21,6 +21,7 @@ from apu_tool.dominio.licitacion import read_licitacion
 from apu_tool.dominio.pipeline import BibliotecaVacia, ensure_seeded, generate_sample
 from apu_tool.nucleo.models import LicitacionItem
 from apu_tool.servicio import apus as apus_svc
+from apu_tool.servicio import armador
 from apu_tool.servicio import auditoria as auditoria_svc
 from apu_tool.servicio import autoria
 from apu_tool.servicio import carpetas as carpetas_svc
@@ -160,6 +161,20 @@ def _items_del_upload(nombre: str, contenido: bytes, turno: str) -> list[Licitac
     return items
 
 
+def _encolada(cid: int, total: int) -> dict:
+    """La respuesta de crear una corrida: se encoló, no se armó.
+
+    Armar 1900 líneas lleva de una a tres horas y las instancias de Render viven entre
+    18 y 30 minutos, así que hacerlo DENTRO de la petición no terminaba nunca. Ahora la
+    petición vuelve en el acto y el armado lo toma el worker desde la cola
+    (`estado='armando'` ES la cola); el progreso sale por `GET /corridas/{id}`.
+
+    El `set()` es solo para que el worker arranque YA en vez de esperar su poll de
+    respaldo: si se perdiera, la corrida se arma igual, 30 segundos más tarde."""
+    armador.hay_trabajo.set()
+    return {"id": cid, "total": total, "estado": "armando"}
+
+
 @router.post("/corridas")
 async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
                         use_ai: Optional[bool] = Form(None),
@@ -174,10 +189,10 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
     _validar_lista(alm, lista_id)
     _asegurar_biblioteca(alm)
     items = _items_del_upload(archivo.filename, await archivo.read(), turno)
-    cid = svc.construir_corrida(alm, archivo.filename or "licitacion", items, turno, use_ai,
-                                carpeta_id=carpeta_id, nombre=nombre,
-                                lista_precios_id=lista_id)
-    return {"id": cid, "resumen": svc.vista_corrida(alm, cid)["totales"]}
+    cid = svc.crear_corrida_encolada(alm, archivo.filename or "licitacion", items, turno,
+                                     use_ai, carpeta_id=carpeta_id, nombre=nombre,
+                                     lista_precios_id=lista_id)
+    return _encolada(cid, len(items))
 
 
 @router.post("/sample")
@@ -196,9 +211,9 @@ def crear_sample(alm: Almacen = Depends(get_almacen),
     if not items:
         raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
     sc = carpetas_svc.carpeta_sin_clasificar_id(alm)
-    cid = svc.construir_corrida(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False,
-                                carpeta_id=sc, nombre="Ejemplo")
-    return {"id": cid, "resumen": svc.vista_corrida(alm, cid)["totales"]}
+    cid = svc.crear_corrida_encolada(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO,
+                                     False, carpeta_id=sc, nombre="Ejemplo")
+    return _encolada(cid, len(items))
 
 
 def _event_stream(gen):
@@ -483,6 +498,33 @@ def activar(cid: int, alm: Almacen = Depends(get_almacen),
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v
+
+
+@router.post("/corridas/{cid}/reanudar")
+def reanudar(cid: int, alm: Almacen = Depends(get_almacen),
+             _: object = Depends(requiere_rol("editor"))):
+    """Devuelve a la cola una corrida que se rindió (`armado_detenido`), desde cero:
+    `intentos` en 0 y sin error. Lo ya armado se conserva — el worker entra en
+    `max_seq + 1`.
+
+    Rol `editor` y no `consulta` como sus vecinos, por el mismo criterio que
+    `igualar-costo`: relanza horas de trabajo del servidor.
+    """
+    meta = _meta_o_404(alm, cid)
+    if meta.estado != "armado_detenido":
+        # Solo se reanuda lo que se rindió. Reencolar una que YA está en la cola le
+        # borraría los `intentos` (el tope no llegaría nunca); reencolar una terminada
+        # la volvería de solo lectura hasta que el worker la retome —y una
+        # 'finalizada' perdería ese estado— sin que nadie lo haya pedido.
+        raise HTTPException(
+            status_code=409,
+            detail=("La corrida ya está en la cola de armado."
+                    if meta.estado == "armando" else
+                    "La corrida no está detenida: solo se reanuda un armado que se "
+                    "interrumpió."))
+    alm.corridas.reencolar_armado(cid)
+    armador.hay_trabajo.set()      # que el worker la tome YA, no en el próximo poll
+    return svc.vista_corrida(alm, cid)
 
 
 @router.post("/corridas/{cid}/renombrar")

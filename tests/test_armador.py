@@ -644,3 +644,36 @@ def test_la_app_arma_de_punta_a_punta_una_corrida_encolada(tmp_path):
     m = alm.corridas.get_corrida(cid)
     assert m.estado == "en_revision"
     assert len(alm.corridas.get_items(cid)) == 1
+
+
+# ---------------------------------------------------------------------------
+# El invariante: `estado='armando'` ES la cola.
+# ---------------------------------------------------------------------------
+def test_ninguna_operacion_de_fila_saca_la_corrida_de_la_cola(tmp_path):
+    """`armando` no es una etiqueta informativa: es la cola del worker.
+
+    Un `set_estado` sin guarda la borra de ahí para siempre — la corrida queda a
+    medio armar, sin nadie que la retome y sin error que mirar. Hoy los puntos que
+    escriben `estado` están todos guardados por `estado == "finalizada"`, así que
+    nadie lo rompe; este test existe para el PRÓXIMO que agregue uno, que no va a
+    tener este contexto.
+
+    Se ejercitan las operaciones que actúan sobre filas de una corrida ya armada y
+    que sí tocan `estado` en alguna rama (las dos vuelven a `en_revision` una corrida
+    `finalizada`, porque el cuadro emitido dejó de decir la verdad)."""
+    alm = _almacen(tmp_path)
+    items = [_item("Concreto clase D"), _item("Concreto clase D")]
+    cid = svc.crear_corrida_encolada(alm, "x.xlsx", items, "DIURNO", None,
+                                     carpeta_id=_carpeta(alm))
+    for _ in svc.armar_pendientes(alm, cid, items[:1]):
+        pass                                   # media corrida: sigue en la cola
+
+    svc.confirmar_items(alm, cid, [0])
+    assert alm.corridas.get_corrida(cid).estado == "armando"
+
+    svc.igualar_costo_al_contractual(alm, cid, [0])
+    assert alm.corridas.get_corrida(cid).estado == "armando"
+
+    # Y sigue siendo reclamable: la cola no se rompió, no solo el rótulo.
+    assert alm.corridas.reclamar_armado(
+        "instancia-test", "2099-01-01T00:00:00", "2098-01-01T00:00:00") == cid

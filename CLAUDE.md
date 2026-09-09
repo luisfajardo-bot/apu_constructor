@@ -53,7 +53,7 @@ estructurada: es lo que pide `dominio/ai_assist.py`.
 
 ```
 Excel histórico ──seed──► SQLite/Postgres (precios, apus, corridas, perfiles, auditoría)
-lista licitación ──► matching determinístico ──► confirma usuario ──► motor de precios
+lista licitación ──► encola ──► worker arma (reanudable) ──► confirma usuario ──► motor de precios
                                                           └─► cuadro resumen (Excel)
 corrida armada ──► revisión con IA (sin dinero) ──► propone veredicto ──► confirma usuario
 
@@ -206,6 +206,26 @@ matching, modelo de IA, clasificación de precios.
   rechaza (regla "nada en $0"), y el candado exige `> 0` y no `is not None` para no depender
   de que su único llamador se porte bien. Endpoint: `POST /api/corridas/{id}/igualar-costo`,
   rol `editor` — más estricto que sus vecinos a propósito, porque declara dinero.
+- **Armado reanudable.** Las licitaciones reales traen 1000-2000 ítems y el armado
+  tarda de 1 a 3 horas; las instancias de Render (plan free) viven 18-30 minutos, así
+  que corriendo dentro de la petición HTTP **no terminaba nunca**. Ahora `POST
+  /api/corridas` **encola y devuelve al instante**, y un hilo del proceso web
+  (`servicio/armador.py`) consume la cola. **La cola vive en la base**: una corrida en
+  `estado='armando'` ES un trabajo pendiente, así que un reinicio no pierde nada — al
+  arrancar, la instancia ve el mismo trabajo que dejó la anterior. Las líneas ya
+  interpretadas del Excel se guardan en `corrida.plan_json` al crear (el archivo subido
+  no se persiste, y sin eso no habría forma de saber qué falta armar; por eso `plan_json`
+  está en `_FORBIDDEN_KEYS`: lleva `precio_contractual` adentro). Se reanuda en
+  `max_seq + 1`. El worker **reclama** la corrida con un `UPDATE ... WHERE` atómico y
+  late cada `ARMADO_LATIDO_S`: durante un deploy la instancia nueva arranca mientras la
+  vieja drena, y sin reclama las dos armarían la misma corrida. Un ítem que revienta
+  deja una fila sin APU y el armado sigue; `MAX_FALLOS_SEGUIDOS_ARMADO` fallos seguidos
+  cortan (un fallo aislado es un ítem malo, una racha es el entorno). Superado
+  `ARMADO_MAX_INTENTOS`, la corrida pasa a `armado_detenido` con el motivo y un botón
+  para reintentar. **Un archivo no puede tener dos armados a medias en la misma
+  carpeta** (`ux_corrida_armando_archivo`, índice único parcial): es la protección del
+  doble clic, y es un índice y no un `if` porque las dos peticiones de un doble clic
+  llegan con milisegundos de diferencia.
 - **Salidas:** `salidas/` (cuadros) y `ejemplos/` (licitaciones de ejemplo).
 - Fuentes de precio: `PRECIO IDU` se trata como **público**; el resto
   (`COSTO INTERNO`, `COMPRAS…`, etc.) como **interno/confidencial**
@@ -230,6 +250,21 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   `write_report` sin pasar por `seqs_sin_apu`, y ahí el hueco se ve en la hoja `ALERTAS`
   del cuadro, no en una puerta trabada. Si lo haces global, el punto de paso es
   `pipeline.py`.
+- No saques una corrida de `estado='armando'` con un `set_estado` pelado: ese estado
+  **es la cola** del worker de armado (`servicio/armador.py`). Sacarla de ahí la deja a
+  medio armar, sin nadie que la retome y sin error que mirar. Los únicos caminos de
+  salida son `finalizar_armado` (el worker, al terminar o rendirse) y `reencolar_armado`
+  (el botón de reintentar). Si escribís `estado`, guardá con `estado == "finalizada"`
+  como ya hacen los puntos que hoy lo tocan.
+- No toques las líneas de una corrida con el plan a medias (`armando` o
+  `armado_detenido`): mientras el armado no termine, el espacio de `seq` es del armador.
+  `agregar_items` y `borrar_items` ya lo rechazan por `_plan_a_medias`. Agregar una
+  línea ahí le roba el `seq` a un ítem del plan y ese ítem **nunca se arma**, sin dejar
+  rastro; borrar las últimas hace retroceder el punto de reanudación.
+- No emitas un cuadro de una corrida a medio armar: `seqs_sin_apu` **no puede verlo**
+  (mira las filas que existen, y las que faltan armar no existen), así que el candado
+  es `ArmadoIncompleto` y vive en `_exigir_armado_completo`. Sin él, una corrida
+  detenida en 290 de 1939 emite un cuadro de 290 líneas que se ve entero.
 - No edites el Excel fuente ni borres `data/`, `salidas/`, `ejemplos/`.
 - No dupliques lógica de orquestación: reúsala desde `pipeline.py`.
 - No hagas que una lista que no sea Principal caiga al precio histórico ni al de

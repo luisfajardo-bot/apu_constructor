@@ -15,6 +15,16 @@ más que el TTL la nueva reclama la corrida. Sin fencing, la vieja termina y le 
 reclama al dueño legítimo; con `estado='armando'` es peor, porque una tercera la reclama
 y quedan dos armando la misma corrida. Si a alguna llamada de este módulo se le olvida
 la instancia, el agujero vuelve por ahí.
+
+PRECONDICIÓN DE DESPLIEGUE — no llames a `arrancar()` mientras algún endpoint arme
+DENTRO de la petición HTTP. Los caminos sincrónicos que quedan en `rutas.py` crean la
+corrida en 'armando' con `armando_desde=NULL`: entran a la cola en el instante en que
+nacen y no la reclaman nunca, así que el worker se las lleva a mitad de la petición.
+Reproducido en proceso: la petición armó el ítem 0, el worker armó del 1 al 5 y cerró
+la corrida, el stream murió con un IntegrityError de `ux_corrida_item_seq` y el usuario
+se comió un 500 con la corrida ya en 'en_revision'. El UNIQUE salva el dato (no hay
+actividades duplicadas, para eso está), no la petición. El worker y los endpoints
+sincrónicos NO pueden coexistir: primero la API deja de armar, después se arranca esto.
 """
 from __future__ import annotations
 
@@ -67,9 +77,13 @@ def _motivo_detenida(meta) -> str:
     Sin error previo (la mataron de golpe: OOM, deploy) no se agrega nada, para que el
     mensaje no quede con un cabo suelto."""
     detalle = _acortar(meta.ultimo_error or "", 200)
+    # `intentos - 1` y no `intentos`: la reclama de AHORA ya sumó, y es la que se rinde
+    # sin armar nada. Con tres interrupciones reales, `intentos` vale 4 y decir "4 veces"
+    # es contarle al usuario un intento que nunca existió.
     return ("El armado se interrumpió %d veces seguidas. Puede ser un reinicio del "
             "servidor o un problema con el archivo. Reintentá; si vuelve a pasar, "
-            "avisá.%s" % (meta.intentos, (" Último error: %s" % detalle) if detalle else ""))
+            "avisá.%s" % (meta.intentos - 1,
+                          (" Último error: %s" % detalle) if detalle else ""))
 
 
 def _limite_vencimiento() -> str:

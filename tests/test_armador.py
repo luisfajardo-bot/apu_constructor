@@ -174,7 +174,9 @@ def test_al_pasar_el_tope_de_intentos_se_detiene(tmp_path):
 
     m = alm.corridas.get_corrida(cid)
     assert m.estado == "armado_detenido"
-    assert "interrump" in (m.ultimo_error or "").lower()
+    # El NÚMERO importa: `intentos` ya cuenta la reclama que se rindió sin armar nada,
+    # así que decir `intentos` a secas le inventa al usuario una interrupción de más.
+    assert "se interrumpió %d veces" % config.ARMADO_MAX_INTENTOS in m.ultimo_error
     assert "TypeError: falta el campo turno" in m.ultimo_error
     assert m.armando_por is None                       # y sale de la cola sin dueño
     assert alm.corridas.get_items(cid) == []           # no armó nada: se rindió
@@ -233,16 +235,24 @@ def test_sin_plan_se_detiene_con_motivo(tmp_path):
     assert m.armando_por is None
 
 
-def test_la_corrida_borrada_a_mitad_no_revienta_el_ciclo(tmp_path):
-    """La borran mientras arma: el ciclo termina limpio y devuelve True (había
-    trabajo, ya no está). Sin esto, `agregar_item` levanta CorridaEliminada."""
+def test_la_corrida_borrada_a_mitad_no_se_finaliza(tmp_path):
+    """La borran mientras arma: el ciclo termina limpio y devuelve True (había trabajo,
+    ya no está) SIN escribirle nada.
+
+    Ojo con lo que prueba: el `CorridaEliminada` ya lo absorbe `armar_pendientes` y lo
+    convierte en el evento 'error', así que el ciclo no reventaría igual. Lo que agrega
+    la rama de `un_ciclo` —y lo único que este test puede afirmar— es que no se intente
+    finalizar una corrida que ya no existe."""
     alm = _almacen(tmp_path)
     items = [_item("ACTIVIDAD %d" % i, item=str(i)) for i in range(4)]
     cid = _encolar(alm, items)
     _al_armar_item(alm, 0, lambda: alm.corridas.eliminar_corrida(cid))
+    llamadas = _espiar_reclama(alm)
 
     assert armador.un_ciclo(alm, "instancia-F") is True
+
     assert alm.corridas.get_corrida(cid) is None
+    assert llamadas == []          # ni un latido ni una finalización sobre lo borrado
 
 
 def test_la_corrida_borrada_entre_la_reclama_y_la_lectura(tmp_path):
@@ -402,6 +412,26 @@ def test_late_cuando_pasa_el_intervalo_aunque_sean_pocos_items(tmp_path):
     assert _latidos(llamadas) == 2          # uno por ítem, porque cada ítem tardó el intervalo
 
 
+def test_un_salto_largo_no_acumula_latidos_atrasados(tmp_path):
+    """Un ítem que tardó TRES intervalos vale UN latido, no tres.
+
+    La próxima cita se corre desde ahora (`= ahora + intervalo`) y no se acumula desde
+    la anterior (`+= intervalo`): con la suma, después del salto quedan dos citas
+    vencidas y el worker manda tres UPDATE para el mismo instante. Los otros tests del
+    latido no lo ven porque avanzan el reloj en múltiplos exactos, donde las dos
+    fórmulas dan lo mismo."""
+    alm = _almacen(tmp_path)
+    reloj = _RelojFalso()
+    _encolar(alm, [_item("ACTIVIDAD %d" % i, item=str(i)) for i in range(3)])
+    # Solo el primer ítem tarda; los otros dos son instantáneos.
+    _al_armar_item(alm, 0, lambda: reloj.avanzar(config.ARMADO_LATIDO_S * 3))
+    llamadas = _espiar_reclama(alm)
+
+    armador.un_ciclo(alm, "yo", reloj=reloj)
+
+    assert _latidos(llamadas) == 1
+
+
 def test_el_intervalo_se_cuenta_desde_el_ultimo_latido(tmp_path):
     """Diez ítems que en total tardan un intervalo y medio: dos latidos, no diez."""
     alm = _almacen(tmp_path)
@@ -486,19 +516,74 @@ def test_el_bucle_no_se_muere_por_una_excepcion(monkeypatch):
     assert len(vueltas) == 2           # hubo segunda vuelta: la excepción no lo mató
 
 
-class _EventoQueNoSeEspera(threading.Event):
+class _EventoQueCuenta(threading.Event):
+    """El `hay_trabajo` del worker, contando cuántas veces lo esperaron. Nunca duerme."""
+
+    def __init__(self):
+        super().__init__()
+        self.esperas = 0
+
     def wait(self, timeout=None):
-        raise AssertionError("el bucle esperó el poll con la parada ya puesta")
+        self.esperas += 1
+        return super().wait(0)
 
 
 def test_el_bucle_sale_sin_esperar_el_poll(monkeypatch):
     """Con la parada puesta no se queda esperando: si esperara, apagar la app costaría
     hasta ARMADO_POLL_S de más por cada worker."""
     parar = threading.Event()
+    evento = _EventoQueCuenta()
     monkeypatch.setattr(armador, "un_ciclo", lambda _alm, _i: parar.set() or False)
-    monkeypatch.setattr(armador, "hay_trabajo", _EventoQueNoSeEspera())
+    monkeypatch.setattr(armador, "hay_trabajo", evento)
     armador.correr_para_siempre(None, parar)
-    assert parar.is_set()
+    assert parar.is_set() and evento.esperas == 0
+
+
+def test_el_bucle_drena_la_cola_entera_sin_volver_a_esperar(monkeypatch):
+    """Tres corridas en la cola se arman SEGUIDAS, en una vuelta. Con un `if` en vez del
+    `while`, la cola se drenaría a una corrida por poll —30 s de aire entre armados de
+    horas— y no lo notaría nadie."""
+    parar = threading.Event()
+    evento = _EventoQueCuenta()
+    respuestas = [True, True, False]
+    llamadas = []
+
+    def un_ciclo_falso(_alm, _instancia):
+        llamadas.append(1)
+        hubo = respuestas.pop(0) if respuestas else False
+        if not hubo:
+            parar.set()                # la cola quedó vacía: cortamos el test acá
+        return hubo
+
+    monkeypatch.setattr(armador, "un_ciclo", un_ciclo_falso)
+    monkeypatch.setattr(armador, "hay_trabajo", evento)
+    armador.correr_para_siempre(None, parar)
+
+    assert len(llamadas) == 3          # las tres seguidas...
+    assert evento.esperas == 0         # ...sin pasar por el poll en el medio
+
+
+def test_el_bucle_limpia_el_evento_despues_de_esperarlo(monkeypatch):
+    """Sin el `clear()`, `wait()` sobre un Event ya levantado vuelve al instante: el
+    worker martillaría `reclamar_armado` contra la base en bucle cerrado, con la cola
+    vacía y sin ningún backoff."""
+    parar = threading.Event()
+    vueltas = []
+
+    def un_ciclo_falso(_alm, _instancia):
+        vueltas.append(1)
+        if len(vueltas) == 2:
+            parar.set()
+        return False
+
+    monkeypatch.setattr(armador, "un_ciclo", un_ciclo_falso)
+    monkeypatch.setattr(config, "ARMADO_POLL_S", 0)   # ninguna espera puede colgar esto
+    armador.hay_trabajo.set()
+
+    armador.correr_para_siempre(None, parar)
+
+    assert len(vueltas) == 2           # esperó el evento y volvió a trabajar
+    assert not armador.hay_trabajo.is_set()
 
 
 def test_id_de_instancia(monkeypatch):

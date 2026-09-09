@@ -193,6 +193,13 @@ def armar_pendientes(alm: Almacen, corrida_id: int, items: list[LicitacionItem],
     fila cae sola en el candado de `seqs_sin_apu` (que impide emitir el cuadro), y si
     no vale la pena armarle el APU se le puede igualar el costo al contractual, que
     abre ese candado a propósito.
+
+    Salvo que los fallos vengan SEGUIDOS: a los `config.MAX_FALLOS_SEGUIDOS_ARMADO`
+    se corta y la excepción SUBE, sin escribir esa última fila. Ahí lo que se cayó no
+    es un ítem, es el entorno, y seguir escribiría el plan entero como "no se pudo
+    armar" — filas permanentes, porque cuentan para `max_seq` y al reanudar el worker
+    arranca después de ellas. Levantando, la corrida queda en la cola con el motivo y
+    se reintenta cuando la base vuelva. Un éxito reinicia el contador (ver config).
     """
     # `enabled=False` y no `use_ai`: el armado NUNCA llama a la IA (audita después, ver
     # dominio/revision.py; hay un test que lo fija). El Assembler sigue pidiendo un
@@ -202,6 +209,7 @@ def armar_pendientes(alm: Almacen, corrida_id: int, items: list[LicitacionItem],
     assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False),
                           lista_id=meta.lista_precios_id if meta else None)
     total = len(items)
+    fallos_seguidos = 0
     for seq in range(desde_seq, total):
         item = items[seq]
         i = seq + 1
@@ -212,7 +220,16 @@ def armar_pendientes(alm: Almacen, corrida_id: int, items: list[LicitacionItem],
             ens, fila = _armar_fila(assembler, item, seq)
         except Exception as exc:   # noqa: BLE001 — un ítem venenoso no mata la corrida
             logger.exception("Fallo al armar el ítem %s de la corrida %s", seq, corrida_id)
+            fallos_seguidos += 1
+            if fallos_seguidos >= config.MAX_FALLOS_SEGUIDOS_ARMADO:
+                # `from exc`: el motivo real viaja en la cadena y el worker lo guarda.
+                raise RuntimeError(
+                    f"{fallos_seguidos} ítems seguidos fallaron al armar "
+                    f"(el último, el {i} de {total}): se detuvo el armado para no "
+                    f"quemar el plan. Último error: {exc}") from exc
             ens, fila = _fila_sin_apu(item, seq, f"No se pudo armar: {exc}")
+        else:
+            fallos_seguidos = 0        # un ítem sano corta la racha: era el ítem, no el entorno
         try:
             alm.corridas.agregar_item(corrida_id, fila)
         except CorridaEliminada:

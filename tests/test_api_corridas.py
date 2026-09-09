@@ -1,5 +1,7 @@
 import openpyxl
+import pytest
 
+from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.licitacion import write_sample_licitacion
 from apu_tool.nucleo.models import (
@@ -600,3 +602,52 @@ def test_construir_corrida_arma_todo_y_finaliza(tmp_path):
     assert isinstance(meta.duracion_ms, int) and meta.duracion_ms >= 0
     assert [r.seq for r in alm.corridas.get_items(cid)] == [0, 1]
     assert svc.vista_corrida(alm, cid)["totales"]["n_items"] == 2
+
+
+def _armado_que_falla(monkeypatch, falla) -> list[int]:
+    """Parchea `_armar_fila` para que reviente en los seq donde `falla(seq)` sea
+    cierto. Devuelve la lista (viva) de los seq que se intentaron armar."""
+    real = svc._armar_fila
+    intentados: list[int] = []
+
+    def _quizas_explota(assembler, item, seq):
+        intentados.append(seq)
+        if falla(seq):
+            raise RuntimeError(f"la base no responde ({seq})")
+        return real(assembler, item, seq)
+
+    monkeypatch.setattr(svc, "_armar_fila", _quizas_explota)
+    return intentados
+
+
+def test_fallos_alternados_no_cortan_el_armado(tmp_path, monkeypatch):
+    """El contador es de fallos SEGUIDOS: un ítem que arma bien lo reinicia. Sin
+    esto, una licitación con muchos ítems raros salpicados se cortaría sola."""
+    cli, alm = _cliente(tmp_path)
+    n = config.MAX_FALLOS_SEGUIDOS_ARMADO * 4          # muchos más fallos que el tope
+    items = [_item_plan("Concreto clase D", item=str(i)) for i in range(n)]
+    cid = svc.crear_corrida_encolada(alm, "x.xlsx", items, "DIURNO", None,
+                                     carpeta_id=_carpeta(cli))
+    _armado_que_falla(monkeypatch, lambda seq: seq % 2 == 0)   # uno sí, uno no
+    eventos = list(svc.armar_pendientes(alm, cid, items))      # NO levanta
+    assert len(eventos) == n
+    assert len(alm.corridas.get_items(cid)) == n
+    assert len(svc.seqs_sin_apu(alm.corridas.get_items(cid))) == n // 2
+
+
+def test_fallos_seguidos_cortan_y_la_excepcion_sube(tmp_path, monkeypatch):
+    """N seguidos ya no es un ítem malo, es el entorno: se corta ANTES de escribir
+    otra fila envenenada y la excepción sube, para que el worker deje la corrida en
+    la cola y la reintente cuando la base vuelva."""
+    cli, alm = _cliente(tmp_path)
+    tope = config.MAX_FALLOS_SEGUIDOS_ARMADO
+    items = [_item_plan("Concreto clase D", item=str(i)) for i in range(tope * 3)]
+    cid = svc.crear_corrida_encolada(alm, "x.xlsx", items, "DIURNO", None,
+                                     carpeta_id=_carpeta(cli))
+    intentados = _armado_que_falla(monkeypatch, lambda seq: seq >= 1)   # el 0 arma bien
+    with pytest.raises(RuntimeError, match="seguidos"):
+        list(svc.armar_pendientes(alm, cid, items))
+    # El fallo nº `tope` corta sin persistir: quedan el ítem sano y `tope - 1` filas
+    # envenenadas, no las 15 del plan.
+    assert [r.seq for r in alm.corridas.get_items(cid)] == list(range(tope))
+    assert intentados == list(range(tope + 1))          # y no se intentó ni uno más

@@ -188,3 +188,33 @@ def test_congelada_sigue_marcando_el_costo_a_mano(alm):
     assert fila["costo_unitario"] == 92106000.0
     assert fila["costo_manual"] is True
     assert any("costo puesto a mano" in m for m in fila["alertas_costeo"])
+
+
+def test_una_corrida_a_medio_armar_no_emite_cuadro(alm):
+    """El hueco que `seqs_sin_apu` NO puede ver.
+
+    Ese candado mira las filas que EXISTEN. Las líneas que el worker todavía no armó
+    **no existen como filas**, así que una corrida detenida en 2 de 5 tiene 2 filas,
+    las 2 con APU, y el candado la deja pasar: saldría un cuadro de licitación de 2
+    líneas pareciendo entero, sin un solo aviso de que faltan 3 actividades."""
+    items = [LicitacionItem(item=str(i), descripcion="EXCAVACION MANUAL", unidad="M3",
+                            cantidad=1.0, precio_contractual=100.0, shift="DIURNO")
+             for i in range(5)]
+    cid = svc.crear_corrida_encolada(alm, "x.xlsx", items, "DIURNO", None)
+    for _ in svc.armar_pendientes(alm, cid, items[:2]):
+        pass                                    # 2 de 5, y las 2 CON APU
+    assert svc.seqs_sin_apu(alm.corridas.get_items(cid)) == []   # el candado viejo no ve nada
+
+    for estado in ("armando", "armado_detenido"):
+        alm.corridas.finalizar_armado(cid, estado, error="x")
+        with pytest.raises(svc.ArmadoIncompleto) as exc:
+            svc.generar_cuadro(alm, cid)
+        assert (exc.value.hechos, exc.value.total) == (2, 5)
+        with pytest.raises(svc.ArmadoIncompleto):
+            svc.congelar(alm, cid)
+
+    # Terminada de armar, sí emite: el candado no es permanente.
+    for _ in svc.armar_pendientes(alm, cid, items, desde_seq=alm.corridas.max_seq(cid) + 1):
+        pass
+    alm.corridas.finalizar_armado(cid, "en_revision")
+    assert svc.generar_cuadro(alm, cid) is not None

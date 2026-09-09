@@ -495,6 +495,12 @@ def congelar(cid: int, alm: Almacen = Depends(get_almacen),
              _: object = Depends(requiere_rol("consulta"))):
     try:
         v = svc.congelar(alm, cid)
+    except svc.ArmadoIncompleto as e:
+        # 409 con el progreso: la pantalla ya lo muestra, pero quien fuerce el POST
+        # tiene que enterarse de que le faltan líneas, no de un error genérico.
+        raise HTTPException(
+            status_code=409,
+            detail={"mensaje": str(e), "hechos": e.hechos, "total": e.total})
     except svc.FilasSinApu as e:
         # Único endpoint con detail estructurado (el resto de este archivo usa
         # string): `seqs` es lo que el frontend necesita para resaltar las filas
@@ -560,6 +566,12 @@ def cuadro(cid: int, alm: Almacen = Depends(get_almacen),
           _: object = Depends(requiere_rol("consulta"))):
     try:
         out = svc.generar_cuadro(alm, cid)
+    except svc.ArmadoIncompleto as e:
+        # 409 con el progreso: la pantalla ya lo muestra, pero quien fuerce el POST
+        # tiene que enterarse de que le faltan líneas, no de un error genérico.
+        raise HTTPException(
+            status_code=409,
+            detail={"mensaje": str(e), "hechos": e.hechos, "total": e.total})
     except svc.FilasSinApu as e:
         raise HTTPException(
             status_code=409,

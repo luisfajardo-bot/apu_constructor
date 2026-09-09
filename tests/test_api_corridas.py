@@ -263,12 +263,10 @@ def test_renombrar_corrida_inexistente_404(tmp_path):
 
 def test_renombrar_corrida_congelada_200(tmp_path):
     cli, alm = _cliente(tmp_path)
-    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
-    lic = _xlsx_lic(tmp_path)
-    with open(lic, "rb") as f:
-        cid = cli.post("/api/corridas",
-                       data={"turno": "DIURNO", "use_ai": "false", "carpeta_id": str(obra["id"])},
-                       files={"archivo": ("lic.xlsx", f, "application/octet-stream")}).json()["id"]
+    # Por `/corridas/stream` y no por `POST /corridas`: este último ENCOLA y no arma,
+    # así que la corrida quedaría en `armando` sin filas y `congelar` la rechaza (que
+    # es lo correcto: congelar un armado a medias emite un cuadro incompleto).
+    cid = _corrida_api(cli, tmp_path)
     r = cli.post(f"/api/corridas/{cid}/congelar")
     assert r.status_code == 200 and r.json()["modo"] == "congelada"
     r2 = cli.post(f"/api/corridas/{cid}/renombrar", json={"nombre": "Congelada Renombrada"})

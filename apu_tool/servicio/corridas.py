@@ -41,6 +41,27 @@ class CorridaCongelada(Exception):
         self.corrida_id = corrida_id
 
 
+class ArmadoIncompleto(RuntimeError):
+    """La corrida todavía tiene líneas del plan SIN ARMAR: no se congela ni se emite
+    cuadro.
+
+    Es el hermano silencioso de `FilasSinApu`, y peor. Ahí las filas existen y están
+    en $0, así que el candado las ve y la hoja ALERTAS las nombra. Acá las líneas que
+    el worker no alcanzó a armar **no existen como filas**: `seqs_sin_apu` no puede
+    verlas, y un cuadro de una corrida detenida en 290 de 1939 sale con 290 líneas
+    pareciendo entero. Quien lo recibe no tiene forma de saber que le faltan 1.649
+    actividades de la licitación.
+    """
+    def __init__(self, corrida_id: int, hechos: int, total: int):
+        self.corrida_id = corrida_id
+        self.hechos = hechos
+        self.total = total
+        super().__init__(
+            f"La corrida todavía se está armando: {hechos} de {total} líneas. "
+            f"Esperá a que termine (o reanudala si quedó detenida) antes de "
+            f"congelar o descargar el cuadro.")
+
+
 class FilasSinApu(RuntimeError):
     """La corrida tiene líneas sin APU asignado: no se congela ni se emite cuadro.
 
@@ -685,6 +706,20 @@ def detalle_item(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
     }
 
 
+def _exigir_armado_completo(alm: Almacen, meta, filas: int) -> None:
+    """Traba congelar/emitir mientras el plan no esté armado entero.
+
+    NO alcanza con `seqs_sin_apu`: ese candado mira las filas que EXISTEN, y las que
+    el worker todavía no armó no existen. Sin esto, una corrida a medio armar emite
+    un cuadro que se ve completo.
+    """
+    if not _plan_a_medias(meta):
+        return
+    crudo = alm.corridas.get_plan(meta.id)
+    total = len(json.loads(crudo)) if crudo else filas
+    raise ArmadoIncompleto(meta.id, filas, total)
+
+
 def congelar(alm: Almacen, corrida_id: int) -> Optional[dict]:
     """Fija una foto inmutable: costea la vista ACTIVA ahora y guarda el snapshot de
     cada ítem; luego marca modo='congelada'. Idempotente (recongelar = foto nueva)."""
@@ -692,6 +727,7 @@ def congelar(alm: Almacen, corrida_id: int) -> Optional[dict]:
     if meta is None:
         return None
     _rows = alm.corridas.get_items(corrida_id)
+    _exigir_armado_completo(alm, meta, len(_rows))
     faltan = seqs_sin_apu(_rows)
     if faltan:
         raise FilasSinApu(corrida_id, faltan)
@@ -1029,6 +1065,7 @@ def generar_cuadro(alm: Almacen, corrida_id: int) -> Optional[Path]:
     if meta is None:
         return None
     rows = alm.corridas.get_items(corrida_id)   # una sola lectura: guard + cuadro
+    _exigir_armado_completo(alm, meta, len(rows))
     # Chequeo propio, no basta con el de `congelar`: si la corrida ya está congelada
     # con foto, la llamada a `congelar` de abajo se saltea, y una corrida congelada
     # ANTES de este candado sí puede traer filas sin APU.

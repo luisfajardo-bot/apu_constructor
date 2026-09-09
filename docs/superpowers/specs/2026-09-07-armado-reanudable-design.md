@@ -126,9 +126,17 @@ al salir). Su bucle:
    junto con cada fila y duplica las escrituras del camino que ya es el cuello de botella.
 3. **Armar** los ítems de `plan_json` desde ese índice, con el mismo `_armar_fila` de
    hoy y un `Assembler` compartido. Cada fila se guarda al armarla, como ahora.
-4. **Latir**: refrescar `armando_desde` **cada 25 ítems**, para que la reclama no venza
-   mientras trabaja. Con el ritmo medido (2,8–6,2 s/ítem) eso es un latido cada 1–2,5
-   minutos, holgado contra el TTL de 3 minutos.
+4. **Latir**: refrescar `armando_desde` **cada 60 s** (`ARMADO_LATIDO_S`), con reloj
+   monótono, para que la reclama no venza mientras trabaja. Contra el TTL de 180 s da
+   **3× de margen fijo**.
+
+   Se mide en TIEMPO y no en ítems, y esto fue una corrección al diseño original: un
+   lease se mide en tiempo, así que contar ítems ata el margen a una velocidad que no
+   controlamos — y que ya medimos variando más del doble (2,8 a 6,2 s/ítem). Con el
+   «cada 25 ítems» que decía esta spec, un tramo lento dejaba **25 segundos** de
+   colchón contra el TTL: un pico de latencia de Supabase o unos sub-APUs grandes
+   vencían la reclama **mientras el worker trabajaba bien**, y se perdía el armado
+   entero por nada.
 5. Al terminar: `en_revision`, duración, y a buscar el siguiente trabajo.
 
 **Se despierta por evento, no por reloj.** `POST /corridas` levanta un

@@ -975,9 +975,12 @@ En `apu_tool/config.py`, cerca de los otros umbrales:
 # retomar la corrida. Es el tiempo de recuperación tras un reinicio de golpe: más
 # corto arriesga doble armado durante el drenaje de un deploy, más largo hace esperar.
 ARMADO_TTL_RECLAMA_S = 180
-# Cada cuántos ítems se refresca la reclama. Con el ritmo medido (2,8-6,2 s/ítem) es
-# un latido cada 1-2,5 minutos, holgado contra el TTL de arriba.
-ARMADO_LATIDO_CADA = 25
+# Cada cuánto se refresca la reclama, EN TIEMPO. Contra el TTL de arriba da 3x de
+# margen fijo. Se mide en segundos y no en ítems a propósito: un lease se mide en
+# tiempo, y contar ítems ataba el margen a una velocidad que no controlamos (medida
+# variando de 2,8 a 6,2 s/ítem, o sea entre 1,16x y 2,6x de margen). No la cambies
+# sin mirar ARMADO_TTL_RECLAMA_S.
+ARMADO_LATIDO_S = 60
 # Respaldo del evento: es lo ÚNICO que hace arrancar un armado huérfano al bootear,
 # cuando no hay ningún evento que despierte al worker.
 ARMADO_POLL_S = 30
@@ -1134,7 +1137,7 @@ def un_ciclo(alm: Almacen, instancia: str) -> bool:
             if evento == "error":          # la corrida se borró a mitad
                 return True
             hechos += 1
-            if hechos % config.ARMADO_LATIDO_CADA == 0:
+            if reloj() >= proximo_latido:
                 alm.corridas.latir_armado(corrida_id, _ahora())
         alm.corridas.finalizar_armado(
             corrida_id, "en_revision",

@@ -81,6 +81,7 @@ flowchart TD
 | --- | --- |
 | `app.py` | App FastAPI: monta /api y, si existe el build, sirve el frontend (web/dist). |
 | `apus.py` | Lectura de la biblioteca de APUs (para la página de APUs). |
+| `armador.py` | El worker del armado: un hilo que consume la cola que vive en la base. |
 | `auditoria.py` | Servicio de auditoría: helper transaccional para registrar eventos y lectura paginada. |
 | `auth.py` | Autenticación (Supabase Auth) y autorización (RBAC) para la API. |
 | `autoria.py` | Lógica de servicio para AGREGAR a la base: insumos y APUs nuevos. |

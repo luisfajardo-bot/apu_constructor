@@ -51,6 +51,20 @@ MATCH_REVIEW = 0.55   # entre REVIEW y ACCEPT -> candidato dudoso (revisar)
 # se pierden 4 filas, no 1900, y la corrida queda reintentable.
 MAX_FALLOS_SEGUIDOS_ARMADO = 5
 
+# --- armado como trabajo del servidor (servicio/armador.py) ---
+# Una reclama sin latido por más de esto se considera muerta y otra instancia puede
+# retomar la corrida. Es el tiempo de recuperación tras un reinicio de golpe: más
+# corto arriesga doble armado durante el drenaje de un deploy, más largo hace esperar.
+ARMADO_TTL_RECLAMA_S = 180
+# Cada cuántos ítems se refresca la reclama. Con el ritmo medido (2,8-6,2 s/ítem) es
+# un latido cada 1-2,5 minutos, holgado contra el TTL de arriba.
+ARMADO_LATIDO_CADA = 25
+# Respaldo del evento: es lo ÚNICO que hace arrancar un armado huérfano al bootear,
+# cuando no hay ningún evento que despierte al worker.
+ARMADO_POLL_S = 30
+# Reclamas antes de rendirse. Cubre "algo la mata siempre en el mismo punto".
+ARMADO_MAX_INTENTOS = 3
+
 # Umbrales del cruce código+nombre (resolver de insumos, dominio/cruce.py).
 CRUCE_UMBRAL = 0.60   # similitud mínima de nombre para aceptar un cruce aproximado
 CRUCE_MARGEN = 0.10   # ventaja mínima del mejor candidato sobre el segundo

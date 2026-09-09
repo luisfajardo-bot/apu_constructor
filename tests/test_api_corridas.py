@@ -651,3 +651,26 @@ def test_fallos_seguidos_cortan_y_la_excepcion_sube(tmp_path, monkeypatch):
     # envenenadas, no las 15 del plan.
     assert [r.seq for r in alm.corridas.get_items(cid)] == list(range(tope))
     assert intentados == list(range(tope + 1))          # y no se intentó ni uno más
+
+
+def test_borrar_lineas_mientras_arma_da_error(tmp_path):
+    """El worker reanuda en `max_seq + 1`. Borrar las ÚLTIMAS líneas hace RETROCEDER
+    ese máximo, y si la instancia muere ahí, al reanudar se re-arma justo lo borrado.
+
+    Hoy no se podía llegar a este caso porque durante el armado no se ven las filas;
+    el armado como trabajo del servidor las hace visibles y operables, así que la
+    puerta la abre este diseño y hay que cerrarla."""
+    cli, alm = _cliente(tmp_path)
+    items = [_item_plan("ACTIVIDAD A"), _item_plan("ACTIVIDAD B")]
+    cid = svc.crear_corrida_encolada(alm, "x.xlsx", items, "DIURNO", None,
+                                     carpeta_id=_carpeta(cli))
+    for _ in svc.armar_pendientes(alm, cid, items):
+        pass
+    # crear_corrida_encolada NO finaliza: sigue en 'armando', que es la cola.
+    with pytest.raises(ValueError, match="se está armando"):
+        svc.borrar_items(alm, cid, [1])
+    assert len(alm.corridas.get_items(cid)) == 2          # no borró nada
+
+    alm.corridas.finalizar_armado(cid, "en_revision")
+    svc.borrar_items(alm, cid, [1])                        # ya terminada: sí deja
+    assert len(alm.corridas.get_items(cid)) == 1

@@ -335,9 +335,10 @@ def agregar_items(alm: Almacen, corrida_id: int,
     if meta.modo == "congelada":
         raise CorridaCongelada(corrida_id)
     if meta.estado == "armando":
-        # El armador asigna los seq con enumerate() precalculado; agregar acá pediría
-        # el mismo seq y la fila duplicada entraría callada (corrida_item no tiene
-        # UNIQUE (corrida_id, seq)), duplicando la actividad en el cuadro.
+        # El armador va tomando los seq del plan a medida que avanza; agregar acá
+        # pediría uno que el armado todavía no llegó a usar. Con `ux_corrida_item_seq`
+        # eso ya no entra callado —revienta—, pero reventar a mitad de un armado de
+        # tres horas tampoco es el comportamiento que queremos: se espera y listo.
         raise ValueError("La corrida se está armando; esperá a que termine "
                          "para agregar líneas.")
     if not items:
@@ -374,13 +375,21 @@ def borrar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
     No renumera. Los seq que quedan siguen siendo los mismos (los snapshots y las URLs
     de ítem no cambian de dueño) y un seq borrado no se reusa: `agregar_items` sigue
     desde el máximo. Los seq ajenos a la corrida se saltean. Lanza CorridaCongelada si
-    está congelada; devuelve None si la corrida no existe.
+    está congelada, y ValueError si todavía se está armando (ver la guarda).
+    Devuelve None si la corrida no existe.
     """
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:
         return None
     if meta.modo == "congelada":
         raise CorridaCongelada(corrida_id)
+    if meta.estado == "armando":
+        # El worker reanuda en `max_seq + 1`. Borrar las ÚLTIMAS líneas hace que ese
+        # máximo RETROCEDA, y si la instancia muere justo ahí, al reanudar se re-arma
+        # exactamente lo que se acaba de borrar. Misma guarda y mismo motivo que
+        # `agregar_items`: mientras arma, el espacio de `seq` es del armador.
+        raise ValueError("La corrida se está armando; esperá a que termine "
+                         "para borrar líneas.")
     pedidos = {int(s) for s in seqs}
     victimas = [r for r in alm.corridas.get_items(corrida_id) if r.seq in pedidos]
     if victimas:

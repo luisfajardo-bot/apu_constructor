@@ -451,6 +451,10 @@ def borrar_lineas(cid: int, body: BorrarLineasIn,
     except svc.CorridaCongelada:
         raise HTTPException(status_code=409,
                             detail="La corrida está congelada; actívala para modificar.")
+    except ValueError as e:
+        # Mismo trato que en `_agregar_o_error`: hoy es "todavía se está armando",
+        # que es accionable (esperar), no un error del servidor.
+        raise HTTPException(status_code=400, detail=str(e))
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v

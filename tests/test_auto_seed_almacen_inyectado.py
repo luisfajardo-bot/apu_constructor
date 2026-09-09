@@ -129,10 +129,10 @@ def _xlsx_lic(tmp_path):
     return p
 
 
-def _post_corrida(cli, tmp_path, ruta="/api/corridas"):
+def _post_corrida(cli, tmp_path):
     obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
     with open(_xlsx_lic(tmp_path), "rb") as f:
-        return cli.post(ruta,
+        return cli.post("/api/corridas",
                         data={"turno": "DIURNO", "use_ai": "false",
                               "carpeta_id": str(obra["id"])},
                         files={"archivo": ("lic.xlsx", f, _XLSX)})
@@ -145,21 +145,9 @@ def test_post_corridas_biblioteca_vacia_da_409(tmp_path, monkeypatch):
     assert "biblioteca de APUs está vacía" in r.json()["detail"]
 
 
-def test_post_corridas_stream_biblioteca_vacia_da_409(tmp_path, monkeypatch):
-    cli, _ = _cli_vacio(tmp_path, monkeypatch)
-    r = _post_corrida(cli, tmp_path, ruta="/api/corridas/stream")
-    assert r.status_code == 409, r.text
-
-
 def test_post_sample_biblioteca_vacia_da_409(tmp_path, monkeypatch):
     cli, _ = _cli_vacio(tmp_path, monkeypatch)
     r = cli.post("/api/sample")
-    assert r.status_code == 409, r.text
-
-
-def test_post_sample_stream_biblioteca_vacia_da_409(tmp_path, monkeypatch):
-    cli, _ = _cli_vacio(tmp_path, monkeypatch)
-    r = cli.post("/api/sample/stream")
     assert r.status_code == 409, r.text
 
 

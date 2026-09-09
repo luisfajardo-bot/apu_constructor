@@ -259,7 +259,7 @@ export default function CorridasInicio() {
             ))}
           </select>
           {/* El aviso está al lado de DOS botones y solo aplica a uno: "Usar ejemplo"
-              pega a /api/sample/stream, que no recibe lista_id — el ejemplo es una demo
+              pega a /api/sample, que no recibe lista_id — el ejemplo es una demo
               construida sobre Principal (sus contractuales son costo_Principal * (1+margen),
               ver pipeline.py::generate_sample). Sorprendió en el smoke test de producción
               del 2026-08-03, así que se dice explícitamente. Sin <strong> a propósito: el

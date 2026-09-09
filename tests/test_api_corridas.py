@@ -1,5 +1,4 @@
 import io
-import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -17,7 +16,7 @@ from apu_tool.servicio.app import create_app
 from tests.conftest import cliente
 
 
-def _cli(tmp_path):  # alias usado por los tests de stream
+def _cli(tmp_path):  # alias de _cliente, más corto en los tests con varios POST seguidos
     return _cliente(tmp_path)
 
 
@@ -52,8 +51,8 @@ def _xlsx_lic(tmp_path):
 
 def test_flujo_corrida_completo(tmp_path):
     """De la corrida armada al cuadro: ver, confirmar y descargar."""
-    cli, _ = _cliente(tmp_path)
-    cid = _corrida_api(cli, tmp_path)
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_api(cli, alm)
 
     v = cli.get(f"/api/corridas/{cid}")
     assert v.status_code == 200
@@ -89,46 +88,6 @@ def test_archivo_ilegible_400(tmp_path):
                      files={"archivo": ("mala.csv", f, "text/csv")})
     assert r.status_code == 400
     assert r.json()["detail"]
-
-
-def test_corridas_stream_emite_started_progreso_done(tmp_path):
-    cli, alm = _cli(tmp_path)
-    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
-    lic = _xlsx_lic(tmp_path)
-    with open(lic, "rb") as f:
-        r = cli.post("/api/corridas/stream",
-                     data={"turno": "DIURNO", "use_ai": "false", "carpeta_id": str(obra["id"])},
-                     files={"archivo": ("lic.xlsx", f,
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
-    assert r.status_code == 200
-    assert "text/event-stream" in r.headers["content-type"]
-    body = r.text
-    assert "event: started" in body         # id de la corrida al inicio
-    assert "event: progress" in body
-    assert "event: done" in body
-    # El progress trae la fila ya costeada (para la tabla en vivo).
-    assert '"fila"' in body and '"costo_unitario"' in body
-    # Persistencia incremental: la corrida quedó armada y consultable.
-    assert len(alm.corridas.listar_corridas()) == 1
-
-
-def test_sample_stream_ok(tmp_path):
-    cli, _ = _cli(tmp_path)
-    r = cli.post("/api/sample/stream")
-    assert r.status_code == 200
-    assert "event: done" in r.text
-
-
-def test_corridas_stream_archivo_malo_400(tmp_path):
-    cli, _ = _cli(tmp_path)
-    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
-    mala = tmp_path / "mala.csv"
-    mala.write_text("foo,bar\n1,2\n", encoding="utf-8")
-    with open(mala, "rb") as f:
-        r = cli.post("/api/corridas/stream",
-                     data={"turno": "DIURNO", "carpeta_id": str(obra["id"])},
-                     files={"archivo": ("mala.csv", f, "text/csv")})
-    assert r.status_code == 400
 
 
 def test_listar_corridas_endpoint(tmp_path):
@@ -263,10 +222,7 @@ def test_renombrar_corrida_inexistente_404(tmp_path):
 
 def test_renombrar_corrida_congelada_200(tmp_path):
     cli, alm = _cliente(tmp_path)
-    # Por `/corridas/stream` y no por `POST /corridas`: este último ENCOLA y no arma,
-    # así que la corrida quedaría en `armando` sin filas y `congelar` la rechaza (que
-    # es lo correcto: congelar un armado a medias emite un cuadro incompleto).
-    cid = _corrida_api(cli, tmp_path)
+    cid = _corrida_api(cli, alm)
     r = cli.post(f"/api/corridas/{cid}/congelar")
     assert r.status_code == 200 and r.json()["modo"] == "congelada"
     r2 = cli.post(f"/api/corridas/{cid}/renombrar", json={"nombre": "Congelada Renombrada"})
@@ -292,33 +248,20 @@ def test_renombrar_corrida_requiere_editor(tmp_path):
     assert r_editor.status_code == 200 and r_editor.json()["nombre"] == "Nuevo"
 
 
-def _id_del_stream(body: str) -> int:
-    """El id de la corrida, que viaja en el primer evento del SSE (`started`)."""
-    for linea in body.splitlines():
-        if linea.startswith("data: "):
-            return json.loads(linea[len("data: "):])["id"]
-    raise AssertionError(f"el stream no trajo ningún evento: {body[:200]}")
+def _corrida_api(cli, alm):
+    """Crea y arma una corrida de 1 ítem contra el mismo Almacen que sirve `cli`, y
+    devuelve su id.
 
-
-def _corrida_api(cli, tmp_path):
-    """Crea una corrida de 1 ítem YA ARMADA por la API y devuelve su id.
-
-    Va por `/corridas/stream`, que todavía arma dentro de la petición, y no por
-    `POST /corridas`, que desde el armado como trabajo del servidor solo ENCOLA: los
-    tests de acá abajo operan sobre las filas, y una corrida recién encolada no tiene
-    ninguna hasta que el worker la arme. Cuando la 10b se lleve el SSE, esto pasa a
-    armar con el worker.
+    Antes iba por `POST /corridas/stream`, que armaba dentro de la petición; ese
+    endpoint se borró (el armado real ahora es trabajo del worker, que no corre en
+    estos tests), así que acá se arma directo con `construir_corrida`, el mismo
+    envoltorio sin cola que usan la CLI y la GUI.
     """
     obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
-    lic = _xlsx_lic(tmp_path)
-    with open(lic, "rb") as f:
-        r = cli.post("/api/corridas/stream",
-                     data={"turno": "DIURNO", "use_ai": "false",
-                           "carpeta_id": str(obra["id"])},
-                     files={"archivo": ("lic.xlsx", f, _XLSX_MIME)})
-    assert r.status_code == 200, r.text
-    assert "event: done" in r.text, r.text          # armada de punta a punta
-    return _id_del_stream(r.text)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    return svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False,
+                                 carpeta_id=obra["id"])
 
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -337,8 +280,8 @@ def _xlsx_faltantes(tmp_path):
 
 
 def test_api_agregar_linea_a_mano(tmp_path):
-    cli, _ = _cliente(tmp_path)
-    cid = _corrida_api(cli, tmp_path)
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_api(cli, alm)
     r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": [
         {"descripcion": "Concreto clase D", "unidad": "M3", "cantidad": 3.0,
          "precio_contractual": 400000.0}]})
@@ -349,15 +292,15 @@ def test_api_agregar_linea_a_mano(tmp_path):
 
 
 def test_api_agregar_linea_sin_descripcion_es_400(tmp_path):
-    cli, _ = _cliente(tmp_path)
-    cid = _corrida_api(cli, tmp_path)
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_api(cli, alm)
     r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": [{"descripcion": "  "}]})
     assert r.status_code == 400
 
 
 def test_api_agregar_linea_turno_invalido_es_400(tmp_path):
-    cli, _ = _cliente(tmp_path)
-    cid = _corrida_api(cli, tmp_path)
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_api(cli, alm)
     r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": [
         {"descripcion": "Concreto clase D", "shift": "TARDE"}]})
     assert r.status_code == 400
@@ -365,8 +308,8 @@ def test_api_agregar_linea_turno_invalido_es_400(tmp_path):
 
 
 def test_api_preview_y_importar_lineas(tmp_path):
-    cli, _ = _cliente(tmp_path)
-    cid = _corrida_api(cli, tmp_path)
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_api(cli, alm)
     xls = _xlsx_faltantes(tmp_path)
 
     with open(xls, "rb") as f:
@@ -387,16 +330,16 @@ def test_api_preview_y_importar_lineas(tmp_path):
 
 
 def test_api_importar_archivo_corrupto_es_400(tmp_path):
-    cli, _ = _cliente(tmp_path)
-    cid = _corrida_api(cli, tmp_path)
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_api(cli, alm)
     r = cli.post(f"/api/corridas/{cid}/items/importar",
                  files={"archivo": ("malo.xlsx", b"no soy un excel", _XLSX_MIME)})
     assert r.status_code == 400
 
 
 def test_api_agregar_en_corrida_congelada_es_409(tmp_path):
-    cli, _ = _cliente(tmp_path)
-    cid = _corrida_api(cli, tmp_path)
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_api(cli, alm)
     assert cli.post(f"/api/corridas/{cid}/congelar").status_code == 200
     r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": [
         {"descripcion": "Concreto clase D"}]})
@@ -406,8 +349,8 @@ def test_api_agregar_en_corrida_congelada_es_409(tmp_path):
 
 
 def test_api_borrar_lineas(tmp_path):
-    cli, _ = _cliente(tmp_path)
-    cid = _corrida_api(cli, tmp_path)
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_api(cli, alm)
     cli.post(f"/api/corridas/{cid}/items", json={"lineas": [
         {"descripcion": "Concreto clase D"}]})
     r = cli.post(f"/api/corridas/{cid}/items/borrar", json={"seqs": [0]})
@@ -425,8 +368,8 @@ def test_api_corrida_inexistente_es_404(tmp_path):
 
 def test_api_agregar_pasado_del_tope_es_400(tmp_path):
     from apu_tool.servicio import corridas as svc
-    cli, _ = _cliente(tmp_path)
-    cid = _corrida_api(cli, tmp_path)
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_api(cli, alm)
     lineas = [{"descripcion": "Concreto clase D"}
               for _ in range(svc.MAX_LINEAS_AGREGADAS + 1)]
     r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": lineas})
@@ -437,7 +380,7 @@ def test_api_agregar_pasado_del_tope_es_400(tmp_path):
 
 def test_api_agregar_en_corrida_armando_es_400(tmp_path):
     cli, alm = _cliente(tmp_path)
-    cid = _corrida_api(cli, tmp_path)
+    cid = _corrida_api(cli, alm)
     alm.corridas.set_estado(cid, "armando")
     r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": [
         {"descripcion": "Concreto clase D"}]})
@@ -447,8 +390,8 @@ def test_api_agregar_en_corrida_armando_es_400(tmp_path):
 
 
 def test_api_agregar_linea_con_cantidad_negativa_es_422(tmp_path):
-    cli, _ = _cliente(tmp_path)
-    cid = _corrida_api(cli, tmp_path)
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_api(cli, alm)
     r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": [
         {"descripcion": "Concreto clase D", "cantidad": -5}]})
     assert r.status_code == 422        # pydantic rechaza antes del servicio

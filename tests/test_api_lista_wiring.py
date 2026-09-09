@@ -4,14 +4,14 @@ commit e84c0e1, Task 9).
 `tests/test_servicio_autoria.py` y `tests/test_servicio_insumos_lista.py` llaman a
 `insumos_svc`/`autoria` DIRECTAMENTE, y `tests/test_api_lista_invalida.py` solo
 ejercita el camino del 400 (lista inexistente). Ninguno de los dos va por HTTP con
-una lista VÁLIDA verificando dónde cayó el precio: los 9 puntos donde `rutas.py`
+una lista VÁLIDA verificando dónde cayó el precio: los 8 puntos donde `rutas.py`
 reenvía la lista al servicio pueden romperse (un merge mal resuelto, un reorder de
 argumentos) sin que la suite se entere, y el daño concreto es que los precios de una
 obra se escriban en silencio sobre Principal (el catálogo real de la empresa).
 
 Estos tests van por HTTP y afirman DÓNDE cayó el precio (Principal vs. la lista NP),
-para los 9 puntos de reenvío: listar, fuentes, detalle, cambios, importar/preview,
-importar, crear, corridas y corridas/stream.
+para los 8 puntos de reenvío: listar, fuentes, detalle, cambios, importar/preview,
+importar, crear y corridas.
 """
 import io
 
@@ -162,19 +162,3 @@ def test_post_corridas_queda_con_su_lista_precios_id(tmp_path):
     assert r.status_code == 200, r.text
     cid = r.json()["id"]
     assert alm.corridas.get_corrida(cid).lista_precios_id == lid
-
-
-def test_post_corridas_stream_queda_con_su_lista_precios_id(tmp_path):
-    cli, alm = _cli(tmp_path, rol="consulta")
-    _con_apu(alm)
-    lid = alm.precios.crear_lista("NP Calle 13")
-    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
-    lic = _xlsx_lic(tmp_path)
-    with open(lic, "rb") as f:
-        r = cli.post("/api/corridas/stream",
-                     data={"turno": "DIURNO", "use_ai": "false",
-                           "carpeta_id": str(obra["id"]), "lista_id": str(lid)},
-                     files={"archivo": ("lic.xlsx", f, _XLSX)})
-    assert r.status_code == 200, r.text
-    metas = alm.corridas.listar_corridas()
-    assert len(metas) == 1 and metas[0].lista_precios_id == lid

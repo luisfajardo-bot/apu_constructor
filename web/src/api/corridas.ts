@@ -3,15 +3,12 @@ import type {
   AsignacionIA,
   ComposicionPropuesta,
   StatusResponse,
-  CorridaCreada,
   CorridaDetalle,
   CorridaEncolada,
-  CorridaIniciada,
   CorridaResumen,
   DetalleItem,
   LineaNueva,
   PreviewLineas,
-  Progreso,
   ProgresoRevision,
   ResumenRevision,
   VeredictoIA,
@@ -180,10 +177,9 @@ export function parseSse(block: string): { event: string; data: unknown } | null
 }
 
 /** Abre un SSE en `path` y llama a `onEvent` por cada evento parseado. Es el fetch +
- *  auth + chequeo de 401/ok + bucle de lectura del stream, compartido entre
- *  `streamCorrida` (armado) y `revisarCorridaStream` (revisión con IA): cada
- *  consumidor decide qué hacer con cada evento, incluyendo cuándo terminar
- *  (lanzar acá dentro de `onEvent` rechaza la promesa de afuera, tal cual antes). */
+ *  auth + chequeo de 401/ok + bucle de lectura del stream que usa `revisarCorridaStream`
+ *  (revisión con IA): el consumidor decide qué hacer con cada evento, incluyendo cuándo
+ *  terminar (lanzar acá dentro de `onEvent` rechaza la promesa de afuera). */
 async function consumirSse(
   path: string,
   init: RequestInit,
@@ -215,39 +211,6 @@ async function consumirSse(
       if (ev) onEvent(ev);
     }
   }
-}
-
-async function streamCorrida(
-  path: string,
-  init: RequestInit,
-  onProgress: (p: Progreso) => void,
-  onStarted?: (c: CorridaIniciada) => void,
-): Promise<CorridaCreada> {
-  let done: CorridaCreada | null = null;
-  await consumirSse(path, init, (ev) => {
-    if (ev.event === "started") onStarted?.(ev.data as CorridaIniciada);
-    else if (ev.event === "progress") onProgress(ev.data as Progreso);
-    else if (ev.event === "done") done = ev.data as CorridaCreada;
-    else if (ev.event === "error")
-      throw new Error(mensajeDeError(ev.data, "Error al armar"));
-  });
-  if (!done) throw new Error("La corrida no terminó correctamente.");
-  return done;
-}
-
-export function crearCorridaStream(
-  form: FormData,
-  onProgress: (p: Progreso) => void,
-  onStarted?: (c: CorridaIniciada) => void,
-) {
-  return streamCorrida("/corridas/stream", { method: "POST", body: form }, onProgress, onStarted);
-}
-
-export function crearSampleStream(
-  onProgress: (p: Progreso) => void,
-  onStarted?: (c: CorridaIniciada) => void,
-) {
-  return streamCorrida("/sample/stream", { method: "POST" }, onProgress, onStarted);
 }
 
 /** Audita la corrida con IA (barrido + profundización). La IA propone; nunca aplica.

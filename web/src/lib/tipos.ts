@@ -9,18 +9,6 @@ export interface ListaPrecios {
   creada_en: string;
 }
 
-export interface Progreso {
-  i: number;
-  total: number;
-  descripcion: string;
-  fila?: ItemCuadro; // fila ya costeada del APU recién armado (para la tabla en vivo)
-}
-
-export interface CorridaIniciada {
-  id: number;
-  total: number;
-}
-
 /** Respuesta de crear una corrida: se ENCOLÓ, no se armó. Armar 1900 líneas lleva
  *  horas y la petición vuelve en el acto; el progreso sale del poll de la corrida. */
 export interface CorridaEncolada {
@@ -288,11 +276,6 @@ export interface UsuarioEnLinea {
 
 export interface PresenciaResponse {
   en_linea: UsuarioEnLinea[];
-}
-
-export interface CorridaCreada {
-  id: number;
-  resumen: Totales;
 }
 
 export interface CorridaDetalle {

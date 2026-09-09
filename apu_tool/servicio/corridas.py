@@ -292,33 +292,6 @@ def armar_pendientes(alm: Almacen, corrida_id: int, items: list[LicitacionItem],
                             "fila": _vista_item(ens, seq, ens.status.value)})
 
 
-def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
-                             turno_def: str, use_ai: Optional[bool],
-                             carpeta_id: Optional[int] = None,
-                             nombre: Optional[str] = None,
-                             lista_precios_id: Optional[int] = None):
-    """Crea y arma en el acto, emitiendo el SSE que la pantalla de hoy espera:
-      ('started', {'id','total'}) · los ('progress'/'error') de `armar_pendientes` ·
-      ('done', {'id','resumen','duracion_ms'}) al terminar (estado 'en_revision').
-
-    Es solo la costura entre las tres piezas de arriba y los endpoints
-    `/corridas/stream` y `/sample/stream`, que todavía arman DENTRO de la petición
-    HTTP. Se va cuando la API pase a solo encolar y el armado sea del worker.
-    """
-    corrida_id = crear_corrida_encolada(alm, archivo, items, turno_def, use_ai,
-                                        carpeta_id, nombre, lista_precios_id)
-    yield ("started", {"id": corrida_id, "total": len(items)})
-    t0 = time.monotonic()
-    for evento, payload in armar_pendientes(alm, corrida_id, items, desde_seq=0):
-        yield (evento, payload)
-        if evento == "error":
-            return                      # la corrida ya no existe: no hay qué finalizar
-    duracion_ms = round((time.monotonic() - t0) * 1000)
-    alm.corridas.finalizar_armado(corrida_id, "en_revision", duracion_ms=duracion_ms)
-    resumen = vista_corrida(alm, corrida_id)["totales"]
-    yield ("done", {"id": corrida_id, "resumen": resumen, "duracion_ms": duracion_ms})
-
-
 def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
                       turno_def: str, use_ai: Optional[bool],
                       carpeta_id: Optional[int] = None,

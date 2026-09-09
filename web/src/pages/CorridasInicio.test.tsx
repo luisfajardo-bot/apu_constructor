@@ -120,7 +120,7 @@ test("no pisa el Nombre si el usuario ya lo editó", async () => {
 
 test("el aviso de la lista advierte que «Usar ejemplo» usa Principal", async () => {
   // El aviso vive al lado de DOS botones y solo aplica a uno: "Usar ejemplo" pega a
-  // /api/sample/stream, que no recibe lista_id (el ejemplo es una demo construida sobre
+  // /api/sample, que no recibe lista_id (el ejemplo es una demo construida sobre
   // Principal: sus contractuales salen de costo_Principal * (1+margen), pipeline.py).
   // En el smoke test de producción del 2026-08-03 eso sorprendió: se eligió una lista NP,
   // se usó el atajo y la corrida salió costeada con Principal.

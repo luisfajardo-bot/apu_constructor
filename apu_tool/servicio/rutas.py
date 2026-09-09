@@ -241,49 +241,6 @@ def _event_stream(gen):
         yield f"event: error\ndata: {json.dumps({'detail': 'Error interno.'}, ensure_ascii=False)}\n\n"
 
 
-@router.post("/corridas/stream")
-async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
-                               use_ai: Optional[bool] = Form(None),
-                               carpeta_id: int = Form(...),
-                               nombre: Optional[str] = Form(None),
-                               lista_id: Optional[int] = Form(None),
-                               archivo: UploadFile = File(...),
-                               alm: Almacen = Depends(get_almacen),
-                               _: object = Depends(requiere_rol("consulta"))):
-    if alm.carpetas.get(carpeta_id) is None:
-        raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
-    _validar_lista(alm, lista_id)
-    _asegurar_biblioteca(alm)
-    items = _items_del_upload(archivo.filename, await archivo.read(), turno)
-    gen = svc.construir_corrida_stream(alm, archivo.filename or "licitacion", items, turno,
-                                       use_ai, carpeta_id=carpeta_id, nombre=nombre,
-                                       lista_precios_id=lista_id)
-    return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache"})
-
-
-@router.post("/sample/stream")
-def crear_sample_stream(alm: Almacen = Depends(get_almacen),
-                        _: object = Depends(requiere_rol("consulta"))):
-    _asegurar_biblioteca(alm)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-        sample_path = tmp.name
-    try:
-        generate_sample(out_path=Path(sample_path), alm=alm)
-        items = read_licitacion(sample_path, default_shift=config.SHIFT_DIURNO)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        os.unlink(sample_path)
-    if not items:
-        raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
-    sc = carpetas_svc.carpeta_sin_clasificar_id(alm)
-    gen = svc.construir_corrida_stream(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False,
-                                       carpeta_id=sc, nombre="Ejemplo")
-    return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache"})
-
-
 @router.get("/corridas/{cid}")
 def get_corrida(cid: int, alm: Almacen = Depends(get_almacen),
                 _: object = Depends(requiere_rol("consulta"))):

@@ -9,6 +9,7 @@ from contextlib import contextmanager
 
 import pytest
 
+from apu_tool.datos.repositorio import CorridaEliminada
 from apu_tool.nucleo.models import CorridaItemRow, CorridaMeta, LicitacionItem
 
 
@@ -218,6 +219,68 @@ def test_max_seq_ignora_los_huecos(repo):
         repo.agregar_item(cid, _item(s, 1000.0))
     repo.borrar_items(cid, [1, 2])
     assert repo.max_seq(cid) == 3
+
+
+def test_no_se_puede_duplicar_un_seq(repo):
+    """Sin este indice una fila duplicada entra CALLADA y duplica la actividad en el
+    cuadro. Con el indice, revienta: preferimos fallar a mentir.
+
+    No puede ser CorridaEliminada: ese error dice "la corrida ya no existe" y aca
+    la corrida existe, nomas que el seq esta repetido. Confundirlos seria un mensaje
+    falso (peor que un error crudo)."""
+    cid = repo.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-07T10:00:00", archivo="x.xlsx", turno_def="DIURNO",
+        use_ai=None, estado="en_revision", cuadro_path=None, nombre="x"))
+    repo.agregar_item(cid, _item(0, 1000.0))
+    with pytest.raises(Exception) as exc_info:
+        repo.agregar_item(cid, _item(0, 1000.0))
+    assert not isinstance(exc_info.value, CorridaEliminada)
+
+
+def _nombres_sql(repo):
+    """(tabla de items, índice único) calificados según el backend."""
+    if getattr(repo, "cx", None) is not None:
+        return "corridas.corrida_item", "corridas.ux_corrida_item_seq"
+    return "corrida_item", "ux_corrida_item_seq"
+
+
+def test_arrancar_con_duplicados_viejos_no_tumba_la_app(repo, caplog):
+    """`init_schema` corre en CADA arranque. Una base que YA trae (corrida_id, seq)
+    duplicados —de armados muertos anteriores a esta feature— no puede impedir que
+    la app levante: se quedaría sin servicio hasta que alguien limpie a mano.
+
+    Entonces el índice se crea aparte y con try. Acá se monta ese caso exacto:
+    se tira el índice, se meten duplicados, y se vuelve a arrancar."""
+    tabla, indice = _nombres_sql(repo)
+    cid = repo.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-07T10:00:00", archivo="x.xlsx", turno_def="DIURNO",
+        use_ai=None, estado="en_revision", cuadro_path=None, nombre="x"))
+    with _abrir_conn(repo) as conn:
+        conn.execute(f"DROP INDEX IF EXISTS {indice}")
+    repo.agregar_item(cid, _item(0, 1000.0))
+    repo.agregar_item(cid, _item(0, 1000.0))      # sin índice, entra callada
+
+    with caplog.at_level("ERROR"):
+        repo.init_schema()                        # NO puede reventar
+
+    assert "ux_corrida_item_seq" in caplog.text   # y tiene que gritarlo
+    assert "duplicados" in caplog.text
+    # La base sigue usable aunque el índice no se haya podido crear.
+    assert len(repo.get_items(cid)) == 2
+
+
+def test_reset_tambien_deja_el_indice_puesto(repo):
+    """`reset()` es el camino de `seed --force`. Recrea el esquema desde el .sql, y el
+    índice único NO vive en el .sql (tiene que crearse aparte, con try). Si `reset` se
+    olvidara de crearlo, la protección desaparecería en silencio justo después de un
+    re-semillado, y el próximo armado podría duplicar filas sin que nada avise."""
+    repo.reset()
+    cid = repo.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-07T10:00:00", archivo="x.xlsx", turno_def="DIURNO",
+        use_ai=None, estado="en_revision", cuadro_path=None, nombre="x"))
+    repo.agregar_item(cid, _item(0, 1000.0))
+    with pytest.raises(Exception):
+        repo.agregar_item(cid, _item(0, 1000.0))
 
 
 # ---- la cola del armado: reclama atómica ----

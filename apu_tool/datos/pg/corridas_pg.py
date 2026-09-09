@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict
 from typing import Optional
 
@@ -12,6 +13,8 @@ from apu_tool.datos.pg.conexion import Conexion, ejecutar_script
 from apu_tool.datos.repositorio import CorridaEliminada
 from apu_tool.nucleo.models import CorridaItemRow, CorridaMeta, LicitacionItem
 
+logger = logging.getLogger(__name__)
+
 SCHEMA_PATH = config.PROJECT_ROOT / "db" / "pg" / "corridas.sql"
 
 
@@ -21,11 +24,38 @@ class CorridasPg:
 
     def init_schema(self) -> None:
         self.cx.ejecutar_migracion(SCHEMA_PATH.read_text(encoding="utf-8"))
+        self._crear_indice_seq()
+
+    def _crear_indice_seq(self) -> None:
+        """El índice único de (corrida_id, seq), fuera del script del esquema.
+
+        En su PROPIA conexión a propósito: si el CREATE falla, Postgres aborta la
+        transacción entera y cualquier sentencia posterior en la MISMA conexión
+        fallaría también, sin tener nada que ver. Aislado acá, la falla no ensucia
+        nada más.
+
+        Va aparte y con `try` porque una base vieja puede traer duplicados de armados
+        muertos: ahí el índice no se puede crear, y eso NO puede impedir que la app
+        arranque. Lo llaman `init_schema` Y `reset`: son los dos caminos que dejan el
+        esquema listo, y si solo lo hiciera uno, un `seed --force` borraría la
+        protección sin que nadie se entere.
+        """
+        try:
+            with self.cx.connection() as conn:
+                conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_corrida_item_seq "
+                             "ON corridas.corrida_item(corrida_id, seq)")
+        except psycopg.errors.UniqueViolation:
+            logger.error(
+                "No se pudo crear ux_corrida_item_seq: hay (corrida_id, seq) "
+                "duplicados. El armado reanudable no esta protegido hasta "
+                "limpiarlos. Consulta: SELECT corrida_id, seq, COUNT(*) FROM "
+                "corridas.corrida_item GROUP BY 1,2 HAVING COUNT(*) > 1;")
 
     def reset(self) -> None:
         with self.cx.connection() as conn:
             conn.execute("DROP SCHEMA IF EXISTS corridas CASCADE")
             ejecutar_script(conn, SCHEMA_PATH.read_text(encoding="utf-8"))
+        self._crear_indice_seq()
 
     _INSERT_ITEM_SQL = (
         "INSERT INTO corridas.corrida_item "

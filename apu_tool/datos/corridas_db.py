@@ -8,6 +8,7 @@ que persiste es el precio_contractual de entrada, embebido en item_json.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -17,6 +18,8 @@ from typing import Iterator, Optional
 from apu_tool import config
 from apu_tool.datos.repositorio import CorridaEliminada
 from apu_tool.nucleo.models import CorridaItemRow, CorridaMeta, LicitacionItem
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_PATH = config.PROJECT_ROOT / "db" / "corridas.sql"
 
@@ -89,12 +92,36 @@ class CorridasDB:
             else:
                 sc_id = int(sc["id"])
             conn.execute("UPDATE corrida SET carpeta_id=? WHERE carpeta_id IS NULL", (sc_id,))
+            self._crear_indice_seq(conn)
+
+    def _crear_indice_seq(self, conn: sqlite3.Connection) -> None:
+        """El índice único de (corrida_id, seq), fuera del script del esquema.
+
+        Va aparte y con `try` porque una base vieja puede traer duplicados de armados
+        muertos: ahí el índice no se puede crear, y eso NO puede impedir que la app
+        arranque — se quedaría sin servicio hasta que alguien limpie a mano. Se grita
+        en el log con la consulta para encontrarlos.
+
+        Lo llaman `init_schema` Y `reset`: son los dos caminos que dejan el esquema
+        listo, y si solo lo hiciera uno, un `seed --force` borraría la protección sin
+        que nadie se entere.
+        """
+        try:
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_corrida_item_seq "
+                         "ON corrida_item(corrida_id, seq)")
+        except sqlite3.IntegrityError:
+            logger.error(
+                "No se pudo crear ux_corrida_item_seq: hay (corrida_id, seq) "
+                "duplicados. El armado reanudable no esta protegido hasta "
+                "limpiarlos. Consulta: SELECT corrida_id, seq, COUNT(*) FROM "
+                "corrida_item GROUP BY 1,2 HAVING COUNT(*) > 1;")
 
     def reset(self) -> None:
         with self.connect() as conn:
             for t in ("corrida_item", "corrida", "carpeta"):
                 conn.execute(f"DROP TABLE IF EXISTS {t}")
             conn.executescript(_load_schema())
+            self._crear_indice_seq(conn)
 
     # ---- escritura ----
     _INSERT_ITEM_SQL = (
@@ -138,12 +165,20 @@ class CorridasDB:
         Si la corrida ya no existe (la borraron o se reseteó durante el armado), el
         INSERT viola la FK; se traduce a ``CorridaEliminada`` para que la capa de
         servicio cancele el armado limpio en vez de propagar el error de integridad.
+
+        Un ``seq`` repetido (``ux_corrida_item_seq``) es harina de otro costal: la
+        corrida SIGUE existiendo, así que decir ``CorridaEliminada`` sería un mensaje
+        falso. Se distingue por ``sqlite_errorname`` (no por el texto del mensaje,
+        que no está garantizado) y se deja propagar tal cual: mejor un error crudo
+        que uno mentiroso.
         """
         try:
             with self.connect() as conn:
                 conn.execute(self._INSERT_ITEM_SQL, self._item_tuple(corrida_id, fila))
         except sqlite3.IntegrityError as e:
-            raise CorridaEliminada(corrida_id) from e
+            if getattr(e, "sqlite_errorname", "") == "SQLITE_CONSTRAINT_FOREIGNKEY":
+                raise CorridaEliminada(corrida_id) from e
+            raise
 
     def borrar_items(self, corrida_id: int, seqs, conn=None) -> int:
         lista = [int(s) for s in seqs]

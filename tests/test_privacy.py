@@ -48,3 +48,15 @@ def test_costo_manual_es_campo_prohibido():
     denylist aunque hoy ningún payload de la IA lo arme."""
     with pytest.raises(privacy.PrivacyViolation):
         privacy.assert_no_money({"seq": 1, "costo_manual": 92106000.0})
+
+
+def test_plan_json_es_dinero_y_no_pasa():
+    """`corrida.plan_json` guarda las líneas de licitación ya interpretadas, y cada
+    una lleva su `precio_contractual` adentro: es dinero, aunque la clave no lo
+    parezca. CLAUDE.md lo pide literal — todo campo monetario nuevo entra acá.
+
+    Hoy ningún payload hacia la IA lo incluye (la revisión arma el suyo campo por
+    campo), pero el guardián mira NOMBRES DE CLAVE: si no está en la lista, el día que
+    alguien vuelque la fila entera no salta nada."""
+    with pytest.raises(privacy.PrivacyViolation):
+        privacy.assert_no_money({"corrida": {"plan_json": "[]"}})

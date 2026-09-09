@@ -22,7 +22,7 @@ _FORBIDDEN_KEYS = {
     "precio", "precio_unitario", "precio_contractual", "precio_unitario_hist",
     "costo", "costo_unitario", "costo_total", "valor", "valor_unitario",
     "valor_total", "margen", "price", "cost", "amount", "total",
-    "fuente_precio", "costo_manual",
+    "fuente_precio", "costo_manual", "plan_json",
 }
 
 

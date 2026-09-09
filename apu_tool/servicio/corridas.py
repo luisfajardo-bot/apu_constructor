@@ -167,7 +167,14 @@ def crear_corrida_encolada(alm: Almacen, archivo: str, items: list[LicitacionIte
 
 
 def plan_de(alm: Almacen, corrida_id: int) -> list[LicitacionItem]:
-    """Las líneas guardadas al crear la corrida. Lista vacía si no hay plan."""
+    """Las líneas guardadas al crear la corrida. Lista vacía si no hay plan.
+
+    Ojo con el esquema: un campo NUEVO de `LicitacionItem` con default se resuelve
+    callado, así que una corrida encolada antes del deploy reanuda con el default en
+    vez de lo que decía el Excel. Un campo renombrado o borrado, en cambio, levanta
+    `TypeError` — ruidoso, que es lo correcto para el caso peligroso. Si algún día hay
+    que cambiar la forma de `LicitacionItem`, hay que mirar las corridas en cola.
+    """
     crudo = alm.corridas.get_plan(corrida_id)
     if not crudo:
         return []
@@ -277,8 +284,9 @@ def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
     corrida_id = crear_corrida_encolada(alm, archivo, items, turno_def, use_ai,
                                         carpeta_id, nombre, lista_precios_id)
     t0 = time.monotonic()
-    for _evento, _payload in armar_pendientes(alm, corrida_id, items, desde_seq=0):
-        pass
+    for evento, _payload in armar_pendientes(alm, corrida_id, items, desde_seq=0):
+        if evento == "error":
+            return corrida_id       # borraron la corrida a mitad: no hay nada que cerrar
     alm.corridas.finalizar_armado(corrida_id, "en_revision",
                                   duracion_ms=round((time.monotonic() - t0) * 1000))
     return corrida_id
@@ -346,13 +354,17 @@ def agregar_items(alm: Almacen, corrida_id: int,
     if len(items) > MAX_LINEAS_AGREGADAS:
         raise ValueError(f"Máximo {MAX_LINEAS_AGREGADAS} líneas por vez; "
                          f"llegaron {len(items)}. Partí el archivo.")
-    assembler = Assembler(alm, advisor=ApuAdvisor(enabled=meta.use_ai),
+    # Advisor apagado, igual que `armar_pendientes`: las dos entran por `_armar_fila`,
+    # que es el camino ÚNICO del armado, y la IA no participa de ninguna de las dos.
+    # Tener dos políticas para un camino único es cómo se cuela una diferencia.
+    assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False),
                           lista_id=meta.lista_precios_id)
     # El seq sigue desde el máximo y los huecos que dejó un borrado NO se reusan: el
     # seq es la clave del snapshot y de la URL del ítem.
-    # ponytail: se lee fuera de transacción, y corrida_item no tiene UNIQUE
-    # (corrida_id, seq) sino un índice; dos usuarios agregando en el mismo instante
-    # podrían pedir el mismo seq. Si llega a pasar, el arreglo es el índice UNIQUE.
+    # Se lee fuera de transacción: dos usuarios agregando en el mismo instante podrían
+    # pedir el mismo seq. Desde `ux_corrida_item_seq` eso ya NO entra callado — el
+    # segundo INSERT revienta y el usuario reintenta —, así que la carrera dejó de
+    # poder duplicar una actividad en el cuadro, que era el daño real.
     siguiente = max((r.seq for r in alm.corridas.get_items(corrida_id)), default=-1) + 1
     for k, item in enumerate(items):
         seq = siguiente + k

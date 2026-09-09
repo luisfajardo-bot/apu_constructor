@@ -674,3 +674,18 @@ def test_borrar_lineas_mientras_arma_da_error(tmp_path):
     alm.corridas.finalizar_armado(cid, "en_revision")
     svc.borrar_items(alm, cid, [1])                        # ya terminada: sí deja
     assert len(alm.corridas.get_items(cid)) == 1
+
+
+def test_el_endpoint_de_borrar_traduce_el_armando_a_400(tmp_path):
+    """El test de arriba prueba el servicio; este prueba la RUTA. Sin el
+    `except ValueError` de `rutas.py`, la guarda sigue funcionando pero el usuario
+    recibe un 500 opaco en vez del motivo — y la suite quedaría verde igual."""
+    cli, alm = _cliente(tmp_path)
+    items = [_item_plan("ACTIVIDAD A"), _item_plan("ACTIVIDAD B")]
+    cid = svc.crear_corrida_encolada(alm, "x.xlsx", items, "DIURNO", None,
+                                     carpeta_id=_carpeta(cli))
+    for _ in svc.armar_pendientes(alm, cid, items):
+        pass
+    r = cli.post(f"/api/corridas/{cid}/items/borrar", json={"seqs": [1]})
+    assert r.status_code == 400, r.text
+    assert "armando" in r.json()["detail"]

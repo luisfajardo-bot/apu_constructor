@@ -4,6 +4,7 @@ from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.licitacion import write_sample_licitacion
 from apu_tool.nucleo.models import (
     Apu, ApuComponent, CorridaItemRow, CorridaMeta, Insumo, LicitacionItem)
+from apu_tool.servicio import corridas as svc
 from apu_tool.servicio.app import create_app
 from tests.conftest import cliente
 
@@ -501,3 +502,101 @@ def test_igualar_costo_rol_editor_permitido(tmp_path):
     cid = _corrida_especial(alm)
     r = cli.post(f"/api/corridas/{cid}/igualar-costo", json={"seqs": [0]})
     assert r.status_code == 200, r.text
+
+
+# --------------------------------------------------------------------------
+# Armado partido en dos: crear-encolada + armar-pendientes (el worker entra por
+# el medio, en el ítem donde quedó).
+# --------------------------------------------------------------------------
+def _item_plan(desc: str, **kw) -> LicitacionItem:
+    base = dict(item="1", descripcion=desc, unidad="M3", cantidad=10.0,
+                precio_contractual=400000.0, shift="DIURNO")
+    base.update(kw)
+    return LicitacionItem(**base)
+
+
+def _carpeta(cli) -> int:
+    return cli.post("/api/carpetas", json={"nombre": "Obra"}).json()["id"]
+
+
+def test_armar_pendientes_arranca_donde_se_le_dice(tmp_path):
+    """El worker reanuda por el medio: con desde_seq=2 no vuelve a armar 0 y 1."""
+    cli, alm = _cliente(tmp_path)
+    items = [_item_plan(f"ACTIVIDAD {i}") for i in range(4)]
+    cid = svc.crear_corrida_encolada(alm, "x.xlsx", items, "DIURNO", None,
+                                     carpeta_id=_carpeta(cli))
+    eventos = list(svc.armar_pendientes(alm, cid, items, desde_seq=2))
+    armados = [p["i"] for e, p in eventos if e == "progress"]
+    assert armados == [3, 4]                       # 1-based: solo los seq 2 y 3
+    assert [r.seq for r in alm.corridas.get_items(cid)] == [2, 3]
+
+
+def test_crear_corrida_encolada_guarda_el_plan_y_no_arma(tmp_path):
+    """Encolar es crear + guardar el plan. Ni una fila armada: eso es del worker."""
+    cli, alm = _cliente(tmp_path)
+    items = [_item_plan("Concreto clase D"), _item_plan("ACTIVIDAD 2")]
+    cid = svc.crear_corrida_encolada(alm, "x.xlsx", items, "DIURNO", None,
+                                     carpeta_id=_carpeta(cli))
+    assert alm.corridas.get_corrida(cid).estado == "armando"
+    assert alm.corridas.get_plan(cid)                      # el plan quedó guardado
+    assert alm.corridas.get_items(cid) == []               # y NADA armado
+
+
+def test_plan_de_devuelve_exactamente_lo_guardado(tmp_path):
+    """Round-trip del plan. Si perdiera un campo, el armado reanudado costearía
+    distinto que el original y en silencio."""
+    cli, alm = _cliente(tmp_path)
+    items = [_item_plan("Concreto clase D", item="7", unidad="M2", cantidad=3.5,
+                        precio_contractual=123456.0, shift="NOCTURNO",
+                        categoria="ESTRUCTURAS", codigo_sugerido="A1"),
+             _item_plan("ACTIVIDAD 2")]
+    cid = svc.crear_corrida_encolada(alm, "x.xlsx", items, "DIURNO", None,
+                                     carpeta_id=_carpeta(cli))
+    assert svc.plan_de(alm, cid) == items                  # dataclass: compara campo a campo
+
+
+def test_plan_de_sin_plan_es_lista_vacia(tmp_path):
+    _cli, alm = _cliente(tmp_path)
+    cid = _corrida_especial(alm)                           # creada sin pasar por encolar
+    assert svc.plan_de(alm, cid) == []
+
+
+def test_un_item_que_revienta_no_tumba_el_armado(tmp_path, monkeypatch):
+    """Un ítem venenoso cuesta una fila, no 1900: queda sin APU con el motivo a la
+    vista y el armado sigue con los que faltan."""
+    cli, alm = _cliente(tmp_path)
+    items = [_item_plan(f"Concreto clase D {i}") for i in range(3)]
+    cid = svc.crear_corrida_encolada(alm, "x.xlsx", items, "DIURNO", None,
+                                     carpeta_id=_carpeta(cli))
+    real = svc._armar_fila
+
+    def _explota(assembler, item, seq):
+        if seq == 1:
+            raise RuntimeError("insumo maldito")
+        return real(assembler, item, seq)
+
+    monkeypatch.setattr(svc, "_armar_fila", _explota)
+    eventos = list(svc.armar_pendientes(alm, cid, items))
+    assert [p["i"] for e, p in eventos if e == "progress"] == [1, 2, 3]
+
+    filas = {r.seq: r for r in alm.corridas.get_items(cid)}
+    assert set(filas) == {0, 1, 2}
+    assert filas[0].apu_codigo == "A1" and filas[2].apu_codigo == "A1"   # los sanos, armados
+    envenenada = filas[1]
+    assert envenenada.apu_codigo is None
+    assert "insumo maldito" in envenenada.explicacion
+    assert svc.seqs_sin_apu(filas.values()) == [1]         # cae sola en el candado
+
+
+def test_construir_corrida_arma_todo_y_finaliza(tmp_path):
+    """REGRESION del camino sincrónico (CLI/GUI): crea, arma todo en el acto y
+    termina en 'en_revision' con la duración guardada."""
+    cli, alm = _cliente(tmp_path)
+    items = [_item_plan("Concreto clase D"), _item_plan("Concreto clase D", item="2")]
+    cid = svc.construir_corrida(alm, "lic.xlsx", items, "DIURNO", False,
+                                carpeta_id=_carpeta(cli))
+    meta = alm.corridas.get_corrida(cid)
+    assert meta.estado == "en_revision"
+    assert isinstance(meta.duracion_ms, int) and meta.duracion_ms >= 0
+    assert [r.seq for r in alm.corridas.get_items(cid)] == [0, 1]
+    assert svc.vista_corrida(alm, cid)["totales"]["n_items"] == 2

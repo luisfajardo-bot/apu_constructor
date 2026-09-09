@@ -7,8 +7,10 @@ el equipo), pero nunca abre un camino hacia la IA.
 """
 from __future__ import annotations
 
+import json
+import logging
 import time
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
@@ -27,6 +29,8 @@ from apu_tool.nucleo.models import (
 )
 from apu_tool.nucleo.texto import normalizar
 from apu_tool.servicio.auditoria import registrar_auditoria
+
+logger = logging.getLogger(__name__)
 
 
 class CorridaCongelada(Exception):
@@ -103,7 +107,7 @@ def _armar_fila(assembler: Assembler, item: LicitacionItem,
     se reusan en `assemble_item()` para elegir el APU final (mismo resultado
     determinístico, sin recalcular el matcher).
 
-    Es el camino ÚNICO del armado: lo usan el armado inicial (`construir_corrida_stream`)
+    Es el camino ÚNICO del armado: lo usan el armado inicial (`armar_pendientes`)
     y las líneas que se agregan después (`agregar_items`), para que no puedan divergir.
     """
     result = assembler.matcher.match(item)
@@ -119,37 +123,96 @@ def _armar_fila(assembler: Assembler, item: LicitacionItem,
     return ens, fila
 
 
-def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
-                             turno_def: str, use_ai: Optional[bool],
-                             carpeta_id: Optional[int] = None,
-                             nombre: Optional[str] = None,
-                             lista_precios_id: Optional[int] = None):
-    """Arma la corrida de forma INCREMENTAL, emitiendo eventos:
-      ('started', {'id', 'total'})           — al crear la corrida (estado 'armando').
-      ('progress', {'i','total','descripcion','fila'}) — por ítem, con la fila ya
-                                                costeada; el ítem ya quedó persistido.
-      ('done', {'id','resumen','duracion_ms'}) — al terminar (estado 'en_revision').
-      ('error', {'detail': ...})             — si la corrida se borra/resetea a mitad
-                                                (cancelación limpia, sin FK crudo).
+def _fila_sin_apu(item: LicitacionItem, seq: int,
+                  motivo: str) -> tuple[AssembledApu, CorridaItemRow]:
+    """La fila que queda cuando armar un ítem revienta: sin APU, en $0 y con el motivo
+    a la vista.
 
-    Cada APU se guarda al armarlo (no todo al final), así la tabla se llena en vivo y
-    lo ya armado sobrevive si se abandona. La corrida nace 'armando'; si desaparece
-    durante el armado, `agregar_item` lanza CorridaEliminada y se cancela."""
-    advisor = ApuAdvisor(enabled=use_ai)
-    assembler = Assembler(alm, advisor=advisor, lista_id=lista_precios_id)
+    No inventa una forma nueva: es la misma que `assemble_item` deja para un ítem bajo
+    el umbral (sin APU, sin componentes, status `new`, origen manual), con otro nombre
+    para que se distinga de "no había nada parecido en la biblioteca"."""
+    ens = AssembledApu(
+        item=item, apu_codigo=None, apu_nombre="(no se pudo armar)",
+        unidad=item.unidad, shift=item.shift, componentes=[], costo_unitario=0.0,
+        status=MatchStatus.NEW, confianza=0.0, origen="manual", explicacion=motivo)
+    fila = CorridaItemRow(
+        seq=seq, item=item, status=ens.status.value, apu_codigo=None,
+        apu_nombre=ens.apu_nombre, unidad=ens.unidad, shift=ens.shift,
+        origen=ens.origen, confianza=ens.confianza, explicacion=motivo,
+        componentes=[], candidatos=[])
+    return ens, fila
+
+
+def crear_corrida_encolada(alm: Almacen, archivo: str, items: list[LicitacionItem],
+                           turno_def: str, use_ai: Optional[bool],
+                           carpeta_id: Optional[int] = None,
+                           nombre: Optional[str] = None,
+                           lista_precios_id: Optional[int] = None) -> int:
+    """Crea la corrida en 'armando' con su plan guardado y devuelve el id. NO arma:
+    de eso se encarga quien llame a `armar_pendientes` — el camino sincrónico de la
+    CLI/GUI, o el worker, que la ve porque `estado='armando'` ES la cola.
+
+    Guardar el plan es lo que hace posible reanudar: el Excel subido no se persiste,
+    así que sin esto un reinicio deja la corrida a medias sin forma de continuar.
+    """
     nombre_efectivo = (nombre or "").strip()[:120].strip() or nombre_desde_archivo(archivo)
     corrida_id = alm.corridas.crear_corrida(CorridaMeta(
         id=None, creada_en=datetime.now().isoformat(timespec="seconds"),
         archivo=archivo, turno_def=turno_def, use_ai=use_ai,
         estado="armando", cuadro_path=None, carpeta_id=carpeta_id,
         nombre=nombre_efectivo, lista_precios_id=lista_precios_id))
+    alm.corridas.set_plan(corrida_id, json.dumps([asdict(i) for i in items],
+                                                 ensure_ascii=False))
+    return corrida_id
+
+
+def plan_de(alm: Almacen, corrida_id: int) -> list[LicitacionItem]:
+    """Las líneas guardadas al crear la corrida. Lista vacía si no hay plan."""
+    crudo = alm.corridas.get_plan(corrida_id)
+    if not crudo:
+        return []
+    return [LicitacionItem(**d) for d in json.loads(crudo)]
+
+
+def armar_pendientes(alm: Almacen, corrida_id: int, items: list[LicitacionItem],
+                     desde_seq: int = 0):
+    """Arma los ítems de `items` desde el índice `desde_seq`, emitiendo:
+      ('progress', {'i','total','descripcion','fila'}) — por ítem YA persistido, con la
+                                                fila costeada; `i` es 1-based y `total`
+                                                es el plan entero.
+      ('error', {'detail': ...})               — la corrida se borró a mitad
+                                                (cancelación limpia, sin FK crudo).
+
+    `desde_seq` es por donde entra el worker al reanudar: el seq de una fila ES su
+    índice en el plan, así que arrancar en el índice N es seguir donde quedó. Cada APU
+    se guarda al armarlo (no todo al final), así la tabla se llena en vivo y lo ya
+    armado sobrevive a un reinicio.
+
+    Un ítem que revienta NO tumba la corrida: se persiste sin APU con el motivo en
+    `explicacion` y el armado sigue. Un ítem venenoso cuesta una fila, no 1900. Esa
+    fila cae sola en el candado de `seqs_sin_apu` (que impide emitir el cuadro), y si
+    no vale la pena armarle el APU se le puede igualar el costo al contractual, que
+    abre ese candado a propósito.
+    """
+    # `enabled=False` y no `use_ai`: el armado NUNCA llama a la IA (audita después, ver
+    # dominio/revision.py; hay un test que lo fija). El Assembler sigue pidiendo un
+    # advisor solo por `generar_composicion`, que es a pedido explícito del usuario y
+    # no pasa por acá; pasarle uno apagado deja la puerta cerrada de este lado.
+    meta = alm.corridas.get_corrida(corrida_id)
+    assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False),
+                          lista_id=meta.lista_precios_id if meta else None)
     total = len(items)
-    yield ("started", {"id": corrida_id, "total": total})
-    t0 = time.monotonic()
-    for seq, item in enumerate(items):
+    for seq in range(desde_seq, total):
+        item = items[seq]
         i = seq + 1
+        # El ritmo real por ítem se mide con esto en los logs de Render (2,8 s/ítem):
+        # sacarlo nos deja ciegos justo cuando queramos atacar la velocidad.
         print(f"  [{i}/{total}] {item.descripcion[:60]}", flush=True)
-        ens, fila = _armar_fila(assembler, item, seq)
+        try:
+            ens, fila = _armar_fila(assembler, item, seq)
+        except Exception as exc:   # noqa: BLE001 — un ítem venenoso no mata la corrida
+            logger.exception("Fallo al armar el ítem %s de la corrida %s", seq, corrida_id)
+            ens, fila = _fila_sin_apu(item, seq, f"No se pudo armar: {exc}")
         try:
             alm.corridas.agregar_item(corrida_id, fila)
         except CorridaEliminada:
@@ -158,9 +221,31 @@ def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionI
         yield ("progress", {"i": i, "total": total,
                             "descripcion": item.descripcion,
                             "fila": _vista_item(ens, seq, ens.status.value)})
+
+
+def construir_corrida_stream(alm: Almacen, archivo: str, items: list[LicitacionItem],
+                             turno_def: str, use_ai: Optional[bool],
+                             carpeta_id: Optional[int] = None,
+                             nombre: Optional[str] = None,
+                             lista_precios_id: Optional[int] = None):
+    """Crea y arma en el acto, emitiendo el SSE que la pantalla de hoy espera:
+      ('started', {'id','total'}) · los ('progress'/'error') de `armar_pendientes` ·
+      ('done', {'id','resumen','duracion_ms'}) al terminar (estado 'en_revision').
+
+    Es solo la costura entre las tres piezas de arriba y los endpoints
+    `/corridas/stream` y `/sample/stream`, que todavía arman DENTRO de la petición
+    HTTP. Se va cuando la API pase a solo encolar y el armado sea del worker.
+    """
+    corrida_id = crear_corrida_encolada(alm, archivo, items, turno_def, use_ai,
+                                        carpeta_id, nombre, lista_precios_id)
+    yield ("started", {"id": corrida_id, "total": len(items)})
+    t0 = time.monotonic()
+    for evento, payload in armar_pendientes(alm, corrida_id, items, desde_seq=0):
+        yield (evento, payload)
+        if evento == "error":
+            return                      # la corrida ya no existe: no hay qué finalizar
     duracion_ms = round((time.monotonic() - t0) * 1000)
-    alm.corridas.set_estado(corrida_id, "en_revision")
-    alm.corridas.set_duracion(corrida_id, duracion_ms)
+    alm.corridas.finalizar_armado(corrida_id, "en_revision", duracion_ms=duracion_ms)
     resumen = vista_corrida(alm, corrida_id)["totales"]
     yield ("done", {"id": corrida_id, "resumen": resumen, "duracion_ms": duracion_ms})
 
@@ -170,13 +255,15 @@ def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
                       carpeta_id: Optional[int] = None,
                       nombre: Optional[str] = None,
                       lista_precios_id: Optional[int] = None) -> int:
-    """Envoltorio no-stream: drena el generador e ignora el progreso; devuelve el id."""
-    corrida_id = -1
-    for evento, payload in construir_corrida_stream(alm, archivo, items, turno_def,
-                                                    use_ai, carpeta_id, nombre,
-                                                    lista_precios_id):
-        if evento == "done":
-            corrida_id = payload["id"]
+    """Crea y arma en el acto, sin worker ni cola. Lo usan la CLI, la GUI y los tests:
+    ahí no hay proceso de fondo que espere, y las listas son chicas."""
+    corrida_id = crear_corrida_encolada(alm, archivo, items, turno_def, use_ai,
+                                        carpeta_id, nombre, lista_precios_id)
+    t0 = time.monotonic()
+    for _evento, _payload in armar_pendientes(alm, corrida_id, items, desde_seq=0):
+        pass
+    alm.corridas.finalizar_armado(corrida_id, "en_revision",
+                                  duracion_ms=round((time.monotonic() - t0) * 1000))
     return corrida_id
 
 

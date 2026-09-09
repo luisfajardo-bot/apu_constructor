@@ -1188,6 +1188,36 @@ git commit -m "feat(armado): worker que consume la cola que vive en la base"
 
 ---
 
+## ⚠️ ORDEN CORREGIDO: la Tarea 10 va ANTES que la 9
+
+**Descubierto y reproducido durante la revisión de la Tarea 8.** El plan original ponía
+la 9 (arrancar el worker) antes que la 10 (que la API deje de armar en el request).
+Ese orden **deja la app rota entre las dos tareas**.
+
+Por qué: los cuatro endpoints que todavía arman dentro de la petición
+(`rutas.py`, `construir_corrida` / `construir_corrida_stream`) crean la corrida con
+`estado='armando'` y `armando_desde=NULL` — o sea que **entran a la cola en el instante
+en que nacen y nunca la reclaman**. Apenas la Tarea 9 llame a `arrancar()`, el worker se
+las lleva a mitad de la petición. Reproducido en proceso:
+
+```
+[1/6] ...                    <- la peticion HTTP armo el item 0
+worker: un_ciclo -> True     <- el worker armo 1..5 y la cerro
+EL STREAM REVIENTA: IntegrityError UNIQUE ... corrida_item.corrida_id, seq
+estado final: en_revision
+```
+
+El `UNIQUE (corrida_id, seq)` de la Tarea 4 salva el dato —no salen actividades
+duplicadas, que es justo para lo que está— pero el usuario se come un 500 a mitad del
+stream y la corrida se cierra por debajo.
+
+**Entonces: hacé la Tarea 10 primero.** Si por alguna razón tienen que ir en deploys
+separados, el orden obligatorio es 10 y después 9; nunca al revés. La precondición
+quedó escrita también en el docstring de `apu_tool/servicio/armador.py`, que es donde
+la va a leer el próximo.
+
+---
+
 ## Tarea 9: Arrancar el worker con la app
 
 **Files:**

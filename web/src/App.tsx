@@ -11,11 +11,10 @@ import Insumos from "@/pages/Insumos";
 import Apus from "@/pages/Apus";
 import Usuarios from "@/pages/Usuarios";
 import Auditoria from "@/pages/Auditoria";
-import { ArmadoVivoProvider } from "@/lib/armado";
 
 export default function App() {
   return (
-    <ArmadoVivoProvider>
+    <>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/definir-clave" element={<DefinirClave />} />
@@ -36,6 +35,6 @@ export default function App() {
       </Routes>
       {/* Toaster global: cubre también /login y /definir-clave (fuera del Layout). */}
       <Toaster richColors position="top-right" />
-    </ArmadoVivoProvider>
+    </>
   );
 }

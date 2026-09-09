@@ -380,7 +380,9 @@ export default function MisCorridas() {
                       </td>
                       <td className={cn(CLASE_TD, CLASE_NUM)}>{fmtDuracion(c.duracion_ms)}</td>
                       <td className={CLASE_TD}>
-                        <span className={cn(CLASE_BADGE, claseEstado(c.estado))}>{c.estado}</span>
+                        <span className={cn(CLASE_BADGE, badgeEstado(c.estado).cls)}>
+                          {badgeEstado(c.estado).texto}
+                        </span>
                       </td>
                       <td className={CLASE_TD}>
                         <span
@@ -447,23 +449,29 @@ export function claseSigno(n: number | null): string | undefined {
   return n >= 0 ? "text-margen-pos" : "text-margen-neg";
 }
 
-/** Clase del badge de estado de una corrida. Los cinco casos son los mismos de antes;
- *  lo que cambia es que salen de tokens y no de hex sueltos. */
-function claseEstado(estado: string): string {
+/** Badge de estado de una corrida: texto y clase, juntos porque son la misma decisión.
+ *
+ *  Los estados del armado son los que hay que poder distinguir de un vistazo: una
+ *  corrida a medio armar se veía igual que una terminada, y `armado_detenido` salía
+ *  crudo, con guion bajo. Que una corrida detenida se lea "Detenida" y en rojo es
+ *  justamente lo que hace que alguien entre a reanudarla. */
+function badgeEstado(estado: string): { texto: string; cls: string } {
   switch (estado.toLowerCase()) {
     case "ok":
     case "listo":
-      return "bg-margen-pos-surface text-margen-pos";
+      return { texto: estado, cls: "bg-margen-pos-surface text-margen-pos" };
     case "armando":
-      return "bg-info-surface text-info";
+      return { texto: "Armando…", cls: "bg-info-surface text-info" };
+    case "armado_detenido":
+      return { texto: "Armado detenido", cls: "bg-destructive-surface text-destructive" };
     case "revision":
     case "en_revision":
     case "por_revisar":
-      return "bg-revisar-surface text-revisar";
+      return { texto: estado, cls: "bg-revisar-surface text-revisar" };
     case "error":
-      return "bg-destructive-surface text-destructive";
+      return { texto: estado, cls: "bg-destructive-surface text-destructive" };
     default:
-      return "bg-muted text-muted-foreground";
+      return { texto: estado, cls: "bg-muted text-muted-foreground" };
   }
 }
 

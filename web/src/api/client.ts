@@ -28,12 +28,38 @@ export function mensajeDeError(cuerpo: unknown, respaldo: string): string {
   return respaldo;
 }
 
+/** Error de la API que además conserva el `detail` crudo y el status.
+ *
+ *  `message` es el de siempre, así que quien solo hace `e instanceof Error ? e.message`
+ *  no cambia. Lo que se gana es el `detail` estructurado: los endpoints que devuelven
+ *  un objeto (el 409 de las filas sin APU con sus `seqs`, el del armado duplicado con
+ *  su `corrida_id`) traen ahí datos que la interfaz necesita para ACTUAR — navegar a la
+ *  corrida que ya existe— y que el mensaje solo tiene en prosa. Sacarlos de la prosa a
+ *  punta de regex sería peor. */
+export class ErrorApi extends Error {
+  status: number;
+  detail: unknown;
+  constructor(mensaje: string, status: number, detail: unknown) {
+    super(mensaje);
+    this.name = "ErrorApi";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 async function manejar(r: Response): Promise<Response> {
   if (r.status === 401) {
     await supabase.auth.signOut(); // sesión inválida -> redirección reactiva a /login
     throw new Error("Sesión expirada.");
   }
-  if (!r.ok) throw new Error(mensajeDeError(await r.json().catch(() => null), r.statusText));
+  if (!r.ok) {
+    const cuerpo = await r.json().catch(() => null);
+    throw new ErrorApi(
+      mensajeDeError(cuerpo, r.statusText),
+      r.status,
+      (cuerpo as { detail?: unknown } | null)?.detail,
+    );
+  }
   return r;
 }
 

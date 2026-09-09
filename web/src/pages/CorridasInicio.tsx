@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { useArmadoVivo } from "@/lib/armado";
+import { crearCorrida, crearSample, corridaEnCurso } from "@/api/corridas";
 import { listarCarpetas, crearCarpeta } from "@/api/carpetas";
 import { listarListas } from "@/api/listas";
 import { LISTA_PRINCIPAL_ID, type CarpetaNodo, type ListaPrecios } from "@/lib/tipos";
@@ -10,9 +10,14 @@ import { Input } from "@/components/ui/input";
 
 export default function CorridasInicio() {
   const navigate = useNavigate();
-  const { armarArchivo, armarEjemplo } = useArmadoVivo();
   const fileRef = useRef<HTMLInputElement>(null);
   const [cargando, setCargando] = useState(false);
+  // Gemelo de `cargando` en un ref porque el candado tiene que valer YA, no en el
+  // próximo render: un Enter sostenido (o un doble clic rápido) dispara dos submits
+  // antes de que React vuelva a pintar, y los dos leerían `cargando === false`.
+  // Antes esto no se notaba porque el botón tardaba HORAS en volver; ahora vuelve al
+  // instante y el segundo envío encolaría otro armado del mismo Excel.
+  const enVuelo = useRef(false);
   const [nombre, setNombre] = useState("");
   const [nombreTocado, setNombreTocado] = useState(false);
 
@@ -98,6 +103,31 @@ export default function CorridasInicio() {
     if (f && !nombreTocado) setNombre(stripExt(f.name));
   }
 
+  /** Encola y navega. Todo lo que crea corridas pasa por acá para que el candado
+   *  contra el doble envío y el rescate del 409 sean uno solo, no dos copias. */
+  async function encolar(pedir: () => Promise<{ id: number }>, respaldo: string) {
+    if (enVuelo.current) return;      // segundo submit del mismo tirón: se ignora
+    enVuelo.current = true;
+    setCargando(true);
+    try {
+      const c = await pedir();
+      navigate(`/corridas/${c.id}`);
+    } catch (err) {
+      // El 409 del armado duplicado NO es un error del usuario: es el mismo armado
+      // que acaba de pedir. Se lo lleva ahí en vez de dejarlo con un cartel rojo.
+      const yaExiste = corridaEnCurso(err);
+      if (yaExiste !== null) {
+        toast.warning("Ese archivo ya se está armando; te llevamos a esa corrida.");
+        navigate(`/corridas/${yaExiste}`);
+      } else {
+        toast.error(err instanceof Error ? err.message : respaldo);
+      }
+    } finally {
+      enVuelo.current = false;
+      setCargando(false);
+    }
+  }
+
   async function handleArmar(e: React.FormEvent) {
     e.preventDefault();
     if (carpetaDestino == null) {
@@ -114,28 +144,11 @@ export default function CorridasInicio() {
     form.append("carpeta_id", String(carpetaDestino));
     form.append("nombre", nombre.trim());
     if (listaId !== LISTA_PRINCIPAL_ID) form.append("lista_id", String(listaId));
-    const listaElegida = listaId !== LISTA_PRINCIPAL_ID
-      ? { id: listaId, nombre: listas.find((l) => l.id === listaId)?.nombre ?? "" }
-      : undefined;
-    setCargando(true);
-    try {
-      await armarArchivo(form, (id) => navigate(`/corridas/${id}`), listaElegida);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Error al crear la corrida");
-    } finally {
-      setCargando(false);
-    }
+    await encolar(() => crearCorrida(form), "Error al crear la corrida");
   }
 
   async function handleEjemplo() {
-    setCargando(true);
-    try {
-      await armarEjemplo((id) => navigate(`/corridas/${id}`));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Error al crear corrida de ejemplo");
-    } finally {
-      setCargando(false);
-    }
+    await encolar(crearSample, "Error al crear corrida de ejemplo");
   }
 
   return (

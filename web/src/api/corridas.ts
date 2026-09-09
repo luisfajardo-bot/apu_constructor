@@ -1,10 +1,11 @@
-import { apiGet, apiPost, apiDelete, authHeader, descargarArchivo, mensajeDeError } from "@/api/client";
+import { apiGet, apiPost, apiDelete, authHeader, descargarArchivo, mensajeDeError, ErrorApi } from "@/api/client";
 import type {
   AsignacionIA,
   ComposicionPropuesta,
   StatusResponse,
   CorridaCreada,
   CorridaDetalle,
+  CorridaEncolada,
   CorridaIniciada,
   CorridaResumen,
   DetalleItem,
@@ -20,12 +21,35 @@ export function getStatus(): Promise<StatusResponse> {
   return apiGet<StatusResponse>("/status");
 }
 
-export function crearSample(): Promise<CorridaCreada> {
-  return apiPost<CorridaCreada>("/sample");
+/** Encola el ejemplo. Vuelve en el acto: `estado` llega en 'armando' y lo que se ve
+ *  después sale del poll de `getCorrida`, no de esta respuesta. */
+export function crearSample(): Promise<CorridaEncolada> {
+  return apiPost<CorridaEncolada>("/sample");
 }
 
-export function crearCorrida(form: FormData): Promise<CorridaCreada> {
-  return apiPost<CorridaCreada>("/corridas", form);
+/** Encola el armado del archivo subido. Vuelve en el acto (armar 1900 líneas lleva
+ *  horas y no cabe en una petición HTTP); el progreso sale del poll de `getCorrida`.
+ *  Rebota con 409 si ya hay un armado a medias del mismo archivo en la misma carpeta:
+ *  ese error trae el id, y `corridaEnCurso` lo saca. */
+export function crearCorrida(form: FormData): Promise<CorridaEncolada> {
+  return apiPost<CorridaEncolada>("/corridas", form);
+}
+
+/** Devuelve a la cola una corrida en `armado_detenido` (rol editor). Lo ya armado se
+ *  conserva: el worker entra donde quedó. */
+export function reanudarArmado(id: number): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/reanudar`);
+}
+
+/** El id de la corrida que YA se está armando, si `e` es el 409 del doble clic.
+ *  `null` para cualquier otro error — incluido un 409 de otra cosa, que no trae id.
+ *
+ *  Existe porque ese 409 no es un error del usuario: es el mismo armado que acaba de
+ *  pedir. Con el id se lo lleva ahí; sin él, el doble clic termina en un cartel rojo. */
+export function corridaEnCurso(e: unknown): number | null {
+  if (!(e instanceof ErrorApi) || e.status !== 409) return null;
+  const id = (e.detail as { corrida_id?: unknown } | null)?.corrida_id;
+  return typeof id === "number" ? id : null;
 }
 
 export function listarCorridas(): Promise<CorridaResumen[]> {

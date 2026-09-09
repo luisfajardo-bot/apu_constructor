@@ -21,6 +21,26 @@ export interface CorridaIniciada {
   total: number;
 }
 
+/** Respuesta de crear una corrida: se ENCOLÓ, no se armó. Armar 1900 líneas lleva
+ *  horas y la petición vuelve en el acto; el progreso sale del poll de la corrida. */
+export interface CorridaEncolada {
+  id: number;
+  total: number;
+  estado: string;
+}
+
+/** Cómo va el armado que corre en el servidor. `null` cuando la corrida ya terminó
+ *  de armarse: un progreso al 100 % que no se apaga es peor que nada. */
+export interface ProgresoArmado {
+  hechos: number;
+  total: number;
+  /** 0 = le toca ahora (o ya está armándose); > 0 = está esperando su turno. */
+  posicion_en_cola: number;
+  intentos: number;
+  /** Motivo por el que se rindió. Puede traer pegada la cola técnica del error real. */
+  ultimo_error: string | null;
+}
+
 export interface Totales {
   contractual: number;
   costo: number;
@@ -289,6 +309,8 @@ export interface CorridaDetalle {
   lista_nombre: string;
   // Apaga el botón "Revisar con IA" cuando el servidor no tiene ANTHROPIC_API_KEY.
   ia_disponible: boolean;
+  /** Solo con estado 'armando' o 'armado_detenido'; `null` si ya terminó de armarse. */
+  armado: ProgresoArmado | null;
   /** Solo en la respuesta de `igualarCostoAlContractual`. */
   igualadas?: number[];
   /** Seqs con contractual ≤ 0: no se tocan (regla "nada en $0"). */

@@ -6,17 +6,31 @@ import TablaItems from "@/components/corrida/TablaItems";
 import { DialogoAgregarLineas } from "@/components/corrida/DialogoAgregarLineas";
 import {
   getCorrida, descargarCuadro, congelarCorrida, activarCorrida,
-  revisarCorridaStream, aplicarSugerencias,
+  revisarCorridaStream, aplicarSugerencias, reanudarArmado,
 } from "@/api/corridas";
 import { cop, pct } from "@/lib/moneda";
 import { fmtDuracion } from "@/lib/tiempo";
-import { useArmadoVivo } from "@/lib/armado";
 import { useCorridaTabla, SIN_APU } from "@/lib/corridaTabla";
 import { useAuth } from "@/lib/auth";
 import { puede } from "@/components/rutas";
 import type { AsignacionIA, CorridaDetalle, ItemCuadro, Totales } from "@/lib/tipos";
 
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
+
+/** Cada cuánto se relee una corrida que se está armando. 5 s y no 2: el armado dura
+ *  de una a tres horas, así que el poll vive miles de ciclos y cada uno recostea la
+ *  corrida entera del lado del servidor. */
+const POLL_ARMANDO_MS = 5000;
+
+/** Parte el motivo de un armado detenido en lo que le habla a una persona y la cola
+ *  técnica que el backend le pega detrás ("Último error: RuntimeError: ..."). Lo
+ *  técnico sirve para reportar el problema, pero no puede ser EL mensaje: quien lee
+ *  necesita primero saber qué hacer. */
+function partirMotivo(motivo: string): { humano: string; tecnico: string } {
+  const i = motivo.indexOf("Último error:");
+  if (i < 0) return { humano: motivo.trim(), tecnico: "" };
+  return { humano: motivo.slice(0, i).trim(), tecnico: motivo.slice(i).trim() };
+}
 
 function totalesDe(filas: ItemCuadro[]): Totales {
   const contractual = filas.reduce((s, f) => s + f.contractual_total, 0);
@@ -35,8 +49,6 @@ function totalesDe(filas: ItemCuadro[]): Totales {
 export default function Corrida() {
   const { id } = useParams<{ id: string }>();
   const corridaId = Number(id);
-  const vivo = useArmadoVivo();
-  const live = vivo.corridaId === corridaId && vivo.estado === "armando";
   const { perfil } = useAuth();
 
   const [corrida, setCorrida] = useState<CorridaDetalle | null>(null);
@@ -50,6 +62,11 @@ export default function Corrida() {
     | null
   >(null);
   const [aplicando, setAplicando] = useState(false);
+  const [reanudando, setReanudando] = useState(false);
+  // Bumpearlo relanza el efecto de carga —y con él la cadena del poll, que se corta
+  // sola cuando la corrida deja de estar 'armando'. Es lo que hace que reanudar
+  // vuelva a mostrar el progreso sin recargar la página a mano.
+  const [recarga, setRecarga] = useState(0);
   const control = useCorridaTabla(corrida?.items ?? []);
   // La revisión de 300 líneas dura minutos: el usuario se va de la página mucho
   // antes de que termine. El stream sigue (y el backend sigue guardando), pero acá
@@ -70,6 +87,26 @@ export default function Corrida() {
     }
   }
 
+  /** Devuelve la corrida a la cola. Refresca por el efecto (no por la respuesta):
+   *  así vuelve a arrancar el poll, que la respuesta sola no reanimaría. */
+  async function reanudar() {
+    if (reanudando) return;
+    setReanudando(true);
+    try {
+      await reanudarArmado(corridaId);
+      toast.success("El armado volvió a la cola.");
+    } catch (e) {
+      // Incluye el 409 "ya está en la cola" de cuando otra persona la reanudó antes:
+      // se dice qué pasó y se relee igual, que es lo que deja la pantalla al día.
+      toast.error(e instanceof Error ? e.message : "No se pudo reanudar el armado.");
+    } finally {
+      if (montado.current) {
+        setReanudando(false);
+        setRecarga((n) => n + 1);
+      }
+    }
+  }
+
   async function cambiarModo(accion: "congelar" | "activar") {
     try {
       const fn = accion === "congelar" ? congelarCorrida : activarCorrida;
@@ -82,12 +119,6 @@ export default function Corrida() {
   }
 
   useEffect(() => {
-    if (live) {
-      // Mientras se arma en vivo en esta pestaña, la tabla viene del stream; no se
-      // consulta el backend (al terminar, `live` pasa a false y se relee abajo).
-      setCargando(false);
-      return;
-    }
     let cancelado = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     setError(null);
@@ -97,9 +128,12 @@ export default function Corrida() {
           if (cancelado) return;
           setCorrida(c);
           setCargando(false);
-          // Recarga durante un armado sin stream local (p. ej. otra pestaña):
-          // refrescar hasta que deje de estar 'armando'.
-          if (c.estado === "armando") timer = setTimeout(cargar, 2000);
+          // El armado corre en el servidor: la pantalla lo mira por el poll hasta que
+          // deje de estar 'armando'. `armado_detenido` NO se pollea a propósito: ese
+          // estado no cambia solo — solo lo mueve el botón "Reintentar armado", que ya
+          // relanza este efecto. Pollearlo sería un request cada 5 s, para siempre,
+          // sobre una pestaña olvidada, esperando algo que nadie va a hacer.
+          if (c.estado === "armando") timer = setTimeout(cargar, POLL_ARMANDO_MS);
         })
         .catch((err: unknown) => {
           if (cancelado) return;
@@ -112,28 +146,13 @@ export default function Corrida() {
       cancelado = true;
       if (timer) clearTimeout(timer);
     };
-  }, [corridaId, live]);
+  }, [corridaId, recarga]);
 
-  // Datos a mostrar: en vivo desde el stream, o lo persistido.
-  const data: CorridaDetalle | null = live
-    ? {
-        id: corridaId,
-        nombre: "(armando)",
-        archivo: "(armando)",
-        estado: "armando",
-        items: vivo.filas,
-        totales: totalesDe(vivo.filas),
-        duracion_ms: null,
-        modo: "activa",
-        carpeta_id: null,
-        lista_precios_id: vivo.listaId,
-        lista_nombre: vivo.listaNombre,
-        // Todavía armando, sin persistir: nada que revisar hasta que termine.
-        ia_disponible: false,
-      }
-    : corrida;
+  // El armado ya no vive en esta pestaña: lo corre el servidor y lo único que hay
+  // para mostrar es lo persistido, con el progreso que trae la misma vista.
+  const data: CorridaDetalle | null = corrida;
 
-  if (!live && cargando) {
+  if (cargando) {
     return (
       <div style={{ padding: "1rem" }} className="text-sm text-muted-foreground">
         Cargando corrida #{id}…
@@ -141,7 +160,7 @@ export default function Corrida() {
     );
   }
 
-  if (!live && error) {
+  if (error) {
     return (
       <div style={{ padding: "1rem" }} className="text-sm text-destructive">
         {error}
@@ -151,8 +170,10 @@ export default function Corrida() {
 
   if (!data) return null;
 
-  const filas = live ? data.items : control.filtradas;
-  const totales = live ? data.totales : totalesDe(filas);
+  const filas = control.filtradas;
+  const totales = totalesDe(filas);
+  const armado = data.armado;
+  const motivo = armado?.ultimo_error ? partirMotivo(armado.ultimo_error) : null;
   const margenNegativo = totales.margen < 0;
   // Filas sin APU: se cuentan sobre TODOS los ítems, no sobre los filtrados —
   // el candado no depende de lo que estés mirando. El backend devuelve 409 al
@@ -269,63 +290,91 @@ export default function Corrida() {
             {data.archivo} &mdash; {data.estado}
           </p>
         </div>
-        {!live && (
-          <div className="flex items-center gap-2">
-            <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${
-              esActivar ? "bg-blue-100 text-blue-800" : "bg-green-100 text-green-800"}`}>
-              {esActivar ? "Congelada" : "Activa"}
-            </span>
-            <Button size="sm" variant="outline"
-              disabled={bloqueado && !esActivar}
-              title={bloqueado && !esActivar
-                ? `${nSinApu} línea(s) sin APU: asígnalas antes de congelar.`
-                : undefined}
-              aria-describedby={bloqueado ? "candado-sin-apu" : undefined}
-              onClick={() => cambiarModo(esActivar ? "activar" : "congelar")}>
-              {esActivar ? "Activar" : "Congelar"}
+        <div className="flex items-center gap-2">
+          <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${
+            esActivar ? "bg-blue-100 text-blue-800" : "bg-green-100 text-green-800"}`}>
+            {esActivar ? "Congelada" : "Activa"}
+          </span>
+          <Button size="sm" variant="outline"
+            disabled={bloqueado && !esActivar}
+            title={bloqueado && !esActivar
+              ? `${nSinApu} línea(s) sin APU: asígnalas antes de congelar.`
+              : undefined}
+            aria-describedby={bloqueado ? "candado-sin-apu" : undefined}
+            onClick={() => cambiarModo(esActivar ? "activar" : "congelar")}>
+            {esActivar ? "Activar" : "Congelar"}
+          </Button>
+          {!esActivar && data.estado !== "armando" && (
+            <Button size="sm" variant="outline" onClick={() => setAgregando(true)}>
+              Agregar líneas
             </Button>
-            {!esActivar && data.estado !== "armando" && (
-              <Button size="sm" variant="outline" onClick={() => setAgregando(true)}>
-                Agregar líneas
-              </Button>
-            )}
-            {puedeEditar && (
-              <Button size="sm" variant="outline"
-                disabled={motivoNoRevisar !== null}
-                title={motivoNoRevisar
-                  ?? "La IA audita la corrida ya armada y propone; aplicar lo decides tú."}
-                onClick={revisar}>
-                {revision
-                  ? "Revisando…"
-                  : `Revisar ${nFilas} ${nFilas === 1 ? "línea" : "líneas"} con IA`}
-              </Button>
-            )}
-            {puedeEditar && !esActivar && sugerencias.length > 0 && (
-              <Button size="sm" variant="outline"
-                disabled={aplicando}
-                title="Asigna de una vez el APU que la IA propuso para cada línea con dictamen «cambiar»."
-                onClick={aplicarTodas}>
-                {aplicando
-                  ? "Aplicando…"
-                  : `Aplicar ${sugerencias.length} ${
-                      sugerencias.length === 1 ? "sugerencia" : "sugerencias"}`}
-              </Button>
-            )}
+          )}
+          {puedeEditar && (
             <Button size="sm" variant="outline"
-              disabled={bloqueado}
-              title={bloqueado
-                ? esActivar
-                  ? `${nSinApu} línea(s) sin APU: actívala, asígnalas y vuelve a congelar.`
-                  : `${nSinApu} línea(s) sin APU: asígnalas antes de descargar.`
-                : undefined}
-              aria-describedby={bloqueado ? "candado-sin-apu" : undefined}
-              onClick={() => descargarCuadro(corridaId).catch((e) =>
-                toast.error(e instanceof Error ? e.message : "No se pudo descargar el cuadro."))}>
-              Descargar cuadro
+              disabled={motivoNoRevisar !== null}
+              title={motivoNoRevisar
+                ?? "La IA audita la corrida ya armada y propone; aplicar lo decides tú."}
+              onClick={revisar}>
+              {revision
+                ? "Revisando…"
+                : `Revisar ${nFilas} ${nFilas === 1 ? "línea" : "líneas"} con IA`}
             </Button>
-          </div>
-        )}
+          )}
+          {puedeEditar && !esActivar && sugerencias.length > 0 && (
+            <Button size="sm" variant="outline"
+              disabled={aplicando}
+              title="Asigna de una vez el APU que la IA propuso para cada línea con dictamen «cambiar»."
+              onClick={aplicarTodas}>
+              {aplicando
+                ? "Aplicando…"
+                : `Aplicar ${sugerencias.length} ${
+                    sugerencias.length === 1 ? "sugerencia" : "sugerencias"}`}
+            </Button>
+          )}
+          <Button size="sm" variant="outline"
+            disabled={bloqueado}
+            title={bloqueado
+              ? esActivar
+                ? `${nSinApu} línea(s) sin APU: actívala, asígnalas y vuelve a congelar.`
+                : `${nSinApu} línea(s) sin APU: asígnalas antes de descargar.`
+              : undefined}
+            aria-describedby={bloqueado ? "candado-sin-apu" : undefined}
+            onClick={() => descargarCuadro(corridaId).catch((e) =>
+              toast.error(e instanceof Error ? e.message : "No se pudo descargar el cuadro."))}>
+            Descargar cuadro
+          </Button>
+        </div>
       </div>
+
+      {/* Armado detenido: por qué se rindió y cómo volver a intentarlo. Es lo único
+          que explica una corrida a medias que dejó de avanzar. */}
+      {data.estado === "armado_detenido" && (
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive-surface px-3 py-2">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-destructive">
+              El armado se detuvo{armado ? ` en ${armado.hechos} de ${armado.total} líneas` : ""}.
+            </p>
+            {motivo && (
+              <>
+                <p className="mt-0.5 text-xs text-foreground">{motivo.humano}</p>
+                {/* La cola técnica va chica, gris y cortada: sirve para reportar el
+                    problema, pero el mensaje de arriba es el que le habla a la persona. */}
+                {motivo.tecnico && (
+                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground"
+                     title={motivo.tecnico}>
+                    {motivo.tecnico}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+          {puedeEditar && (
+            <Button size="sm" variant="outline" disabled={reanudando} onClick={reanudar}>
+              {reanudando ? "Reanudando…" : "Reintentar armado"}
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* Totals bar */}
       <div
@@ -348,9 +397,11 @@ export default function Corrida() {
 
       {/* Counters sub-line */}
       <div className="flex items-center gap-4 text-xs text-muted-foreground">
-        {live ? (
-          <span className="text-blue-700 font-medium">
-            Armando {vivo.filas.length}/{vivo.total}…
+        {data.estado === "armando" && armado ? (
+          <span className="font-medium text-info">
+            {armado.posicion_en_cola > 0
+              ? `En espera: puesto ${armado.posicion_en_cola} en la cola`
+              : `Armando: ${armado.hechos} de ${armado.total}`}
           </span>
         ) : control.hayFiltros ? (
           <span>{filas.length} de {control.totalItems} ítems</span>
@@ -373,7 +424,7 @@ export default function Corrida() {
               : `Veredictos: ${revision.hechos} de ${revision.total} filas`}
           </span>
         )}
-        {!live && nSinApu > 0 && (
+        {nSinApu > 0 && (
           <button
             type="button"
             id="candado-sin-apu"
@@ -386,13 +437,13 @@ export default function Corrida() {
         )}
       </div>
 
-      {/* Dense table (se llena APU por APU en vivo) */}
+      {/* Dense table */}
       <TablaItems
         corridaId={corridaId}
         items={filas}
         onConfirmado={(c) => setCorrida(c)}
         readOnly={data.modo === "congelada"}
-        control={live ? undefined : control}
+        control={control}
         puedeEditar={puedeEditar}
       />
 

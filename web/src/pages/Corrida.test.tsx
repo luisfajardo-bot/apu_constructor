@@ -2,9 +2,6 @@ import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 import { beforeEach, expect, test, vi } from "vitest";
 
 vi.mock("react-router-dom", () => ({ useParams: () => ({ id: "1" }) }));
-vi.mock("@/lib/armado", () => ({
-  useArmadoVivo: () => ({ corridaId: null, estado: "idle", filas: [], total: 0 }),
-}));
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
 }));
@@ -24,7 +21,7 @@ function fila(p: Record<string, unknown>) {
 
 const CORRIDA = {
   id: 1, archivo: "obra.xlsx", estado: "en_revision", modo: "activa", duracion_ms: 1000,
-  ia_disponible: true,
+  ia_disponible: true, armado: null,
   items: [
     fila({ seq: 0, descripcion: "Excavación", unidad: "M3", contractual_total: 1000 }),
     fila({ seq: 1, descripcion: "Concreto", unidad: "M2", contractual_total: 500 }),
@@ -39,6 +36,7 @@ vi.mock("@/api/corridas", () => ({
   activarCorrida: vi.fn(),
   revisarCorridaStream: vi.fn(async () => RESUMEN),
   aplicarSugerencias: vi.fn(async () => CORRIDA),
+  reanudarArmado: vi.fn(async () => CORRIDA),
 }));
 // TablaItems importa BuscadorApu -> @/api/autoria -> @/api/client -> @/lib/supabase,
 // que crea el cliente de Supabase al cargar el módulo (falla sin envs en test). Se

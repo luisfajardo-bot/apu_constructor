@@ -9,12 +9,14 @@ import threading
 from datetime import datetime, timedelta
 
 import pytest
+from fastapi.testclient import TestClient
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import (
     Apu, ApuComponent, CorridaMeta, Insumo, LicitacionItem)
 from apu_tool.servicio import armador, corridas as svc
+from apu_tool.servicio.app import create_app
 
 
 # --------------------------------------------------------------------------
@@ -596,3 +598,49 @@ def test_id_de_instancia(monkeypatch):
     assert str(os.getpid()) in yo
     monkeypatch.delenv("RENDER_INSTANCE_ID")
     assert armador.id_de_instancia() != armador.id_de_instancia()
+
+
+# --------------------------------------------------------------------------
+# La app enciende y apaga el worker (Tarea 9: el commit que prende la feature)
+# --------------------------------------------------------------------------
+def test_la_app_arranca_y_para_el_worker(tmp_path):
+    alm = _almacen(tmp_path)
+    app = create_app(almacen=alm)
+    with TestClient(app):
+        assert app.state.armador_hilo.is_alive()
+    assert app.state.armador_parar.is_set()      # el lifespan lo apagó al salir
+
+
+def test_la_app_arma_de_punta_a_punta_una_corrida_encolada(tmp_path):
+    """El único test que prueba que el cableado quedó bien: `arrancar()` con el
+    almacén correcto, sobre el hilo correcto, agarrando la cola de verdad. Los demás
+    tests de este archivo prueban `un_ciclo` a mano y no verían un `arrancar(Almacen())`
+    -con un almacén nuevo en vez de `app.state.almacen`- ni un `arrancar()` puesto
+    DESPUÉS del `yield`.
+
+    Determinístico sin dormir: la corrida ya está encolada ANTES de crear la app, así
+    que el primer `un_ciclo` del bucle (que corre ANTES de esperar `hay_trabajo`, ver
+    `correr_para_siempre`) la agarra apenas arranca el hilo, sin depender de ningún
+    timing. Lo que el test espera no es un reloj: es un espía sobre `finalizar_armado`
+    que levanta un `Event` cuando el ciclo termina; el `timeout` es solo una red por si
+    algo se rompe, no la señal de éxito."""
+    alm = _almacen(tmp_path)
+    cid = _encolar(alm, [_item("Concreto clase D")])
+    terminado = threading.Event()
+    original = alm.corridas.finalizar_armado
+
+    def espia(*a, **kw):
+        try:
+            return original(*a, **kw)
+        finally:
+            terminado.set()
+
+    alm.corridas.finalizar_armado = espia
+    app = create_app(almacen=alm)
+
+    with TestClient(app):
+        assert terminado.wait(timeout=5), "el worker de la app no armó la corrida"
+
+    m = alm.corridas.get_corrida(cid)
+    assert m.estado == "en_revision"
+    assert len(alm.corridas.get_items(cid)) == 1

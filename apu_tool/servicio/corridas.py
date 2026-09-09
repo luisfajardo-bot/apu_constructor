@@ -326,6 +326,20 @@ def preview_agregar(alm: Almacen, corrida_id: int,
             "modo": meta.modo, "tope": MAX_LINEAS_AGREGADAS}
 
 
+# Estados en los que el plan está a medias y el espacio de `seq` sigue siendo del
+# armador. `armado_detenido` cuenta: la corrida se rindió con ítems del plan sin armar
+# y `reencolar_armado` la puede devolver a la cola en cualquier momento.
+_MSG_PLAN_A_MEDIAS = (
+    "La corrida todavía tiene líneas por armar; esperá a que termine "
+    "(o reanudala si quedó detenida) antes de {accion} líneas.")
+
+ARMANDO_O_A_MEDIAS = ("armando", "armado_detenido")
+
+
+def _plan_a_medias(meta) -> bool:
+    return meta.estado in ARMANDO_O_A_MEDIAS
+
+
 def agregar_items(alm: Almacen, corrida_id: int,
                   items: list[LicitacionItem]) -> Optional[dict]:
     """Suma líneas a una corrida ya armada. Devuelve la vista; None si no existe.
@@ -342,13 +356,17 @@ def agregar_items(alm: Almacen, corrida_id: int,
         return None
     if meta.modo == "congelada":
         raise CorridaCongelada(corrida_id)
-    if meta.estado == "armando":
+    if _plan_a_medias(meta):
         # El armador va tomando los seq del plan a medida que avanza; agregar acá
         # pediría uno que el armado todavía no llegó a usar. Con `ux_corrida_item_seq`
         # eso ya no entra callado —revienta—, pero reventar a mitad de un armado de
         # tres horas tampoco es el comportamiento que queremos: se espera y listo.
-        raise ValueError("La corrida se está armando; esperá a que termine "
-                         "para agregar líneas.")
+        #
+        # `armado_detenido` cuenta igual, y ahí el daño es PEOR y silencioso: la línea
+        # nueva ocupa el `seq` que le tocaba a un ítem del plan, el worker reanuda en
+        # `max_seq + 1` y ese ítem NUNCA se arma. La corrida sale a `en_revision`
+        # entera a la vista y `seqs_sin_apu` no ve nada, porque esa fila no existe.
+        raise ValueError(_MSG_PLAN_A_MEDIAS.format(accion="agregar"))
     if not items:
         raise ValueError("No hay líneas para agregar.")
     if len(items) > MAX_LINEAS_AGREGADAS:
@@ -395,13 +413,13 @@ def borrar_items(alm: Almacen, corrida_id: int, seqs: Iterable[int],
         return None
     if meta.modo == "congelada":
         raise CorridaCongelada(corrida_id)
-    if meta.estado == "armando":
+    if _plan_a_medias(meta):
         # El worker reanuda en `max_seq + 1`. Borrar las ÚLTIMAS líneas hace que ese
         # máximo RETROCEDA, y si la instancia muere justo ahí, al reanudar se re-arma
         # exactamente lo que se acaba de borrar. Misma guarda y mismo motivo que
-        # `agregar_items`: mientras arma, el espacio de `seq` es del armador.
-        raise ValueError("La corrida se está armando; esperá a que termine "
-                         "para borrar líneas.")
+        # `agregar_items`: mientras el plan esté a medias, el espacio de `seq` es del
+        # armador.
+        raise ValueError(_MSG_PLAN_A_MEDIAS.format(accion="borrar"))
     pedidos = {int(s) for s in seqs}
     victimas = [r for r in alm.corridas.get_items(corrida_id) if r.seq in pedidos]
     if victimas:

@@ -429,7 +429,7 @@ def test_api_agregar_en_corrida_armando_es_400(tmp_path):
     r = cli.post(f"/api/corridas/{cid}/items", json={"lineas": [
         {"descripcion": "Concreto clase D"}]})
     assert r.status_code == 400
-    assert "armando" in r.json()["detail"]
+    assert "por armar" in r.json()["detail"]
     assert len(cli.get(f"/api/corridas/{cid}").json()["items"]) == 1
 
 
@@ -667,7 +667,7 @@ def test_borrar_lineas_mientras_arma_da_error(tmp_path):
     for _ in svc.armar_pendientes(alm, cid, items):
         pass
     # crear_corrida_encolada NO finaliza: sigue en 'armando', que es la cola.
-    with pytest.raises(ValueError, match="se está armando"):
+    with pytest.raises(ValueError, match="por armar"):
         svc.borrar_items(alm, cid, [1])
     assert len(alm.corridas.get_items(cid)) == 2          # no borró nada
 
@@ -688,4 +688,37 @@ def test_el_endpoint_de_borrar_traduce_el_armando_a_400(tmp_path):
         pass
     r = cli.post(f"/api/corridas/{cid}/items/borrar", json={"seqs": [1]})
     assert r.status_code == 400, r.text
-    assert "armando" in r.json()["detail"]
+    assert "por armar" in r.json()["detail"]
+
+
+def test_no_se_tocan_las_lineas_de_una_corrida_detenida_a_medio_armar(tmp_path):
+    """`armado_detenido` es una corrida con ítems del plan SIN armar, y
+    `reencolar_armado` la puede devolver a la cola en cualquier momento.
+
+    Sin esta guarda el daño es silencioso y del peor tipo: la línea agregada a mano
+    ocupa el `seq` que le tocaba a un ítem del plan, el worker reanuda en
+    `max_seq + 1` y ese ítem **NUNCA se arma**. La corrida sale a `en_revision`
+    entera a la vista, y el candado de `seqs_sin_apu` no ve nada — porque esa fila
+    no existe, no es una fila sin APU."""
+    cli, alm = _cliente(tmp_path)
+    items = [_item_plan(f"PLAN {i}") for i in range(5)]
+    cid = svc.crear_corrida_encolada(alm, "x.xlsx", items, "DIURNO", None,
+                                     carpeta_id=_carpeta(cli))
+    for _ in svc.armar_pendientes(alm, cid, items[:2]):
+        pass                                   # armó 0 y 1; faltan 2, 3 y 4
+    alm.corridas.finalizar_armado(cid, "armado_detenido", error="se murió")
+
+    with pytest.raises(ValueError, match="por armar"):
+        svc.agregar_items(alm, cid, [_item_plan("LINEA A MANO")])
+    with pytest.raises(ValueError, match="por armar"):
+        svc.borrar_items(alm, cid, [0])
+    assert [r.seq for r in alm.corridas.get_items(cid)] == [0, 1]   # nada cambió
+
+    # Reanudada y terminada, sí se puede: la guarda no es un candado permanente.
+    alm.corridas.reencolar_armado(cid)
+    for _ in svc.armar_pendientes(alm, cid, items, desde_seq=alm.corridas.max_seq(cid) + 1):
+        pass
+    alm.corridas.finalizar_armado(cid, "en_revision")
+    svc.agregar_items(alm, cid, [_item_plan("LINEA A MANO")])
+    descripciones = [r.item.descripcion for r in alm.corridas.get_items(cid)]
+    assert descripciones == [f"PLAN {i}" for i in range(5)] + ["LINEA A MANO"]

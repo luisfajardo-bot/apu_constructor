@@ -4,6 +4,7 @@ Todo se prueba contra `un_ciclo`, que reclama y arma UNA corrida y vuelve. El bu
 (`correr_para_siempre`) solo se prueba en lo suyo —que una excepción no lo mate— y con
 los dos eventos ya puestos, así que ningún test de acá duerme ni lanza un hilo.
 """
+import os
 import threading
 from datetime import datetime, timedelta
 
@@ -415,7 +416,11 @@ def test_el_bucle_sale_sin_esperar_el_poll(monkeypatch):
 
 def test_id_de_instancia(monkeypatch):
     monkeypatch.setenv("RENDER_INSTANCE_ID", "srv-abc-123")
-    assert armador.id_de_instancia() == "srv-abc-123"
+    yo = armador.id_de_instancia()
+    assert yo.startswith("srv-abc-123")
+    # El id de Render es de la MÁQUINA y los procesos de gunicorn lo heredan igual: sin
+    # el PID, dos workers de la misma instancia se llaman igual y el fencing no filtra
+    # nada (cada uno se cree dueño de la reclama del otro).
+    assert str(os.getpid()) in yo
     monkeypatch.delenv("RENDER_INSTANCE_ID")
-    # Lo único que importa fuera de Render: que dos procesos no se llamen igual.
     assert armador.id_de_instancia() != armador.id_de_instancia()

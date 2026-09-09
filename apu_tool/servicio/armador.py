@@ -38,8 +38,15 @@ hay_trabajo = threading.Event()
 
 def id_de_instancia() -> str:
     """Quién es esta instancia, para la reclama. En Render viene en el entorno; si no,
-    un uuid por proceso alcanza (lo único que importa es que dos procesos difieran)."""
-    return os.environ.get("RENDER_INSTANCE_ID") or "local-%s" % uuid.uuid4().hex[:8]
+    un uuid alcanza. Lo único que importa es que dos procesos NO se llamen igual.
+
+    Por eso lleva el PID pegado: `RENDER_INSTANCE_ID` identifica la MÁQUINA y los
+    procesos de gunicorn (`WEB_CONCURRENCY`, hoy 1 pero por default 2) lo heredan
+    idéntico. Dos dueños con el mismo nombre dejan el fencing sin efecto: al que le
+    robaron la reclama le sigue pareciendo suya y la finaliza igual, que es justo el
+    doble armado que el fencing existe para cortar."""
+    maquina = os.environ.get("RENDER_INSTANCE_ID") or "local-%s" % uuid.uuid4().hex[:8]
+    return "%s-%d" % (maquina, os.getpid())
 
 
 def _ahora() -> str:
@@ -102,11 +109,11 @@ def un_ciclo(alm: Almacen, instancia: str) -> bool:
                         "La corrida %s ya no es de %s (reclama perdida): se corta el "
                         "armado en el ítem %s", corrida_id, instancia, hechos)
                     return True
-        if not _finalizar(alm, corrida_id, "en_revision", instancia,
-                          duracion_ms=round((time.monotonic() - t0) * 1000)):
-            # Nos la robaron sobre el final. Se cura sola: el dueño nuevo la retoma, no
-            # encuentra ítems pendientes y la cierra él.
-            return True
+        # Si nos la robaron sobre el final, el fencing hace que esto no escriba nada
+        # (`_finalizar` avisa). Se cura sola: el dueño nuevo la retoma, no encuentra
+        # ítems pendientes y la cierra él.
+        _finalizar(alm, corrida_id, "en_revision", instancia,
+                   duracion_ms=round((time.monotonic() - t0) * 1000))
     except Exception as exc:               # noqa: BLE001
         # Un fallo que NO es de un ítem (esos ya los absorbe `armar_pendientes`):
         # se deja la corrida EN LA COLA con el motivo, para que se reintente. Soltar la

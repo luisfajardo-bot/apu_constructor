@@ -9,7 +9,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from apu_tool.datos.repositorio import CorridaEliminada
+from apu_tool.datos.repositorio import ArmadoDuplicado, CorridaEliminada
 from apu_tool.nucleo.models import CorridaItemRow, CorridaMeta, LicitacionItem
 
 
@@ -287,6 +287,110 @@ def test_reset_tambien_deja_el_indice_puesto(repo):
     repo.agregar_item(cid, _item(0, 1000.0))
     with pytest.raises(Exception):
         repo.agregar_item(cid, _item(0, 1000.0))
+
+
+# ---- un archivo, un solo armado a medias: ux_corrida_armando_archivo ----
+
+def _crear_carpeta(repo, nombre: str) -> int:
+    """Una carpeta, por SQL crudo: el fixture solo trae el repo de corridas (la tabla
+    `carpeta` vive en la misma base) y estos tests necesitan carpetas REALES —el
+    índice de armados duplicados es por (carpeta, archivo), y con `carpeta_id` NULL
+    no aplica."""
+    pg = getattr(repo, "cx", None) is not None
+    tabla, marca = ("corridas.carpeta", "%s") if pg else ("carpeta", "?")
+    sql = f"INSERT INTO {tabla} (nombre, creada_en) VALUES ({marca}, {marca})"
+    with _abrir_conn(repo) as conn:
+        cur = conn.execute(sql + (" RETURNING id" if pg else ""),
+                           (nombre, "2026-09-08T10:00:00"))
+        return int(cur.fetchone()["id"]) if pg else int(cur.lastrowid)
+
+
+def _encolar_archivo(repo, carpeta_id: int, archivo: str = "lic.xlsx",
+                     estado: str = "armando") -> int:
+    return repo.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-08T10:00:00", archivo=archivo, turno_def="DIURNO",
+        use_ai=None, estado=estado, cuadro_path=None, nombre=archivo,
+        carpeta_id=carpeta_id))
+
+
+def _indice_armado(repo) -> str:
+    return ("corridas.ux_corrida_armando_archivo"
+            if getattr(repo, "cx", None) is not None else "ux_corrida_armando_archivo")
+
+
+def test_dos_armados_del_mismo_archivo_y_carpeta_no_coexisten(repo):
+    """El doble clic: dos peticiones a milisegundos de distancia encolarían dos
+    armados de tres horas del mismo Excel. Un `if ya_hay_una` no lo evita (las dos
+    leen "no hay ninguna"), un índice único sí. Y la violación llega traducida:
+    `ArmadoDuplicado`, no el error crudo del motor."""
+    carpeta = _crear_carpeta(repo, "Obra")
+    primera = _encolar_archivo(repo, carpeta)
+    with pytest.raises(ArmadoDuplicado):
+        _encolar_archivo(repo, carpeta)
+    assert [m.id for m in repo.listar_corridas()] == [primera]   # UNA sola corrida
+
+
+def test_un_armado_detenido_tambien_bloquea(repo):
+    """`armado_detenido` es plan a medias: `reencolar_armado` la devuelve a la cola
+    en cualquier momento, así que subir el mismo Excel otra vez dejaría dos armados
+    del mismo archivo compitiendo por el mismo espacio de `seq`."""
+    carpeta = _crear_carpeta(repo, "Obra")
+    detenida = _encolar_archivo(repo, carpeta, estado="armado_detenido")
+    with pytest.raises(ArmadoDuplicado):
+        _encolar_archivo(repo, carpeta)
+    assert [m.id for m in repo.listar_corridas()] == [detenida]
+
+
+def test_el_indice_no_bloquea_lo_legitimo(repo):
+    """Los tres casos que NO son un doble clic: la misma lista en otra obra, otra
+    lista en la misma obra, y volver a subir la misma lista cuando la anterior ya
+    terminó (para eso el índice es PARCIAL: si cubriera todos los estados, un
+    archivo quedaría vetado para siempre)."""
+    obra = _crear_carpeta(repo, "Obra")
+    otra_obra = _crear_carpeta(repo, "Otra obra")
+    primera = _encolar_archivo(repo, obra)
+    _encolar_archivo(repo, otra_obra)                      # misma lista, otra obra
+    _encolar_archivo(repo, obra, archivo="otra.xlsx")      # otra lista, misma obra
+    repo.finalizar_armado(primera, "en_revision")
+    _encolar_archivo(repo, obra)                           # ya terminó: entra de nuevo
+    assert len(repo.listar_corridas()) == 4
+
+
+def test_una_carpeta_inexistente_no_se_confunde_con_un_duplicado(repo):
+    """Una FK rota también es una violación de integridad, y contarla como duplicado
+    mandaría al usuario a buscar una corrida en curso que no existe."""
+    with pytest.raises(Exception) as e:
+        _encolar_archivo(repo, 999_999)          # carpeta que no existe
+    assert not isinstance(e.value, ArmadoDuplicado)
+
+
+def test_arrancar_con_armados_duplicados_viejos_no_tumba_la_app(repo, caplog):
+    """Gemelo del de `ux_corrida_item_seq`: `init_schema` corre en CADA arranque, y
+    una base que YA trae dos armados del mismo archivo —de antes de esta feature— no
+    puede impedir que la app levante. Se grita en el log y se sigue."""
+    carpeta = _crear_carpeta(repo, "Obra")
+    with _abrir_conn(repo) as conn:
+        conn.execute(f"DROP INDEX IF EXISTS {_indice_armado(repo)}")
+    _encolar_archivo(repo, carpeta)
+    _encolar_archivo(repo, carpeta)                # sin índice, entran las dos
+
+    with caplog.at_level("ERROR"):
+        repo.init_schema()                         # NO puede reventar
+
+    assert "ux_corrida_armando_archivo" in caplog.text
+    assert "duplicados" in caplog.text
+    assert len(repo.listar_corridas()) == 2        # y la base sigue usable
+
+
+def test_reset_tambien_deja_el_indice_de_armado_puesto(repo):
+    """`reset()` es el camino de `seed --force`. El índice no vive en el .sql (se crea
+    aparte, con try), así que si `reset` se olvidara de crearlo un re-semillado
+    dejaría el doble clic suelto otra vez, en silencio."""
+    repo.reset()
+    carpeta = _crear_carpeta(repo, "Obra")
+    _encolar_archivo(repo, carpeta)
+    with pytest.raises(ArmadoDuplicado):
+        _encolar_archivo(repo, carpeta)
 
 
 # ---- la cola del armado: reclama atómica ----

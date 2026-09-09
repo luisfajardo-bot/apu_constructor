@@ -18,7 +18,7 @@ from weakref import WeakKeyDictionary
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
-from apu_tool.datos.repositorio import CorridaEliminada
+from apu_tool.datos.repositorio import ArmadoDuplicado, CorridaEliminada
 from apu_tool.dominio.alertas import alertas_costeo
 from apu_tool.dominio.assemble import Assembler, ApuAdvisor
 from apu_tool.dominio.pricing import PricingEngine
@@ -157,14 +157,37 @@ def crear_corrida_encolada(alm: Almacen, archivo: str, items: list[LicitacionIte
     así que sin esto un reinicio deja la corrida a medias sin forma de continuar.
     """
     nombre_efectivo = (nombre or "").strip()[:120].strip() or nombre_desde_archivo(archivo)
-    corrida_id = alm.corridas.crear_corrida(CorridaMeta(
-        id=None, creada_en=datetime.now().isoformat(timespec="seconds"),
-        archivo=archivo, turno_def=turno_def, use_ai=use_ai,
-        estado="armando", cuadro_path=None, carpeta_id=carpeta_id,
-        nombre=nombre_efectivo, lista_precios_id=lista_precios_id))
+    try:
+        corrida_id = alm.corridas.crear_corrida(CorridaMeta(
+            id=None, creada_en=datetime.now().isoformat(timespec="seconds"),
+            archivo=archivo, turno_def=turno_def, use_ai=use_ai,
+            estado="armando", cuadro_path=None, carpeta_id=carpeta_id,
+            nombre=nombre_efectivo, lista_precios_id=lista_precios_id))
+    except ArmadoDuplicado as e:
+        # La violación pasa en el INSERT, así que no queda una corrida a medio crear
+        # (el `set_plan` de abajo ni se intenta). Solo falta decir CUÁL es la que ya
+        # existe, para poder llevar al usuario ahí en vez de dejarlo reintentando.
+        raise ArmadoDuplicado(archivo, armado_en_curso(alm, carpeta_id, archivo)) from e
     alm.corridas.set_plan(corrida_id, json.dumps([asdict(i) for i in items],
                                                  ensure_ascii=False))
     return corrida_id
+
+
+def armado_en_curso(alm: Almacen, carpeta_id: Optional[int],
+                    archivo: str) -> Optional[int]:
+    """El id del armado a medias que ocupa ese (carpeta, archivo), o None.
+
+    Se busca DESPUÉS de la violación, no antes: preguntar antes es la carrera que este
+    índice existe para cerrar. Recorre `listar_corridas` en vez de agregar una consulta
+    nueva a los dos backends — corre una vez por doble clic, no por petición.
+
+    None solo si la corrida que acaba de bloquear el INSERT desapareció en el medio
+    (la borraron entre las dos escrituras): rarísimo, y el mensaje se adapta."""
+    for meta in alm.corridas.listar_corridas():
+        if (meta.estado in ARMANDO_O_A_MEDIAS and meta.carpeta_id == carpeta_id
+                and meta.archivo == archivo):
+            return meta.id
+    return None
 
 
 def plan_de(alm: Almacen, corrida_id: int) -> list[LicitacionItem]:

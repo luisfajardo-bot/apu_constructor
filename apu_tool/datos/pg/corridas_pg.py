@@ -10,7 +10,7 @@ import psycopg
 
 from apu_tool import config
 from apu_tool.datos.pg.conexion import Conexion, ejecutar_script
-from apu_tool.datos.repositorio import CorridaEliminada
+from apu_tool.datos.repositorio import ArmadoDuplicado, CorridaEliminada
 from apu_tool.nucleo.models import CorridaItemRow, CorridaMeta, LicitacionItem
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ class CorridasPg:
     def init_schema(self) -> None:
         self.cx.ejecutar_migracion(SCHEMA_PATH.read_text(encoding="utf-8"))
         self._crear_indice_seq()
+        self._crear_indice_armado()
 
     def _crear_indice_seq(self) -> None:
         """El índice único de (corrida_id, seq), fuera del script del esquema.
@@ -51,11 +52,42 @@ class CorridasPg:
                 "limpiarlos. Consulta: SELECT corrida_id, seq, COUNT(*) FROM "
                 "corridas.corrida_item GROUP BY 1,2 HAVING COUNT(*) > 1;")
 
+    def _crear_indice_armado(self) -> None:
+        """Un solo armado a medias por (carpeta, archivo): el que frena el doble clic.
+
+        PARCIAL (`WHERE estado IN (...)`) porque solo mientras el plan está a medias
+        el archivo está tomado: cuando el armado termina, volver a subir la misma
+        lista es legítimo (cambió un precio, se rearma). Los dos estados son los
+        mismos de `servicio.corridas.ARMANDO_O_A_MEDIAS`; van acá como literal porque
+        es SQL — si allá se agrega un estado, hay que tocar este índice también.
+
+        En su PROPIA conexión y con `try`, por lo mismo que `_crear_indice_seq`: si el
+        CREATE falla, Postgres aborta la transacción entera y arrastraría a cualquier
+        sentencia posterior; y una base que ya traiga dos armados del mismo archivo no
+        puede impedir que la app arranque. Lo llaman `init_schema` Y `reset`, porque
+        un `seed --force` que se olvidara de crearlo dejaría el doble clic suelto sin
+        que nadie se entere.
+        """
+        try:
+            with self.cx.connection() as conn:
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_corrida_armando_archivo "
+                    "ON corridas.corrida(carpeta_id, archivo) "
+                    "WHERE estado IN ('armando', 'armado_detenido')")
+        except psycopg.errors.UniqueViolation:
+            logger.error(
+                "No se pudo crear ux_corrida_armando_archivo: hay (carpeta_id, "
+                "archivo) duplicados entre los armados a medias. El doble clic no "
+                "esta protegido hasta limpiarlos. Consulta: SELECT carpeta_id, "
+                "archivo, COUNT(*) FROM corridas.corrida WHERE estado IN ('armando', "
+                "'armado_detenido') GROUP BY 1,2 HAVING COUNT(*) > 1;")
+
     def reset(self) -> None:
         with self.cx.connection() as conn:
             conn.execute("DROP SCHEMA IF EXISTS corridas CASCADE")
             ejecutar_script(conn, SCHEMA_PATH.read_text(encoding="utf-8"))
         self._crear_indice_seq()
+        self._crear_indice_armado()
 
     _INSERT_ITEM_SQL = (
         "INSERT INTO corridas.corrida_item "
@@ -83,8 +115,13 @@ class CorridasPg:
         return int(cur.fetchone()["id"])
 
     def crear_corrida(self, meta: CorridaMeta) -> int:
-        with self.cx.connection() as conn:
-            return self._insert_corrida(conn, meta)
+        try:
+            with self.cx.connection() as conn:
+                return self._insert_corrida(conn, meta)
+        except psycopg.errors.UniqueViolation as e:
+            # El único UNIQUE que puede violar este INSERT es el del armado duplicado
+            # (la PK es GENERATED). Una FK rota es otra clase y sube tal cual.
+            raise ArmadoDuplicado(meta.archivo) from e
 
     def guardar_items(self, corrida_id: int, items: list[CorridaItemRow]) -> int:
         rows = [self._item_tuple(corrida_id, it) for it in items]

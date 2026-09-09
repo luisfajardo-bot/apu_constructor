@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 from apu_tool import config
-from apu_tool.datos.repositorio import CorridaEliminada
+from apu_tool.datos.repositorio import ArmadoDuplicado, CorridaEliminada
 from apu_tool.nucleo.models import CorridaItemRow, CorridaMeta, LicitacionItem
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,7 @@ class CorridasDB:
                 sc_id = int(sc["id"])
             conn.execute("UPDATE corrida SET carpeta_id=? WHERE carpeta_id IS NULL", (sc_id,))
             self._crear_indice_seq(conn)
+            self._crear_indice_armado(conn)
 
     def _crear_indice_seq(self, conn: sqlite3.Connection) -> None:
         """El índice único de (corrida_id, seq), fuera del script del esquema.
@@ -116,12 +117,40 @@ class CorridasDB:
                 "limpiarlos. Consulta: SELECT corrida_id, seq, COUNT(*) FROM "
                 "corrida_item GROUP BY 1,2 HAVING COUNT(*) > 1;")
 
+    def _crear_indice_armado(self, conn: sqlite3.Connection) -> None:
+        """Un solo armado a medias por (carpeta, archivo): el que frena el doble clic.
+
+        PARCIAL (`WHERE estado IN (...)`) porque solo mientras el plan está a medias
+        el archivo está tomado: cuando el armado termina, volver a subir la misma
+        lista es legítimo (cambió un precio, se rearma). Los dos estados son los
+        mismos de `servicio.corridas.ARMANDO_O_A_MEDIAS`; van acá como literal porque
+        es SQL — si allá se agrega un estado, hay que tocar este índice también.
+
+        Mismo trato no-fatal que `_crear_indice_seq`, y por lo mismo: una base que ya
+        traiga dos armados del mismo archivo no puede impedir que la app arranque. Y
+        también lo llaman `init_schema` Y `reset`, porque un `seed --force` que se
+        olvidara de crearlo dejaría el doble clic suelto sin que nadie se entere.
+        """
+        try:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_corrida_armando_archivo "
+                "ON corrida(carpeta_id, archivo) "
+                "WHERE estado IN ('armando', 'armado_detenido')")
+        except sqlite3.IntegrityError:
+            logger.error(
+                "No se pudo crear ux_corrida_armando_archivo: hay (carpeta_id, "
+                "archivo) duplicados entre los armados a medias. El doble clic no "
+                "esta protegido hasta limpiarlos. Consulta: SELECT carpeta_id, "
+                "archivo, COUNT(*) FROM corrida WHERE estado IN ('armando', "
+                "'armado_detenido') GROUP BY 1,2 HAVING COUNT(*) > 1;")
+
     def reset(self) -> None:
         with self.connect() as conn:
             for t in ("corrida_item", "corrida", "carpeta"):
                 conn.execute(f"DROP TABLE IF EXISTS {t}")
             conn.executescript(_load_schema())
             self._crear_indice_seq(conn)
+            self._crear_indice_armado(conn)
 
     # ---- escritura ----
     _INSERT_ITEM_SQL = (
@@ -150,8 +179,18 @@ class CorridasDB:
         return int(cur.lastrowid)
 
     def crear_corrida(self, meta: CorridaMeta) -> int:
-        with self.connect() as conn:
-            return self._insert_corrida(conn, meta)
+        try:
+            with self.connect() as conn:
+                return self._insert_corrida(conn, meta)
+        except sqlite3.IntegrityError as e:
+            # Solo el UNIQUE: una FK rota (carpeta que no existe) también es
+            # IntegrityError y no tiene nada que ver con el doble clic. Postgres las
+            # distingue por clase (UniqueViolation); acá hay que mirar el código de
+            # error. El único UNIQUE que este INSERT puede violar es el del armado
+            # duplicado: la PK es autoincremental.
+            if e.sqlite_errorname != "SQLITE_CONSTRAINT_UNIQUE":
+                raise
+            raise ArmadoDuplicado(meta.archivo) from e
 
     def guardar_items(self, corrida_id: int, items: list[CorridaItemRow]) -> int:
         rows = [self._item_tuple(corrida_id, it) for it in items]

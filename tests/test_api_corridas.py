@@ -1,4 +1,7 @@
+import io
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import openpyxl
 import pytest
@@ -749,12 +752,14 @@ def _xlsx_lic3(tmp_path):
     return p
 
 
-def _post_corrida(cli, tmp_path, carpeta_id):
+def _post_corrida(cli, tmp_path, carpeta_id, nombre="lic3.xlsx"):
+    """`nombre` es el nombre con el que se sube, o sea `corrida.archivo`: la clave
+    (con la carpeta) del índice que impide encolar dos veces la misma lista."""
     with open(_xlsx_lic3(tmp_path), "rb") as f:
         return cli.post("/api/corridas",
                         data={"turno": "DIURNO", "use_ai": "false",
                               "carpeta_id": str(carpeta_id)},
-                        files={"archivo": ("lic3.xlsx", f, _XLSX_MIME)})
+                        files={"archivo": (nombre, f, _XLSX_MIME)})
 
 
 def test_post_corridas_encola_y_no_arma_nada(tmp_path):
@@ -795,6 +800,161 @@ def test_post_sample_encola_y_no_arma_nada(tmp_path):
     assert len(svc.plan_de(alm, cuerpo["id"])) == cuerpo["total"]
     assert armador.hay_trabajo.is_set()
     armador.hay_trabajo.clear()
+
+
+# --------------------------------------------------------------------------
+# Un doble clic no encola dos armados: `ux_corrida_armando_archivo`.
+# --------------------------------------------------------------------------
+def test_dos_clics_seguidos_encolan_un_solo_armado(tmp_path):
+    """El caso real: el botón devuelve al instante (antes tardaba horas y eso tapaba
+    el doble clic), así que el segundo clic manda otra petición. Tiene que rebotar con
+    409 Y con el id de la que ya se está armando, para llevar al usuario ahí."""
+    cli, alm = _cliente(tmp_path)
+    carpeta = _carpeta(cli)
+    primera = _post_corrida(cli, tmp_path, carpeta)
+    segunda = _post_corrida(cli, tmp_path, carpeta)
+
+    assert primera.status_code == 200, primera.text
+    assert segunda.status_code == 409, segunda.text
+    detalle = segunda.json()["detail"]
+    assert detalle["corrida_id"] == primera.json()["id"]
+    assert "lic3.xlsx" in detalle["mensaje"]                  # qué archivo, en español
+    assert len(alm.corridas.listar_corridas()) == 1           # UN solo armado encolado
+
+
+def test_dos_peticiones_concurrentes_encolan_un_solo_armado(tmp_path, monkeypatch):
+    """Lo que un `if ya_hay_una: rechazar` NO cubre: las dos peticiones llegan a la
+    vez, las dos leen "no hay ninguna" y las dos crean.
+
+    La `Barrier` va DENTRO de `crear_corrida`: ninguna de las dos escribe hasta que
+    las dos estén ahí, así que la carrera es real y no depende de adivinar una ventana
+    de tiempo (no hay `sleep` en ningún lado). Si el framework serializara las
+    peticiones, la barrera se rompería por timeout y el test fallaría en vez de pasar
+    fingiendo concurrencia. Da igual cuál gane: una entra y la otra rebota, y quien
+    decide es el índice de la base."""
+    cli, alm = _cliente(tmp_path)
+    carpeta = _carpeta(cli)
+    xlsx = _xlsx_lic3(tmp_path).read_bytes()   # los bytes: dos hilos no comparten un file object
+    puerta = threading.Barrier(2, timeout=20)
+    crear_de_verdad = alm.corridas.crear_corrida
+
+    def _crear_a_la_vez(meta):
+        puerta.wait()
+        return crear_de_verdad(meta)
+
+    monkeypatch.setattr(alm.corridas, "crear_corrida", _crear_a_la_vez)
+
+    def _postear():
+        return cli.post("/api/corridas",
+                        data={"turno": "DIURNO", "use_ai": "false",
+                              "carpeta_id": str(carpeta)},
+                        files={"archivo": ("lic3.xlsx", io.BytesIO(xlsx), _XLSX_MIME)})
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        r1, r2 = [f.result() for f in [pool.submit(_postear), pool.submit(_postear)]]
+
+    assert sorted([r1.status_code, r2.status_code]) == [200, 409], (r1.text, r2.text)
+    gana, rebota = (r1, r2) if r1.status_code == 200 else (r2, r1)
+    assert rebota.json()["detail"]["corrida_id"] == gana.json()["id"]
+    assert len(alm.corridas.listar_corridas()) == 1
+
+
+def test_la_misma_lista_en_otra_carpeta_si_se_encola(tmp_path):
+    """Dos obras pueden estar presupuestando el mismo Excel: el índice es por
+    (carpeta, archivo) justamente para no confundir eso con un doble clic."""
+    cli, alm = _cliente(tmp_path)
+    assert _post_corrida(cli, tmp_path, _carpeta(cli)).status_code == 200
+    otra = cli.post("/api/carpetas", json={"nombre": "Obra 2"}).json()["id"]
+    assert _post_corrida(cli, tmp_path, otra).status_code == 200
+    assert len(alm.corridas.listar_corridas()) == 2
+
+
+def test_otra_lista_en_la_misma_carpeta_si_se_encola(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    carpeta = _carpeta(cli)
+    assert _post_corrida(cli, tmp_path, carpeta).status_code == 200
+    assert _post_corrida(cli, tmp_path, carpeta, nombre="otra.xlsx").status_code == 200
+    assert len(alm.corridas.listar_corridas()) == 2
+
+
+def test_cuando_el_primer_armado_termina_la_misma_lista_vuelve_a_entrar(tmp_path):
+    """El índice es PARCIAL a propósito: cubre solo los estados con el plan a medias.
+    Si cubriera todos, un archivo quedaría vetado para siempre y no se podría volver
+    a costear la misma lista tras un cambio de precios."""
+    cli, alm = _cliente(tmp_path)
+    carpeta = _carpeta(cli)
+    primera = _post_corrida(cli, tmp_path, carpeta).json()["id"]
+    alm.corridas.finalizar_armado(primera, "en_revision")
+    segunda = _post_corrida(cli, tmp_path, carpeta)
+    assert segunda.status_code == 200
+    assert len(alm.corridas.listar_corridas()) == 2
+    # Y el 409 del tercer clic apunta a la que se está armando AHORA, no a la vieja
+    # ya terminada: el id que devuelve tiene que ser navegable a un armado en curso.
+    tercera = _post_corrida(cli, tmp_path, carpeta)
+    assert tercera.status_code == 409, tercera.text
+    assert tercera.json()["detail"]["corrida_id"] == segunda.json()["id"]
+
+
+def test_el_409_apunta_al_armado_en_curso_y_no_a_uno_viejo(tmp_path):
+    """El id del 409 tiene que llevar a un armado EN CURSO. Acá hay dos corridas del
+    mismo archivo y carpeta: una armándose y otra ya terminada pero con fecha MÁS
+    NUEVA (se monta a mano, porque por la API es imposible: mientras una se arma no
+    entra otra). Es lo único que distingue "la que está en curso" de "la primera con
+    este archivo que aparezca en la lista"."""
+    cli, alm = _cliente(tmp_path)
+    carpeta = _carpeta(cli)
+    en_curso = _post_corrida(cli, tmp_path, carpeta).json()["id"]
+    alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="2999-01-01T00:00:00", archivo="lic3.xlsx",
+        turno_def="DIURNO", use_ai=None, estado="en_revision", cuadro_path=None,
+        nombre="terminada", carpeta_id=carpeta))
+
+    r = _post_corrida(cli, tmp_path, carpeta)
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["corrida_id"] == en_curso
+
+
+def test_dos_ejemplos_seguidos_llevan_al_primero(tmp_path):
+    """`/sample` crea siempre "ejemplo.xlsx" en "Sin clasificar", así que dos clics en
+    Ejemplo chocan con el mismo índice. Es lo deseado; lo que no puede pasar es que
+    el ejemplo quede inutilizable después."""
+    cli, alm = _cliente(tmp_path)
+    primero = cli.post("/api/sample")
+    segundo = cli.post("/api/sample")
+    assert primero.status_code == 200, primero.text
+    assert segundo.status_code == 409, segundo.text
+    assert segundo.json()["detail"]["corrida_id"] == primero.json()["id"]
+
+    alm.corridas.finalizar_armado(primero.json()["id"], "en_revision")
+    assert cli.post("/api/sample").status_code == 200          # ya terminó: otro ejemplo
+    assert len(alm.corridas.listar_corridas()) == 2
+
+
+def test_mover_a_una_carpeta_ocupada_por_el_mismo_archivo_es_409(tmp_path):
+    """Mover también toca (carpeta, archivo): sin traducir, el índice lo frenaba con
+    un 500. Con el 409 se dice qué corrida ocupa el destino."""
+    cli, alm = _cliente(tmp_path)
+    c1 = _carpeta(cli)
+    c2 = cli.post("/api/carpetas", json={"nombre": "Obra 2"}).json()["id"]
+    en_c1 = _post_corrida(cli, tmp_path, c1).json()["id"]
+    en_c2 = _post_corrida(cli, tmp_path, c2).json()["id"]
+
+    r = cli.post(f"/api/corridas/{en_c2}/mover", json={"carpeta_id": c1})
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["corrida_id"] == en_c1
+    assert alm.corridas.get_corrida(en_c2).carpeta_id == c2      # no se movió
+
+
+def test_un_armado_detenido_tambien_frena_el_segundo_clic(tmp_path):
+    """Una corrida detenida a medio armar sigue teniendo plan pendiente y se puede
+    reanudar, así que subir la misma lista otra vez armaría dos veces lo mismo."""
+    cli, alm = _cliente(tmp_path)
+    carpeta = _carpeta(cli)
+    primera = _post_corrida(cli, tmp_path, carpeta).json()["id"]
+    alm.corridas.finalizar_armado(primera, "armado_detenido", error="se murió la instancia")
+    segunda = _post_corrida(cli, tmp_path, carpeta)
+    assert segunda.status_code == 409, segunda.text
+    assert segunda.json()["detail"]["corrida_id"] == primera
 
 
 def _encolada_a_medias(alm, cli, n=5, armados=2) -> int:
@@ -855,9 +1015,11 @@ def test_posicion_en_cola_con_varias_encoladas(tmp_path):
     arranca todavía."""
     cli, alm = _cliente(tmp_path)
     carpeta = _carpeta(cli)
-    cids = [svc.crear_corrida_encolada(alm, "x.xlsx", [_item_plan("PLAN")], "DIURNO",
+    # Tres archivos DISTINTOS: `ux_corrida_armando_archivo` no deja dos armados del
+    # mismo archivo en la misma carpeta, y lo que se prueba acá es la cola, no eso.
+    cids = [svc.crear_corrida_encolada(alm, f"x{i}.xlsx", [_item_plan("PLAN")], "DIURNO",
                                        None, carpeta_id=carpeta)
-            for _ in range(3)]
+            for i in range(3)]
     puestos = [cli.get(f"/api/corridas/{c}").json()["armado"]["posicion_en_cola"]
                for c in cids]
     assert puestos == [0, 1, 2]

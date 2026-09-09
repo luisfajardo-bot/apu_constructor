@@ -161,6 +161,24 @@ def _items_del_upload(nombre: str, contenido: bytes, turno: str) -> list[Licitac
     return items
 
 
+def _encolar(alm: Almacen, archivo: str, items: list[LicitacionItem], turno: str,
+             use_ai: Optional[bool], **kw) -> dict:
+    """Encola el armado y arma la respuesta, o rebota con 409 si ya hay uno igual.
+
+    Los dos endpoints que crean corridas pasan por acá para que el doble clic se
+    traduzca igual en los dos: el 409 lleva el id de la corrida que YA se está
+    armando, y con eso el frontend te lleva ahí en vez de encolar otras tres horas
+    de armado del mismo Excel."""
+    try:
+        cid = svc.crear_corrida_encolada(alm, archivo, items, turno, use_ai, **kw)
+    except svc.ArmadoDuplicado as e:
+        # detail estructurado (como el de FilasSinApu): `corrida_id` es lo que el
+        # frontend necesita para navegar, y sacarlo de la prosa con un regex sería peor.
+        raise HTTPException(status_code=409,
+                            detail={"mensaje": str(e), "corrida_id": e.corrida_id})
+    return _encolada(cid, len(items))
+
+
 def _encolada(cid: int, total: int) -> dict:
     """La respuesta de crear una corrida: se encoló, no se armó.
 
@@ -189,10 +207,8 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
     _validar_lista(alm, lista_id)
     _asegurar_biblioteca(alm)
     items = _items_del_upload(archivo.filename, await archivo.read(), turno)
-    cid = svc.crear_corrida_encolada(alm, archivo.filename or "licitacion", items, turno,
-                                     use_ai, carpeta_id=carpeta_id, nombre=nombre,
-                                     lista_precios_id=lista_id)
-    return _encolada(cid, len(items))
+    return _encolar(alm, archivo.filename or "licitacion", items, turno, use_ai,
+                    carpeta_id=carpeta_id, nombre=nombre, lista_precios_id=lista_id)
 
 
 @router.post("/sample")
@@ -211,9 +227,8 @@ def crear_sample(alm: Almacen = Depends(get_almacen),
     if not items:
         raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
     sc = carpetas_svc.carpeta_sin_clasificar_id(alm)
-    cid = svc.crear_corrida_encolada(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO,
-                                     False, carpeta_id=sc, nombre="Ejemplo")
-    return _encolada(cid, len(items))
+    return _encolar(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False,
+                    carpeta_id=sc, nombre="Ejemplo")
 
 
 def _event_stream(gen):
@@ -917,4 +932,13 @@ def mover_corrida(cid: int, body: MoverCorridaIn, alm: Almacen = Depends(get_alm
             raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     except CarpetaInvalida as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except svc.ArmadoDuplicado as e:
+        # El mensaje de la excepción es el de crear una corrida ("te llevamos a esa");
+        # moviendo, lo que hay que decir es por qué el destino está ocupado.
+        raise HTTPException(
+            status_code=409,
+            detail={"mensaje": f"En la carpeta destino ya hay un armado en curso de "
+                               f"«{e.archivo}» (corrida {e.corrida_id}). Esperá a que "
+                               f"termine antes de mover esta.",
+                    "corrida_id": e.corrida_id})
     return svc.vista_corrida(alm, cid)

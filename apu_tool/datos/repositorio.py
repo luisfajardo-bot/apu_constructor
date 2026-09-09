@@ -24,6 +24,29 @@ class CorridaEliminada(Exception):
         self.corrida_id = corrida_id
 
 
+class ArmadoDuplicado(Exception):
+    """Ya hay un armado a medias del MISMO archivo en la MISMA carpeta.
+
+    Lo frena el índice único parcial `ux_corrida_armando_archivo` (los estados
+    'armando' y 'armado_detenido'), no una comprobación previa: las dos peticiones de
+    un doble clic llegan a milisegundos de distancia, las dos leerían "no hay
+    ninguna" y las dos encolarían tres horas de armado del mismo Excel.
+
+    `corrida_id` es la corrida que YA existe, para llevar al usuario ahí en vez de
+    dejarlo reintentando. Es opcional porque esta capa ve la violación pero no los
+    estados que la definen (viven en el servicio, en `ARMANDO_O_A_MEDIAS`): lo
+    completa `servicio.corridas.crear_corrida_encolada`.
+    """
+
+    def __init__(self, archivo: str, corrida_id: Optional[int] = None):
+        self.archivo = archivo
+        self.corrida_id = corrida_id
+        cola = (f" (corrida {corrida_id}): te llevamos a esa en vez de armar el mismo "
+                f"archivo dos veces." if corrida_id else ": esperá a que termine.")
+        super().__init__(f"Ya hay un armado en curso de «{archivo}» en esta carpeta"
+                         + cola)
+
+
 @runtime_checkable
 class RepositorioPrecios(Protocol):
     def init_schema(self) -> None: ...
@@ -160,7 +183,11 @@ class RepositorioApus(Protocol):
 class RepositorioCorridas(Protocol):
     def init_schema(self) -> None: ...
     def reset(self) -> None: ...
-    def crear_corrida(self, meta: CorridaMeta) -> int: ...
+    def crear_corrida(self, meta: CorridaMeta) -> int:
+        """Crea la corrida y devuelve su id. Lanza `ArmadoDuplicado` si ya hay un
+        armado a medias del mismo `archivo` en la misma `carpeta_id` (lo decide el
+        índice, no una consulta previa: ver la excepción)."""
+        ...
     def guardar_items(self, corrida_id: int, items: list[CorridaItemRow]) -> int: ...
     def agregar_item(self, corrida_id: int, fila: CorridaItemRow) -> None:
         """Inserta un ítem (armado incremental). Lanza CorridaEliminada si la

@@ -59,19 +59,35 @@ def _robar(alm, corrida_id: int, ladron: str = "instancia-ladrona") -> None:
     assert alm.corridas.reclamar_armado(ladron, futuro, futuro) == corrida_id
 
 
-def _al_armar_item(alm, seq_gatillo: int, accion):
-    """Corre `accion()` justo después de que se persista la fila `seq_gatillo`.
+def _al_armar_item(alm, seq_gatillo, accion):
+    """Corre `accion()` justo después de que se persista la fila `seq_gatillo`
+    (`None` = después de cada fila).
 
     Es el único punto de enganche determinístico que hay a mitad de un armado, y sirve
-    para meter la carrera real (otra instancia roba la reclama) sin hilos ni sleeps."""
+    para meter la carrera real (otra instancia roba la reclama) o para adelantar el
+    reloj, sin hilos ni sleeps."""
     original = alm.corridas.agregar_item
 
     def espia(corrida_id, fila):
         original(corrida_id, fila)
-        if fila.seq == seq_gatillo:
+        if seq_gatillo is None or fila.seq == seq_gatillo:
             accion()
 
     alm.corridas.agregar_item = espia
+
+
+class _RelojFalso:
+    """Cronómetro monótono que solo avanza cuando el test lo dice. Con esto el latido
+    por tiempo se prueba en milisegundos en vez de en minutos."""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self) -> float:
+        return self.t
+
+    def avanzar(self, segundos: float) -> None:
+        self.t += segundos
 
 
 @pytest.fixture(autouse=True)
@@ -144,9 +160,13 @@ def _agotar_intentos(alm, veces: int) -> None:
 
 
 def test_al_pasar_el_tope_de_intentos_se_detiene(tmp_path):
-    """Algo la mata siempre en el mismo punto: deja de reintentarse para siempre."""
+    """Algo la mata siempre en el mismo punto: deja de reintentarse para siempre, y el
+    motivo REAL viaja en el mensaje. Sin eso, la pantalla dice "se interrumpió 3 veces"
+    y no de qué, y lo que la mató queda solo en un log de Render que nadie abre."""
     alm = _almacen(tmp_path)
     cid = _encolar(alm, [_item("Concreto clase D")])
+    alm.corridas.finalizar_armado(cid, "armando",
+                                  error="TypeError: falta el campo turno")
     _agotar_intentos(alm, config.ARMADO_MAX_INTENTOS)
     assert alm.corridas.get_corrida(cid).intentos == config.ARMADO_MAX_INTENTOS
 
@@ -155,8 +175,35 @@ def test_al_pasar_el_tope_de_intentos_se_detiene(tmp_path):
     m = alm.corridas.get_corrida(cid)
     assert m.estado == "armado_detenido"
     assert "interrump" in (m.ultimo_error or "").lower()
+    assert "TypeError: falta el campo turno" in m.ultimo_error
     assert m.armando_por is None                       # y sale de la cola sin dueño
     assert alm.corridas.get_items(cid) == []           # no armó nada: se rindió
+
+
+def test_el_motivo_sin_error_previo_no_queda_con_un_cabo_suelto(tmp_path):
+    """La mataron de golpe (OOM, deploy): no hay error que contar, y el mensaje no puede
+    terminar en un "Último error:" vacío."""
+    alm = _almacen(tmp_path)
+    cid = _encolar(alm, [_item("Concreto clase D")])
+    _agotar_intentos(alm, config.ARMADO_MAX_INTENTOS)
+
+    armador.un_ciclo(alm, "instancia-C2")
+
+    motivo = alm.corridas.get_corrida(cid).ultimo_error
+    assert "Último error" not in motivo and motivo.endswith("avisá.")
+
+
+def test_el_motivo_recorta_un_error_larguisimo(tmp_path):
+    """Un traceback entero no entra en una línea de la interfaz."""
+    alm = _almacen(tmp_path)
+    cid = _encolar(alm, [_item("Concreto clase D")])
+    alm.corridas.finalizar_armado(cid, "armando", error="ERR " + "x" * 3000)
+    _agotar_intentos(alm, config.ARMADO_MAX_INTENTOS)
+
+    armador.un_ciclo(alm, "instancia-C3")
+
+    motivo = alm.corridas.get_corrida(cid).ultimo_error
+    assert "ERR xxx" in motivo and motivo.endswith("…") and len(motivo) < 400
 
 
 def test_justo_en_el_tope_todavia_arma(tmp_path):
@@ -299,6 +346,7 @@ def test_el_worker_pasa_la_instancia_en_todas_las_llamadas(
     Una sola llamada sin `instancia` reabre el agujero del deploy (el worker viejo le
     suelta la reclama al dueño nuevo) y ningún otro test lo vería."""
     alm = _almacen(tmp_path)
+    reloj = _RelojFalso()
     if escenario == "sin_plan":
         alm.corridas.crear_corrida(CorridaMeta(
             id=None, creada_en="2026-01-01T00:00:00", archivo="x.xlsx",
@@ -308,42 +356,81 @@ def test_el_worker_pasa_la_instancia_en_todas_las_llamadas(
         n = 20 if escenario == "falla" else 2
         _encolar(alm, [_item("ACTIVIDAD %d" % i, item=str(i)) for i in range(n)])
         if escenario == "ok":
-            monkeypatch.setattr(config, "ARMADO_LATIDO_CADA", 1)   # que lata en 2 ítems
+            # Que cada ítem cueste el intervalo: así el ciclo late de verdad.
+            _al_armar_item(alm, None, lambda: reloj.avanzar(config.ARMADO_LATIDO_S))
         if escenario == "tope":
             _agotar_intentos(alm, config.ARMADO_MAX_INTENTOS)
         if escenario == "falla":
             _romper_el_armado(monkeypatch)
 
     llamadas = _espiar_reclama(alm)
-    assert armador.un_ciclo(alm, "yo-mismo") is True
+    assert armador.un_ciclo(alm, "yo-mismo", reloj=reloj) is True
 
     assert {n for n, _ in llamadas} == esperados
     assert [quien for _, quien in llamadas] == ["yo-mismo"] * len(llamadas)
 
 
-def test_late_cada_N_items_y_no_por_item(tmp_path, monkeypatch):
-    """El latido es barato pero no gratis: uno por ítem son 1900 UPDATE de más."""
+def _latidos(llamadas) -> int:
+    return [n for n, _ in llamadas].count("latir_armado")
+
+
+def test_no_late_por_item(tmp_path):
+    """El latido es barato pero no gratis: uno por ítem son 1900 UPDATE de más. Con el
+    reloj quieto, cinco ítems no justifican ni un latido."""
     alm = _almacen(tmp_path)
-    monkeypatch.setattr(config, "ARMADO_LATIDO_CADA", 2)
     _encolar(alm, [_item("ACTIVIDAD %d" % i, item=str(i)) for i in range(5)])
     llamadas = _espiar_reclama(alm)
 
-    armador.un_ciclo(alm, "yo")
+    armador.un_ciclo(alm, "yo", reloj=_RelojFalso())
 
-    assert [n for n, _ in llamadas].count("latir_armado") == 2   # en el 2º y el 4º
+    assert _latidos(llamadas) == 0
 
 
-def test_un_zombi_desplazado_para_de_armar(tmp_path, monkeypatch):
+def test_late_cuando_pasa_el_intervalo_aunque_sean_pocos_items(tmp_path):
+    """El caso que se perdía contando ítems: DOS ítems lentos (un tramo de sub-APUs
+    gordos, un pico de latencia) ya son minutos, y sin latido la reclama vence con el
+    worker trabajando bien. Contando de a 25 ítems, acá no latía nadie."""
+    alm = _almacen(tmp_path)
+    reloj = _RelojFalso()
+    _encolar(alm, [_item("ACTIVIDAD %d" % i, item=str(i)) for i in range(2)])
+    # Cada ítem cuesta EXACTO el intervalo: prueba también el borde (>= y no >).
+    _al_armar_item(alm, None, lambda: reloj.avanzar(config.ARMADO_LATIDO_S))
+    llamadas = _espiar_reclama(alm)
+
+    armador.un_ciclo(alm, "yo", reloj=reloj)
+
+    assert _latidos(llamadas) == 2          # uno por ítem, porque cada ítem tardó el intervalo
+
+
+def test_el_intervalo_se_cuenta_desde_el_ultimo_latido(tmp_path):
+    """Diez ítems que en total tardan un intervalo y medio: dos latidos, no diez."""
+    alm = _almacen(tmp_path)
+    reloj = _RelojFalso()
+    _encolar(alm, [_item("ACTIVIDAD %d" % i, item=str(i)) for i in range(10)])
+    _al_armar_item(alm, None, lambda: reloj.avanzar(config.ARMADO_LATIDO_S / 5))
+    llamadas = _espiar_reclama(alm)
+
+    armador.un_ciclo(alm, "yo", reloj=reloj)
+
+    assert _latidos(llamadas) == 2          # en el ítem 5 y en el 10
+
+
+def test_un_zombi_desplazado_para_de_armar(tmp_path):
     """Deploy: el worker viejo tardó más que el TTL, otra instancia le robó la corrida.
     El `False` del latido es el aviso, y parar ahí es lo que evita que dos workers armen
     la misma corrida durante horas."""
     alm = _almacen(tmp_path)
-    monkeypatch.setattr(config, "ARMADO_LATIDO_CADA", 1)   # late tras cada ítem
+    reloj = _RelojFalso()
     items = [_item("ACTIVIDAD %d" % i, item=str(i)) for i in range(4)]
     cid = _encolar(alm, items)
-    _al_armar_item(alm, 0, lambda: _robar(alm, cid))
 
-    assert armador.un_ciclo(alm, "worker-viejo") is True
+    def roban_y_pasa_el_tiempo():
+        _robar(alm, cid)
+        reloj.avanzar(config.ARMADO_LATIDO_S)      # el primer ítem tardó el intervalo
+
+    _al_armar_item(alm, 0, roban_y_pasa_el_tiempo)
+
+    assert armador.un_ciclo(alm, "worker-viejo", reloj=reloj) is True
 
     # Paró en el primer ítem: si ignorara el `False` armaría los cuatro.
     assert len(alm.corridas.get_items(cid)) == 1

@@ -53,16 +53,39 @@ def _ahora() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _acortar(texto: str, tope: int) -> str:
+    """Un motivo tiene que entrar en una línea de la pantalla, no en una pared de texto."""
+    texto = " ".join(texto.split())        # un traceback de varias líneas se aplana
+    return texto if len(texto) <= tope else texto[:tope - 1].rstrip() + "…"
+
+
+def _motivo_detenida(meta) -> str:
+    """El mensaje que va a leer una persona cuando una corrida se rinde.
+
+    Lleva pegado el último error REAL: sin él dice "se interrumpió 3 veces" y no de qué,
+    y lo que la mató las tres veces queda solo en un log de Render que nadie va a abrir.
+    Sin error previo (la mataron de golpe: OOM, deploy) no se agrega nada, para que el
+    mensaje no quede con un cabo suelto."""
+    detalle = _acortar(meta.ultimo_error or "", 200)
+    return ("El armado se interrumpió %d veces seguidas. Puede ser un reinicio del "
+            "servidor o un problema con el archivo. Reintentá; si vuelve a pasar, "
+            "avisá.%s" % (meta.intentos, (" Último error: %s" % detalle) if detalle else ""))
+
+
 def _limite_vencimiento() -> str:
     vencido = datetime.now() - timedelta(seconds=config.ARMADO_TTL_RECLAMA_S)
     return vencido.isoformat(timespec="seconds")
 
 
-def un_ciclo(alm: Almacen, instancia: str) -> bool:
+def un_ciclo(alm: Almacen, instancia: str, reloj=time.monotonic) -> bool:
     """Reclama UNA corrida y la arma entera. Devuelve si había trabajo.
 
     Separado de `correr_para_siempre` para poder testear el ciclo sin hilo, sin
     dormir y sin app: los tests llaman a esto.
+
+    `reloj` es el cronómetro del latido y de la duración: monótono (no `datetime`, que
+    un ajuste de hora corre para atrás) e inyectable, para que un test pueda adelantarlo
+    a mano en vez de dormir un minuto.
     """
     corrida_id = alm.corridas.reclamar_armado(instancia, _ahora(), _limite_vencimiento())
     if corrida_id is None:
@@ -75,9 +98,7 @@ def un_ciclo(alm: Almacen, instancia: str) -> bool:
         # Sale de la cola o se reintentaría para siempre. El usuario la puede
         # reencolar a mano desde la pantalla (POST /corridas/{id}/reanudar).
         _finalizar(alm, corrida_id, "armado_detenido", instancia,
-                   error=("El armado se interrumpió %d veces seguidas. Puede ser un "
-                          "reinicio del servidor o un problema con el archivo. "
-                          "Reintentá; si vuelve a pasar, avisá." % meta.intentos))
+                   error=_motivo_detenida(meta))
         return True
 
     try:
@@ -92,13 +113,19 @@ def un_ciclo(alm: Almacen, instancia: str) -> bool:
         # `max_seq + 1` y no la cantidad de filas: con un hueco en el medio, contar
         # reanudaría sobre un seq que ya existe.
         desde = alm.corridas.max_seq(corrida_id) + 1
-        t0 = time.monotonic()
+        t0 = reloj()
+        proximo_latido = t0 + config.ARMADO_LATIDO_S
         hechos = 0
         for evento, _payload in svc.armar_pendientes(alm, corrida_id, items, desde):
             if evento == "error":          # la corrida se borró a mitad
                 return True
             hechos += 1
-            if hechos % config.ARMADO_LATIDO_CADA == 0:
+            # Por tiempo y no cada N ítems: lo que vence es un lease. Un tramo de
+            # sub-APUs gordos o un pico de latencia hacían vencer la reclama con el
+            # worker trabajando bien, y ahí se perdía una hora de armado por nada.
+            ahora_mono = reloj()
+            if ahora_mono >= proximo_latido:
+                proximo_latido = ahora_mono + config.ARMADO_LATIDO_S
                 if not alm.corridas.latir_armado(corrida_id, _ahora(), instancia):
                     # Nos desplazaron: la corrida ya tiene otro dueño y esto es un
                     # zombi. Parar acá es lo único que evita armar en paralelo con el
@@ -113,14 +140,14 @@ def un_ciclo(alm: Almacen, instancia: str) -> bool:
         # (`_finalizar` avisa). Se cura sola: el dueño nuevo la retoma, no encuentra
         # ítems pendientes y la cierra él.
         _finalizar(alm, corrida_id, "en_revision", instancia,
-                   duracion_ms=round((time.monotonic() - t0) * 1000))
+                   duracion_ms=round((reloj() - t0) * 1000))
     except Exception as exc:               # noqa: BLE001
         # Un fallo que NO es de un ítem (esos ya los absorbe `armar_pendientes`):
         # se deja la corrida EN LA COLA con el motivo, para que se reintente. Soltar la
         # reclama la hace reclamable en el acto, sin esperar el TTL; `intentos` no se
         # toca, así que el tope la termina deteniendo si el fallo es permanente.
         logger.exception("Fallo armando la corrida %s", corrida_id)
-        _finalizar(alm, corrida_id, "armando", instancia, error=str(exc)[:500])
+        _finalizar(alm, corrida_id, "armando", instancia, error=_acortar(str(exc), 500))
     return True
 
 

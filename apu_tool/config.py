@@ -56,9 +56,13 @@ MAX_FALLOS_SEGUIDOS_ARMADO = 5
 # retomar la corrida. Es el tiempo de recuperación tras un reinicio de golpe: más
 # corto arriesga doble armado durante el drenaje de un deploy, más largo hace esperar.
 ARMADO_TTL_RECLAMA_S = 180
-# Cada cuántos ítems se refresca la reclama. Con el ritmo medido (2,8-6,2 s/ítem) es
-# un latido cada 1-2,5 minutos, holgado contra el TTL de arriba.
-ARMADO_LATIDO_CADA = 25
+# Cada cuánto se refresca la reclama MIENTRAS se arma. Se mide en TIEMPO y no en ítems
+# porque lo que vence es un lease, que también es tiempo: contar ítems es un proxy de
+# una velocidad que no controlamos (medida entre 2,8 y 6,2 s/ítem, más del doble de
+# variación), y con el proxy el margen contra el TTL depende de qué tan gordos vengan
+# los sub-APUs. Así el margen es fijo: 3x el intervalo antes de que la reclama venza.
+# Cambiar esto sin mirar ARMADO_TTL_RECLAMA_S es quedarse sin ese margen.
+ARMADO_LATIDO_S = 60
 # Respaldo del evento: es lo ÚNICO que hace arrancar un armado huérfano al bootear,
 # cuando no hay ningún evento que despierte al worker.
 ARMADO_POLL_S = 30

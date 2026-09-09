@@ -343,18 +343,20 @@ class CorridasPg:
             armando_por=r.get("armando_por"),
             armando_desde=r.get("armando_desde"))
 
-    def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
-        with self.cx.connection() as conn:
-            r = conn.execute("SELECT * FROM corridas.corrida WHERE id=%s",
-                             (corrida_id,)).fetchone()
-        return self._row_to_meta(r) if r else None
-
     # Columnas explícitas y NO `SELECT *`: `plan_json` pesa ~400 KB en una corrida de
     # 1900 ítems y este listado trae TODAS las corridas. Con `*`, abrir "Mis corridas"
     # arrastraría decenas de MB que nadie mira.
     _COLS_META = ("id, creada_en, archivo, turno_def, use_ai, estado, cuadro_path, "
                   "duracion_ms, modo, carpeta_id, nombre, lista_precios_id, "
                   "intentos, ultimo_error, armando_por, armando_desde")
+
+    def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
+        with self.cx.connection() as conn:
+            # Mismo motivo que en SQLite: `plan_json` son ~400 KB y esta lectura
+            # corre en cada poll mientras arma, para tirarlo. Acá el egress se paga.
+            r = conn.execute(f"SELECT {self._COLS_META} FROM corridas.corrida WHERE id=%s",
+                             (corrida_id,)).fetchone()
+        return self._row_to_meta(r) if r else None
 
     def listar_corridas(self) -> list[CorridaMeta]:
         with self.cx.connection() as conn:

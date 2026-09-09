@@ -178,10 +178,16 @@ def test_listar_corridas_no_pierde_ninguna_columna(repo):
         turno_def="NOCTURNO", use_ai=True, estado="finalizada",
         cuadro_path="salidas/cuadro.xlsx", duracion_ms=4321, modo="congelada",
         nombre="Mi corrida", lista_precios_id=7))
-    listada = next(c for c in repo.listar_corridas() if c.id == cid)
-    completa = repo.get_corrida(cid)
-    # Lo que trae el listado tiene que ser IDÉNTICO a leerla de a una.
-    assert listada == completa
+    esperada = CorridaMeta(
+        id=cid, creada_en="2026-09-07T11:00:00", archivo="lista.xlsx",
+        turno_def="NOCTURNO", use_ai=True, estado="finalizada",
+        cuadro_path="salidas/cuadro.xlsx", duracion_ms=4321, modo="congelada",
+        nombre="Mi corrida", lista_precios_id=7)
+    # Se afirma contra valores EXPLÍCITOS y no una ruta contra la otra: las dos usan
+    # `_COLS_META`, así que compararlas entre sí no detectaría una columna olvidada
+    # (las dos devolverían el mismo default equivocado y el test pasaría igual).
+    assert repo.get_corrida(cid) == esperada
+    assert next(c for c in repo.listar_corridas() if c.id == cid) == esperada
 
 
 def test_plan_se_guarda_y_se_lee_igual(repo):

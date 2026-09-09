@@ -1190,6 +1190,27 @@ git commit -m "feat(armado): worker que consume la cola que vive en la base"
 
 ---
 
+## ⚠️ SEGUNDA CORRECCIÓN DE ORDEN: la 10 se parte en dos
+
+El mismo problema, un escalón más arriba. La Tarea 10 original **borra** los endpoints
+SSE, pero el frontend los sigue llamando hasta la Tarea 11: entre las dos, crear una
+corrida devuelve 404 y `npm test` queda rojo. La regla de este plan es que cada tarea
+deja todo verde, así que la 10 se parte:
+
+- **10a — backend, sin borrar nada.** `POST /corridas` y `POST /sample` pasan a encolar
+  y devolver al instante; `GET /corridas/{id}` suma el bloque `armado`; aparece
+  `POST /corridas/{id}/reanudar`. **Los endpoints SSE siguen vivos y funcionando**, así
+  que el frontend actual no se entera y todo sigue verde.
+- **11 — frontend.** La pantalla pasa a crear por el endpoint nuevo y a leer el progreso
+  del poll; muere `armado.tsx`.
+- **10b — la poda.** Recién ahí se borran `POST /corridas/stream`, `POST /sample/stream`
+  y `construir_corrida_stream`, que ya no los llama nadie.
+
+Orden final: **10a → 11 → 10b → 9 → 12**. La 9 (arrancar el worker) va después de que
+la API deje de armar en el request, por el motivo del bloque de arriba.
+
+---
+
 ## ⚠️ ORDEN CORREGIDO: la Tarea 10 va ANTES que la 9
 
 **Descubierto y reproducido durante la revisión de la Tarea 8.** El plan original ponía

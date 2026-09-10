@@ -89,6 +89,19 @@ def test_componente_duplicado_es_error():
     assert "COMPONENTE_DUPLICADO" in codigos(v.errores)
 
 
+def test_varios_duplicados_dan_un_solo_hallazgo():
+    """Una regla, un hallazgo: si emitiera uno por par, `superadas` restaría de más."""
+    p = Propuesta(componentes=(comp(), comp(),
+                               comp(codigo="6092", funcion="herramienta",
+                                    rendimiento=1.0),
+                               comp(codigo="6092", funcion="herramienta",
+                                    rendimiento=1.0)))
+    _, v = validar(p, ctx())
+    dups = [h for h in v.errores if h.codigo == "COMPONENTE_DUPLICADO"]
+    assert len(dups) == 1
+    assert "4279" in dups[0].mensaje and "6092" in dups[0].mensaje
+
+
 def test_mismo_codigo_como_insumo_y_como_subapu_no_es_duplicado():
     """La clave es (codigo, tipo, ref_shift): son dos cosas distintas."""
     p = Propuesta(componentes=(
@@ -151,6 +164,14 @@ def test_un_redondeo_razonable_no_se_marca_como_corregido():
 def test_sin_calculo_el_rendimiento_del_modelo_se_respeta():
     corregida, _ = validar(Propuesta(componentes=(comp(rendimiento=0.62),)), ctx())
     assert corregida.componentes[0].rendimiento == 0.62
+
+
+def test_la_unidad_del_componente_la_pone_el_catalogo_no_el_modelo():
+    """No hay regla de unidad porque no hay campo de unidad: el contrato no deja que
+    el modelo la declare. Que la actividad sea M3 y la cuadrilla HR es lo normal —
+    el rendimiento es HR por M3, no una incoherencia."""
+    from dataclasses import fields
+    assert "unidad" not in {f.name for f in fields(ComponentePropuesto)}
 
 
 # --- advertencias ----------------------------------------------------------

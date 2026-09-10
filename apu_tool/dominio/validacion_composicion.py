@@ -64,6 +64,11 @@ class Validacion:
     totales: int
 
     def to_dict(self) -> dict[str, Any]:
+        # OJO al renombrar: `total` (singular) está en `_FORBIDDEN_KEYS` de
+        # `dominio/privacy.py`. Este dict viaja hacia la interfaz y se persiste, y el
+        # día que se reinyecte como contexto hacia la IA, un `total` haría saltar el
+        # guardián sobre una validación que no tiene un peso adentro. `totales` pasa
+        # por el plural, no por diseño.
         return {"valido": self.valido,
                 "errores": [h.to_dict() for h in self.errores],
                 "advertencias": [h.to_dict() for h in self.advertencias],
@@ -241,9 +246,14 @@ def _validar_conjunto(p: Propuesta, ctx: ContextoValidacion
 
     reglas += 1
     claves = [(c.codigo, c.tipo, c.ref_shift) for c in comps]
-    for k in sorted({k for k in claves if claves.count(k) > 1}):
-        err.append(Hallazgo("COMPONENTE_DUPLICADO",
-                            f"{k[0]} aparece más de una vez en la composición.", k[0]))
+    repetidas = sorted({k[0] for k in claves if claves.count(k) > 1})
+    if repetidas:
+        # UN hallazgo con todos los códigos, no uno por par: es una sola regla, y si
+        # emitiera N la métrica `superadas` restaría N por una regla evaluada.
+        err.append(Hallazgo(
+            "COMPONENTE_DUPLICADO",
+            f"{', '.join(repetidas)} aparece más de una vez en la composición.",
+            repetidas[0] if len(repetidas) == 1 else ""))
 
     reglas += 1
     if not ({"mano_de_obra", "equipo"} & funciones):

@@ -91,7 +91,8 @@ la descripción diga "SUMINISTRO E INSTALACIÓN DE TUBERÍA" sin diámetro ni ma
 
 | Archivo | Estado | Responsabilidad |
 |---|---|---|
-| `dominio/composicion.py` | **nuevo** | tipos del contrato, orquestador `componer()`, transiciones de estado |
+| `dominio/composicion.py` | **nuevo** | tipos del contrato y parseo tolerante, sin dependencias de otras capas |
+| `dominio/composicion_agente.py` | **nuevo** | orquestador `componer()`, transiciones de estado |
 | `dominio/validacion_composicion.py` | **nuevo** | validador determinístico + confianza calculada |
 | `dominio/compose.py` | ampliado | el retriever sigue igual (fase 3 lo cambia) + `rendimientos_observados()` |
 | `dominio/ai_assist.py` | ampliado | `ApuAdvisor.componer()` con el esquema v2 + `PROMPT_VERSION` |

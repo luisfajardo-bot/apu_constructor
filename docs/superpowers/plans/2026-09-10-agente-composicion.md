@@ -34,7 +34,8 @@ explícita** — `master` autodespliega.
 
 | Archivo | Responsabilidad |
 |---|---|
-| `apu_tool/dominio/composicion.py` | **nuevo.** Vocabularios cerrados, dataclasses del contrato, parseo tolerante del JSON del modelo, orquestador `componer()` |
+| `apu_tool/dominio/composicion.py` | **nuevo.** Contrato puro: vocabularios cerrados, dataclasses, parseo tolerante del JSON del modelo |
+| `apu_tool/dominio/composicion_agente.py` | **nuevo.** Orquestador: `recuperar()`, `evaluar()`, `componer()` |
 | `apu_tool/dominio/validacion_composicion.py` | **nuevo.** Validador determinístico + confianza calculada. Sin IA, sin dinero, sin motor de precios |
 | `apu_tool/dominio/compose.py` | + `RendimientoObservado` y `rendimientos_observados()` |
 | `apu_tool/dominio/privacy.py` | + `payload_composicion()` y sus helpers |
@@ -2808,10 +2809,38 @@ Se parte en tres funciones porque tienen tres llamadores distintos:
 - `componer()` — el generador con los eventos; usa las dos anteriores.
 
 **Archivos:**
-- Modificar: `apu_tool/dominio/composicion.py`, `apu_tool/dominio/ai_assist.py`,
-  `apu_tool/dominio/assemble.py`, `tests/test_compose.py`,
-  `tests/test_assemble_generado.py`
+- Crear: `apu_tool/dominio/composicion_agente.py`
+- Modificar: `apu_tool/dominio/ai_assist.py`, `apu_tool/dominio/assemble.py`,
+  `tests/test_compose.py`, `tests/test_assemble_generado.py`
 - Test: `tests/test_composicion_motor.py`
+
+> **Cambio respecto al borrador del plan** (revisión de calidad de la tarea 1): el
+> orquestador va en un **archivo hermano**, no al final de `composicion.py`. Razón: el
+> orquestador arrastra `Almacen` y la fachada del SDK, y todo el que importe el
+> contrato — el validador, `esquemas.py`, el servicio — se los comería. Es el mismo
+> reparto que ya tiene el repo entre `revision.py` y `ai_assist.py`. Como efecto
+> secundario desaparecen los imports dentro de funciones que el borrador usaba para
+> esquivar ese acoplamiento: acá van todos arriba, normales.
+>
+> En el código de abajo, donde dice "al final de `composicion.py`", va en
+> `composicion_agente.py`, con estos imports a nivel de módulo:
+>
+> ```python
+> from dataclasses import dataclass, replace
+> from typing import Any
+>
+> from apu_tool.dominio import privacy
+> from apu_tool.dominio.ai_assist import PROMPT_VERSION, IANoDisponible
+> from apu_tool.dominio.compose import InsumoRetriever, rendimientos_observados
+> from apu_tool.dominio.composicion import Propuesta, propuesta_desde_json
+> from apu_tool.dominio.validacion_composicion import (
+>     ContextoValidacion, calcular_confianza, validar,
+> )
+> ```
+>
+> Y el test importa `componer`, `evaluar` y `recuperar` de
+> `apu_tool.dominio.composicion_agente` (los tipos siguen viniendo de
+> `apu_tool.dominio.composicion`).
 
 - [ ] **Paso 1: escribir la prueba que falla**
 
@@ -2825,8 +2854,9 @@ import pytest
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.ai_assist import ApuAdvisor, IANoDisponible
 from apu_tool.dominio.composicion import (
-    Calculo, ComponentePropuesto, Propuesta, Referencia, componer, evaluar, recuperar,
+    Calculo, ComponentePropuesto, Propuesta, Referencia,
 )
+from apu_tool.dominio.composicion_agente import componer, evaluar, recuperar
 from apu_tool.nucleo.models import Apu, ApuComponent, Insumo, LicitacionItem
 
 ITEM = LicitacionItem("1.3", "EXCAVACION MANUAL EN MATERIAL COMUN", "M3", 120.0,
@@ -3562,7 +3592,8 @@ from apu_tool.datos.almacen import Almacen
 from apu_tool.datos.repositorio import VersionYaExiste
 from apu_tool.dominio.ai_assist import PROMPT_VERSION, ApuAdvisor, IANoDisponible
 from apu_tool.dominio import privacy
-from apu_tool.dominio.composicion import Propuesta, componer, evaluar, propuesta_desde_json, recuperar
+from apu_tool.dominio.composicion import Propuesta, propuesta_desde_json
+from apu_tool.dominio.composicion_agente import componer, evaluar, recuperar
 from apu_tool.nucleo.models import ComposicionRow
 from apu_tool.servicio import autoria
 from apu_tool.servicio.corridas import CorridaCongelada, confirmar_item
@@ -4709,7 +4740,8 @@ En la tabla de `apu_tool/dominio/`, agrega dos filas y corrige la de `compose.py
 
 ```markdown
 | `compose.py`             | candidatos de insumos + rendimientos observados de la biblioteca |
-| `composicion.py`         | contrato del agente de composición + orquestador (propone; no aplica) |
+| `composicion.py`         | contrato del agente de composición (tipos y parseo, sin dependencias) |
+| `composicion_agente.py`  | orquestador de la composición (propone; nunca aplica) |
 | `validacion_composicion.py` | validador determinístico + confianza calculada (sin IA, sin dinero) |
 ```
 

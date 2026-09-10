@@ -1,4 +1,4 @@
-﻿"""Endpoint de revisión: SSE, rol, corrida congelada, persistencia del veredicto."""
+"""Endpoint de revisión: SSE, rol, corrida congelada, persistencia del veredicto."""
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio import revision
 from apu_tool.nucleo.models import (

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Lógica de la capa de servicio para las corridas (armado web).
 
 No habla HTTP ni con la IA directamente: orquesta el dominio (matcher, assembler,

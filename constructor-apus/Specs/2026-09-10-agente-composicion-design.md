@@ -257,6 +257,16 @@ ni `monto` en ningún nivel. Es deliberado: la propuesta persistida se puede rei
 un payload futuro (regenerar con contexto, fase 4) sin volver a filtrarla. Hay un test que
 lo fija.
 
+**El contrato guarda códigos, no nombres — y la respuesta HTTP tiene que agregarlos.**
+`ComponentePropuesto` solo lleva `codigo`, porque es lo único que el modelo elige: el
+nombre y la unidad los pone el catálogo. Pero eso deja la mesa de revisión mostrando
+`4279 · 0,62 · mano_de_obra`, que no se puede juzgar; `CUADRILLA OFICIAL MAS AYUDANTES`
+sí. La solución no es meter el nombre en la propuesta persistida (sería duplicar el
+catálogo y quedaría viejo), sino que el **servicio enriquezca la respuesta** con un
+`catalogo: {codigo: {nombre, unidad, grupo}}` armado con una consulta en lote sobre los
+códigos de la propuesta. La fila persistida queda pura —lo que dijo el modelo— y los
+datos de presentación viajan aparte, siempre frescos.
+
 ### 6.3 Lo que devuelve la plataforma
 
 ```json

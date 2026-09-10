@@ -1,4 +1,4 @@
-﻿"""Endpoints de la API. Delgados: validan y delegan en apu_tool.servicio.corridas."""
+"""Endpoints de la API. Delgados: validan y delegan en apu_tool.servicio.corridas."""
 from __future__ import annotations
 
 import json

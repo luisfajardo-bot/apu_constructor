@@ -183,6 +183,16 @@ def test_las_hipotesis_no_quedan_aliasadas_al_json_del_llamador():
     assert p.componentes[0].hipotesis["horas_jornada"] == 8
 
 
+def test_una_hipotesis_con_clave_monetaria_no_entra():
+    """`hipotesis` es el único dict cuyas claves pone el modelo, y esta fila está
+    hecha para reinyectarse: una clave prohibida haría reventar el guardián al LEER
+    algo que se aceptó al escribir."""
+    p = propuesta_desde_json(_crudo(hipotesis={"horas_jornada": 8,
+                                               "costo": 350000,
+                                               "precio_unitario": 1}))
+    assert p.componentes[0].hipotesis == {"horas_jornada": 8}
+
+
 def test_un_codigo_absurdamente_largo_se_acota_en_el_parseo():
     """La salida del modelo es un borde de confianza: se acota acá, no río abajo.
     Un código de 10 KB rompe la tabla de la interfaz y se persiste igual, porque la

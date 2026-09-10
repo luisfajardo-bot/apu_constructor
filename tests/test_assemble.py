@@ -152,11 +152,12 @@ def test_fallback_sin_candidatos_no_pide_elegir(assembler):
 
 class _AdvisorEspia:
     """Revienta si el armado lo toca. El armado tiene que ser determinístico."""
-    def choose_apu(self, *a, **k):
-        raise AssertionError("assemble_item no debe llamar a la IA")
-
-    def compose_apu(self, *a, **k):
-        raise AssertionError("assemble_item no debe componer con IA")
+    def __getattr__(self, nombre):
+        # Cualquier atributo, no una lista de métodos que se desactualiza: cuando la
+        # composición vieja murió, este espía quedó vigilando `choose_apu` y
+        # `compose_apu`, que ya no existen, y habría dejado pasar un `componer`.
+        raise AssertionError(
+            f"assemble_item no debe tocar la IA (intentó usar '{nombre}')")
 
 
 def test_armado_nunca_llama_a_la_ia(assembler):

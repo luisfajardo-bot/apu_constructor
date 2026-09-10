@@ -45,18 +45,27 @@ class InsumoRetriever:
     ) -> tuple[list[CandidateInsumo], list[DePricedApu]]:
         """Devuelve (insumos_candidatos, apus_ejemplo) — todo sin dinero."""
         # 1) APUs análogos -> sus insumos + sirven de ejemplo.
+        #
+        # UN solo recorrido: antes había dos, y el primero (el de los ejemplos) volvía
+        # a pedir los mismos APUs que el segundo. En SQLite no se nota, pero cada
+        # `get_depriced_apu` son DOS consultas en Postgres (`get_apu` +
+        # `get_components`), así que eran round-trips tirados contra Supabase en el
+        # camino de generación.
+        #
+        # El corte de los ejemplos va por ÍNDICE (`i < max_ejemplos`) y no por cuántos
+        # se llevan acumulados: el bucle viejo iteraba `cands[:max_ejemplos]`, así que
+        # un candidato que no resolvía gastaba su cupo en vez de cederlo al siguiente.
+        # Contar los acumulados daría más ejemplos que antes en ese caso — mismo
+        # código, otro payload hacia el modelo.
         cands = self.matcher.candidates(descripcion, shift, top_n=8)
         ejemplos: list[DePricedApu] = []
         insumos: dict[str, CandidateInsumo] = {}
-        for c in cands[:max_ejemplos]:
+        for i, c in enumerate(cands):
             dp = self.alm.apus.get_depriced_apu(c.apu_codigo, shift)
             if dp is None:
                 continue
-            ejemplos.append(dp)
-        for c in cands:
-            dp = self.alm.apus.get_depriced_apu(c.apu_codigo, shift)
-            if dp is None:
-                continue
+            if i < max_ejemplos:
+                ejemplos.append(dp)
             for comp in dp.componentes:
                 # Los sub-APUs NO entran al conjunto candidato. El contrato y el
                 # validador los soportan, pero en esta fase la IA no los propone: los

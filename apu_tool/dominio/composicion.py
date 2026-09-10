@@ -5,8 +5,10 @@ actividad que el matcher determinístico no supo resolver, y lo que sale de acá
 propuesta que alguien tiene que aprobar. No hay dinero en ningún campo de este módulo,
 a propósito: aun así, la propuesta persistida se filtra igual al salir de nuevo hacia
 la IA (`dominio/privacy.py`) — `hipotesis` es un dict abierto cuyas claves las pone el
-modelo (o, en estado `editada`, una persona), y nada impide que alguien meta ahí un
-`"costo"`.
+modelo (o, en estado `editada`, una persona). Esas claves se filtran contra la misma
+denylist del guardián al PARSEAR (`_hipotesis_desde`), porque esta fila está hecha
+para reinyectarse: aceptar al escribir un `"costo"` que después hace reventar a
+`assert_no_money` al leer sería dejar una bomba de tiempo en la base.
 
 REGLA DEL PARSEO: un componente LEGIBLE nunca se descarta en silencio. Un campo que no
 se entiende se degrada de forma CONSERVADORA — hacia menos confianza, nunca hacia más —
@@ -217,16 +219,40 @@ def _componente_desde(v: Any) -> Optional[ComponentePropuesto]:
         origen=_del_vocabulario(v.get("origen"), ORIGENES, "sin_evidencia"),
         referencias=_referencias_desde(v.get("referencias")),
         # `hipotesis` es un dict abierto cuyas claves las pone el modelo: se acota
-        # como todo lo demás que viene de él, porque se persiste y se muestra.
-        hipotesis=({_texto(k, 60): (_texto(x) if isinstance(x, str) else x)
-                    for k, x in list(v["hipotesis"].items())[:20]}
-                   if isinstance(v.get("hipotesis"), dict) else {}),
+        # como todo lo demás que viene de él, y se le sacan las claves monetarias,
+        # porque se persiste, se muestra y está pensado para reinyectarse.
+        hipotesis=_hipotesis_desde(v.get("hipotesis")),
         calculo=_calculo_desde(v.get("calculo")),
         justificacion=_texto(v.get("justificacion")),
         nivel_evidencia=_del_vocabulario(v.get("nivel_evidencia"),
                                          NIVELES_EVIDENCIA, "bajo"),
         ref_shift=_texto(v.get("ref_shift"), _MAX_CODIGO).upper(),
     )
+
+
+def _hipotesis_desde(v: Any) -> dict[str, Any]:
+    """Las hipótesis del modelo, sin claves monetarias.
+
+    `hipotesis` es el único dict del contrato cuyas CLAVES las pone el modelo (o una
+    persona, en estado `editada`), así que es la única vía por la que un "costo"
+    podría entrar a la propuesta persistida. Y esta fila está diseñada para
+    reinyectarse en un payload futuro: dejarlo pasar significaría que
+    `assert_no_money` reviente al LEER algo que se aceptó al escribirlo. Se filtra
+    acá, en el borde, no río abajo.
+
+    El import es local a propósito: este módulo es el CONTRATO y no depende de nada a
+    nivel de módulo (todo el que importe un tipo se comería la cadena entera). No hay
+    ciclo — `privacy` solo importa `nucleo.models` —, y la denylist se lee de allá en
+    vez de copiarse acá justamente para que el filtro y el guardián no se separen.
+    """
+    from apu_tool.dominio.privacy import _FORBIDDEN_KEYS
+    if not isinstance(v, dict):
+        return {}
+    # El tope de 20 se aplica ANTES de filtrar, como antes: acota lo que mandó el
+    # modelo, no lo que sobrevive al filtro.
+    return {_texto(k, 60): (_texto(x) if isinstance(x, str) else x)
+            for k, x in list(v.items())[:20]
+            if str(k).strip().lower() not in _FORBIDDEN_KEYS}
 
 
 def _supuestos_desde(v: Any) -> tuple[Supuesto, ...]:

@@ -21,10 +21,17 @@ from apu_tool.nucleo.models import DePricedApu, DePricedComponent
 
 @dataclass(frozen=True)
 class CandidateInsumo:
-    """Insumo candidato SIN dinero (código, nombre, unidad)."""
+    """Insumo candidato SIN dinero (código, nombre, unidad, grupo).
+
+    `grupo` es clasificación técnica (MO/EQ/MAT), no monetaria, y lo llena el
+    orquestador con la misma consulta al catálogo con la que arma `unidades_catalogo`
+    para el validador: una lectura, dos usos. Por defecto vacío para que el retriever
+    siga construyendo candidatos sin consultar nada.
+    """
     codigo: str
     nombre: str
     unidad: str
+    grupo: str = ""
 
 
 class InsumoRetriever:
@@ -70,7 +77,8 @@ class InsumoRetriever:
 
 
 def candidate_insumo_to_dict(c: CandidateInsumo) -> dict:
-    return {"insumo_codigo": c.codigo, "insumo_nombre": c.nombre, "unidad": c.unidad}
+    return {"insumo_codigo": c.codigo, "insumo_nombre": c.nombre,
+            "unidad": c.unidad, "grupo": c.grupo}
 
 
 @dataclass(frozen=True)

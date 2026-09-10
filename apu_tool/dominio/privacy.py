@@ -97,5 +97,42 @@ def safe_json(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def rendimiento_observado_to_dict(o) -> dict[str, Any]:
+    """Estadística de uso de un insumo en la biblioteca. Cantidades físicas, no dinero.
+
+    Se copia clave por clave y no se delega en `o.to_dict()`: este es el borde hacia
+    la IA, y un campo agregado al tipo del dominio no debe viajar solo por existir.
+    """
+    return {"insumo_codigo": o.insumo_codigo, "unidad": o.unidad, "n": o.n,
+            "minimo": round(o.minimo, 6), "mediana": round(o.mediana, 6),
+            "maximo": round(o.maximo, 6),
+            # El modelo tiene que saber que el rango dejó filas afuera: si no, un
+            # "n=35" sobre un insumo que también se usa en otra unidad le parece
+            # evidencia más firme de la que es.
+            "descartados_otra_unidad": o.descartados_otra_unidad}
+
+
+def payload_composicion(item, insumos, ejemplos, observados) -> dict[str, Any]:
+    """El payload de la composición asistida (dominio/composicion_agente.py).
+
+    Se arma clave por clave a propósito, nunca volcando objetos en bloque: es lo que
+    hace que el test de FORMA sirva de algo. Los APUs de referencia entran como
+    `DePricedApu`, un tipo que estructuralmente no puede llevar dinero — la frontera
+    está en el tipo, no en acordarse de filtrar campos.
+
+    `observados` es un dict {codigo: RendimientoObservado}; se ordena por código para
+    que dos llamadas con los mismos datos produzcan el mismo texto (el prompt es
+    cacheable y los tests, comparables).
+    """
+    from apu_tool.dominio.compose import candidate_insumo_to_dict
+    return {
+        "actividad": licitacion_item_to_dict(item),
+        "insumos_disponibles": [candidate_insumo_to_dict(i) for i in insumos],
+        "apus_referencia": [depriced_apu_to_dict(a) for a in ejemplos],
+        "rendimientos_observados": [rendimiento_observado_to_dict(observados[k])
+                                    for k in sorted(observados)],
+    }
+
+
 class PrivacyViolation(RuntimeError):
     """Se intentó enviar un valor monetario a la IA."""

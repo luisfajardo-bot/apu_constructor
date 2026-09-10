@@ -7,8 +7,9 @@ de hallazgos.
 El reparto entre error y advertencia sigue una regla, no el gusto:
 
   - Bloquea lo ESTRUCTURAL: el código no está autorizado, no existe, la cantidad no es
-    un número usable, el sub-APU no existe o cierra un ciclo, la fórmula es imposible.
-    Con cualquiera de estas la propuesta no describe algo que el sistema pueda costear.
+    un número usable, el sub-APU no existe o cierra un ciclo, la fórmula es imposible,
+    el tipo contradice la función. Con cualquiera de estas la propuesta no describe
+    algo que el sistema pueda costear.
   - Advierte lo CONTEXTUAL: el rendimiento es raro, falta herramienta, el método no
     cuadra con la descripción. Acá un ingeniero puede tener razón contra la regla, y
     convertir criterio discutible en bloqueo absoluto es lo que el diseño prohíbe.
@@ -17,6 +18,10 @@ El reparto entre error y advertencia sigue una regla, no el gusto:
 modelo cuando hay un `calculo` que lo contradice) y las referencias muertas (se
 limpian). Tirar una propuesta buena por una división mal hecha que sabemos arreglar
 sería el peor de los dos comportamientos.
+
+CONVENCIÓN DE LA MÉTRICA: una regla evaluada = a lo sumo un hallazgo, y una regla que
+no aplica no se cuenta. `superadas` se muestra en la interfaz ("20 de 21"), así que una
+regla que emita N hallazgos restaría N por una sola evaluación y el número mentiría.
 """
 from __future__ import annotations
 
@@ -27,21 +32,38 @@ from typing import Any
 from apu_tool import config
 from apu_tool.dominio.compose import RendimientoObservado
 from apu_tool.dominio.composicion import ComponentePropuesto, Propuesta
+from apu_tool.nucleo.texto import normalizar
 
-# Orígenes que AFIRMAN venir de un antecedente: sin referencia viva, la afirmación no
-# se sostiene y se advierte.
-_ORIGENES_CON_ANTECEDENTE = ("copiado_de_antecedente", "ajustado_de_antecedente")
+# Orígenes que AFIRMAN un respaldo. Cada uno lo afirma de una forma distinta y por eso
+# se chequean distinto: los dos primeros con una referencia viva, el tercero con la
+# cuenta a la vista, el cuarto con un supuesto declarado para que alguien lo confirme.
+# `sin_evidencia` no afirma nada — es honesto y por eso también advierte, pero sin
+# contradicción. La tarea 4 (confianza) lee esta misma constante: si se parchea allá
+# en vez de acá, el validador y la confianza dicen cosas distintas del mismo componente.
+_ORIGENES_CON_REFERENCIA = ("copiado_de_antecedente", "ajustado_de_antecedente")
+
+# Funciones que APORTAN ejecución. Un APU hecho de sub-APUs tiene la mano de obra
+# adentro de ellos, y un subcontrato la tiene adentro de su precio: exigirle cuadrilla
+# propia sería una advertencia que suena siempre sobre composiciones correctas.
+_FUNCIONES_EJECUCION = frozenset({"mano_de_obra", "equipo", "sub_apu", "subcontrato"})
 
 # Tolerancia relativa del recálculo. El modelo redondea a 6 decimales; 8/96 devuelto
 # como 0,083333 no es un error, 0,09 sí. 1e-4 separa las dos cosas con holgura.
 _TOLERANCIA_RELATIVA = 1e-4
 
-# ponytail: detección de método por palabra clave sobre la descripción cruda. Es tosca
-# —por eso es ADVERTENCIA y no error— y se reemplaza en la fase 3, cuando la ficha
-# técnica traiga el método en un campo propio en vez de adivinarlo del texto.
+# ponytail: detección de método por palabra clave sobre la descripción normalizada. Es
+# tosca —por eso es ADVERTENCIA y no error— y se reemplaza en la fase 3, cuando la
+# ficha técnica traiga el método en un campo propio en vez de adivinarlo del texto.
+# Van sin tilde porque `normalizar` las quita: "MECÁNICA" entra como "MECANICA".
 _PALABRAS_MANUAL = ("MANUAL", "A MANO")
-_PALABRAS_MECANICO = ("MECANIC", "MECÁNIC", "RETRO", "EXCAVADORA", "MOTONIVELADORA",
+_PALABRAS_MECANICO = ("MECANIC", "RETRO", "EXCAVADORA", "MOTONIVELADORA",
                       "VIBROCOMPACTADOR")
+
+
+def _corto(texto: str, n: int = 40) -> str:
+    """El código lo escribe el modelo: uno de 10 KB rompe la interfaz que lo muestra."""
+    t = str(texto)
+    return t if len(t) <= n else t[:n] + "…"
 
 
 @dataclass(frozen=True)
@@ -94,6 +116,12 @@ class ContextoValidacion:
     # Código del APU que se está creando. Vacío durante la generación (todavía no se
     # eligió) y con valor al aprobar: recién ahí un ciclo es detectable.
     apu_codigo_propio: str = ""
+    # Turno del APU que se está creando. Un APU es (codigo, turno): el mismo código en
+    # DIURNO y en NOCTURNO son dos APUs, y solo uno de los dos puede ciclar. Vacío
+    # (todavía no se eligió) hace que el ciclo se compare solo por código, que es lo
+    # conservador: puede señalar un ciclo que no lo es, y eso se explica; al revés se
+    # colaría uno real.
+    turno_propio: str = ""
     supuestos_confirmados: bool = False
     # Unidad de cada APU de la biblioteca, (codigo, turno) -> unidad. La usa la señal
     # `unidad_de_antecedentes` de la confianza (tarea 4): un antecedente que mide en
@@ -102,25 +130,34 @@ class ContextoValidacion:
 
 
 # --------------------------------------------------------------- recálculo
-def _recalcular(c: ComponentePropuesto) -> tuple[ComponentePropuesto, list[Hallazgo]]:
-    """Python manda sobre la aritmética."""
+def _recalcular(c: ComponentePropuesto
+                ) -> tuple[ComponentePropuesto, list[Hallazgo], list[Hallazgo]]:
+    """Python manda sobre la aritmética. Devuelve (componente, errores, advertencias):
+    quién bloquea y quién no lo decide esta función, que es la que sabe, y no el
+    llamador comparando códigos de hallazgo contra strings."""
     if c.calculo is None:
-        return c, []
+        return c, [], []
     resultado = c.calculo.evaluar()
     if resultado is None:
         return c, [Hallazgo(
             "CALCULO_IMPOSIBLE",
             f"La fórmula declarada ({c.calculo.operacion}) no se puede evaluar: "
             f"numerador {c.calculo.numerador}, denominador {c.calculo.denominador}.",
-            c.codigo)]
+            _corto(c.codigo))], []
     dicho = c.rendimiento
+    # Piso absoluto 5e-7: el modelo redondea a 6 decimales, así que ese es su error
+    # máximo honesto. Con el piso en 1e-9, todo resultado por debajo de ~0,005 se
+    # marcaba como corregido por un redondeo correcto.
     if math.isfinite(dicho) and abs(dicho - resultado) <= max(
-            1e-9, _TOLERANCIA_RELATIVA * abs(resultado)):
-        return c, []
-    return replace(c, rendimiento=resultado), [Hallazgo(
+            5e-7, _TOLERANCIA_RELATIVA * abs(resultado)):
+        return c, [], []
+    # Se corrige el rendimiento Y el resultado que la fórmula declara: la interfaz
+    # muestra la cuenta, y no puede decir "8 / 96 = 0,09" arriba de un 0,083333.
+    return replace(c, rendimiento=resultado,
+                   calculo=replace(c.calculo, resultado=resultado)), [], [Hallazgo(
         "CALCULO_CORREGIDO",
         f"El modelo declaró {dicho:g} pero su propia fórmula da {resultado:g}. "
-        f"Se usa {resultado:g}.", c.codigo)]
+        f"Se usa {resultado:g}.", _corto(c.codigo))]
 
 
 def _limpiar_referencias(c: ComponentePropuesto, ctx: ContextoValidacion
@@ -132,15 +169,15 @@ def _limpiar_referencias(c: ComponentePropuesto, ctx: ContextoValidacion
         (vivas if (r.apu_codigo, turno) in ctx.apus_existentes else muertas).append(r)
     if not muertas:
         return c, []
-    nombres = ", ".join(r.apu_codigo for r in muertas)
+    nombres = ", ".join(_corto(r.apu_codigo) for r in muertas)
     return replace(c, referencias=tuple(vivas)), [Hallazgo(
         "REFERENCIA_INEXISTENTE",
         f"El APU de referencia {nombres} ya no está en la biblioteca; se descarta "
-        f"como respaldo.", c.codigo)]
+        f"como respaldo.", _corto(c.codigo))]
 
 
 # ----------------------------------------------------------------- ciclos
-def _cierra_ciclo(codigo: str, turno: str, propio: str,
+def _cierra_ciclo(codigo: str, turno: str, propio: str, turno_propio: str,
                   arbol: dict[tuple[str, str], tuple[tuple[str, str, str], ...]]
                   ) -> bool:
     """El árbol de este sub-APU, ¿vuelve al APU que estamos creando?"""
@@ -153,7 +190,9 @@ def _cierra_ciclo(codigo: str, turno: str, propio: str,
         if clave in vistos:
             continue
         vistos.add(clave)
-        if clave[0] == propio:
+        # Sin turno propio se compara solo el código (ver `ContextoValidacion`).
+        if clave[0] == propio and (not turno_propio
+                                   or clave[1] == turno_propio.upper()):
             return True
         for hijo, tipo, ref in arbol.get(clave, ()):
             if tipo == "apu":
@@ -162,75 +201,111 @@ def _cierra_ciclo(codigo: str, turno: str, propio: str,
 
 
 # ------------------------------------------------------- reglas por componente
-def _validar_componente(c: ComponentePropuesto, ctx: ContextoValidacion
+def _validar_componente(c: ComponentePropuesto, ctx: ContextoValidacion,
+                        hay_supuestos: bool
                         ) -> tuple[list[Hallazgo], list[Hallazgo], int]:
     """(errores, advertencias, reglas_evaluadas) de UN componente."""
     err: list[Hallazgo] = []
     adv: list[Hallazgo] = []
     reglas = 0
+    cod = _corto(c.codigo)
 
     reglas += 1
     if c.codigo not in ctx.codigos_permitidos:
         err.append(Hallazgo("CODIGO_NO_AUTORIZADO",
-                            f"El código {c.codigo or '(vacío)'} no estaba entre los "
-                            f"candidatos que se le dieron a la IA.", c.codigo))
+                            f"El código {cod or '(vacío)'} no estaba entre los "
+                            f"candidatos que se le dieron a la IA.", cod))
     elif c.tipo == "apu":
         reglas += 1
         turno = (c.ref_shift or ctx.shift).upper()
         if (c.codigo, turno) not in ctx.apus_existentes:
             err.append(Hallazgo("SUBAPU_INEXISTENTE",
-                                f"El sub-APU {c.codigo} no existe en turno {turno}.",
-                                c.codigo))
+                                f"El sub-APU {cod} no existe en turno {turno}.", cod))
         else:
             reglas += 1
             if _cierra_ciclo(c.codigo, turno, ctx.apu_codigo_propio,
-                             ctx.componentes_de_apu):
+                             ctx.turno_propio, ctx.componentes_de_apu):
                 err.append(Hallazgo("SUBAPU_CICLO",
-                                    f"El sub-APU {c.codigo} contiene al APU que se "
-                                    f"está creando: sería un ciclo.", c.codigo))
+                                    f"El sub-APU {cod} contiene al APU que se está "
+                                    f"creando: sería un ciclo.", cod))
     else:
         reglas += 1
         if c.codigo not in ctx.unidades_catalogo:
             err.append(Hallazgo("CODIGO_INEXISTENTE",
-                                f"El insumo {c.codigo} no está en el catálogo.",
-                                c.codigo))
+                                f"El insumo {cod} no está en el catálogo.", cod))
+
+    reglas += 1
+    if (c.funcion == "sub_apu") != (c.tipo == "apu"):
+        err.append(Hallazgo(
+            "TIPO_INCOHERENTE",
+            f"{cod} declara funcion={c.funcion or '(vacía)'} y tipo={c.tipo}: no "
+            f"coinciden. `tipo` es lo que decide cómo se costea (un sub-APU guardado "
+            f"como insumo se costea como insumo).", cod))
 
     reglas += 1
     r = c.rendimiento
-    if not math.isfinite(r) or r <= 0 or r > config.COMPOSICION_LIMITE_RENDIMIENTO:
+    if not math.isfinite(r) or r <= 0:
         err.append(Hallazgo("CANTIDAD_INVALIDA",
-                            f"El rendimiento de {c.codigo} ({r}) tiene que ser un "
-                            f"número mayor que 0 y menor que "
-                            f"{config.COMPOSICION_LIMITE_RENDIMIENTO:g}.", c.codigo))
+                            f"El rendimiento de {cod} ({r:g}) tiene que ser un "
+                            f"número mayor que 0.", cod))
+    elif r > config.COMPOSICION_LIMITE_RENDIMIENTO:
+        # Advertencia y no error: un APU en GLB o KM lleva la cantidad de la obra
+        # adentro (15.000 M2 de señalización en un PMT global) y pasa el techo de
+        # forma legítima. Bloquearlo dejaba la propuesta sin ningún estado en el que
+        # se pudiera aprobar, ni corrigiéndola a mano. La coma corrida (0,5 -> 500),
+        # que es el error que motivó el techo, la atrapa RENDIMIENTO_ATIPICO.
+        adv.append(Hallazgo("CANTIDAD_SOSPECHOSA",
+                            f"El rendimiento de {cod} ({r:g}) supera "
+                            f"{config.COMPOSICION_LIMITE_RENDIMIENTO:g}: verificá que "
+                            f"la unidad de la actividad sea global.", cod))
 
     reglas += 1
     if not c.funcion:
         adv.append(Hallazgo("FUNCION_ILEGIBLE",
-                            f"No se entendió qué función cumple {c.codigo} en la "
-                            f"actividad; revisala antes de aprobar.", c.codigo))
+                            f"No se entendió qué función cumple {cod} en la "
+                            f"actividad; revisala antes de aprobar.", cod))
 
     reglas += 1
-    if c.origen == "sin_evidencia" or (
-            c.origen in _ORIGENES_CON_ANTECEDENTE and not c.referencias):
-        adv.append(Hallazgo("SIN_EVIDENCIA",
-                            f"{c.codigo} no tiene un antecedente que lo respalde.",
-                            c.codigo))
+    if c.origen == "sin_evidencia":
+        motivo = "no declara de dónde sale su rendimiento"
+    elif c.origen in _ORIGENES_CON_REFERENCIA and not c.referencias:
+        motivo = f"dice venir de un antecedente ({c.origen}) pero no cita ninguno"
+    elif c.origen == "calculado_desde_produccion" and c.calculo is None:
+        motivo = "dice estar calculado pero no muestra la cuenta"
+    elif c.origen == "supuesto_tecnico" and not hay_supuestos:
+        motivo = "se apoya en un supuesto técnico que nadie declaró"
+    else:
+        motivo = ""
+    if motivo:
+        adv.append(Hallazgo("SIN_EVIDENCIA", f"{cod} {motivo}.", cod))
 
-    reglas += 1
-    obs = ctx.observados.get(c.codigo)
-    if obs is None or obs.n < config.COMPOSICION_MIN_ANTECEDENTES:
-        adv.append(Hallazgo("SIN_ANTECEDENTES",
-                            f"{c.codigo} aparece en {0 if obs is None else obs.n} APUs "
-                            f"de la biblioteca: no hay rango contra el cual comparar "
-                            f"su rendimiento.", c.codigo))
-    elif math.isfinite(r) and not (obs.minimo <= r <= obs.maximo):
-        ref = obs.minimo if r < obs.minimo else obs.maximo
-        pct = abs(r - ref) / ref * 100 if ref else 0.0
-        lado = "por debajo" if r < obs.minimo else "por encima"
-        adv.append(Hallazgo("RENDIMIENTO_ATIPICO",
-                            f"{r:g} {obs.unidad} queda {pct:.0f} % {lado} del rango "
-                            f"observado ({obs.minimo:g}-{obs.maximo:g} {obs.unidad}, "
-                            f"n={obs.n}).", c.codigo))
+    # Los rendimientos observados salen de `apu_componentes` filtrando por
+    # `tipo='insumo'`: un sub-APU nunca los tiene, y no porque no se use. Aplicarle la
+    # regla sería una advertencia que suena siempre y que además miente el conteo.
+    if c.tipo != "apu":
+        reglas += 1
+        obs = ctx.observados.get(c.codigo)
+        unidad_cat = ctx.unidades_catalogo.get(c.codigo)
+        if obs is None or obs.n < config.COMPOSICION_MIN_ANTECEDENTES:
+            adv.append(Hallazgo("SIN_ANTECEDENTES",
+                                f"{cod} aparece en {0 if obs is None else obs.n} APUs "
+                                f"de la biblioteca: no hay rango contra el cual "
+                                f"comparar su rendimiento.", cod))
+        elif obs.unidad and unidad_cat is not None and obs.unidad != unidad_cat:
+            # `obs.unidad` es la MAYORITARIA de la biblioteca. El caso 4288 N (HR vs
+            # JR, ~100x) muestra que si difiere de la del catálogo el rango no compara.
+            adv.append(Hallazgo("SIN_ANTECEDENTES",
+                                f"{cod} se usa en la biblioteca en {obs.unidad} pero "
+                                f"el catálogo lo mide en {unidad_cat}: el rango no "
+                                f"compara.", cod))
+        elif math.isfinite(r) and not (obs.minimo <= r <= obs.maximo):
+            ref = obs.minimo if r < obs.minimo else obs.maximo
+            pct = abs(r - ref) / ref * 100 if ref else 0.0
+            lado = "por debajo" if r < obs.minimo else "por encima"
+            adv.append(Hallazgo("RENDIMIENTO_ATIPICO",
+                                f"{r:g} {obs.unidad} queda {pct:.0f} % {lado} del "
+                                f"rango observado ({obs.minimo:g}-{obs.maximo:g} "
+                                f"{obs.unidad}, n={obs.n}).", cod))
 
     return err, adv, reglas
 
@@ -252,11 +327,12 @@ def _validar_conjunto(p: Propuesta, ctx: ContextoValidacion
         # emitiera N la métrica `superadas` restaría N por una regla evaluada.
         err.append(Hallazgo(
             "COMPONENTE_DUPLICADO",
-            f"{', '.join(repetidas)} aparece más de una vez en la composición.",
-            repetidas[0] if len(repetidas) == 1 else ""))
+            f"{', '.join(_corto(k) for k in repetidas)} aparece más de una vez en la "
+            f"composición.",
+            _corto(repetidas[0]) if len(repetidas) == 1 else ""))
 
     reglas += 1
-    if not ({"mano_de_obra", "equipo"} & funciones):
+    if not (_FUNCIONES_EJECUCION & funciones):
         adv.append(Hallazgo("FALTA_MANO_DE_OBRA",
                             "La composición no tiene ni mano de obra ni equipo: "
                             "revisá si la actividad es solo de suministro."))
@@ -267,7 +343,7 @@ def _validar_conjunto(p: Propuesta, ctx: ContextoValidacion
                             "Hay cuadrilla pero ni herramienta ni equipo."))
 
     reglas += 1
-    desc = (ctx.descripcion or "").upper()
+    desc = normalizar(ctx.descripcion or "")
     if any(x in desc for x in _PALABRAS_MANUAL) and "equipo" in funciones:
         adv.append(Hallazgo("METODO_INCOHERENTE",
                             "La actividad dice MANUAL y la composición trae equipo."))
@@ -302,14 +378,18 @@ def validar(p: Propuesta, ctx: ContextoValidacion) -> tuple[Propuesta, Validacio
     errores: list[Hallazgo] = []
     advertencias: list[Hallazgo] = []
     reglas = 0
+    hay_supuestos = bool(p.supuestos)
 
     for c in p.componentes:
-        c, h1 = _recalcular(c)
-        c, h2 = _limpiar_referencias(c, ctx)
-        reglas += 2
-        for h in h1 + h2:
-            (errores if h.codigo == "CALCULO_IMPOSIBLE" else advertencias).append(h)
-        e, a, n = _validar_componente(c, ctx)
+        tenia_calculo = c.calculo is not None
+        tenia_referencias = bool(c.referencias)
+        c, e1, a1 = _recalcular(c)
+        c, a2 = _limpiar_referencias(c, ctx)
+        # Solo cuentan como regla evaluada si había algo que evaluar.
+        reglas += tenia_calculo + tenia_referencias
+        errores += e1
+        advertencias += a1 + a2
+        e, a, n = _validar_componente(c, ctx, hay_supuestos)
         errores += e
         advertencias += a
         reglas += n

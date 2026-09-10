@@ -78,10 +78,13 @@ def test_cantidades_no_positivas_o_no_finitas_son_error(valor):
     assert "CANTIDAD_INVALIDA" in codigos(v.errores)
 
 
-def test_cantidad_por_encima_del_techo_es_error():
+def test_cantidad_por_encima_del_techo_advierte_pero_no_bloquea():
+    """Antes era error. Un APU en GLB o KM lleva la cantidad de obra adentro y pasa
+    el techo legítimamente; bloquearlo no dejaba ningún estado en el que aprobarlo."""
     absurdo = config.COMPOSICION_LIMITE_RENDIMIENTO + 1
     _, v = validar(Propuesta(componentes=(comp(rendimiento=absurdo),)), ctx())
-    assert "CANTIDAD_INVALIDA" in codigos(v.errores)
+    assert "CANTIDAD_INVALIDA" not in codigos(v.errores)
+    assert "CANTIDAD_SOSPECHOSA" in codigos(v.advertencias)
 
 
 def test_componente_duplicado_es_error():
@@ -255,12 +258,104 @@ def test_supuesto_confirmado_no_advierte():
 
 
 # --- forma del resultado ---------------------------------------------------
-def test_las_metricas_cuentan_reglas_no_componentes():
+def test_la_forma_del_resultado_es_estable():
     _, v = validar(Propuesta(componentes=(comp(),)), ctx())
     d = v.to_dict()
     assert set(d) == {"valido", "errores", "advertencias", "metricas"}
-    assert (d["metricas"]["superadas"] + len(d["errores"]) + len(d["advertencias"])
-            == d["metricas"]["totales"])
+    assert set(d["metricas"]) == {"superadas", "totales"}
+
+
+def test_una_regla_rota_resta_exactamente_uno():
+    """Candado de la convención: una regla = un hallazgo. El test viejo comparaba
+    `superadas` contra su propia definición y no podía fallar nunca.
+
+    La mutación es el rendimiento y no la `funcion`: vaciar `funcion` rompe DOS reglas
+    a la vez (FUNCION_ILEGIBLE y, porque el conjunto de funciones se queda sin
+    `mano_de_obra`, FALTA_MANO_DE_OBRA), y un diferencial de dos no mide una regla.
+    Un rendimiento fuera del rango observado rompe exactamente una y no mueve
+    `totales`, que es lo que este candado necesita."""
+    limpia = Propuesta(componentes=(comp(), comp(codigo="6092",
+                                                 funcion="herramienta",
+                                                 rendimiento=1.0)))
+    rota = Propuesta(componentes=(comp(rendimiento=5.0), comp(codigo="6092",
+                                                              funcion="herramienta",
+                                                              rendimiento=1.0)))
+    _, vl = validar(limpia, ctx())
+    _, vr = validar(rota, ctx())
+    assert vr.totales == vl.totales
+    assert vr.superadas == vl.superadas - 1
+
+
+def test_todas_las_referencias_muertas_dejan_el_componente_sin_evidencia():
+    p = Propuesta(componentes=(comp(referencias=(Referencia("FANTASMA", "DIURNO"),)),))
+    corregida, v = validar(p, ctx())
+    assert corregida.componentes[0].referencias == ()
+    assert "REFERENCIA_INEXISTENTE" in codigos(v.advertencias)
+    assert "SIN_EVIDENCIA" in codigos(v.advertencias)
+
+
+def test_un_rendimiento_ilegible_lo_rescata_su_propia_formula():
+    """NaN del parseo + una fórmula válida: Python la evalúa y el componente se salva."""
+    p = Propuesta(componentes=(comp(rendimiento=float("nan"),
+                                    calculo=Calculo("division", 8, 96, 0.083)),))
+    corregida, v = validar(p, ctx())
+    assert corregida.componentes[0].rendimiento == pytest.approx(8 / 96)
+    assert "CANTIDAD_INVALIDA" not in codigos(v.errores)
+
+
+def test_el_techo_exacto_no_es_sospechoso():
+    justo = config.COMPOSICION_LIMITE_RENDIMIENTO
+    _, v = validar(Propuesta(componentes=(comp(rendimiento=justo),)), ctx())
+    assert "CANTIDAD_SOSPECHOSA" not in codigos(v.advertencias)
+    _, v2 = validar(Propuesta(componentes=(comp(rendimiento=justo + 1),)), ctx())
+    assert "CANTIDAD_SOSPECHOSA" in codigos(v2.advertencias)
+    assert v2.valido is True          # sospechoso, no bloqueante
+
+
+def test_un_codigo_vacio_no_rompe_los_mensajes():
+    _, v = validar(Propuesta(componentes=(comp(codigo=""),)), ctx())
+    assert "CODIGO_NO_AUTORIZADO" in codigos(v.errores)
+    assert all(h.mensaje for h in v.errores)
+
+
+def test_funcion_subapu_con_tipo_insumo_es_error():
+    p = Propuesta(componentes=(comp(codigo="SUB", funcion="sub_apu", tipo="insumo"),))
+    _, v = validar(p, ctx(codigos_permitidos=frozenset({"SUB"}),
+                          unidades_catalogo={"SUB": "UN"}))
+    assert "TIPO_INCOHERENTE" in codigos(v.errores)
+
+
+def test_un_subapu_no_arrastra_sin_antecedentes():
+    p = Propuesta(componentes=(comp(codigo="SUB", tipo="apu", funcion="sub_apu",
+                                    ref_shift="DIURNO"),))
+    _, v = validar(p, ctx(codigos_permitidos=frozenset({"SUB"})))
+    assert "SIN_ANTECEDENTES" not in codigos(v.advertencias)
+
+
+def test_calculado_sin_cuenta_advierte():
+    _, v = validar(Propuesta(componentes=(
+        comp(origen="calculado_desde_produccion", calculo=None),)), ctx())
+    assert "SIN_EVIDENCIA" in codigos(v.advertencias)
+
+
+def test_supuesto_tecnico_sin_supuesto_declarado_advierte():
+    _, v = validar(Propuesta(componentes=(comp(origen="supuesto_tecnico"),)), ctx())
+    assert "SIN_EVIDENCIA" in codigos(v.advertencias)
+
+
+def test_supuesto_tecnico_con_supuesto_declarado_no_advierte():
+    p = Propuesta(componentes=(comp(origen="supuesto_tecnico"),),
+                  supuestos=(Supuesto("prof", "<1,5 m", "cambia el equipo"),))
+    _, v = validar(p, ctx())
+    assert "SIN_EVIDENCIA" not in codigos(v.advertencias)
+
+
+def test_el_calculo_corregido_tambien_corrige_su_propio_resultado():
+    """La interfaz muestra la fórmula: no puede decir '8/96 = 0,09' arriba de 0,083."""
+    p = Propuesta(componentes=(comp(rendimiento=0.09,
+                                    calculo=Calculo("division", 8, 96, 0.09)),))
+    corregida, _ = validar(p, ctx())
+    assert corregida.componentes[0].calculo.resultado == pytest.approx(8 / 96)
 
 
 def test_cada_hallazgo_apunta_a_su_componente():

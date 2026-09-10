@@ -369,24 +369,34 @@ rendimientos observados.
 | `PROPUESTA_VACIA` | cero componentes |
 | `CODIGO_NO_AUTORIZADO` | el código no estaba en la lista blanca de esta generación |
 | `CODIGO_INEXISTENTE` | no existe en el catálogo (ni en la biblioteca si `tipo='apu'`) |
-| `CANTIDAD_INVALIDA` | ≤ 0, `NaN`, `inf`, o por encima de `COMPOSICION_LIMITE_RENDIMIENTO` |
+| `CANTIDAD_INVALIDA` | ≤ 0, `NaN` o `inf` — el motor no puede costear eso |
+| `TIPO_INCOHERENTE` | `funcion = sub_apu` con `tipo ≠ apu`, o al revés |
 | `COMPONENTE_DUPLICADO` | mismo `(codigo, tipo, ref_shift)` dos veces |
 | `SUBAPU_INEXISTENTE` | el sub-APU no existe en ese turno |
 | `SUBAPU_CICLO` | el sub-APU se referencia a sí mismo o cierra un ciclo |
 | `CALCULO_IMPOSIBLE` | denominador 0, o factores no finitos |
 
 Dos umbrales nuevos en `config.py`, junto a los del matcher y los del cruce:
-`COMPOSICION_LIMITE_RENDIMIENTO` (techo absurdo por componente, para atrapar un
-rendimiento con la coma corrida) y `COMPOSICION_MIN_ANTECEDENTES` (3: por debajo no hay
+`COMPOSICION_LIMITE_RENDIMIENTO` y `COMPOSICION_MIN_ANTECEDENTES` (3: por debajo no hay
 rango contra el cual llamar atípico a nada).
+
+**Por qué el techo advierte y no bloquea** (corregido tras la revisión de la tarea 3):
+un APU medido en GLB o en KM lleva la cantidad de la obra adentro — 15.000 M2 de
+señalización en un PMT global — y supera cualquier techo de forma legítima. Bloquearlo
+dejaba la propuesta **sin ningún estado en el que se pudiera aprobar**, ni corrigiéndola
+a mano, porque el `PUT` revalida. Y el techo casi no atrapaba el error que lo motivó: la
+coma corrida típica (0,5 → 500) pasa por debajo sin despeinarse — eso lo atrapa
+`RENDIMIENTO_ATIPICO`, que compara contra la biblioteca. Lo que sigue bloqueando es lo
+que el motor no puede costear: `NaN`, infinito y todo lo que no sea positivo.
 
 **Advertencias — se ven, no bloquean:**
 
 | Código | Regla |
 |---|---|
 | `CALCULO_CORREGIDO` | Python recalculó y dio distinto; manda Python |
+| `CANTIDAD_SOSPECHOSA` | por encima de `COMPOSICION_LIMITE_RENDIMIENTO` |
 | `RENDIMIENTO_ATIPICO` | fuera del rango observado del mismo insumo, con `n ≥ COMPOSICION_MIN_ANTECEDENTES` |
-| `SIN_ANTECEDENTES` | `n < COMPOSICION_MIN_ANTECEDENTES`: no hay contra qué comparar |
+| `SIN_ANTECEDENTES` | `n < COMPOSICION_MIN_ANTECEDENTES`, o el rango está en otra unidad que el catálogo: no hay contra qué comparar |
 | `SIN_EVIDENCIA` | `origen = sin_evidencia`, o `referencias` vacío con un origen que las exige |
 | `REFERENCIA_INEXISTENTE` | un `apu_codigo` de `referencias` ya no existe; se limpia |
 | `FALTA_MANO_DE_OBRA` | ninguna función es `mano_de_obra` ni `equipo` |

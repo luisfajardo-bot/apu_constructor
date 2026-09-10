@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -30,8 +30,8 @@ import { useAuth } from "@/lib/auth";
 import { puede } from "@/components/rutas";
 import type {
   ComponentePropuesto,
-  ComposicionVersion,
   Hallazgo,
+  VistaComposicion,
 } from "@/lib/tipos";
 
 /** Las etapas del stream, en palabras de persona. Las claves son los `event` que
@@ -41,6 +41,10 @@ const ETAPAS: Record<string, string> = {
   generando: "Redactando la propuesta con IA…",
   validando: "Validando la propuesta contra el catálogo…",
 };
+
+/** Chevron + Código + Insumo + Un. + Rend. + Función + Origen + Ev. La celda de
+ *  quitar se suma aparte, solo con rol editor. */
+const COLS_TABLA = 8;
 
 const num = (n: number) =>
   Number.isFinite(n) ? n.toLocaleString("es-CO", { maximumFractionDigits: 4 }) : "—";
@@ -94,7 +98,9 @@ export default function Composicion() {
   const { perfil } = useAuth();
   const puedeEditar = puede(perfil?.rol, "editor");
 
-  const [vigente, setVigente] = useState<ComposicionVersion | null>(null);
+  // La VISTA entera, no solo la versión: `catalogo` (nombre y unidad de cada
+  // código) viaja con la respuesta y sin él la tabla muestra códigos pelados.
+  const [vista, setVista] = useState<VistaComposicion | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filas, setFilas] = useState<Fila[]>([]);
@@ -112,20 +118,22 @@ export default function Composicion() {
     return () => { montado.current = false; };
   }, []);
 
-  /** Adopta lo que devolvió el servidor como la verdad de la pantalla. */
-  function adoptar(v: ComposicionVersion | null) {
-    setVigente(v);
-    setFilas(filasDe(v?.propuesta?.componentes ?? []));
+  /** Adopta lo que devolvió el servidor como la verdad de la pantalla. Los cuatro
+   *  endpoints devuelven la vista completa, así que los nombres del catálogo no se
+   *  pierden después de guardar una edición ni de rechazar. */
+  function adoptar(v: VistaComposicion) {
+    setVista(v);
+    setFilas(filasDe(v.vigente?.propuesta?.componentes ?? []));
     setSupuestosOk(false);
     setAbierta(null);
   }
 
   async function recargar(): Promise<void> {
-    const vista = await getComposicion(corridaId, linea);
+    const v = await getComposicion(corridaId, linea);
     // `vigente` puede venir null con historial: el seq se reusa, y un expediente de
     // la actividad que ANTES ocupaba esta línea no habla de la de hoy. Para esta
     // pantalla eso es "todavía no hay composición", no un error.
-    if (montado.current) adoptar(vista.vigente);
+    if (montado.current) adoptar(v);
   }
 
   useEffect(() => {
@@ -133,9 +141,9 @@ export default function Composicion() {
     setCargando(true);
     setError(null);
     getComposicion(corridaId, linea)
-      .then((vista) => {
+      .then((v) => {
         if (cancelado) return;
-        adoptar(vista.vigente);
+        adoptar(v);
         setCargando(false);
       })
       .catch((e: unknown) => {
@@ -148,6 +156,8 @@ export default function Composicion() {
     // una persona, nunca el montaje de la pantalla.
   }, [corridaId, linea]);
 
+  const vigente = vista?.vigente ?? null;
+  const catalogo = vista?.catalogo ?? {};
   const propuesta = vigente?.propuesta ?? null;
   const validacion = vigente?.validacion ?? null;
   const actividad = vigente?.actividad ?? null;
@@ -212,9 +222,9 @@ export default function Composicion() {
     if (!vigente || guardando) return;
     setGuardando(true);
     try {
-      const vista = await guardarComposicion(
+      const v = await guardarComposicion(
         corridaId, linea, vigente.version, componentes, supuestosOk);
-      if (montado.current) adoptar(vista.vigente);
+      if (montado.current) adoptar(v);
       toast.success("Cambios guardados. La propuesta se revalidó sin IA.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "No se pudieron guardar los cambios.");
@@ -229,9 +239,9 @@ export default function Composicion() {
     if (motivo === null) return;
     setGuardando(true);
     try {
-      const vista = await rechazarComposicion(
+      const v = await rechazarComposicion(
         corridaId, linea, vigente.version, motivo.trim());
-      if (montado.current) adoptar(vista.vigente);
+      if (montado.current) adoptar(v);
       toast.success("Propuesta rechazada. No se creó ningún APU.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "No se pudo rechazar la propuesta.");
@@ -395,12 +405,13 @@ export default function Composicion() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-6 px-1" />
-                <TableHead className="text-xs w-24">Código</TableHead>
-                <TableHead className="text-xs w-28">Función</TableHead>
+                <TableHead className="text-xs w-20">Código</TableHead>
+                <TableHead className="text-xs">Insumo</TableHead>
+                <TableHead className="text-xs w-12">Un.</TableHead>
                 <TableHead className="text-xs w-24 text-right">Rend.</TableHead>
-                <TableHead className="text-xs w-40">Origen</TableHead>
+                <TableHead className="text-xs w-28">Función</TableHead>
+                <TableHead className="text-xs w-36">Origen</TableHead>
                 <TableHead className="text-xs w-16">Ev.</TableHead>
-                <TableHead className="text-xs">Justificación</TableHead>
                 {puedeEditar && <TableHead className="text-xs w-8" />}
               </TableRow>
             </TableHeader>
@@ -409,114 +420,141 @@ export default function Composicion() {
                 const hs = hallazgosDe(f.c.codigo);
                 const abiertaEsta = abierta === f.uid;
                 const hipotesis = Object.entries(f.c.hipotesis ?? {});
+                // Un código que el catálogo no tiene NO es un hueco de datos: es un
+                // insumo que no existe. El validador ya lo dijo con
+                // CODIGO_INEXISTENTE, así que la fila se lee como problema y no
+                // como un guion mudo.
+                const ficha = catalogo[f.c.codigo];
                 return (
-                  <TableRow key={f.uid}
-                            className={hs.length > 0 ? "bg-revisar-surface/50" : undefined}>
-                    <TableCell className="w-6 px-1 py-1 align-top">
-                      <button
-                        type="button"
-                        aria-label={abiertaEsta
-                          ? `Colapsar ${f.c.codigo}`
-                          : `Ver supuestos de ${f.c.codigo}`}
-                        aria-expanded={abiertaEsta}
-                        className="text-xs text-muted-foreground hover:text-foreground"
-                        onClick={() => setAbierta(abiertaEsta ? null : f.uid)}
-                      >
-                        {abiertaEsta ? "▾" : "▸"}
-                      </button>
-                    </TableCell>
-                    <TableCell className="text-xs font-mono align-top">
-                      {f.c.codigo}
-                      {f.c.tipo === "apu" && (
-                        <span className="ml-1 rounded bg-muted px-1 text-[10px] font-sans">
-                          sub-APU {f.c.ref_shift}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs align-top">
-                      {f.c.funcion || <span className="text-muted-foreground">—</span>}
-                    </TableCell>
-                    <TableCell className="text-xs text-right align-top">
-                      {puedeEditar ? (
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          aria-label={`Rendimiento de ${f.c.codigo}`}
-                          className="h-6 w-full rounded border border-border bg-transparent px-1 text-right text-[11px] outline-none focus-visible:border-ring"
-                          value={f.rend}
-                          onChange={(e) => setFilas((prev) => prev.map((x) =>
-                            x.uid === f.uid ? { ...x, rend: e.target.value } : x))}
-                        />
-                      ) : (
-                        <span className="font-mono tabular-nums">{num(Number(f.rend))}</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground align-top">
-                      {f.c.origen}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground align-top">
-                      {/* La interfaz es el ÚNICO consumidor de `nivel_evidencia`: ni el
-                          validador ni la confianza lo leen. */}
-                      {f.c.nivel_evidencia}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground align-top">
-                      {f.c.justificacion}
-                      {hs.length > 0 && (
-                        <span className="ml-1 font-medium text-revisar"
-                              title={hs.map((h) => h.mensaje).join(" · ")}>
-                          ⚠ {hs.length}
-                        </span>
-                      )}
-                      {abiertaEsta && (
-                        <div className="mt-1 flex flex-col gap-0.5 border-l-2 border-border pl-2">
-                          {f.c.calculo && (
-                            <span className="font-mono text-[11px] text-foreground">
-                              {f.c.calculo.operacion}: {num(f.c.calculo.numerador)} /{" "}
-                              {num(f.c.calculo.denominador)} = {num(f.c.calculo.resultado)}
-                            </span>
-                          )}
-                          {/* `hipotesis` es un dict cuyas claves las pone el modelo: se
-                              muestra como TEXTO y no se reenvía ni se interpreta. */}
-                          {hipotesis.map(([k, v]) => (
-                            <span key={k} className="text-[11px]">
-                              <span className="font-medium text-foreground">{k}:</span>{" "}
-                              {String(v)}
-                            </span>
-                          ))}
-                          {f.c.referencias.map((r, i) => (
-                            <span key={i} className="text-[11px]">
-                              Antecedente: APU {r.apu_codigo} ({r.turno})
-                            </span>
-                          ))}
-                          {!f.c.calculo && hipotesis.length === 0
-                            && f.c.referencias.length === 0 && (
-                            <span className="text-[11px]">
-                              Sin supuestos ni cálculo declarados.
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </TableCell>
-                    {puedeEditar && (
-                      <TableCell className="w-8 px-1 py-1 align-top">
+                  <Fragment key={f.uid}>
+                    <TableRow className={!ficha
+                      ? "bg-destructive-surface/60"
+                      : hs.length > 0 ? "bg-revisar-surface/50" : undefined}>
+                      <TableCell className="w-6 px-1 py-1 align-top">
                         <button
                           type="button"
-                          aria-label={`Quitar ${f.c.codigo}`}
-                          className="text-xs text-muted-foreground hover:text-destructive"
-                          onClick={() => setFilas((prev) =>
-                            prev.filter((x) => x.uid !== f.uid))}
+                          aria-label={abiertaEsta
+                            ? `Colapsar ${f.c.codigo}`
+                            : `Ver supuestos de ${f.c.codigo}`}
+                          aria-expanded={abiertaEsta}
+                          className="text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => setAbierta(abiertaEsta ? null : f.uid)}
                         >
-                          ⨯
+                          {abiertaEsta ? "▾" : "▸"}
                         </button>
                       </TableCell>
+                      <TableCell className="text-xs font-mono align-top">
+                        {f.c.codigo}
+                        {f.c.tipo === "apu" && (
+                          <span className="ml-1 rounded bg-muted px-1 text-[10px] font-sans">
+                            sub-APU {f.c.ref_shift}
+                          </span>
+                        )}
+                      </TableCell>
+                      {/* El nombre puede ser larguísimo (830 caracteres en el
+                          catálogo real): se trunca a una línea y el completo queda
+                          en el `title`. Una tabla densa no sobrevive un párrafo. */}
+                      <TableCell className="max-w-[22rem] truncate text-xs align-top">
+                        {ficha ? (
+                          <span title={ficha.nombre}>{ficha.nombre}</span>
+                        ) : (
+                          <span className="font-medium text-destructive">
+                            no está en el catálogo
+                          </span>
+                        )}
+                        {hs.length > 0 && (
+                          <span className="ml-1 font-medium text-revisar"
+                                title={hs.map((h) => h.mensaje).join(" · ")}>
+                            ⚠ {hs.length}
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs font-mono text-muted-foreground align-top">
+                        {ficha?.unidad || "—"}
+                      </TableCell>
+                      <TableCell className="text-xs text-right align-top">
+                        {puedeEditar ? (
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            aria-label={`Rendimiento de ${f.c.codigo}`}
+                            className="h-6 w-full rounded border border-border bg-transparent px-1 text-right text-[11px] outline-none focus-visible:border-ring"
+                            value={f.rend}
+                            onChange={(e) => setFilas((prev) => prev.map((x) =>
+                              x.uid === f.uid ? { ...x, rend: e.target.value } : x))}
+                          />
+                        ) : (
+                          <span className="font-mono tabular-nums">{num(Number(f.rend))}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs align-top">
+                        {f.c.funcion || <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground align-top">
+                        {f.c.origen}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground align-top">
+                        {/* La interfaz es el ÚNICO consumidor de `nivel_evidencia`: ni
+                            el validador ni la confianza lo leen. */}
+                        {f.c.nivel_evidencia}
+                      </TableCell>
+                      {puedeEditar && (
+                        <TableCell className="w-8 px-1 py-1 align-top">
+                          <button
+                            type="button"
+                            aria-label={`Quitar ${f.c.codigo}`}
+                            className="text-xs text-muted-foreground hover:text-destructive"
+                            onClick={() => setFilas((prev) =>
+                              prev.filter((x) => x.uid !== f.uid))}
+                          >
+                            ⨯
+                          </button>
+                        </TableCell>
+                      )}
+                    </TableRow>
+
+                    {abiertaEsta && (
+                      <TableRow className="bg-muted/20 hover:bg-muted/20">
+                        <TableCell colSpan={COLS_TABLA + (puedeEditar ? 1 : 0)}
+                                   className="px-8 py-2">
+                          <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                            {f.c.justificacion && <span>{f.c.justificacion}</span>}
+                            {f.c.calculo && (
+                              <span className="font-mono text-[11px] text-foreground">
+                                {f.c.calculo.operacion}: {num(f.c.calculo.numerador)} /{" "}
+                                {num(f.c.calculo.denominador)} = {num(f.c.calculo.resultado)}
+                              </span>
+                            )}
+                            {/* `hipotesis` es un dict cuyas claves las pone el modelo:
+                                se muestra como TEXTO y no se interpreta. */}
+                            {hipotesis.map(([k, v]) => (
+                              <span key={k} className="text-[11px]">
+                                <span className="font-medium text-foreground">{k}:</span>{" "}
+                                {String(v)}
+                              </span>
+                            ))}
+                            {f.c.referencias.map((r, i) => (
+                              <span key={i} className="text-[11px]">
+                                Antecedente: APU {r.apu_codigo} ({r.turno})
+                              </span>
+                            ))}
+                            {!f.c.justificacion && !f.c.calculo && hipotesis.length === 0
+                              && f.c.referencias.length === 0 && (
+                              <span className="text-[11px]">
+                                Sin supuestos ni cálculo declarados.
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
                     )}
-                  </TableRow>
+                  </Fragment>
                 );
               })}
               {filas.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={puedeEditar ? 8 : 7}
+                  <TableCell colSpan={COLS_TABLA + (puedeEditar ? 1 : 0)}
                              className="py-4 text-center text-xs text-muted-foreground">
                     La propuesta quedó sin componentes.
                   </TableCell>

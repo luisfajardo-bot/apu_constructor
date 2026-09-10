@@ -97,6 +97,18 @@ function version() {
   };
 }
 
+/** El mapa nombre/unidad/grupo que ahora viaja con la respuesta. No se persiste:
+ *  la fila guardada tiene solo el código y el nombre se lee fresco del catálogo. */
+const CATALOGO = {
+  "4279": { nombre: "CUADRILLA OFICIAL MAS AYUDANTES", unidad: "HR", grupo: "MO" },
+  "8801": { nombre: "OFICIAL DE OBRA", unidad: "HC", grupo: "MO" },
+};
+
+/** Las cuatro respuestas del expediente traen TRES claves. */
+function vista(vigente: unknown, catalogo: unknown = CATALOGO) {
+  return { vigente, historial: vigente ? [vigente] : [], catalogo };
+}
+
 function montar() {
   return render(
     <MemoryRouter initialEntries={["/corridas/1/componer/3"]}>
@@ -115,10 +127,10 @@ beforeEach(() => {
   aprobarComposicion.mockReset();
   rechazarComposicion.mockReset();
   generarComposicionStream.mockReset();
-  getComposicion.mockResolvedValue({ vigente: version(), historial: [version()] });
-  guardarComposicion.mockResolvedValue({ vigente: version(), historial: [] });
-  aprobarComposicion.mockResolvedValue({ vigente: version(), historial: [] });
-  rechazarComposicion.mockResolvedValue({ vigente: null, historial: [] });
+  getComposicion.mockResolvedValue(vista(version()));
+  guardarComposicion.mockResolvedValue(vista(version()));
+  aprobarComposicion.mockResolvedValue(vista(version()));
+  rechazarComposicion.mockResolvedValue(vista(null, {}));
 });
 
 const boton = (re: RegExp) => screen.getByRole("button", { name: re }) as HTMLButtonElement;
@@ -134,9 +146,11 @@ test("pinta los componentes con su origen y su justificación", async () => {
   montar();
   expect(await screen.findByText("4279")).toBeTruthy();
   expect(screen.getByText("calculado_desde_produccion")).toBeTruthy();
-  expect(screen.getByText(/Cuadrilla tomada del APU 3010/)).toBeTruthy();
   // `nivel_evidencia` solo lo consume la interfaz.
   expect(screen.getByText("medio")).toBeTruthy();
+  // La justificación va en el desplegable: en la fila manda el nombre del insumo.
+  fireEvent.click(screen.getByLabelText("Ver supuestos de 4279"));
+  expect(screen.getByText(/Cuadrilla tomada del APU 3010/)).toBeTruthy();
 });
 
 test("al desplegar la fila se ven las hipótesis y la fórmula del cálculo", async () => {
@@ -182,59 +196,50 @@ test("borrar un componente lo saca de lo que se guarda", async () => {
 });
 
 test("con errores bloqueantes aprobar está deshabilitado y los mensajes se ven", async () => {
-  getComposicion.mockResolvedValue({
-    vigente: {
-      ...version(),
-      validacion: {
-        valido: false,
-        errores: [{ codigo: "CODIGO_NO_AUTORIZADO",
-                    mensaje: "El código 9999 no está en la lista blanca.",
-                    componente: "9999" }],
-        advertencias: [],
-        metricas: { superadas: 11, totales: 12 },
-      },
+  getComposicion.mockResolvedValue(vista({
+    ...version(),
+    validacion: {
+      valido: false,
+      errores: [{ codigo: "CODIGO_NO_AUTORIZADO",
+                  mensaje: "El código 9999 no está en la lista blanca.",
+                  componente: "9999" }],
+      advertencias: [],
+      metricas: { superadas: 11, totales: 12 },
     },
-    historial: [],
-  });
+  }));
   montar();
   expect(await screen.findByText(/no está en la lista blanca/)).toBeTruthy();
   expect(boton(/Aprobar y crear APU/).disabled).toBe(true);
 });
 
 test("con errores NO se muestra el cociente de validaciones superadas", async () => {
-  getComposicion.mockResolvedValue({
-    vigente: {
-      ...version(),
-      validacion: {
-        valido: false,
-        errores: [{ codigo: "CANTIDAD_INVALIDA", mensaje: "Rendimiento en 0.",
-                    componente: "4279" }],
-        advertencias: [],
-        metricas: { superadas: 11, totales: 12 },
-      },
+  getComposicion.mockResolvedValue(vista({
+    ...version(),
+    validacion: {
+      valido: false,
+      errores: [{ codigo: "CANTIDAD_INVALIDA", mensaje: "Rendimiento en 0.",
+                  componente: "4279" }],
+      advertencias: [],
+      metricas: { superadas: 11, totales: 12 },
     },
-    historial: [],
-  });
+  }));
   montar();
   expect(await screen.findByText("1 error")).toBeTruthy();
   expect(screen.queryByText(/validaciones superadas/)).toBeNull();
 });
 
 test("con solo advertencias aprobar está habilitado y la advertencia se ve", async () => {
-  getComposicion.mockResolvedValue({
-    vigente: {
-      ...version(),
-      validacion: {
-        valido: true,
-        errores: [],
-        advertencias: [{ codigo: "RENDIMIENTO_ATIPICO",
-                         mensaje: "0,083 HR queda 79 % por debajo del rango observado.",
-                         componente: "4279" }],
-        metricas: { superadas: 11, totales: 12 },
-      },
+  getComposicion.mockResolvedValue(vista({
+    ...version(),
+    validacion: {
+      valido: true,
+      errores: [],
+      advertencias: [{ codigo: "RENDIMIENTO_ATIPICO",
+                       mensaje: "0,083 HR queda 79 % por debajo del rango observado.",
+                       componente: "4279" }],
+      metricas: { superadas: 11, totales: 12 },
     },
-    historial: [],
-  });
+  }));
   montar();
   expect(await screen.findByText(/79 % por debajo del rango observado/)).toBeTruthy();
   expect(boton(/Aprobar y crear APU/).disabled).toBe(false);
@@ -242,26 +247,23 @@ test("con solo advertencias aprobar está habilitado y la advertencia se ve", as
 });
 
 test("un hallazgo del conjunto (componente vacío) no resalta ninguna fila", async () => {
-  getComposicion.mockResolvedValue({
-    vigente: {
-      ...version(),
-      validacion: {
-        valido: true, errores: [],
-        advertencias: [{ codigo: "FALTA_HERRAMIENTA",
-                         mensaje: "No hay herramienta menor en la propuesta.",
-                         componente: "" }],
-        metricas: { superadas: 11, totales: 12 },
-      },
+  getComposicion.mockResolvedValue(vista({
+    ...version(),
+    validacion: {
+      valido: true, errores: [],
+      advertencias: [{ codigo: "FALTA_HERRAMIENTA",
+                       mensaje: "No hay herramienta menor en la propuesta.",
+                       componente: "" }],
+      metricas: { superadas: 11, totales: 12 },
     },
-    historial: [],
-  });
+  }));
   montar();
   // El mensaje se pinta una sola vez, en el bloque de arriba: ninguna fila lo repite.
   expect((await screen.findAllByText(/No hay herramienta menor/)).length).toBe(1);
 });
 
 test("sin composición ofrece «Generar propuesta» y no la pide sola", async () => {
-  getComposicion.mockResolvedValue({ vigente: null, historial: [] });
+  getComposicion.mockResolvedValue(vista(null, {}));
   montar();
   expect(await screen.findByRole("button", { name: /Generar propuesta/ })).toBeTruthy();
   expect(generarComposicionStream).not.toHaveBeenCalled();
@@ -270,14 +272,16 @@ test("sin composición ofrece «Generar propuesta» y no la pide sola", async ()
 test("vigente null con historial no vacío ofrece generar, no rompe", async () => {
   // El seq se reusa: el expediente viejo es de la actividad que ANTES ocupaba la
   // línea. Para esta pantalla eso es "todavía no hay composición".
-  getComposicion.mockResolvedValue({ vigente: null, historial: [version()] });
+  getComposicion.mockResolvedValue({
+    vigente: null, historial: [version()], catalogo: {},
+  });
   montar();
   expect(await screen.findByRole("button", { name: /Generar propuesta/ })).toBeTruthy();
   expect(screen.getByText(/todavía no tiene una propuesta/)).toBeTruthy();
 });
 
 test("generar muestra el avance por etapas", async () => {
-  getComposicion.mockResolvedValue({ vigente: null, historial: [] });
+  getComposicion.mockResolvedValue(vista(null, {}));
   let emitir: (e: EventoComposicion) => void = () => {};
   let terminar: () => void = () => {};
   generarComposicionStream.mockImplementation(
@@ -295,7 +299,7 @@ test("generar muestra el avance por etapas", async () => {
   expect(await screen.findByText(/Validando la propuesta/)).toBeTruthy();
 
   // Al terminar el stream se RELEE: la propuesta la persistió el backend.
-  getComposicion.mockResolvedValue({ vigente: version(), historial: [version()] });
+  getComposicion.mockResolvedValue(vista(version()));
   terminar();
   expect(await screen.findByText("EXCAVACION MANUAL EN MATERIAL COMUN")).toBeTruthy();
   expect(getComposicion).toHaveBeenCalledTimes(2);
@@ -344,7 +348,7 @@ test("con rol consulta no aparece ninguna acción que escriba", async () => {
 
 test("con rol consulta y sin composición tampoco se ofrece generar", async () => {
   rol = "consulta";
-  getComposicion.mockResolvedValue({ vigente: null, historial: [] });
+  getComposicion.mockResolvedValue(vista(null, {}));
   montar();
   expect(await screen.findByText(/todavía no tiene una propuesta/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Generar propuesta/ })).toBeNull();
@@ -386,4 +390,29 @@ test("volver con cambios sin guardar avisa antes de perderlos", async () => {
   expect(confirmar).toHaveBeenCalled();
   expect(screen.queryByText("vuelta a la corrida")).toBeNull();
   confirmar.mockRestore();
+});
+
+// ─── el catálogo que enriquece la respuesta ─────────────────────────────────
+
+test("la tabla muestra el nombre del insumo, no solo el código", async () => {
+  montar();
+  expect(await screen.findByText(/CUADRILLA OFICIAL MAS AYUDANTES/)).toBeTruthy();
+  expect(screen.getByText("HR")).toBeTruthy();          // la unidad, del catálogo
+});
+
+test("un código sin entrada en el catálogo se ve como problema, no como guion", async () => {
+  getComposicion.mockResolvedValue(vista(version(), {}));
+  montar();
+  // El código sigue visible y al lado dice por qué no hay nombre.
+  expect(await screen.findByText("4279")).toBeTruthy();
+  expect(screen.getByText(/no está en el catálogo/)).toBeTruthy();
+});
+
+test("los nombres siguen ahí después de guardar una edición", async () => {
+  montar();
+  fireEvent.change(await screen.findByLabelText("Rendimiento de 4279"),
+                   { target: { value: "0.12" } });
+  fireEvent.click(boton(/Guardar cambios/));
+  await waitFor(() => expect(guardarComposicion).toHaveBeenCalled());
+  expect(await screen.findByText(/CUADRILLA OFICIAL MAS AYUDANTES/)).toBeTruthy();
 });

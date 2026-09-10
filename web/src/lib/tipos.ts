@@ -156,9 +156,21 @@ export interface ComposicionVersion {
   motivo: string | null;
 }
 
+export interface EntradaCatalogo {
+  nombre: string;
+  unidad: string;
+  grupo: string;
+}
+
 export interface VistaComposicion {
   vigente: ComposicionVersion | null;
   historial: ComposicionVersion[];
+  /** Nombre y unidad de cada código de la propuesta vigente. Viene de la respuesta
+   *  y no de la fila persistida: la propuesta guarda lo que dijo el modelo (solo el
+   *  código) y el nombre se lee fresco del catálogo. Un código que no está en el
+   *  catálogo NO aparece acá — y eso es correcto, el validador ya emitió
+   *  CODIGO_INEXISTENTE y el usuario tiene que verlo. */
+  catalogo: Record<string, EntradaCatalogo>;
 }
 
 /** Un APU distinto por fila para aplicar sugerencias de la IA en un solo recosteo. */

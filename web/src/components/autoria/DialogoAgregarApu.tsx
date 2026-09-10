@@ -654,13 +654,13 @@ export function DialogoAgregarApu({
 
 // ─── Buscador de insumo (autocompletado) ───────────────────────────────────────
 
-interface BuscadorInsumoProps {
+export interface BuscadorInsumoProps {
   codigo: string;
   nombre: string;
   onElegir: (ins: Insumo) => void;
 }
 
-function BuscadorInsumo({ codigo, nombre, onElegir }: BuscadorInsumoProps) {
+export function BuscadorInsumo({ codigo, nombre, onElegir }: BuscadorInsumoProps) {
   const [q, setQ] = useState("");
   const [resultados, setResultados] = useState<Insumo[]>([]);
   const [abierto, setAbierto] = useState(false);

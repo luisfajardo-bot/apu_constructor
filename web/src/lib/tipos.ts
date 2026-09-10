@@ -78,28 +78,6 @@ export interface ResumenRevision {
   sin_veredicto: number;
 }
 
-// @deprecated: lo borra la tarea 12 junto con DialogoComposicion.tsx — contrato viejo
-// de POST /corridas/{id}/componer/{seq}, ya reemplazado por el expediente de
-// composicion.ts (ComposicionVersion). Sigue vivo porque DialogoComposicion.tsx y
-// corridas.ts::componerItem todavía lo usan.
-export interface ComponenteComposicion {
-  insumo_codigo: string;
-  insumo_nombre: string;
-  unidad: string;
-  rendimiento: number;
-}
-
-// @deprecated: lo borra la tarea 12 junto con DialogoComposicion.tsx (ver arriba).
-export interface ComposicionPropuesta {
-  seq: number;
-  nombre: string;
-  unidad: string;
-  shift: string;
-  justificacion: string;
-  confianza: number;
-  componentes: ComponenteComposicion[];
-}
-
 /** Un componente propuesto, con todo lo que lo explica. Espejo del contrato de
  *  `apu_tool/dominio/composicion.py`. Ningún campo es monetario, a propósito. */
 export interface ComponentePropuesto {

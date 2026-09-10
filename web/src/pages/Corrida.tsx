@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import TablaItems from "@/components/corrida/TablaItems";
@@ -49,6 +49,7 @@ function totalesDe(filas: ItemCuadro[]): Totales {
 export default function Corrida() {
   const { id } = useParams<{ id: string }>();
   const corridaId = Number(id);
+  const navigate = useNavigate();
   const { perfil } = useAuth();
 
   const [corrida, setCorrida] = useState<CorridaDetalle | null>(null);
@@ -437,7 +438,10 @@ export default function Corrida() {
         )}
       </div>
 
-      {/* Dense table */}
+      {/* Dense table. `onComponer` navega a la mesa de composición y le manda la
+          descripción como PISTA: antes de que exista una propuesta el expediente
+          todavía no trae la actividad, y sin esto la mesa no tendría qué titular.
+          Es opcional — en una recarga en frío cae al número de línea. */}
       <TablaItems
         corridaId={corridaId}
         items={filas}
@@ -445,6 +449,9 @@ export default function Corrida() {
         readOnly={data.modo === "congelada"}
         control={control}
         puedeEditar={puedeEditar}
+        onComponer={(seq) => navigate(`/corridas/${corridaId}/componer/${seq}`, {
+          state: { descripcion: data.items.find((f) => f.seq === seq)?.descripcion },
+        })}
       />
 
       {agregando && (

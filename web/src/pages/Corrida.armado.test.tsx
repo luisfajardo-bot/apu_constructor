@@ -14,7 +14,11 @@
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-vi.mock("react-router-dom", () => ({ useParams: () => ({ id: "1" }) }));
+vi.mock("react-router-dom", () => ({
+  useParams: () => ({ id: "1" }),
+  // Corrida navega a la mesa de composición desde la columna Acciones.
+  useNavigate: () => vi.fn(),
+}));
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
 }));

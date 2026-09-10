@@ -26,15 +26,6 @@ vi.mock("@/api/corridas", () => ({
     id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
     totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
   })),
-  componerItem: vi.fn(async () => ({
-    seq: 0, nombre: "SARDINEL A-10", unidad: "ML", shift: "DIURNO",
-    justificacion: "Nada parecido en la biblioteca; se compone desde A-80.",
-    confianza: 0.6,
-    componentes: [
-      { insumo_codigo: "1105", insumo_nombre: "CONCRETO 3000 PSI",
-        unidad: "M3", rendimiento: 0.045 },
-    ],
-  })),
   igualarCostoAlContractual: vi.fn(async () => ({
     id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
     totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
@@ -729,11 +720,13 @@ test("si todas las filas tienen veredicto, no se ofrece \"sin revisar\"", () => 
   expect([...select.options].map((o) => o.text)).toEqual(["(todas)", "✔ ok"]);
 });
 
-// ─── Componer un APU con IA a pedido (dictamen `sin_apu`) ────────────────────
-// La IA dictaminó que la biblioteca no tiene nada adecuado. El botón abre una
-// PROPUESTA; crear el APU sigue siendo el alta de siempre, y la hace el usuario.
+// ─── La puerta de entrada a la mesa de composición ───────────────────────────
+// Componer ya NO depende de haber corrido la revisión con IA sobre toda la corrida:
+// se ofrece en cualquier fila sin APU (o con veredicto `sin_apu`), desde la columna
+// Acciones. El botón solo AVISA al padre con el seq; navegar es de la página, que es
+// la que está dentro del Router (esta tabla se monta sin él en estos tests).
 
-/** Veredicto `sin_apu`: el único que ofrece Componer. */
+/** Veredicto `sin_apu`: el que ofrece Componer aunque la fila SÍ tenga APU. */
 const VEREDICTO_SIN_APU = {
   seq: 0, dictamen: "sin_apu", apu_sugerido: null, turno_sugerido: null,
   confianza: 0.8, justificacion: "No hay sardineles A-10.", nivel: "profundo",
@@ -742,7 +735,7 @@ const VEREDICTO_SIN_APU = {
 test("con dictamen sin_apu y rol editor aparece Componer", () => {
   render(
     <TablaItems corridaId={1} items={[{ ...ITEM, revision: VEREDICTO_SIN_APU }]}
-      onConfirmado={() => {}} puedeEditar />,
+      onConfirmado={() => {}} onComponer={() => {}} puedeEditar />,
   );
   expect(screen.getByRole("button", { name: /^Componer$/ })).toBeTruthy();
 });
@@ -753,14 +746,15 @@ test("los demás dictámenes no ofrecen Componer", () => {
     { ...ITEM, seq: 1, descripcion: "Beta", revision: veredicto(1, "cambiar") },
     { ...ITEM, seq: 2, descripcion: "Gama", revision: veredicto(2, "dudoso") },
   ];
-  render(<TablaItems corridaId={1} items={items} onConfirmado={() => {}} puedeEditar />);
+  render(<TablaItems corridaId={1} items={items} onConfirmado={() => {}}
+                     onComponer={() => {}} puedeEditar />);
   expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
 });
 
 test("sin rol editor no aparece Componer", () => {
   render(
     <TablaItems corridaId={1} items={[{ ...ITEM, revision: VEREDICTO_SIN_APU }]}
-      onConfirmado={() => {}} />,
+      onConfirmado={() => {}} onComponer={() => {}} />,
   );
   expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
 });
@@ -768,68 +762,49 @@ test("sin rol editor no aparece Componer", () => {
 test("en corrida congelada no aparece Componer", () => {
   render(
     <TablaItems corridaId={1} items={[{ ...ITEM, revision: VEREDICTO_SIN_APU }]}
-      onConfirmado={() => {}} puedeEditar readOnly />,
+      onConfirmado={() => {}} onComponer={() => {}} puedeEditar readOnly />,
   );
   expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
 });
 
-test("Componer le pide a la IA la propuesta de ESA fila", async () => {
-  const { componerItem } = await import("@/api/corridas");
-  vi.mocked(componerItem).mockClear();
+test("una fila sin APU ofrece componer sin haber corrido la revisión", () => {
+  render(
+    <TablaItems corridaId={1}
+      items={[{ ...ITEM, apu_codigo: "", apu_nombre: "", revision: null }]}
+      onConfirmado={() => {}} onComponer={() => {}} puedeEditar />,
+  );
+  expect(screen.getByRole("button", { name: /^Componer$/ })).toBeTruthy();
+});
+
+test("una fila CON APU y sin veredicto no ofrece componer", () => {
+  render(
+    <TablaItems corridaId={1} items={[{ ...ITEM, revision: null }]}
+      onConfirmado={() => {}} onComponer={() => {}} puedeEditar />,
+  );
+  expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
+});
+
+test("una fila con costo puesto a mano no ofrece componer", () => {
+  // Ya declaró su costo (proyectos especiales): no necesita APU.
+  render(
+    <TablaItems corridaId={1}
+      items={[{ ...ITEM, apu_codigo: "", apu_nombre: "", costo_manual: true }]}
+      onConfirmado={() => {}} onComponer={() => {}} puedeEditar />,
+  );
+  expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
+});
+
+test("Componer avisa al padre con el seq de ESA fila", () => {
+  const onComponer = vi.fn();
   const items = [
-    { ...ITEM, seq: 0, descripcion: "Alfa", revision: veredicto(0, "ok") },
+    { ...ITEM, seq: 0, descripcion: "Alfa" },
     { ...ITEM, seq: 5, item: "2", descripcion: "SARDINEL A-10",
-      revision: { ...VEREDICTO_SIN_APU, seq: 5 } },
+      apu_codigo: "", apu_nombre: "" },
   ];
-  render(<TablaItems corridaId={1} items={items} onConfirmado={() => {}} puedeEditar />);
+  render(<TablaItems corridaId={1} items={items} onConfirmado={() => {}}
+                     onComponer={onComponer} puedeEditar />);
   fireEvent.click(screen.getByRole("button", { name: /^Componer$/ }));
-  await waitFor(() => expect(componerItem).toHaveBeenCalledWith(1, 5));
-  expect(await screen.findByText(/nada parecido en la biblioteca/i)).toBeTruthy();
-});
-
-test("un doble clic en Componer no le pide dos propuestas a la IA", async () => {
-  const { componerItem } = await import("@/api/corridas");
-  vi.mocked(componerItem).mockClear();
-  render(
-    <TablaItems corridaId={1} items={[{ ...ITEM, revision: VEREDICTO_SIN_APU }]}
-      onConfirmado={() => {}} puedeEditar />,
-  );
-  const boton = screen.getByRole("button", { name: /^Componer$/ });
-  fireEvent.click(boton);
-  fireEvent.click(boton);
-  await waitFor(() => expect(componerItem).toHaveBeenCalledTimes(1));
-});
-
-test("al crear el APU desde la propuesta, queda asignado a la fila", async () => {
-  const { aplicarSugerencias } = await import("@/api/corridas");
-  const { crearApu } = await import("@/api/autoria");
-  vi.mocked(aplicarSugerencias).mockClear();
-  vi.mocked(crearApu).mockClear();
-  const onConfirmado = vi.fn();
-  render(
-    <TablaItems corridaId={1} items={[{ ...ITEM, seq: 5, revision: { ...VEREDICTO_SIN_APU, seq: 5 } }]}
-      onConfirmado={onConfirmado} puedeEditar />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: /^Componer$/ }));
-  fireEvent.click(await screen.findByRole("button", { name: /Crear APU con esto/i }));
-  // El alta arranca precargada con la propuesta; el usuario pone identidad y grupo.
-  expect(await screen.findByDisplayValue("SARDINEL A-10")).toBeTruthy();
-  expect(screen.getByDisplayValue("0.045")).toBeTruthy();
-  fireEvent.change(screen.getByLabelText(/código/i), { target: { value: "9001" } });
-  fireEvent.change(screen.getByLabelText(/grupo/i, { selector: "select" }),
-                   { target: { value: "PAVIMENTOS" } });
-  await waitFor(() =>
-    expect((screen.getByRole("button", { name: /^Crear APU$/ }) as HTMLButtonElement).disabled)
-      .toBe(false));
-  fireEvent.click(screen.getByRole("button", { name: /^Crear APU$/ }));
-  await waitFor(() => expect(crearApu).toHaveBeenCalled());
-  // Creado por el usuario y recién ahí asignado a la fila, con la corrida
-  // recosteada propagada por el mismo callback de siempre.
-  await waitFor(() =>
-    expect(aplicarSugerencias).toHaveBeenCalledWith(1, [
-      { seq: 5, apu_codigo: "9001", shift: "DIURNO" },
-    ]));
-  await waitFor(() => expect(onConfirmado).toHaveBeenCalled());
+  expect(onComponer).toHaveBeenCalledWith(5);
 });
 
 // ─── Igualar costo al contractual (proyectos especiales) ────────────────────

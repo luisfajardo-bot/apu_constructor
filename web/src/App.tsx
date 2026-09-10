@@ -7,6 +7,7 @@ import DefinirClave from "@/pages/DefinirClave";
 import MisCorridas from "@/pages/MisCorridas";
 import CorridasInicio from "@/pages/CorridasInicio";
 import Corrida from "@/pages/Corrida";
+import Composicion from "@/pages/Composicion";
 import Insumos from "@/pages/Insumos";
 import Apus from "@/pages/Apus";
 import Usuarios from "@/pages/Usuarios";
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="corridas" element={<MisCorridas />} />
             <Route path="corridas/nueva" element={<CorridasInicio />} />
             <Route path="corridas/:id" element={<Corrida />} />
+            <Route path="corridas/:id/componer/:seq" element={<Composicion />} />
             <Route path="insumos" element={<Insumos />} />
             <Route path="apus" element={<Apus />} />
             <Route element={<RequiereRol minimo="admin" />}>

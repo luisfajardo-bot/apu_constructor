@@ -101,20 +101,3 @@ test("aplicarSugerencias manda seqs vacío + asignaciones al confirmar-lote", as
   expect(init?.method).toBe("POST");
   expect(JSON.parse(init?.body as string)).toEqual({ seqs: [], asignaciones });
 });
-
-test("componerItem pega a /corridas/{id}/componer/{seq}", async () => {
-  const respuesta = {
-    seq: 5, nombre: "Excavación manual", unidad: "M3", shift: "DIURNO",
-    justificacion: "x", confianza: 0.5, componentes: [],
-  };
-  const fetchMock = vi.fn(async () => new Response(JSON.stringify(respuesta), { status: 200 }));
-  vi.stubGlobal("fetch", fetchMock);
-  const { componerItem } = await import("./corridas");
-
-  const d = await componerItem(7, 5);
-
-  const [url, init] = fetchMock.mock.calls[0];
-  expect(url).toBe("/api/corridas/7/componer/5");
-  expect(init?.method).toBe("POST");
-  expect(d).toEqual(respuesta);
-});

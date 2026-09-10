@@ -124,3 +124,43 @@ class RolIn(BaseModel):
 
 class EstadoIn(BaseModel):
     estado: str
+
+
+# ------------------------------------------------------- composición asistida
+class ComponenteComposicionIn(BaseModel):
+    """Un componente tal como lo deja el humano en la mesa de revisión."""
+    codigo: str
+    tipo: str = "insumo"
+    funcion: str = ""
+    rendimiento: float
+    origen: str = "supuesto_tecnico"
+    referencias: list[dict] = []
+    hipotesis: dict = {}
+    calculo: Optional[dict] = None
+    justificacion: str = ""
+    nivel_evidencia: str = "bajo"
+    ref_shift: str = ""
+
+
+class ComposicionEditarIn(BaseModel):
+    # La versión sobre la que trabajó el usuario. Si ya hay una mayor, 409: alguien
+    # más la cambió mientras tanto.
+    version_base: int
+    componentes: list[ComponenteComposicionIn]
+    supuestos_confirmados: bool = False
+
+
+class ComposicionAprobarIn(BaseModel):
+    """La identidad del APU la pone el humano; los componentes salen de la versión
+    vigente, no del cuerpo: aprobar no es una oportunidad de editar."""
+    version_base: int
+    codigo: str
+    turno: str
+    nombre: str
+    grupo: str = ""
+    unidad: str = ""
+
+
+class ComposicionRechazarIn(BaseModel):
+    version_base: int
+    motivo: str = ""

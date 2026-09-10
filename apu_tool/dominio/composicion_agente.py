@@ -17,7 +17,12 @@ from dataclasses import dataclass, replace
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio import privacy
-from apu_tool.dominio.ai_assist import PROMPT_VERSION, IANoDisponible
+# `ApuAdvisor` y `IANoDisponible` se RE-EXPORTAN desde acá, igual que `revision.py`
+# re-exporta `IANoDisponible`: `apu_tool/servicio/` no importa `ai_assist` (lo fija
+# `tests/test_servicio_privacidad.py::test_servicio_no_importa_ai_assist`), así que la
+# capa de servicio construye la fachada a través de su orquestador de dominio y no
+# tocando la puerta al SDK. Ese test es lo que mantiene el borde en un solo lugar.
+from apu_tool.dominio.ai_assist import PROMPT_VERSION, ApuAdvisor, IANoDisponible
 from apu_tool.dominio.compose import InsumoRetriever, rendimientos_observados
 from apu_tool.dominio.composicion import Propuesta
 from apu_tool.dominio.validacion_composicion import (

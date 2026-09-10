@@ -58,6 +58,15 @@ class InsumoRetriever:
             if dp is None:
                 continue
             for comp in dp.componentes:
+                # Los sub-APUs NO entran al conjunto candidato. El contrato y el
+                # validador los soportan, pero en esta fase la IA no los propone: los
+                # ~1500 APUs duplicarían la lista blanca y traerían el riesgo de
+                # anidar un APU dentro de sí mismo, cuando todavía no sabemos si el
+                # modelo compone bien con solo insumos (eso es la fase 3). Sin este
+                # filtro el modelo ve un código de APU disfrazado de insumo, lo
+                # propone de buena fe y se come un CODIGO_INEXISTENTE que no es suyo.
+                if comp.tipo == "apu":
+                    continue
                 if comp.insumo_codigo and comp.insumo_codigo not in insumos:
                     insumos[comp.insumo_codigo] = CandidateInsumo(
                         comp.insumo_codigo, comp.insumo_nombre, comp.unidad)

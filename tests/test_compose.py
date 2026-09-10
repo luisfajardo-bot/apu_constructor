@@ -60,6 +60,17 @@ def test_retriever_returns_candidates(alm):
     assert "322" in codigos          # por nombre (CONCRETO)
 
 
+def test_un_subapu_de_un_apu_de_referencia_no_entra_como_candidato(alm):
+    """La IA no propone sub-APUs en esta fase: un código de APU en la lista blanca
+    la invita a proponer algo que el validador después rechaza."""
+    alm.apus.insert_apus([Apu("SUB", "SUB-APU DE PRUEBA", "M3", "DIURNO")])
+    alm.apus.insert_components([
+        ApuComponent("3010", "DIURNO", "SUB", "SUB-APU DE PRUEBA", "M3", 1.0, 0,
+                     tipo="apu", ref_shift="DIURNO")])
+    insumos, _ = InsumoRetriever(alm).retrieve("DEMOLICION PAVIMENTO", "DIURNO")
+    assert "SUB" not in {i.codigo for i in insumos}
+
+
 def test_generative_composition_is_costed(alm):
     comp = ComposeResult(
         componentes=[ComposedComponent("4279", 2.0), ComposedComponent("322", 0.1)],

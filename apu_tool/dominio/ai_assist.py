@@ -118,7 +118,7 @@ _COMPOSE_SCHEMA = {
 # Versión del prompt de composición. Se guarda con cada propuesta: sin esto, cuando el
 # modelo empiece a proponer distinto no hay forma de saber si cambió el modelo o el
 # prompt. Se sube A MANO al tocar `_SISTEMA_COMPOSICION` o `_ESQUEMA_COMPOSICION`.
-PROMPT_VERSION = "composicion/v2"
+PROMPT_VERSION = "composicion/v3"
 
 _SISTEMA_COMPOSICION = """\
 Eres un ingeniero de costos de obra civil. Te dan una ACTIVIDAD de licitación que no
@@ -137,10 +137,26 @@ Reglas estrictas:
 - Cuando derives un rendimiento de una hipótesis de producción, escribe la fórmula en
   `calculo`. Un programa la recalcula y manda su resultado sobre el tuyo, así que no te
   esfuerces en la aritmética: esfuérzate en la hipótesis.
+- `hipotesis` es el razonamiento productivo detrás del rendimiento, en pares
+  clave-valor: por ejemplo {"horas_jornada": 8, "produccion_por_jornada": 96,
+  "unidad_produccion": "m3/dia"}. No se valida, se le muestra a un ingeniero de costos
+  para que pueda discutir el criterio y no solo el número. Si el rendimiento viene
+  copiado de un antecedente y no de una hipótesis propia, mandá {}.
 - `funcion` es el ROL del insumo dentro del APU, del vocabulario cerrado. No es el
   nombre de la actividad; eso va en `justificacion`.
-- `origen` dice de dónde sale el rendimiento. Sé honesto: si no tienes antecedente,
-  `sin_evidencia` es la respuesta correcta y no te penaliza.
+- `origen` dice de dónde sale el rendimiento, y es lo que la plataforma usa para
+  medir cuánto respaldo tiene la propuesta. Sé honesto:
+  - "copiado_de_antecedente": lo tomaste igual de un APU de referencia. Citalo.
+  - "ajustado_de_antecedente": partiste de uno y lo moviste por una razón que
+    explicás en `justificacion`. Citalo igual.
+  - "calculado_desde_produccion": lo derivaste de una hipótesis. Mandá `calculo`.
+  - "supuesto_tecnico": lo pusiste por criterio, sin antecedente ni cuenta. Declará
+    el supuesto en `supuestos`.
+  - "sin_evidencia": no tenés en qué apoyarte. Es una respuesta legítima y preferible
+    a inventar un respaldo.
+- `nivel_evidencia` es qué tan firme es ese respaldo: "alto" si el antecedente es
+  directamente comparable, "medio" si hay que extrapolar, "bajo" si es analogía
+  lejana.
 - `referencias` solo puede citar APUs que estén en los de referencia que te dimos.
 - Si algún dato que falta cambiaría materialmente la composición, decláralo en
   `supuestos` en vez de inventarlo en silencio. Declararlos no te penaliza.

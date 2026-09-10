@@ -185,6 +185,14 @@ modelo la base para declarar "copiado" o "ajustado", y al validador la base para
 "atípico". Son cantidades físicas, no dinero. `grupo` (`MO`/`EQ`/`MAT`) entra por primera
 vez: es clasificación técnica.
 
+**`insumos_disponibles` excluye los sub-APUs, y hay que sostenerlo en el retriever.**
+La decisión de fase es que el contrato y el validador soporten sub-APUs pero la IA
+todavía no los proponga. Eso no se cumple solo: `InsumoRetriever` saca candidatos de
+los componentes de los APUs de referencia, y un componente con `tipo="apu"` entraba a
+la lista blanca **disfrazado de insumo** — el modelo lo proponía de buena fe y se comía
+un `CODIGO_INEXISTENTE` que no era suyo. El filtro va en el retriever, no en el prompt:
+lo que el modelo no ve, no lo puede proponer.
+
 ### 6.2 Lo que la IA devuelve
 
 ```json
@@ -227,6 +235,13 @@ Vocabularios **cerrados** — enum en el esquema JSON *y* revalidados en Python,
 validador escriba reglas ("no hay ni mano de obra ni equipo", "hay cuadrilla sin
 herramienta"); un texto libre no se puede validar y se vuelve un campo decorativo. La
 descripción de qué hace el insumo en *esta* actividad va en `justificacion`.
+
+**`hipotesis` no se valida, y es a propósito.** Ningún hallazgo del validador la mira.
+Su valor es **explicativo**: es el razonamiento productivo detrás del rendimiento — "8
+horas de jornada ÷ 96 m³/día" — y va a la mesa de revisión para que un ingeniero pueda
+discutir el criterio y no solo el número. Que no se valide no significa que sobre;
+significa que **la interfaz tiene que mostrarla**, o el campo se vuelve peso muerto que
+el modelo llena con `{}`.
 
 **Ninguna clave del contrato es monetaria.** No hay `precio`, `costo`, `valor`, `total`
 ni `monto` en ningún nivel. Es deliberado: la propuesta persistida se puede reinyectar en

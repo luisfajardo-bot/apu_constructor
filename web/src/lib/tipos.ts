@@ -132,6 +132,10 @@ export interface ComposicionVersion {
   actividad: {
     item: string; descripcion: string; unidad: string; cantidad: number;
     shift: string;
+    /** Código IDU que manda el presupuesto. Si la línea quedó sin APU es porque ese
+     *  código no existe en la biblioteca, así que es el que debería llevar el APU
+     *  nuevo. Opcional: los expedientes creados antes de este cambio no lo traen. */
+    codigo_sugerido?: string;
   };
   ficha: null;                  // fase 2
   propuesta: {

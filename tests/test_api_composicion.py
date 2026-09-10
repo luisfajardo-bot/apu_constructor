@@ -490,3 +490,38 @@ def test_editar_una_rechazada_la_reabre(app_alm, corrida):
                json=dict(APROBAR, version_base=3))
     assert a.status_code == 200
     assert alm.apus.get_apu("9001", "DIURNO") is not None
+
+
+# --- codigo_sugerido ---------------------------------------------------------
+def test_la_vista_trae_el_codigo_sugerido_del_presupuesto(app_alm, corrida):
+    """Si la línea quedó sin APU es porque ese código no está en la biblioteca:
+    es justo el que debería llevar el APU nuevo."""
+    app, alm = app_alm
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-10T10:00:00", archivo="y.xlsx",
+        turno_def="DIURNO", use_ai=None, estado="en_revision"))
+    item = LicitacionItem("2.1", DESCRIPCION, "M3", 50.0, 90000.0, "DIURNO",
+                           codigo_sugerido="9001")
+    alm.corridas.guardar_items(cid, [CorridaItemRow(
+        seq=1, item=item, status="new", apu_codigo=None,
+        apu_nombre="(sin base — armar manual)", unidad="M3", shift="DIURNO",
+        origen="manual", confianza=0.0, explicacion="", componentes=[],
+        candidatos=[])])
+    _sembrar(alm, cid, version=1)
+    # `rechazar` re-sella la actividad desde el `LicitacionItem` de hoy (vía
+    # `_sello`): es el camino más chico para pasar por el código real sin invocar
+    # la IA.
+    r = cliente(app, "editor").post(
+        f"/api/corridas/{cid}/composicion/1/rechazar",
+        json={"version_base": 1, "motivo": "no aplica"})
+    assert r.status_code == 200
+    assert r.json()["vigente"]["actividad"]["codigo_sugerido"] == "9001"
+
+
+def test_un_expediente_viejo_sin_codigo_sugerido_no_rompe(app_alm, corrida):
+    """Los expedientes creados antes de este cambio no traen el campo."""
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)   # `_sembrar` no incluye `codigo_sugerido`
+    r = cliente(app, "consulta").get(f"/api/corridas/{corrida}/composicion/1")
+    assert r.status_code == 200
+    assert "codigo_sugerido" not in r.json()["vigente"]["actividad"]

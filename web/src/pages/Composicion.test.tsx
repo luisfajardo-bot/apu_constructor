@@ -57,7 +57,9 @@ const COMPONENTE = {
   ref_shift: "",
 };
 
-function version() {
+/** `actividadExtra` cubre `codigo_sugerido`: por defecto AUSENTE (como un
+ *  expediente viejo), y los tests que lo necesitan lo pasan explícito. */
+function version(actividadExtra: Partial<{ codigo_sugerido: string }> = {}) {
   return {
     corrida_id: 1,
     seq: 3,
@@ -66,6 +68,7 @@ function version() {
     actividad: {
       item: "1.3", descripcion: "EXCAVACION MANUAL EN MATERIAL COMUN",
       unidad: "M3", cantidad: 120, shift: "DIURNO",
+      ...actividadExtra,
     },
     ficha: null,
     propuesta: {
@@ -336,6 +339,35 @@ test("aprobar pide la identidad y crea el APU con la versión vigente", async ()
     unidad: "M3",
   }));
   expect(await screen.findByText("vuelta a la corrida")).toBeTruthy();
+});
+
+test("el diálogo de identidad precarga el código del presupuesto", async () => {
+  getComposicion.mockResolvedValue(vista(version({ codigo_sugerido: "9001" })));
+  montar();
+  fireEvent.click(await screen.findByRole("button", { name: /Aprobar y crear APU/ }));
+  const input = await screen.findByLabelText("Código") as HTMLInputElement;
+  expect(input.value).toBe("9001");
+});
+
+test("sin código sugerido el campo arranca vacío", async () => {
+  montar();   // `version()` sin argumentos: sin `codigo_sugerido`, como un expediente viejo.
+  fireEvent.click(await screen.findByRole("button", { name: /Aprobar y crear APU/ }));
+  const input = await screen.findByLabelText("Código") as HTMLInputElement;
+  expect(input.value).toBe("");
+});
+
+test("el código precargado se puede cambiar", async () => {
+  getComposicion.mockResolvedValue(vista(version({ codigo_sugerido: "9001" })));
+  montar();
+  fireEvent.click(await screen.findByRole("button", { name: /Aprobar y crear APU/ }));
+  const input = await screen.findByLabelText("Código") as HTMLInputElement;
+  expect(input.value).toBe("9001");
+  fireEvent.change(input, { target: { value: "9002" } });
+  expect(input.value).toBe("9002");
+  fireEvent.change(screen.getByLabelText("Grupo"), { target: { value: "EXCAVACIONES" } });
+  fireEvent.click(screen.getByRole("button", { name: /^Crear APU$/ }));
+  await waitFor(() => expect(aprobarComposicion).toHaveBeenCalledWith(
+    1, 3, expect.objectContaining({ codigo: "9002" })));
 });
 
 test("con rol consulta no aparece ninguna acción que escriba", async () => {

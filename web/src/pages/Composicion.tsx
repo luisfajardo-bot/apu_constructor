@@ -323,11 +323,17 @@ export default function Composicion() {
           (con la corrida congelada no se puede aprobar nada, así que este aviso es
           informativo nomás), y este habla del dato de la fila. Los dos pueden
           mostrarse juntos sin contradecirse. */}
+      {/* Informativo, no una advertencia. Igualar al contractual se usa de las dos
+          maneras y el sistema no las distingue: como precio de REFERENCIA mientras se
+          arman los APUs que faltan —y ahí reemplazarlo es justo lo que se busca— y
+          como decisión permanente en los proyectos especiales globales, donde armar
+          el APU no paga. Redactarlo como aviso de peligro alarmaba sobre el
+          resultado deseado del primer caso, que es el más común. */}
       {vista?.costo_a_mano && (
-        <p className="border-l-2 border-revisar bg-revisar-surface px-2 py-1.5 text-xs text-revisar">
-          Esta línea tiene hoy un <span className="font-semibold">costo declarado a
-          mano</span>, igualado al contractual. Aprobar un APU acá lo
-          <span className="font-semibold"> reemplaza por el costo calculado</span>.
+        <p className="border-l-2 border-hairline bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
+          Esta línea se costea hoy con el{" "}
+          <span className="font-semibold text-foreground">contractual como
+          referencia</span>. Al aprobar el APU pasa a costearse con sus insumos.
         </p>
       )}
 

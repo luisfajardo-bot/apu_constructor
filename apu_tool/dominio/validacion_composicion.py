@@ -427,3 +427,130 @@ def validar(p: Propuesta, ctx: ContextoValidacion) -> tuple[Propuesta, Validacio
     return nueva, Validacion(
         valido=not errores, errores=tuple(errores), advertencias=tuple(advertencias),
         superadas=reglas - len(errores) - len(advertencias), totales=reglas)
+
+
+# ------------------------------------------------------------------ confianza
+# Cuatro niveles y no un porcentaje: no hay masa de datos para sostener una escala
+# continua, y pintar "73 %" es la falsa precisión que esta feature vino a quitar. Lo
+# que sí hay es un desglose: el usuario puede ver de dónde salió el nivel.
+NIVELES_CONFIANZA = ("alta", "media", "baja", "insuficiente")
+
+_UMBRAL_ALTA = 4
+_UMBRAL_MEDIA = 2
+
+# Un rango observado tan ancho como (max-min)/mediana <= 0,5 es un consenso; por encima
+# de 2,0 la biblioteca no se pone de acuerdo y el antecedente respalda menos.
+_DISPERSION_ESTRECHA = 0.5
+_DISPERSION_ANCHA = 2.0
+
+
+@dataclass(frozen=True)
+class Motivo:
+    senal: str
+    valor: str          # legible: "4 de 5 con antecedente vivo"
+    aporte: int
+
+    def to_dict(self) -> dict[str, Any]:
+        # La clave serializada es `detalle` y no `valor`: `valor` está en
+        # `_FORBIDDEN_KEYS` de `dominio/privacy.py` (por "valor_total"/"valor
+        # unitario"), y `assert_no_money` mira nombres de clave, no contenido — este
+        # texto es descriptivo ("4 de 5 con antecedente vivo"), pero con esa clave el
+        # guardián lo tomaría por un monto. El atributo Python se llama `valor` sin
+        # problema; solo el JSON hacia afuera cambia de nombre.
+        return {"senal": self.senal, "detalle": self.valor, "aporte": self.aporte}
+
+
+@dataclass(frozen=True)
+class Confianza:
+    nivel: str
+    puntos: int
+    motivos: tuple[Motivo, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"nivel": self.nivel, "puntos": self.puntos,
+                "motivos": [m.to_dict() for m in self.motivos]}
+
+
+def _dispersion(obs: RendimientoObservado) -> float:
+    return (obs.maximo - obs.minimo) / obs.mediana if obs.mediana else 0.0
+
+
+def calcular_confianza(p: Propuesta, v: Validacion,
+                       ctx: ContextoValidacion) -> Confianza:
+    """El nivel de confianza, calculado FUERA del modelo.
+
+    `p.incertidumbre_declarada` no se lee acá a propósito: es lo que el modelo dice de
+    sí mismo, se guarda y se muestra aparte, y no puede mover un indicador que existe
+    justamente para no depender de él. Hay un test que lo fija.
+
+    Con cualquier error bloqueante el nivel es `insuficiente` sin mirar nada más: una
+    propuesta que no se puede aprobar no tiene confianza que reportar.
+    """
+    if v.errores:
+        return Confianza("insuficiente", 0, (Motivo(
+            "errores_bloqueantes", f"{len(v.errores)} error(es) que impiden aprobar",
+            0),))
+
+    comps = p.componentes
+    n = len(comps)
+    motivos: list[Motivo] = []
+
+    # Respaldado = el validador NO le puso SIN_EVIDENCIA. Se lee de los hallazgos en
+    # vez de recalcular la regla acá: si esta función reimplementara qué orígenes
+    # exigen respaldo, el validador y la confianza dirían cosas distintas del mismo
+    # componente el día que uno de los dos cambie.
+    sin_respaldo = {h.componente for h in v.advertencias
+                    if h.codigo == "SIN_EVIDENCIA"}
+    respaldados = sum(1 for c in comps if _corto(c.codigo) not in sin_respaldo)
+    frac = respaldados / n if n else 0.0
+    aporte = 2 if frac >= 0.8 else (1 if frac >= 0.5 else 0)
+    motivos.append(Motivo("respaldo_de_componentes",
+                          f"{respaldados} de {n} con antecedente vivo", aporte))
+
+    refs = {(r.apu_codigo, (r.turno or ctx.shift).upper())
+            for c in comps for r in c.referencias}
+    unidad = (ctx.unidad_actividad or "").strip().upper()
+    iguales = sum(1 for k in refs
+                  if (ctx.unidades_de_apu.get(k, "") or "").strip().upper() == unidad)
+    motivos.append(Motivo("unidad_de_antecedentes",
+                          f"{iguales} de {len(refs)} comparten "
+                          f"{unidad or '(sin unidad)'}",
+                          1 if iguales else 0))
+
+    con_masa = sum(1 for c in comps
+                   if (o := ctx.observados.get(c.codigo)) is not None
+                   and o.n >= config.COMPOSICION_MIN_ANTECEDENTES)
+    motivos.append(Motivo("antecedentes_comparables",
+                          f"{con_masa} de {n} con al menos "
+                          f"{config.COMPOSICION_MIN_ANTECEDENTES} usos en la "
+                          f"biblioteca",
+                          1 if con_masa >= max(1, n // 2) else 0))
+
+    usados = [o for c in comps if (o := ctx.observados.get(c.codigo)) is not None]
+    if usados:
+        media = sum(_dispersion(o) for o in usados) / len(usados)
+        disp = (1 if media <= _DISPERSION_ESTRECHA
+                else (-1 if media > _DISPERSION_ANCHA else 0))
+        motivos.append(Motivo("dispersion_de_rendimientos",
+                              f"amplitud media {media:.2f} veces la mediana", disp))
+
+    atipicos = sum(1 for h in v.advertencias if h.codigo == "RENDIMIENTO_ATIPICO")
+    if atipicos:
+        motivos.append(Motivo("rendimientos_atipicos", str(atipicos), -atipicos))
+
+    sin_ev = len(sin_respaldo)
+    if sin_ev:
+        motivos.append(Motivo("componentes_sin_evidencia", str(sin_ev), -sin_ev))
+
+    supuestos = len(p.supuestos) if not ctx.supuestos_confirmados else 0
+    if supuestos:
+        motivos.append(Motivo("supuestos_sin_confirmar", str(supuestos), -supuestos))
+
+    motivos.append(Motivo("validaciones",
+                          f"{v.superadas} de {v.totales} superadas",
+                          1 if not v.advertencias else 0))
+
+    puntos = sum(m.aporte for m in motivos)
+    nivel = ("alta" if puntos >= _UMBRAL_ALTA
+             else "media" if puntos >= _UMBRAL_MEDIA else "baja")
+    return Confianza(nivel, puntos, tuple(motivos))

@@ -1622,3 +1622,1175 @@ git commit -m "feat(composicion): confianza calculada por la plataforma, con su 
 ```
 
 ---
+
+## Tarea 5: la frontera de privacidad del agente
+
+El payload hacia la IA y la batería que intenta filtrar dinero por cada rendija nueva.
+Va **antes** que la fachada de IA porque el advisor lo necesita, no al revés.
+
+**Archivos:**
+- Modificar: `apu_tool/dominio/privacy.py`, `apu_tool/dominio/compose.py`
+- Test: `tests/test_composicion_privacidad.py`
+
+- [ ] **Paso 1: escribir la prueba que falla**
+
+```python
+"""Invariante #1 en la superficie nueva: la IA nunca ve dinero.
+
+Se prueba por forma (qué claves lleva el payload) y por guardián (que `assert_no_money`
+reviente si algo monetario se cuela). Las dos cosas: la forma atrapa un campo agregado
+sin pensar, el guardián atrapa uno con nombre monetario.
+"""
+import pytest
+
+from apu_tool.dominio import privacy
+from apu_tool.dominio.compose import CandidateInsumo, RendimientoObservado
+from apu_tool.nucleo.models import (
+    DePricedApu, DePricedComponent, LicitacionItem,
+)
+
+ITEM = LicitacionItem(item="1.3", descripcion="EXCAVACION MANUAL", unidad="M3",
+                      cantidad=120.0, precio_contractual=180000.0, shift="DIURNO")
+INSUMOS = [CandidateInsumo("4279", "CUADRILLA", "HR", "MO")]
+EJEMPLOS = [DePricedApu("A1", "UNO", "M3", "DIURNO", "EXCAVACIONES",
+                        (DePricedComponent("4279", "CUADRILLA", "HR", 0.62),))]
+OBS = {"4279": RendimientoObservado("4279", "HR", 14, 0.40, 0.62, 1.10)}
+
+
+def test_el_payload_pasa_el_guardian():
+    privacy.assert_no_money(privacy.payload_composicion(ITEM, INSUMOS, EJEMPLOS, OBS))
+
+
+def test_el_payload_lleva_exactamente_estas_claves():
+    """Test de forma: un campo agregado sin pensar rompe acá antes que en producción."""
+    p = privacy.payload_composicion(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert set(p) == {"actividad", "insumos_disponibles", "apus_referencia",
+                      "rendimientos_observados"}
+    assert set(p["actividad"]) == {"item", "descripcion", "unidad", "cantidad",
+                                   "shift"}
+    assert set(p["insumos_disponibles"][0]) == {"insumo_codigo", "insumo_nombre",
+                                                "unidad", "grupo"}
+    assert set(p["rendimientos_observados"][0]) == {"insumo_codigo", "unidad", "n",
+                                                    "minimo", "mediana", "maximo"}
+
+
+def test_el_precio_contractual_de_la_actividad_no_viaja():
+    p = privacy.payload_composicion(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert "precio_contractual" not in p["actividad"]
+    assert 180000.0 not in p["actividad"].values()
+
+
+def test_los_apus_de_referencia_no_llevan_precio_historico():
+    p = privacy.payload_composicion(ITEM, INSUMOS, EJEMPLOS, OBS)
+    comp = p["apus_referencia"][0]["componentes"][0]
+    assert "precio_unitario_hist" not in comp
+    assert "precio" not in comp
+
+
+def test_un_precio_colado_en_el_payload_revienta():
+    p = privacy.payload_composicion(ITEM, INSUMOS, EJEMPLOS, OBS)
+    p["insumos_disponibles"][0]["precio"] = 40000
+    with pytest.raises(privacy.PrivacyViolation):
+        privacy.assert_no_money(p)
+
+
+@pytest.mark.parametrize("clave", ["precio", "costo", "costo_unitario", "valor_total",
+                                   "margen", "total", "amount", "fuente_precio",
+                                   "costo_manual", "plan_json"])
+def test_cada_nombre_monetario_revienta_donde_sea(clave):
+    p = privacy.payload_composicion(ITEM, INSUMOS, EJEMPLOS, OBS)
+    p["apus_referencia"][0]["componentes"][0][clave] = 1
+    with pytest.raises(privacy.PrivacyViolation):
+        privacy.assert_no_money(p)
+
+
+def test_safe_json_es_el_unico_camino_de_salida():
+    texto = privacy.safe_json(privacy.payload_composicion(ITEM, INSUMOS, EJEMPLOS, OBS))
+    assert "180000" not in texto
+    assert "EXCAVACION MANUAL" in texto
+
+
+def test_el_payload_sin_antecedentes_sigue_siendo_valido():
+    p = privacy.payload_composicion(ITEM, INSUMOS, EJEMPLOS, {})
+    assert p["rendimientos_observados"] == []
+    privacy.assert_no_money(p)
+
+
+def test_candidate_insumo_lleva_grupo_y_nada_mas():
+    from dataclasses import fields
+    assert {f.name for f in fields(CandidateInsumo)} == {"codigo", "nombre", "unidad",
+                                                         "grupo"}
+```
+
+- [ ] **Paso 2: correr la prueba para verificar que falla**
+
+Ejecuta: `python -m pytest tests/test_composicion_privacidad.py -q`
+Esperado: FALLA con `AttributeError: module 'apu_tool.dominio.privacy' has no attribute 'payload_composicion'`
+
+- [ ] **Paso 3a: agregar `grupo` a `CandidateInsumo`**
+
+En `apu_tool/dominio/compose.py`, reemplaza la dataclass y su serializador:
+
+```python
+@dataclass(frozen=True)
+class CandidateInsumo:
+    """Insumo candidato SIN dinero (código, nombre, unidad, grupo).
+
+    `grupo` es clasificación técnica (MO/EQ/MAT), no monetaria, y lo llena el
+    orquestador con la misma consulta al catálogo con la que arma
+    `unidades_catalogo` para el validador: una lectura, dos usos. Por defecto vacío
+    para que el retriever siga construyendo candidatos sin consultar nada.
+    """
+    codigo: str
+    nombre: str
+    unidad: str
+    grupo: str = ""
+
+
+def candidate_insumo_to_dict(c: CandidateInsumo) -> dict:
+    return {"insumo_codigo": c.codigo, "insumo_nombre": c.nombre,
+            "unidad": c.unidad, "grupo": c.grupo}
+```
+
+- [ ] **Paso 3b: agregar el payload a `privacy.py`**
+
+Al final de `apu_tool/dominio/privacy.py`, **antes** de la clase `PrivacyViolation`:
+
+```python
+def rendimiento_observado_to_dict(o) -> dict[str, Any]:
+    """Estadística de uso de un insumo en la biblioteca. Cantidades físicas, no dinero."""
+    return {"insumo_codigo": o.insumo_codigo, "unidad": o.unidad, "n": o.n,
+            "minimo": round(o.minimo, 6), "mediana": round(o.mediana, 6),
+            "maximo": round(o.maximo, 6)}
+
+
+def payload_composicion(item, insumos, ejemplos, observados) -> dict[str, Any]:
+    """El payload de la composición asistida (dominio/composicion.py).
+
+    Se arma clave por clave a propósito, nunca volcando objetos en bloque: es lo que
+    hace que el test de FORMA sirva de algo. Los APUs de referencia entran como
+    `DePricedApu`, un tipo que estructuralmente no puede llevar dinero — la frontera
+    está en el tipo, no en acordarse de filtrar campos.
+
+    `observados` es un dict {codigo: RendimientoObservado}; se ordena por código para
+    que dos llamadas con los mismos datos produzcan el mismo texto (el prompt es
+    cacheable y los tests, comparables).
+    """
+    from apu_tool.dominio.compose import candidate_insumo_to_dict
+    return {
+        "actividad": licitacion_item_to_dict(item),
+        "insumos_disponibles": [candidate_insumo_to_dict(i) for i in insumos],
+        "apus_referencia": [depriced_apu_to_dict(a) for a in ejemplos],
+        "rendimientos_observados": [rendimiento_observado_to_dict(observados[k])
+                                    for k in sorted(observados)],
+    }
+```
+
+- [ ] **Paso 4: correr las pruebas y verificar que pasan**
+
+```bash
+python -m pytest tests/test_composicion_privacidad.py tests/test_privacy.py tests/test_compose.py -q
+```
+
+Esperado: `9 passed` en la primera; `test_privacy.py` y `test_compose.py` siguen verdes.
+
+- [ ] **Paso 5: commit**
+
+```bash
+git add apu_tool/dominio/privacy.py apu_tool/dominio/compose.py \
+        tests/test_composicion_privacidad.py
+git commit -m "feat(privacidad): payload de la composicion, por forma y por guardian"
+```
+
+---
+
+## Tarea 6: la fachada de IA
+
+`ApuAdvisor.componer` con el esquema v2. Se **agrega** junto a `compose_apu`; el viejo
+muere en la tarea 9, con `generar_composicion`, para que ninguna tarea intermedia deje
+el árbol rojo.
+
+**Archivos:**
+- Modificar: `apu_tool/dominio/ai_assist.py`
+- Test: `tests/test_composicion_advisor.py`
+
+- [ ] **Paso 1: escribir la prueba que falla**
+
+```python
+"""La fachada de IA de la composición: una llamada, contrato v2, degradado explícito.
+
+No se llama a la API real: se sustituye `_pedir_al_sdk`, la ÚNICA puerta al SDK, con el
+mismo truco que usan los tests de `revision.py`.
+"""
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from apu_tool.dominio import privacy
+from apu_tool.dominio.ai_assist import (
+    PROMPT_VERSION, ApuAdvisor, IANoDisponible,
+)
+from apu_tool.dominio.compose import CandidateInsumo, RendimientoObservado
+from apu_tool.nucleo.models import DePricedApu, DePricedComponent, LicitacionItem
+
+ITEM = LicitacionItem("1.3", "EXCAVACION MANUAL", "M3", 120.0, 180000.0, "DIURNO")
+INSUMOS = [CandidateInsumo("4279", "CUADRILLA", "HR", "MO")]
+EJEMPLOS = [DePricedApu("A1", "UNO", "M3", "DIURNO", "EXCAVACIONES",
+                        (DePricedComponent("4279", "CUADRILLA", "HR", 0.62),))]
+OBS = {"4279": RendimientoObservado("4279", "HR", 14, 0.40, 0.62, 1.10)}
+
+BUENA = {"componentes": [{"codigo": "4279", "tipo": "insumo",
+                          "funcion": "mano_de_obra", "rendimiento": 0.62,
+                          "origen": "copiado_de_antecedente",
+                          "referencias": [{"apu_codigo": "A1", "turno": "DIURNO"}],
+                          "hipotesis": {}, "calculo": None, "justificacion": "j",
+                          "nivel_evidencia": "alto"}],
+         "supuestos": [], "incertidumbre_declarada": 0.3, "justificacion": "g"}
+
+
+class AdvisorFalso(ApuAdvisor):
+    """Sustituye la única puerta al SDK. `texto` es lo que 'devuelve' el modelo."""
+
+    def __init__(self, texto: str):
+        self.enabled = True
+        self._client = object()
+        self.model = "falso"
+        self.texto = texto
+        self.contenido_enviado = None
+
+    def _pedir_al_sdk(self, system, schema, contenido, effort):
+        self.contenido_enviado = contenido
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="text", text=self.texto)])
+
+
+def test_devuelve_una_propuesta_parseada():
+    a = AdvisorFalso(json.dumps(BUENA))
+    p = a.componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert len(p.componentes) == 1
+    assert p.componentes[0].codigo == "4279"
+    assert p.incertidumbre_declarada == 0.3
+
+
+def test_no_le_manda_el_precio_contractual_al_modelo():
+    a = AdvisorFalso(json.dumps(BUENA))
+    a.componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert "180000" not in a.contenido_enviado
+
+
+def test_revienta_antes_de_tocar_la_red_si_hay_dinero():
+    """La PrivacyViolation NO se traga: sale del try, como en revision.Revisor._pedir."""
+    a = AdvisorFalso(json.dumps(BUENA))
+    sucio = [CandidateInsumo("4279", "CUADRILLA", "HR", "MO")]
+
+    def payload_sucio(*_a, **_k):
+        return {"actividad": {"precio_contractual": 1}}
+
+    original = privacy.payload_composicion
+    privacy.payload_composicion = payload_sucio
+    try:
+        with pytest.raises(privacy.PrivacyViolation):
+            a.componer(ITEM, sucio, EJEMPLOS, OBS)
+    finally:
+        privacy.payload_composicion = original
+    assert a.contenido_enviado is None      # nunca llegó al SDK
+
+
+@pytest.mark.parametrize("texto", ["", "no soy json", "{", "[1,2]", '"ok"', "42",
+                                   "{}", '{"componentes": []}'])
+def test_una_respuesta_ilegible_o_vacia_da_propuesta_vacia_no_revienta(texto):
+    p = AdvisorFalso(texto).componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert p.componentes == ()
+
+
+def test_sin_credencial_levanta_ia_no_disponible():
+    a = ApuAdvisor(enabled=False)
+    with pytest.raises(IANoDisponible):
+        a.componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+
+
+def test_sin_insumos_candidatos_levanta_valueerror():
+    """No hay lista blanca: pedirle algo al modelo sería invitarlo a inventar."""
+    with pytest.raises(ValueError):
+        AdvisorFalso(json.dumps(BUENA)).componer(ITEM, [], EJEMPLOS, OBS)
+
+
+def test_la_version_del_prompt_esta_declarada():
+    assert PROMPT_VERSION.startswith("composicion/")
+
+
+def test_un_401_del_sdk_se_convierte_en_ia_no_disponible():
+    class Rota(AdvisorFalso):
+        def _pedir_al_sdk(self, *a, **k):
+            raise type("E", (Exception,), {"status_code": 401})()
+
+    with pytest.raises(IANoDisponible):
+        Rota("").componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+
+
+def test_un_429_del_sdk_no_se_confunde_con_falta_de_credencial():
+    class Lenta(AdvisorFalso):
+        def _pedir_al_sdk(self, *a, **k):
+            raise type("E", (Exception,), {"status_code": 429})()
+
+    with pytest.raises(RuntimeError) as exc:
+        Lenta("").componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert not isinstance(exc.value, IANoDisponible)
+```
+
+- [ ] **Paso 2: correr la prueba para verificar que falla**
+
+Ejecuta: `python -m pytest tests/test_composicion_advisor.py -q`
+Esperado: FALLA con `ImportError: cannot import name 'PROMPT_VERSION'`
+
+- [ ] **Paso 3: agregar el esquema v2, el prompt y `componer`**
+
+En `apu_tool/dominio/ai_assist.py`, después de `_COMPOSE_SCHEMA`:
+
+```python
+# Versión del prompt de composición. Se guarda con cada propuesta: sin esto, cuando el
+# modelo empiece a proponer distinto no hay forma de saber si cambió el modelo o el
+# prompt. Se sube A MANO al tocar `_SISTEMA_COMPOSICION` o `_ESQUEMA_COMPOSICION`.
+PROMPT_VERSION = "composicion/v2"
+
+_SISTEMA_COMPOSICION = """\
+Eres un ingeniero de costos de obra civil. Te dan una ACTIVIDAD de licitación que no
+tiene un APU adecuado en la biblioteca histórica, una lista cerrada de INSUMOS
+DISPONIBLES (código, nombre, unidad, grupo), APUs DE REFERENCIA técnicamente cercanos
+con su composición, y RENDIMIENTOS OBSERVADOS: con qué cantidades aparece cada insumo
+en la biblioteca.
+
+Tu tarea: proponer la composición del APU y EXPLICAR cada componente.
+
+Reglas estrictas:
+- Usa ÚNICAMENTE códigos de la lista de insumos disponibles. Un código que no esté ahí
+  se rechaza entero: no inventes ninguno.
+- NUNCA recibirás precios ni costos, y no debes inventarlos ni pedirlos.
+- Los rendimientos son cantidades FÍSICAS por unidad de la actividad.
+- Cuando derives un rendimiento de una hipótesis de producción, escribe la fórmula en
+  `calculo`. Un programa la recalcula y manda su resultado sobre el tuyo, así que no te
+  esfuerces en la aritmética: esfuérzate en la hipótesis.
+- `funcion` es el ROL del insumo dentro del APU, del vocabulario cerrado. No es el
+  nombre de la actividad; eso va en `justificacion`.
+- `origen` dice de dónde sale el rendimiento. Sé honesto: si no tienes antecedente,
+  `sin_evidencia` es la respuesta correcta y no te penaliza.
+- `referencias` solo puede citar APUs que estén en los de referencia que te dimos.
+- Si algún dato que falta cambiaría materialmente la composición, decláralo en
+  `supuestos` en vez de inventarlo en silencio.
+- Incluye típicamente mano de obra o equipo, herramienta y materiales según la
+  actividad. Entre 2 y 12 componentes.
+
+Responde EXCLUSIVAMENTE con un JSON válido con el esquema pedido.
+"""
+
+_ESQUEMA_COMPOSICION = {
+    "type": "object",
+    "properties": {
+        "componentes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "codigo": {"type": "string"},
+                    "tipo": {"type": "string", "enum": ["insumo", "apu"]},
+                    "funcion": {"type": "string", "enum": list(FUNCIONES)},
+                    "rendimiento": {"type": "number"},
+                    "origen": {"type": "string", "enum": list(ORIGENES)},
+                    "referencias": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"apu_codigo": {"type": "string"},
+                                           "turno": {"type": "string"}},
+                            "required": ["apu_codigo", "turno"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "hipotesis": {"type": "object", "additionalProperties": True},
+                    "calculo": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "operacion": {"type": "string",
+                                          "enum": list(OPERACIONES)},
+                            "numerador": {"type": "number"},
+                            "denominador": {"type": "number"},
+                            "resultado": {"type": "number"},
+                        },
+                        "required": ["operacion", "numerador", "denominador",
+                                     "resultado"],
+                        "additionalProperties": False,
+                    },
+                    "justificacion": {"type": "string"},
+                    "nivel_evidencia": {"type": "string",
+                                        "enum": list(NIVELES_EVIDENCIA)},
+                },
+                "required": ["codigo", "tipo", "funcion", "rendimiento", "origen",
+                             "referencias", "hipotesis", "calculo", "justificacion",
+                             "nivel_evidencia"],
+                "additionalProperties": False,
+            },
+        },
+        "supuestos": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"campo": {"type": "string"},
+                               "supuesto": {"type": "string"},
+                               "impacto": {"type": "string"}},
+                "required": ["campo", "supuesto", "impacto"],
+                "additionalProperties": False,
+            },
+        },
+        "incertidumbre_declarada": {"type": "number", "minimum": 0, "maximum": 1},
+        "justificacion": {"type": "string"},
+    },
+    "required": ["componentes", "supuestos", "incertidumbre_declarada",
+                 "justificacion"],
+    "additionalProperties": False,
+}
+```
+
+Y arriba, con los imports:
+
+```python
+from apu_tool.dominio.composicion import (
+    FUNCIONES, NIVELES_EVIDENCIA, OPERACIONES, ORIGENES, Propuesta,
+    propuesta_desde_json,
+)
+```
+
+Dentro de `ApuAdvisor`, después de `compose_apu`:
+
+```python
+    def componer(self, item, insumos, ejemplos, observados) -> Propuesta:
+        """Una llamada al modelo con el contrato v2. Devuelve la propuesta PARSEADA.
+
+        No valida nada: eso es de `dominio/validacion_composicion.py`, que además
+        recalcula la aritmética. Acá solo se habla con el modelo y se lee lo que dijo.
+
+        Una respuesta ilegible da una propuesta VACÍA, que el validador rechaza con
+        `PROPUESTA_VACIA`. Nadie sale por válido por accidente — misma regla que
+        `revision.Revisor.profundizar`, que degrada a "dudoso".
+        """
+        if not self.enabled or self._client is None:
+            raise IANoDisponible(
+                "Componer un APU con IA necesita ANTHROPIC_API_KEY en el servidor.")
+        if not insumos:
+            # Sin lista blanca no hay nada entre lo que elegir: pedírselo igual sería
+            # invitarlo a inventar códigos, que es lo único que el contrato prohíbe.
+            raise ValueError("No hay insumos candidatos para esta actividad.")
+        payload = privacy.payload_composicion(item, insumos, ejemplos, observados)
+        # FUERA del try: el invariante #1 nunca se traga. Adentro, una PrivacyViolation
+        # saldría por el `except` de abajo y el usuario leería "la IA no pudo componer"
+        # mientras nadie se entera de que saltó el guardián. Mismo criterio que
+        # `compose_apu` y que `revision.barrer_lote`.
+        contenido = privacy.safe_json(payload)
+        try:
+            resp = self._pedir_al_sdk(_SISTEMA_COMPOSICION, _ESQUEMA_COMPOSICION,
+                                      contenido, "medium")
+        except Exception as exc:
+            if credencial_invalida(exc):
+                raise IANoDisponible(MSG_CREDENCIAL) from exc
+            raise
+        texto = next((b.text for b in resp.content if b.type == "text"), "{}")
+        try:
+            data = json.loads(texto)
+        except Exception:
+            return Propuesta()   # JSON truncado: propuesta vacía, no una mentira
+        return propuesta_desde_json(data)
+
+    def _pedir_al_sdk(self, system: str, schema: dict, contenido: str, effort: str):
+        """La llamada pelada al SDK. Aparte para que el `try` de arriba envuelva SOLO
+        la red y no el parseo, y para que los tests la sustituyan sin simular el
+        cliente de anthropic — el mismo patrón que `revision.Revisor`."""
+        return self._client.messages.create(
+            model=self.model,
+            max_tokens=16000,        # techo, no gasto: cubre el pensamiento y el JSON
+            system=system,
+            thinking={"type": "adaptive"},
+            output_config={"effort": effort,
+                           "format": {"type": "json_schema", "schema": schema}},
+            messages=[{"role": "user", "content": contenido}],
+        )
+```
+
+- [ ] **Paso 4: correr las pruebas y verificar que pasan**
+
+```bash
+python -m pytest tests/test_composicion_advisor.py tests/test_compose.py -q
+```
+
+Esperado: `17 passed` en la primera; `test_compose.py` sigue verde.
+
+- [ ] **Paso 5: commit**
+
+```bash
+git add apu_tool/dominio/ai_assist.py tests/test_composicion_advisor.py
+git commit -m "feat(composicion): fachada de IA con el contrato v2 y version de prompt"
+```
+
+---
+
+## Tarea 7: persistencia SQLite
+
+Una tabla, append-only por versión, dentro de `corridas.db`. Repo propio, igual que
+`carpetas_db.py`: la separación es por dominio, no por archivo de base.
+
+**La versión es explícita, no calculada dentro del INSERT.** Si el repo hiciera
+`MAX(version)+1`, dos clics seguidos obtendrían 4 y 5 y los dos entrarían: el índice
+único no protegería nada. Con la versión que manda el llamador (`version_base + 1`), el
+segundo choca contra `ux_composicion_version` y el servicio devuelve 409.
+
+**Archivos:**
+- Crear: `apu_tool/datos/composiciones_db.py`
+- Modificar: `apu_tool/nucleo/models.py`, `db/corridas.sql`,
+  `apu_tool/datos/repositorio.py`, `apu_tool/datos/almacen.py`
+- Test: `tests/test_composiciones_db.py`
+
+- [ ] **Paso 1: escribir la prueba que falla**
+
+```python
+"""Persistencia de la composición: append-only por versión, en los dos backends.
+
+Este archivo prueba SQLite. La paridad con Postgres la fija
+`tests/test_composiciones_paridad.py` (tarea 8) con los mismos casos.
+"""
+import pytest
+
+from apu_tool.datos.almacen import Almacen
+from apu_tool.datos.repositorio import VersionYaExiste
+from apu_tool.nucleo.models import ComposicionRow
+
+
+def fila(**kw) -> ComposicionRow:
+    base = dict(
+        id=None, corrida_id=1, seq=7, version=1, estado="propuesta",
+        actividad={"item": "1.3", "descripcion": "EXCAVACION", "unidad": "M3",
+                   "cantidad": 120.0, "shift": "DIURNO"},
+        ficha=None,
+        propuesta={"componentes": [{"codigo": "4279", "rendimiento": 0.62}],
+                   "supuestos": [], "incertidumbre_declarada": 0.3,
+                   "justificacion": "g"},
+        validacion={"valido": True, "errores": [], "advertencias": [],
+                    "metricas": {"superadas": 9, "totales": 9}},
+        confianza="alta",
+        confianza_motivos=[{"senal": "respaldo_de_componentes", "valor": "1 de 1",
+                            "aporte": 2}],
+        antecedentes={"codigos_permitidos": ["4279"], "apus_referencia": ["A1"]},
+        modelo="claude-sonnet-5", prompt_version="composicion/v2",
+        apu_codigo=None, apu_turno=None, autor="luis@test.co",
+        creada_en="2026-09-10T10:00:00", motivo=None)
+    base.update(kw)
+    return ComposicionRow(**base)
+
+
+@pytest.fixture()
+def alm(tmp_path):
+    a = Almacen(tmp_path / "precios.db", tmp_path / "apus.db",
+                tmp_path / "corridas.db")
+    a.init_schema()
+    return a
+
+
+def test_guarda_y_recupera_la_vigente(alm):
+    alm.composiciones.agregar(fila())
+    v = alm.composiciones.vigente(1, 7)
+    assert v is not None
+    assert v.version == 1
+    assert v.estado == "propuesta"
+    assert v.propuesta["componentes"][0]["codigo"] == "4279"
+    assert v.confianza == "alta"
+    assert v.modelo == "claude-sonnet-5"
+    assert v.prompt_version == "composicion/v2"
+
+
+def test_la_vigente_es_la_de_mayor_version(alm):
+    alm.composiciones.agregar(fila(version=1, estado="propuesta"))
+    alm.composiciones.agregar(fila(version=2, estado="editada"))
+    assert alm.composiciones.vigente(1, 7).estado == "editada"
+
+
+def test_el_historial_viene_en_orden(alm):
+    for n, est in enumerate(("propuesta", "editada", "aprobada"), start=1):
+        alm.composiciones.agregar(fila(version=n, estado=est))
+    assert [f.estado for f in alm.composiciones.historial(1, 7)] == [
+        "propuesta", "editada", "aprobada"]
+
+
+def test_repetir_una_version_choca(alm):
+    """La protección del doble clic es el índice único, no un if."""
+    alm.composiciones.agregar(fila(version=1))
+    with pytest.raises(VersionYaExiste):
+        alm.composiciones.agregar(fila(version=1, estado="aprobada"))
+
+
+def test_sin_composicion_la_vigente_es_none(alm):
+    assert alm.composiciones.vigente(1, 99) is None
+    assert alm.composiciones.historial(1, 99) == []
+
+
+def test_cada_fila_es_de_su_corrida_y_su_seq(alm):
+    alm.composiciones.agregar(fila(corrida_id=1, seq=7))
+    alm.composiciones.agregar(fila(corrida_id=1, seq=8))
+    alm.composiciones.agregar(fila(corrida_id=2, seq=7))
+    assert alm.composiciones.vigente(1, 8).seq == 8
+    assert alm.composiciones.vigente(2, 7).corrida_id == 2
+
+
+def test_los_campos_opcionales_aceptan_none(alm):
+    alm.composiciones.agregar(fila(ficha=None, propuesta=None, validacion=None,
+                                   confianza=None, confianza_motivos=None,
+                                   antecedentes=None, estado="error",
+                                   motivo="la IA no contestó"))
+    v = alm.composiciones.vigente(1, 7)
+    assert v.estado == "error" and v.motivo == "la IA no contestó"
+    assert v.propuesta is None and v.confianza_motivos is None
+
+
+def test_la_aprobada_guarda_el_apu_creado(alm):
+    alm.composiciones.agregar(fila(estado="aprobada", apu_codigo="9001",
+                                   apu_turno="DIURNO"))
+    v = alm.composiciones.vigente(1, 7)
+    assert (v.apu_codigo, v.apu_turno) == ("9001", "DIURNO")
+
+
+def test_la_fila_persistida_no_lleva_dinero(alm):
+    """Toda la fila es reinyectable en un payload: por eso `actividad` guarda la
+    vista des-monetizada y no el LicitacionItem crudo."""
+    from apu_tool.dominio import privacy
+    alm.composiciones.agregar(fila())
+    privacy.assert_no_money(alm.composiciones.vigente(1, 7).to_dict())
+
+
+def test_no_hay_columna_para_el_razonamiento_del_modelo(alm):
+    """No se guarda cadena de pensamiento: criterio 36."""
+    from dataclasses import fields
+    nombres = {f.name for f in fields(ComposicionRow)}
+    assert not (nombres & {"thinking", "razonamiento", "pensamiento", "reasoning"})
+```
+
+- [ ] **Paso 2: correr la prueba para verificar que falla**
+
+Ejecuta: `python -m pytest tests/test_composiciones_db.py -q`
+Esperado: FALLA con `ImportError: cannot import name 'ComposicionRow'`
+
+- [ ] **Paso 3a: agregar el tipo a `nucleo/models.py`**
+
+Al final de `apu_tool/nucleo/models.py`:
+
+```python
+@dataclass(frozen=True)
+class ComposicionRow:
+    """Una VERSIÓN del expediente de composición de una fila de corrida.
+
+    Append-only: cada acción que cambia la propuesta (generar, regenerar, editar,
+    aprobar, rechazar) escribe una fila nueva y la vigente es la de mayor `version`.
+    El historial de correcciones sale gratis, y es lo que la fase 4 va a leer como
+    evidencia.
+
+    NO lleva dinero, y es deliberado: `actividad` guarda la vista des-monetizada
+    (`privacy.licitacion_item_to_dict`), no el `LicitacionItem` crudo, que traería
+    `precio_contractual`. Así la fila entera se puede reinyectar en un payload hacia la
+    IA sin volver a filtrarla. Es la lección de `plan_json`, aplicada antes de tropezar.
+
+    Tampoco hay campo para razonamiento del modelo: solo justificaciones cortas, datos
+    estructurados, referencias y decisiones observables.
+    """
+    id: Optional[int]
+    corrida_id: int
+    seq: int
+    version: int
+    estado: str                       # de dominio.composicion.ESTADOS
+    actividad: dict
+    ficha: Optional[dict]             # fase 2; None en fase 1
+    propuesta: Optional[dict]
+    validacion: Optional[dict]
+    confianza: Optional[str]          # alta | media | baja | insuficiente
+    confianza_motivos: Optional[list]
+    antecedentes: Optional[dict]
+    modelo: Optional[str]
+    prompt_version: Optional[str]
+    apu_codigo: Optional[str]         # el APU creado, solo si estado == 'aprobada'
+    apu_turno: Optional[str]
+    autor: Optional[str]
+    creada_en: str
+    motivo: Optional[str]             # el error, o la razón del rechazo
+
+    def to_dict(self) -> dict:
+        return {
+            "corrida_id": self.corrida_id, "seq": self.seq, "version": self.version,
+            "estado": self.estado, "actividad": self.actividad, "ficha": self.ficha,
+            "propuesta": self.propuesta, "validacion": self.validacion,
+            "confianza": self.confianza, "confianza_motivos": self.confianza_motivos,
+            "antecedentes": self.antecedentes, "modelo": self.modelo,
+            "prompt_version": self.prompt_version, "apu_codigo": self.apu_codigo,
+            "apu_turno": self.apu_turno, "autor": self.autor,
+            "creada_en": self.creada_en, "motivo": self.motivo,
+        }
+```
+
+- [ ] **Paso 3b: agregar la tabla a `db/corridas.sql`**
+
+Al final de `db/corridas.sql`:
+
+```sql
+-- Expediente de composición asistida: una fila POR VERSIÓN (append-only). La vigente
+-- es la de mayor `version`; el historial de correcciones es la tabla entera.
+-- SIN dinero a propósito: `actividad_json` guarda la vista des-monetizada del ítem
+-- (sin precio_contractual), así la fila completa se puede reinyectar en un payload
+-- hacia la IA. No hay columna para razonamiento del modelo.
+CREATE TABLE IF NOT EXISTS composicion (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  corrida_id      INTEGER NOT NULL REFERENCES corrida(id) ON DELETE CASCADE,
+  seq             INTEGER NOT NULL,
+  version         INTEGER NOT NULL,
+  estado          TEXT NOT NULL,
+  actividad_json  TEXT NOT NULL,
+  ficha_json      TEXT,
+  propuesta_json  TEXT,
+  validacion_json TEXT,
+  confianza       TEXT,
+  confianza_json  TEXT,
+  antecedentes_json TEXT,
+  modelo          TEXT,
+  prompt_version  TEXT,
+  apu_codigo      TEXT,
+  apu_turno       TEXT,
+  autor           TEXT,
+  creada_en       TEXT NOT NULL,
+  motivo          TEXT
+);
+-- La protección del doble clic, y por eso es un índice y no un `if`: las dos
+-- peticiones de un doble clic llegan con milisegundos de diferencia y las dos leerían
+-- la misma versión vigente. Mismo criterio que ux_corrida_armando_archivo.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_composicion_version
+  ON composicion(corrida_id, seq, version);
+CREATE INDEX IF NOT EXISTS ix_composicion ON composicion(corrida_id, seq);
+```
+
+- [ ] **Paso 3c: crear el repo SQLite**
+
+Crea `apu_tool/datos/composiciones_db.py`:
+
+```python
+"""Acceso a la tabla `composicion` (vive en corridas.db). Implementa
+RepositorioComposiciones.
+
+Append-only: `agregar` escribe una versión y nunca actualiza. La `version` la manda el
+llamador (`version_base + 1`), NO se calcula acá con un MAX+1: si se calculara adentro,
+dos clics seguidos sacarían 4 y 5 y los dos entrarían, y el índice único no protegería
+nada. Con la versión explícita, el segundo choca y el servicio devuelve 409.
+
+Como CarpetasDB, comparte el archivo corridas.db y no tiene init_schema propio: la
+tabla se crea con el resto del esquema (`db/corridas.sql`, cargado por CorridasDB).
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Iterator, Optional
+
+from apu_tool import config
+from apu_tool.datos.repositorio import VersionYaExiste
+from apu_tool.nucleo.models import ComposicionRow
+
+_COLS = ("corrida_id", "seq", "version", "estado", "actividad_json", "ficha_json",
+         "propuesta_json", "validacion_json", "confianza", "confianza_json",
+         "antecedentes_json", "modelo", "prompt_version", "apu_codigo", "apu_turno",
+         "autor", "creada_en", "motivo")
+
+
+def _j(v: Any) -> Optional[str]:
+    return None if v is None else json.dumps(v, ensure_ascii=False)
+
+
+def _dj(v: Any) -> Any:
+    return None if v in (None, "") else json.loads(v)
+
+
+def _params(f: ComposicionRow) -> tuple:
+    return (int(f.corrida_id), int(f.seq), int(f.version), f.estado,
+            _j(f.actividad), _j(f.ficha), _j(f.propuesta), _j(f.validacion),
+            f.confianza, _j(f.confianza_motivos), _j(f.antecedentes), f.modelo,
+            f.prompt_version, f.apu_codigo, f.apu_turno, f.autor, f.creada_en,
+            f.motivo)
+
+
+def _fila(r) -> ComposicionRow:
+    return ComposicionRow(
+        id=r["id"], corrida_id=r["corrida_id"], seq=r["seq"], version=r["version"],
+        estado=r["estado"], actividad=_dj(r["actividad_json"]) or {},
+        ficha=_dj(r["ficha_json"]), propuesta=_dj(r["propuesta_json"]),
+        validacion=_dj(r["validacion_json"]), confianza=r["confianza"],
+        confianza_motivos=_dj(r["confianza_json"]),
+        antecedentes=_dj(r["antecedentes_json"]), modelo=r["modelo"],
+        prompt_version=r["prompt_version"], apu_codigo=r["apu_codigo"],
+        apu_turno=r["apu_turno"], autor=r["autor"], creada_en=r["creada_en"],
+        motivo=r["motivo"])
+
+
+class ComposicionesDB:
+    """Backend SQLite del expediente de composición."""
+
+    def __init__(self, path: Path | str = config.CORRIDAS_DB_PATH):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        conn = sqlite3.connect(self.path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+
+    def agregar(self, fila: ComposicionRow, conn=None) -> None:
+        sql = (f"INSERT INTO composicion ({', '.join(_COLS)}) "
+               f"VALUES ({', '.join('?' * len(_COLS))})")
+        try:
+            if conn is not None:
+                conn.execute(sql, _params(fila))
+                return
+            with self.connect() as c:
+                c.execute(sql, _params(fila))
+        except sqlite3.IntegrityError as exc:
+            raise VersionYaExiste(fila.corrida_id, fila.seq, fila.version) from exc
+
+    def vigente(self, corrida_id: int, seq: int) -> Optional[ComposicionRow]:
+        with self.connect() as conn:
+            r = conn.execute(
+                "SELECT * FROM composicion WHERE corrida_id=? AND seq=? "
+                "ORDER BY version DESC LIMIT 1",
+                (int(corrida_id), int(seq))).fetchone()
+        return _fila(r) if r else None
+
+    def historial(self, corrida_id: int, seq: int) -> list[ComposicionRow]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM composicion WHERE corrida_id=? AND seq=? "
+                "ORDER BY version", (int(corrida_id), int(seq))).fetchall()
+        return [_fila(r) for r in rows]
+```
+
+- [ ] **Paso 3d: agregar la excepción y el Protocol**
+
+En `apu_tool/datos/repositorio.py`, después de `ArmadoDuplicado`:
+
+```python
+class VersionYaExiste(Exception):
+    """Se intentó escribir una versión de composición que ya está.
+
+    La levanta el índice único `ux_composicion_version`, no una comprobación previa:
+    las dos peticiones de un doble clic leerían la misma versión vigente y las dos
+    creerían estar escribiendo la siguiente. El servicio la traduce a un 409.
+    """
+
+    def __init__(self, corrida_id: int, seq: int, version: int):
+        super().__init__(f"La composición {corrida_id}/{seq} ya tiene la versión "
+                         f"{version}: alguien más la cambió mientras trabajabas.")
+        self.corrida_id, self.seq, self.version = corrida_id, seq, version
+```
+
+Y al final del archivo, el Protocol (agrega `ComposicionRow` al import de arriba):
+
+```python
+@runtime_checkable
+class RepositorioComposiciones(Protocol):
+    def agregar(self, fila: ComposicionRow, conn=None) -> None:
+        """Escribe una versión NUEVA. Levanta VersionYaExiste si esa versión ya está."""
+        ...
+
+    def vigente(self, corrida_id: int, seq: int) -> Optional[ComposicionRow]:
+        """La versión de mayor número, o None si nunca se compuso esta fila."""
+        ...
+
+    def historial(self, corrida_id: int, seq: int) -> list[ComposicionRow]:
+        """Todas las versiones, de la más vieja a la más nueva."""
+        ...
+```
+
+- [ ] **Paso 3e: enchufarlo en el `Almacen`**
+
+En `apu_tool/datos/almacen.py`, en la rama SQLite (junto a `self.carpetas = CarpetasDB(corridas_path)`):
+
+```python
+            self.composiciones = ComposicionesDB(corridas_path)
+```
+
+Y el import arriba, con los demás:
+
+```python
+from apu_tool.datos.composiciones_db import ComposicionesDB
+```
+
+- [ ] **Paso 4: correr las pruebas y verificar que pasan**
+
+```bash
+python -m pytest tests/test_composiciones_db.py tests/test_corridas_db.py \
+                 tests/test_repositorios_contrato.py -q
+```
+
+Esperado: `10 passed` en la primera; las otras dos siguen verdes.
+
+- [ ] **Paso 5: commit**
+
+```bash
+git add apu_tool/nucleo/models.py apu_tool/datos/composiciones_db.py \
+        apu_tool/datos/repositorio.py apu_tool/datos/almacen.py db/corridas.sql \
+        tests/test_composiciones_db.py
+git commit -m "feat(datos): expediente de composicion append-only por version (SQLite)"
+```
+
+---
+
+## Tarea 8: persistencia Postgres y paridad
+
+Espejo 1:1 del repo SQLite. La paridad se prueba con **los mismos casos** corriendo
+contra los dos backends, no con una lista aparte que se desincroniza.
+
+**Archivos:**
+- Crear: `apu_tool/datos/pg/composiciones_pg.py`
+- Modificar: `db/pg/corridas.sql`, `apu_tool/datos/almacen.py`
+- Test: `tests/test_composiciones_paridad.py`
+
+- [ ] **Paso 1: escribir la prueba que falla**
+
+```python
+"""Paridad SQLite ↔ Postgres del expediente de composición (criterio 33).
+
+Reusa los casos de test_composiciones_db.py contra los dos backends: una lista aparte
+se desincroniza el día que alguien agrega un caso en un solo lado.
+
+Los de Postgres se saltan sin TEST_DATABASE_URL. OJO: hacen DROP SCHEMA — nunca
+apuntarlos a producción (ver docs y el guard autouse de conftest.py).
+"""
+import os
+
+import pytest
+
+from apu_tool.datos.repositorio import VersionYaExiste
+from tests.test_composiciones_db import fila
+
+pg = pytest.importorskip("psycopg", reason="psycopg no instalado")
+URL = os.environ.get("TEST_DATABASE_URL")
+pytestmark = pytest.mark.skipif(not URL, reason="sin TEST_DATABASE_URL")
+
+
+@pytest.fixture()
+def repo_pg():
+    from apu_tool.datos.pg.composiciones_pg import ComposicionesPg
+    from apu_tool.datos.pg.conexion import Conexion
+    from apu_tool.datos.pg.corridas_pg import CorridasPg
+    cx = Conexion(URL)
+    CorridasPg(cx).reset()
+    with cx.connection() as c:
+        c.execute("INSERT INTO corridas.corrida "
+                  "(creada_en, archivo, turno_def, estado) "
+                  "VALUES ('2026-09-10','x.xlsx','DIURNO','en_revision')")
+    yield ComposicionesPg(cx)
+    cx.cerrar()
+
+
+def _id_de_corrida(repo) -> int:
+    with repo.cx.connection() as c:
+        return int(c.execute("SELECT id FROM corridas.corrida "
+                             "ORDER BY id DESC LIMIT 1").fetchone()["id"])
+
+
+def test_pg_guarda_y_recupera_la_vigente(repo_pg):
+    cid = _id_de_corrida(repo_pg)
+    repo_pg.agregar(fila(corrida_id=cid))
+    v = repo_pg.vigente(cid, 7)
+    assert v.version == 1 and v.estado == "propuesta"
+    assert v.propuesta["componentes"][0]["codigo"] == "4279"
+    assert v.confianza_motivos[0]["aporte"] == 2
+
+
+def test_pg_la_vigente_es_la_de_mayor_version(repo_pg):
+    cid = _id_de_corrida(repo_pg)
+    repo_pg.agregar(fila(corrida_id=cid, version=1, estado="propuesta"))
+    repo_pg.agregar(fila(corrida_id=cid, version=2, estado="editada"))
+    assert repo_pg.vigente(cid, 7).estado == "editada"
+
+
+def test_pg_el_historial_viene_en_orden(repo_pg):
+    cid = _id_de_corrida(repo_pg)
+    for n, est in enumerate(("propuesta", "editada", "aprobada"), start=1):
+        repo_pg.agregar(fila(corrida_id=cid, version=n, estado=est))
+    assert [f.estado for f in repo_pg.historial(cid, 7)] == [
+        "propuesta", "editada", "aprobada"]
+
+
+def test_pg_repetir_una_version_choca_igual_que_sqlite(repo_pg):
+    cid = _id_de_corrida(repo_pg)
+    repo_pg.agregar(fila(corrida_id=cid, version=1))
+    with pytest.raises(VersionYaExiste):
+        repo_pg.agregar(fila(corrida_id=cid, version=1, estado="aprobada"))
+
+
+def test_pg_sin_composicion_la_vigente_es_none(repo_pg):
+    cid = _id_de_corrida(repo_pg)
+    assert repo_pg.vigente(cid, 99) is None
+    assert repo_pg.historial(cid, 99) == []
+
+
+def test_pg_los_campos_opcionales_aceptan_none(repo_pg):
+    cid = _id_de_corrida(repo_pg)
+    repo_pg.agregar(fila(corrida_id=cid, ficha=None, propuesta=None, validacion=None,
+                         confianza=None, confianza_motivos=None, antecedentes=None,
+                         estado="error", motivo="la IA no contestó"))
+    v = repo_pg.vigente(cid, 7)
+    assert v.estado == "error" and v.propuesta is None
+
+
+def test_pg_borra_en_cascada_con_la_corrida(repo_pg):
+    cid = _id_de_corrida(repo_pg)
+    repo_pg.agregar(fila(corrida_id=cid))
+    with repo_pg.cx.connection() as c:
+        c.execute("DELETE FROM corridas.corrida WHERE id=%s", (cid,))
+    assert repo_pg.vigente(cid, 7) is None
+```
+
+- [ ] **Paso 2: correr la prueba para verificar que falla**
+
+```bash
+python -m pytest tests/test_composiciones_paridad.py -q
+```
+
+Esperado sin `TEST_DATABASE_URL`: `7 skipped`. Con la base desechable levantada
+(receta en `docs/`): FALLA con `ModuleNotFoundError: apu_tool.datos.pg.composiciones_pg`.
+
+- [ ] **Paso 3a: agregar la tabla a `db/pg/corridas.sql`**
+
+Al final de `db/pg/corridas.sql`, **antes** del bloque de bootstrap de carpetas:
+
+```sql
+-- Expediente de composición asistida. Equivalente a la tabla `composicion` de
+-- db/corridas.sql: una fila POR VERSIÓN (append-only); la vigente es la de mayor
+-- `version`. SIN dinero: actividad_json guarda la vista des-monetizada del ítem.
+CREATE TABLE IF NOT EXISTS corridas.composicion (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    corrida_id      BIGINT NOT NULL REFERENCES corridas.corrida(id) ON DELETE CASCADE,
+    seq             INTEGER NOT NULL,
+    version         INTEGER NOT NULL,
+    estado          TEXT NOT NULL,
+    actividad_json  TEXT NOT NULL,
+    ficha_json      TEXT,
+    propuesta_json  TEXT,
+    validacion_json TEXT,
+    confianza       TEXT,
+    confianza_json  TEXT,
+    antecedentes_json TEXT,
+    modelo          TEXT,
+    prompt_version  TEXT,
+    apu_codigo      TEXT,
+    apu_turno       TEXT,
+    autor           TEXT,
+    creada_en       TEXT NOT NULL,
+    motivo          TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_composicion_version
+    ON corridas.composicion(corrida_id, seq, version);
+CREATE INDEX IF NOT EXISTS ix_composicion ON corridas.composicion(corrida_id, seq);
+```
+
+- [ ] **Paso 3b: crear el repo Postgres**
+
+Crea `apu_tool/datos/pg/composiciones_pg.py`:
+
+```python
+"""Backend Postgres del expediente de composición. Port de composiciones_db.py."""
+from __future__ import annotations
+
+from typing import Optional
+
+from apu_tool.datos.composiciones_db import _COLS, _dj, _params
+from apu_tool.datos.pg.conexion import Conexion
+from apu_tool.datos.repositorio import VersionYaExiste
+from apu_tool.nucleo.models import ComposicionRow
+
+
+def _fila(r) -> ComposicionRow:
+    return ComposicionRow(
+        id=r["id"], corrida_id=r["corrida_id"], seq=r["seq"], version=r["version"],
+        estado=r["estado"], actividad=_dj(r["actividad_json"]) or {},
+        ficha=_dj(r["ficha_json"]), propuesta=_dj(r["propuesta_json"]),
+        validacion=_dj(r["validacion_json"]), confianza=r["confianza"],
+        confianza_motivos=_dj(r["confianza_json"]),
+        antecedentes=_dj(r["antecedentes_json"]), modelo=r["modelo"],
+        prompt_version=r["prompt_version"], apu_codigo=r["apu_codigo"],
+        apu_turno=r["apu_turno"], autor=r["autor"], creada_en=r["creada_en"],
+        motivo=r["motivo"])
+
+
+class ComposicionesPg:
+    def __init__(self, cx: Conexion):
+        self.cx = cx
+
+    def agregar(self, fila: ComposicionRow, conn=None) -> None:
+        sql = (f"INSERT INTO corridas.composicion ({', '.join(_COLS)}) "
+               f"VALUES ({', '.join(['%s'] * len(_COLS))})")
+        try:
+            if conn is not None:
+                conn.execute(sql, _params(fila))
+                return
+            with self.cx.connection() as c:
+                c.execute(sql, _params(fila))
+        except Exception as exc:
+            # Se mira el SQLSTATE y no la clase: 23505 es unique_violation. Traducirla
+            # acá deja al servicio hablando un solo idioma con los dos backends.
+            if getattr(exc, "sqlstate", None) == "23505":
+                raise VersionYaExiste(fila.corrida_id, fila.seq, fila.version) from exc
+            raise
+
+    def vigente(self, corrida_id: int, seq: int) -> Optional[ComposicionRow]:
+        with self.cx.connection() as conn:
+            r = conn.execute(
+                "SELECT * FROM corridas.composicion WHERE corrida_id=%s AND seq=%s "
+                "ORDER BY version DESC LIMIT 1",
+                (int(corrida_id), int(seq))).fetchone()
+        return _fila(r) if r else None
+
+    def historial(self, corrida_id: int, seq: int) -> list[ComposicionRow]:
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM corridas.composicion WHERE corrida_id=%s AND seq=%s "
+                "ORDER BY version", (int(corrida_id), int(seq))).fetchall()
+        return [_fila(r) for r in rows]
+```
+
+- [ ] **Paso 3c: enchufarlo en el `Almacen`**
+
+En `apu_tool/datos/almacen.py`, en la rama Postgres, junto a
+`self.carpetas = CarpetasPg(self._cx)`:
+
+```python
+            from apu_tool.datos.pg.composiciones_pg import ComposicionesPg
+            self.composiciones = ComposicionesPg(self._cx)
+```
+
+- [ ] **Paso 4: correr las pruebas y verificar que pasan**
+
+```bash
+python -m pytest tests/test_composiciones_paridad.py tests/test_paridad_backends.py \
+                 tests/test_pg_esquema.py -q
+```
+
+Esperado sin `TEST_DATABASE_URL`: los de Postgres se saltan y el resto pasa. Con la
+base desechable: `7 passed` en el primero.
+
+- [ ] **Paso 5: commit**
+
+```bash
+git add apu_tool/datos/pg/composiciones_pg.py apu_tool/datos/almacen.py \
+        db/pg/corridas.sql tests/test_composiciones_paridad.py
+git commit -m "feat(datos): expediente de composicion en Postgres, con paridad probada"
+```
+
+---

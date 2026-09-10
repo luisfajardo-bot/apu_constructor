@@ -28,6 +28,10 @@ from typing import Optional
 from apu_tool import config
 from apu_tool.dominio import privacy
 from apu_tool.dominio.compose import CandidateInsumo, candidate_insumo_to_dict
+from apu_tool.dominio.composicion import (
+    FUNCIONES, NIVELES_EVIDENCIA, OPERACIONES, ORIGENES, TIPOS, Propuesta,
+    propuesta_desde_json,
+)
 from apu_tool.nucleo.models import DePricedApu, LicitacionItem
 
 
@@ -111,6 +115,108 @@ _COMPOSE_SCHEMA = {
 }
 
 
+# Versión del prompt de composición. Se guarda con cada propuesta: sin esto, cuando el
+# modelo empiece a proponer distinto no hay forma de saber si cambió el modelo o el
+# prompt. Se sube A MANO al tocar `_SISTEMA_COMPOSICION` o `_ESQUEMA_COMPOSICION`.
+PROMPT_VERSION = "composicion/v2"
+
+_SISTEMA_COMPOSICION = """\
+Eres un ingeniero de costos de obra civil. Te dan una ACTIVIDAD de licitación que no
+tiene un APU adecuado en la biblioteca histórica, una lista cerrada de INSUMOS
+DISPONIBLES (código, nombre, unidad, grupo), APUs DE REFERENCIA técnicamente cercanos
+con su composición, y RENDIMIENTOS OBSERVADOS: con qué cantidades aparece cada insumo
+en la biblioteca.
+
+Tu tarea: proponer la composición del APU y EXPLICAR cada componente.
+
+Reglas estrictas:
+- Usa ÚNICAMENTE códigos de la lista de insumos disponibles. Un código que no esté ahí
+  se rechaza entero: no inventes ninguno.
+- NUNCA recibirás precios ni costos, y no debes inventarlos ni pedirlos.
+- Los rendimientos son cantidades FÍSICAS por unidad de la actividad.
+- Cuando derives un rendimiento de una hipótesis de producción, escribe la fórmula en
+  `calculo`. Un programa la recalcula y manda su resultado sobre el tuyo, así que no te
+  esfuerces en la aritmética: esfuérzate en la hipótesis.
+- `funcion` es el ROL del insumo dentro del APU, del vocabulario cerrado. No es el
+  nombre de la actividad; eso va en `justificacion`.
+- `origen` dice de dónde sale el rendimiento. Sé honesto: si no tienes antecedente,
+  `sin_evidencia` es la respuesta correcta y no te penaliza.
+- `referencias` solo puede citar APUs que estén en los de referencia que te dimos.
+- Si algún dato que falta cambiaría materialmente la composición, decláralo en
+  `supuestos` en vez de inventarlo en silencio. Declararlos no te penaliza.
+- Incluye típicamente mano de obra o equipo, herramienta y materiales según la
+  actividad. Entre 2 y 12 componentes.
+
+Responde EXCLUSIVAMENTE con un JSON válido con el esquema pedido.
+"""
+
+_ESQUEMA_COMPOSICION = {
+    "type": "object",
+    "properties": {
+        "componentes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "codigo": {"type": "string"},
+                    "tipo": {"type": "string", "enum": list(TIPOS)},
+                    "funcion": {"type": "string", "enum": list(FUNCIONES)},
+                    "rendimiento": {"type": "number"},
+                    "origen": {"type": "string", "enum": list(ORIGENES)},
+                    "referencias": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"apu_codigo": {"type": "string"},
+                                           "turno": {"type": "string"}},
+                            "required": ["apu_codigo", "turno"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "hipotesis": {"type": "object", "additionalProperties": True},
+                    "calculo": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "operacion": {"type": "string",
+                                          "enum": list(OPERACIONES)},
+                            "numerador": {"type": "number"},
+                            "denominador": {"type": "number"},
+                            "resultado": {"type": "number"},
+                        },
+                        "required": ["operacion", "numerador", "denominador",
+                                     "resultado"],
+                        "additionalProperties": False,
+                    },
+                    "justificacion": {"type": "string"},
+                    "nivel_evidencia": {"type": "string",
+                                        "enum": list(NIVELES_EVIDENCIA)},
+                },
+                "required": ["codigo", "tipo", "funcion", "rendimiento", "origen",
+                             "referencias", "hipotesis", "calculo", "justificacion",
+                             "nivel_evidencia"],
+                "additionalProperties": False,
+            },
+        },
+        "supuestos": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"campo": {"type": "string"},
+                               "supuesto": {"type": "string"},
+                               "impacto": {"type": "string"}},
+                "required": ["campo", "supuesto", "impacto"],
+                "additionalProperties": False,
+            },
+        },
+        "incertidumbre_declarada": {"type": "number", "minimum": 0, "maximum": 1},
+        "justificacion": {"type": "string"},
+    },
+    "required": ["componentes", "supuestos", "incertidumbre_declarada",
+                 "justificacion"],
+    "additionalProperties": False,
+}
+
+
 class ApuAdvisor:
     """Fachada sobre la IA. Sin credenciales, `compose_apu` devuelve None."""
 
@@ -186,4 +292,55 @@ class ApuAdvisor:
             componentes=comps,
             justificacion=str(data.get("justificacion", "")).strip(),
             confianza=float(data.get("confianza", 0.0)),
+        )
+
+    def componer(self, item, insumos, ejemplos, observados) -> Propuesta:
+        """Una llamada al modelo con el contrato v2. Devuelve la propuesta PARSEADA.
+
+        No valida nada: eso es de `dominio/validacion_composicion.py`, que además
+        recalcula la aritmética. Acá solo se habla con el modelo y se lee lo que dijo.
+
+        Una respuesta ilegible da una propuesta VACÍA, que el validador rechaza con
+        `PROPUESTA_VACIA`. Nadie sale por válido por accidente — misma regla que
+        `revision.Revisor.profundizar`, que degrada a "dudoso".
+        """
+        if not self.enabled or self._client is None:
+            raise IANoDisponible(
+                "Componer un APU con IA necesita ANTHROPIC_API_KEY en el servidor.")
+        if not insumos:
+            # Sin lista blanca no hay nada entre lo que elegir: pedírselo igual sería
+            # invitarlo a inventar códigos, que es lo único que el contrato prohíbe.
+            raise ValueError("No hay insumos candidatos para esta actividad.")
+        payload = privacy.payload_composicion(item, insumos, ejemplos, observados)
+        # FUERA del try: el invariante #1 nunca se traga. Adentro, una PrivacyViolation
+        # saldría por el `except` de abajo y el usuario leería "la IA no pudo componer"
+        # mientras nadie se entera de que saltó el guardián. Mismo criterio que
+        # `compose_apu` y que `revision.barrer_lote`.
+        contenido = privacy.safe_json(payload)
+        try:
+            resp = self._pedir_al_sdk(_SISTEMA_COMPOSICION, _ESQUEMA_COMPOSICION,
+                                      contenido, "medium")
+        except Exception as exc:
+            if credencial_invalida(exc):
+                raise IANoDisponible(MSG_CREDENCIAL) from exc
+            raise
+        texto = next((b.text for b in resp.content if b.type == "text"), "{}")
+        try:
+            data = json.loads(texto)
+        except Exception:
+            return Propuesta()   # JSON truncado: propuesta vacía, no una mentira
+        return propuesta_desde_json(data)
+
+    def _pedir_al_sdk(self, system: str, schema: dict, contenido: str, effort: str):
+        """La llamada pelada al SDK. Aparte para que el `try` de arriba envuelva SOLO
+        la red y no el parseo, y para que los tests la sustituyan sin simular el
+        cliente de anthropic — el mismo patrón que `revision.Revisor`."""
+        return self._client.messages.create(
+            model=self.model,
+            max_tokens=16000,        # techo, no gasto: cubre el pensamiento y el JSON
+            system=system,
+            thinking={"type": "adaptive"},
+            output_config={"effort": effort,
+                           "format": {"type": "json_schema", "schema": schema}},
+            messages=[{"role": "user", "content": contenido}],
         )

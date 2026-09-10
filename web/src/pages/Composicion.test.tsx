@@ -104,12 +104,14 @@ const CATALOGO = {
   "8801": { nombre: "OFICIAL DE OBRA", unidad: "HC", grupo: "MO" },
 };
 
-/** Las cuatro respuestas del expediente traen CUATRO claves. `corrida_modo` por
- *  defecto "activa": la mayoría de los tests no le interesa el candado de
- *  congelada. */
+/** Las cuatro respuestas del expediente traen CINCO claves. `corrida_modo` por
+ *  defecto "activa" y `costo_a_mano` por defecto false: a la mayoría de los tests
+ *  no le interesa ni el candado de congelada ni el aviso de costo declarado. */
 function vista(vigente: unknown, catalogo: unknown = CATALOGO,
-               corrida_modo: "activa" | "congelada" = "activa") {
-  return { vigente, historial: vigente ? [vigente] : [], catalogo, corrida_modo };
+               corrida_modo: "activa" | "congelada" = "activa",
+               costo_a_mano = false) {
+  return { vigente, historial: vigente ? [vigente] : [], catalogo, corrida_modo,
+          costo_a_mano };
 }
 
 function montar() {
@@ -479,4 +481,33 @@ test("con la corrida congelada se explica por qué", async () => {
   getComposicion.mockResolvedValue(vista(version(), CATALOGO, "congelada"));
   montar();
   expect(await screen.findByText(/congelada/i)).toBeTruthy();
+});
+
+// ─── costo puesto a mano: la mesa lo dice, sin alarmar ─────────────────────
+// Igualar al contractual se usa de dos maneras que el sistema no distingue: como
+// precio de REFERENCIA mientras se arman los APUs que faltan —y ahí reemplazarlo
+// es lo que se busca— y como decisión permanente en proyectos especiales. Por eso
+// el texto informa y no advierte.
+
+test("dice que la línea se costea con el contractual como referencia", async () => {
+  getComposicion.mockResolvedValue(vista(version(), CATALOGO, "activa", true));
+  montar();
+  expect(await screen.findByText(/contractual como\s+referencia/)).toBeTruthy();
+  expect(screen.getByText(/pasa a costearse con sus insumos/)).toBeTruthy();
+});
+
+// No alarmar sobre el resultado deseado: reemplazar el contractual por un costo real
+// es el punto de componer, no un riesgo.
+test("el aviso no está redactado como advertencia", async () => {
+  getComposicion.mockResolvedValue(vista(version(), CATALOGO, "activa", true));
+  montar();
+  await screen.findByText(/contractual como\s+referencia/);
+  expect(screen.queryByText(/reemplaza por el costo calculado/)).toBeNull();
+});
+
+test("sin costo a mano no aparece ese aviso", async () => {
+  getComposicion.mockResolvedValue(vista(version(), CATALOGO, "activa", false));
+  montar();
+  await screen.findByText("EXCAVACION MANUAL EN MATERIAL COMUN");
+  expect(screen.queryByText(/contractual como\s+referencia/)).toBeNull();
 });

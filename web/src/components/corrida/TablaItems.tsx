@@ -43,17 +43,18 @@ interface TablaItemsProps {
 /** ¿Esta línea puede componerse con IA?
  *
  *  Sin APU (el determinístico no encontró nada), o con el veredicto `sin_apu` de la
- *  revisión sobre una fila que sí tiene APU. NO cuando el costo está puesto a mano:
- *  esa línea ya declaró su costo (proyectos especiales) y no necesita APU.
+ *  revisión sobre una fila que sí tiene APU.
+ *
+ *  Una fila con el costo igualado al contractual SÍ se puede componer, y es de las
+ *  que más lo necesitan: igualar era la salida cuando no había APU. Asignar uno de
+ *  verdad borra el costo manual solo (`actualizar_eleccion`) y devuelve la fila al
+ *  costeo normal — el sistema ya contempla ese camino. La mesa de composición avisa
+ *  ahí (con `costo_a_mano` del expediente) que aprobar reemplaza el costo declarado.
  *
  *  Antes esto exigía haber corrido la revisión con IA sobre TODA la corrida para que
  *  apareciera el botón en una sola fila. */
 export function ofreceComponer(it: ItemCuadro, puedeEditar: boolean): boolean {
   if (!puedeEditar) return false;
-  // `costo_manual` viaja como BOOLEANO en el contrato HTTP (servicio/corridas.py lo
-  // arma con `ens.costo_a_mano`), así que el candado es el booleano; un `> 0` no
-  // compila y no diría nada más.
-  if (it.costo_manual) return false;
   return !it.apu_codigo || it.revision?.dictamen === "sin_apu";
 }
 

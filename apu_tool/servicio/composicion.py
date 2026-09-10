@@ -172,7 +172,15 @@ def vista(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
             # función ya carga: cero consultas nuevas. Es una foto del momento de cargar
             # —si la congelan con la mesa abierta, el 409 sigue siendo la red— y eso es
             # deliberado: cubrir ese caso pedía un poll, que este repo no hace.
-            "corrida_modo": meta.modo}
+            "corrida_modo": meta.modo,
+            # Igual criterio que `seqs_sin_apu` (nucleo/models.py no aplica acá: esa
+            # firma —"sin componentes y costo > 0"— pide haber costeado, y esta
+            # función no importa `pricing` a propósito). `row.costo_manual` ya está
+            # cargado, así que no hace falta: mismo `> 0` y no `is not None`, para que
+            # un costo puesto a mano en 0 (o NaN) no dispare el aviso de más abajo.
+            # La mesa lo necesita para avisar ANTES de aprobar que un APU real borra
+            # este costo declarado (`actualizar_eleccion` lo hace solo).
+            "costo_a_mano": (row.costo_manual or 0) > 0}
 
 
 def _catalogo_de(alm: Almacen, v: Optional[ComposicionRow]) -> dict[str, dict]:

@@ -84,7 +84,7 @@ def test_get_sin_composicion_devuelve_vacio(app_alm, corrida):
     r = cliente(app, "consulta").get(f"/api/corridas/{corrida}/composicion/1")
     assert r.status_code == 200
     assert r.json() == {"vigente": None, "historial": [], "catalogo": {},
-                        "corrida_modo": "activa"}
+                        "corrida_modo": "activa", "costo_a_mano": False}
 
 
 def test_la_vista_dice_si_la_corrida_esta_congelada(app_alm, corrida):
@@ -97,6 +97,18 @@ def test_la_vista_dice_si_la_corrida_esta_congelada(app_alm, corrida):
     alm.corridas.set_modo(corrida, "congelada")
     assert c.get(f"/api/corridas/{corrida}/composicion/1").json()[
         "corrida_modo"] == "congelada"
+
+
+def test_la_vista_dice_si_la_linea_tiene_costo_a_mano(app_alm, corrida):
+    """La mesa tiene que avisar que aprobar reemplaza un costo que alguien declaró."""
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    c = cliente(app, "consulta")
+    assert c.get(f"/api/corridas/{corrida}/composicion/1").json()[
+        "costo_a_mano"] is False
+    alm.corridas.set_costo_manual(corrida, {1: 180000.0})
+    assert c.get(f"/api/corridas/{corrida}/composicion/1").json()[
+        "costo_a_mano"] is True
 
 
 def test_una_corrida_congelada_se_puede_LEER(app_alm, corrida):

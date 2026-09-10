@@ -84,16 +84,25 @@ class ComposicionesDB:
             with self.connect() as c:
                 c.execute(sql, _params(fila))
         except sqlite3.IntegrityError as exc:
-            # `IntegrityError` cubre DOS violaciones y significan cosas distintas para
-            # el usuario: el índice único es "alguien más la cambió mientras
-            # trabajabas" (un 409 de concurrencia), y el FK a `corrida` es "la corrida
-            # ya no existe" (la borraron mientras componías). Confundirlas manda a
-            # buscar un conflicto de edición que no pasó. Se distingue por
-            # `sqlite_errorname` (no por el texto del mensaje, que no está
-            # garantizado), mismo criterio que `corridas_db.agregar_item`.
-            if getattr(exc, "sqlite_errorname", "") == "SQLITE_CONSTRAINT_FOREIGNKEY":
+            # Dos violaciones esperadas, con significados distintos para el usuario:
+            # el índice único es un conflicto de concurrencia ("alguien más la cambió
+            # mientras trabajabas") y la FK es una corrida que desapareció. Cualquier
+            # OTRA violación de integridad es un bug nuestro y se propaga cruda:
+            # reportarla como choque de versión sería un mensaje falso y tranquilizador
+            # sobre algo roto, y mandaría al usuario a reintentar en vez de a reportar.
+            # El backend Postgres hace exactamente lo mismo (atrapa solo
+            # ForeignKeyViolation y UniqueViolation), y esa paridad la fija
+            # test_composiciones_paridad.py. Se distingue por `sqlite_errorname`
+            # (no por el texto del mensaje, que no está garantizado), mismo criterio
+            # que `corridas_db.agregar_item`. No se contempla
+            # SQLITE_CONSTRAINT_PRIMARYKEY: el INSERT nunca manda `id` (AUTOINCREMENT),
+            # así que ese choque no puede darse por este camino.
+            nombre = getattr(exc, "sqlite_errorname", "")
+            if nombre == "SQLITE_CONSTRAINT_FOREIGNKEY":
                 raise CorridaEliminada(fila.corrida_id) from exc
-            raise VersionYaExiste(fila.corrida_id, fila.seq, fila.version) from exc
+            if nombre == "SQLITE_CONSTRAINT_UNIQUE":
+                raise VersionYaExiste(fila.corrida_id, fila.seq, fila.version) from exc
+            raise
 
     def vigente(self, corrida_id: int, seq: int) -> Optional[ComposicionRow]:
         with self.connect() as conn:

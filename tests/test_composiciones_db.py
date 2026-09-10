@@ -133,3 +133,15 @@ def test_una_corrida_borrada_no_se_reporta_como_choque_de_version(alm):
     from apu_tool.datos.repositorio import CorridaEliminada
     with pytest.raises(CorridaEliminada):
         alm.composiciones.agregar(fila(corrida_id=9999))
+
+
+def test_una_violacion_inesperada_no_se_disfraza_de_choque_de_version(alm):
+    """Un bug nuestro tiene que verse, no salir como conflicto de concurrencia: ese
+    mensaje es falso y tranquilizador, y manda a reintentar en vez de a reportar.
+    Paridad con Postgres, que solo atrapa las dos violaciones esperadas.
+
+    `estado` es NOT NULL; el dataclass no lo impide en runtime (solo es un type
+    hint), así que esto entra por `agregar` de verdad y no por un INSERT manual."""
+    import sqlite3
+    with pytest.raises(sqlite3.IntegrityError):
+        alm.composiciones.agregar(fila(estado=None))

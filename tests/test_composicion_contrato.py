@@ -7,9 +7,12 @@ hueco que esta feature viene a tapar.
 import math
 
 from apu_tool.dominio.composicion import (
+    ESTADOS,
     FUNCIONES,
     NIVELES_EVIDENCIA,
+    OPERACIONES,
     ORIGENES,
+    TIPOS,
     Calculo,
     propuesta_desde_json,
 )
@@ -103,3 +106,78 @@ def test_vocabularios_son_los_del_diseno():
                         "calculado_desde_produccion", "supuesto_tecnico",
                         "sin_evidencia")
     assert NIVELES_EVIDENCIA == ("alto", "medio", "bajo")
+    assert TIPOS == ("insumo", "apu")
+    assert OPERACIONES == ("division", "multiplicacion", "directo")
+    assert ESTADOS == ("generando", "propuesta", "editada", "aprobada",
+                       "rechazada", "error")
+
+
+def test_la_incertidumbre_se_acota_y_lo_no_finito_cae_a_cero():
+    """El guard de isfinite es load-bearing: min(max(nan,0),1) devuelve nan."""
+    for crudo, esperado in ((5, 1.0), (-1, 0.0), (float("inf"), 0.0),
+                            (float("nan"), 0.0), ("x", 0.0)):
+        p = propuesta_desde_json({"componentes": [],
+                                  "incertidumbre_declarada": crudo})
+        assert p.incertidumbre_declarada == esperado
+
+
+def test_un_calculo_con_operacion_ilegible_queda_en_none():
+    p = propuesta_desde_json(_crudo(calculo={"operacion": "raiz", "numerador": 1,
+                                             "denominador": 2, "resultado": 3}))
+    assert p.componentes[0].calculo is None
+
+
+def test_un_calculo_que_no_es_dict_queda_en_none():
+    p = propuesta_desde_json(_crudo(calculo="8/96"))
+    assert p.componentes[0].calculo is None
+
+
+def test_un_calculo_bien_formado_se_parsea():
+    p = propuesta_desde_json(_crudo(calculo={"operacion": "division",
+                                             "numerador": 8, "denominador": 96,
+                                             "resultado": 0.083}))
+    assert p.componentes[0].calculo.evaluar() == 8 / 96
+
+
+def test_directo_no_necesita_denominador():
+    assert Calculo("directo", 0.5, float("nan"), 0.5).evaluar() == 0.5
+
+
+def test_un_resultado_no_finito_es_imposible():
+    assert Calculo("division", 1e308, 1e-308, 0).evaluar() is None
+    assert Calculo("multiplicacion", 1e200, 1e200, 0).evaluar() is None
+
+
+def test_un_entero_gigante_no_revienta_el_parseo():
+    """Un entero de 400 dígitos es JSON válido; json.loads lo da como int."""
+    import json as _json
+    crudo = _json.loads('{"componentes": [{"codigo": "4279", "rendimiento": '
+                        + "9" * 400 + '}]}')
+    p = propuesta_desde_json(crudo)
+    assert len(p.componentes) == 1
+    assert math.isnan(p.componentes[0].rendimiento)
+
+
+def test_to_dict_produce_json_valido_aunque_haya_nan():
+    """NaN rompe JSON.parse en el navegador y da 500 en Starlette (allow_nan=False)."""
+    import json as _json
+    p = propuesta_desde_json(_crudo(rendimiento="ilegible"))
+    texto = _json.dumps(p.to_dict(), allow_nan=False)   # no debe levantar
+    assert '"rendimiento": null' in texto
+
+
+def test_la_propuesta_hace_round_trip_por_json():
+    import json as _json
+    original = propuesta_desde_json(_crudo(calculo={"operacion": "division",
+                                                    "numerador": 8,
+                                                    "denominador": 96,
+                                                    "resultado": 0.083}))
+    vuelta = propuesta_desde_json(_json.loads(_json.dumps(original.to_dict())))
+    assert vuelta == original
+
+
+def test_las_hipotesis_no_quedan_aliasadas_al_json_del_llamador():
+    crudo = _crudo(hipotesis={"horas_jornada": 8})
+    p = propuesta_desde_json(crudo)
+    crudo["componentes"][0]["hipotesis"]["horas_jornada"] = 999
+    assert p.componentes[0].hipotesis["horas_jornada"] == 8

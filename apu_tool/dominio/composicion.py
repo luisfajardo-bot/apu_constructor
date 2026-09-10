@@ -1,14 +1,16 @@
-"""Contrato de la composición asistida y su orquestador.
+"""Contrato de la composición asistida.
 
 Hermano de `dominio/revision.py`: la IA propone la ESTRUCTURA de un APU para una
 actividad que el matcher determinístico no supo resolver, y lo que sale de acá es una
 propuesta que alguien tiene que aprobar. No hay dinero en ningún campo de este módulo,
-a propósito: la propuesta persistida se puede reinyectar en un payload futuro sin
-volver a filtrarla (ver `dominio/privacy.py`).
+a propósito: aun así, la propuesta persistida se filtra igual al salir de nuevo hacia
+la IA (`dominio/privacy.py`) — `hipotesis` es un dict abierto cuyas claves las pone el
+modelo (o, en estado `editada`, una persona), y nada impide que alguien meta ahí un
+`"costo"`.
 
-REGLA DEL PARSEO: un componente NUNCA se descarta en silencio. Un campo que no se
-entiende se degrada de forma CONSERVADORA — hacia menos confianza, nunca hacia más — y
-el validador lo dice después. Descartar callado es lo que hacía `assemble.py`
+REGLA DEL PARSEO: un componente LEGIBLE nunca se descarta en silencio. Un campo que no
+se entiende se degrada de forma CONSERVADORA — hacia menos confianza, nunca hacia más —
+y el validador lo dice después. Descartar callado es lo que hacía `assemble.py`
 (`if not cands: continue`): la IA proponía ocho insumos, el usuario veía cinco y nadie
 explicaba los tres que faltaban.
 """
@@ -44,6 +46,12 @@ ESTADOS = ("generando", "propuesta", "editada", "aprobada", "rechazada", "error"
 
 
 # ------------------------------------------------------------------- tipos
+def _serializable(x: float) -> Optional[float]:
+    """NaN e infinito no son JSON: viajan como null. Round-trip gratis, porque
+    `_numero(None)` vuelve a dar NaN al leer."""
+    return x if math.isfinite(x) else None
+
+
 @dataclass(frozen=True)
 class Referencia:
     """Un antecedente concreto: el APU de la biblioteca del que sale el componente."""
@@ -66,19 +74,26 @@ class Calculo:
     def evaluar(self) -> Optional[float]:
         """El resultado según Python, o None si la operación es imposible."""
         a, b = self.numerador, self.denominador
-        if not math.isfinite(a) or not math.isfinite(b):
+        if not math.isfinite(a):
+            return None
+        if self.operacion == "directo":
+            return a                       # `directo` no usa el denominador
+        if not math.isfinite(b):
             return None
         if self.operacion == "division":
-            return None if b == 0 else a / b
-        if self.operacion == "multiplicacion":
-            return a * b
-        if self.operacion == "directo":
-            return a
-        return None
+            r = None if b == 0 else a / b
+        elif self.operacion == "multiplicacion":
+            r = a * b
+        else:
+            return None
+        # Dos operandos finitos pueden dar un resultado que no lo es
+        # (1e308 / 1e-308). Un rendimiento infinito no es un rendimiento.
+        return r if r is not None and math.isfinite(r) else None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"operacion": self.operacion, "numerador": self.numerador,
-                "denominador": self.denominador, "resultado": self.resultado}
+        return {"operacion": self.operacion, "numerador": _serializable(self.numerador),
+                "denominador": _serializable(self.denominador),
+                "resultado": _serializable(self.resultado)}
 
 
 @dataclass(frozen=True)
@@ -97,7 +112,7 @@ class ComponentePropuesto:
 
     def to_dict(self) -> dict[str, Any]:
         return {"codigo": self.codigo, "tipo": self.tipo, "funcion": self.funcion,
-                "rendimiento": self.rendimiento, "origen": self.origen,
+                "rendimiento": _serializable(self.rendimiento), "origen": self.origen,
                 "referencias": [r.to_dict() for r in self.referencias],
                 "hipotesis": self.hipotesis,
                 "calculo": self.calculo.to_dict() if self.calculo else None,
@@ -143,7 +158,7 @@ def _numero(v: Any) -> float:
     con un mensaje que el usuario puede leer."""
     try:
         return float(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return float("nan")
 
 
@@ -186,7 +201,7 @@ def _componente_desde(v: Any) -> Optional[ComponentePropuesto]:
         # Conservador: si no se entiende de dónde sale, no se le reconoce evidencia.
         origen=_del_vocabulario(v.get("origen"), ORIGENES, "sin_evidencia"),
         referencias=_referencias_desde(v.get("referencias")),
-        hipotesis=v.get("hipotesis") if isinstance(v.get("hipotesis"), dict) else {},
+        hipotesis=dict(v["hipotesis"]) if isinstance(v.get("hipotesis"), dict) else {},
         calculo=_calculo_desde(v.get("calculo")),
         justificacion=_texto(v.get("justificacion")),
         nivel_evidencia=_del_vocabulario(v.get("nivel_evidencia"),

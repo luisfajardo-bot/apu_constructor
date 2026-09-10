@@ -75,6 +75,7 @@ flowchart TD
 | `report.py` | Generación del cuadro resumen (salida en Excel). |
 | `report_categorizado.py` | Cuadro resumen agrupado por capítulos del presupuesto. |
 | `revision.py` | Revisión con IA de una corrida YA armada. |
+| `validacion_composicion.py` | Validación determinística de una propuesta de composición. |
 
 ## servicio/ — API web (FastAPI)
 

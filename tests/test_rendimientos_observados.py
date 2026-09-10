@@ -76,3 +76,38 @@ def test_a_la_ia_no_le_llega_dinero_en_esto(alm):
     from apu_tool.dominio import privacy
     obs = rendimientos_observados(alm, ["4279"])
     privacy.assert_no_money([r.to_dict() for r in obs.values()])
+
+
+def test_la_unidad_mayoritaria_manda_y_las_otras_no_entran_al_rango(alm):
+    """Caso real: el insumo 4288 N aparece en HR (0,033) y en JR (hasta 2,6).
+    Un rango que mezcla las dos no describe nada."""
+    alm.apus.insert_apus([Apu("A6", "SEIS", "M3", "DIURNO"),
+                          Apu("A7", "SIETE", "M3", "DIURNO")])
+    alm.apus.insert_components([
+        ApuComponent("A6", "DIURNO", "4279", "CUADRILLA", "JR", 2.60, 0),
+        ApuComponent("A7", "DIURNO", "4279", "CUADRILLA", "JR", 2.40, 0),
+    ])
+    r = rendimientos_observados(alm, ["4279"])["4279"]
+    assert r.unidad == "HR"          # 3 filas en HR contra 2 en JR
+    assert r.n == 3
+    assert r.maximo == 1.10          # el 2,60 de JR NO entra
+    assert r.descartados_otra_unidad == 2
+
+
+def test_el_empate_de_unidades_se_resuelve_igual_siempre(alm):
+    """Sin desempate, cuál gana depende del orden de la base, que difiere entre
+    SQLite y Postgres."""
+    alm.apus.insert_apus([Apu("A8", "OCHO", "M3", "DIURNO")])
+    alm.apus.insert_components([
+        ApuComponent("A8", "DIURNO", "6092", "HERRAMIENTA MENOR", "ZZZ", 5.0, 0)])
+    # 6092 tiene 1 fila en GLB y 1 en ZZZ: empate, gana el primero alfabético.
+    assert rendimientos_observados(alm, ["6092"])["6092"].unidad == "GLB"
+
+
+def test_un_insumo_con_todas_sus_filas_en_cero_no_aparece(alm):
+    """Rama distinta de 'no se usa en ningún APU': acá SÍ está en la biblioteca,
+    pero no tiene un solo antecedente utilizable."""
+    alm.apus.insert_apus([Apu("A9", "NUEVE", "M3", "DIURNO")])
+    alm.apus.insert_components([
+        ApuComponent("A9", "DIURNO", "7777", "INSUMO ROTO", "UN", 0.0, 0)])
+    assert "7777" not in rendimientos_observados(alm, ["7777"])

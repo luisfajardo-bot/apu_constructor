@@ -1213,8 +1213,9 @@ def _validar_componente(c: ComponentePropuesto, ctx: ContextoValidacion
         pct = abs(r - ref) / ref * 100 if ref else 0.0
         lado = "por debajo" if r < obs.minimo else "por encima"
         adv.append(Hallazgo("RENDIMIENTO_ATIPICO",
-                            f"{r:g} queda {pct:.0f} % {lado} del rango observado "
-                            f"({obs.minimo:g}-{obs.maximo:g}, n={obs.n}).", c.codigo))
+                            f"{r:g} {obs.unidad} queda {pct:.0f} % {lado} del rango "
+                            f"observado ({obs.minimo:g}-{obs.maximo:g} {obs.unidad}, "
+                            f"n={obs.n}).", c.codigo))
 
     return err, adv, reglas
 
@@ -1672,7 +1673,8 @@ def test_el_payload_lleva_exactamente_estas_claves():
     assert set(p["insumos_disponibles"][0]) == {"insumo_codigo", "insumo_nombre",
                                                 "unidad", "grupo"}
     assert set(p["rendimientos_observados"][0]) == {"insumo_codigo", "unidad", "n",
-                                                    "minimo", "mediana", "maximo"}
+                                                    "minimo", "mediana", "maximo",
+                                                    "descartados_otra_unidad"}
 
 
 def test_el_precio_contractual_de_la_actividad_no_viaja():
@@ -1759,10 +1761,18 @@ Al final de `apu_tool/dominio/privacy.py`, **antes** de la clase `PrivacyViolati
 
 ```python
 def rendimiento_observado_to_dict(o) -> dict[str, Any]:
-    """Estadística de uso de un insumo en la biblioteca. Cantidades físicas, no dinero."""
+    """Estadística de uso de un insumo en la biblioteca. Cantidades físicas, no dinero.
+
+    Se copia clave por clave y no se delega en `o.to_dict()`: este es el borde hacia
+    la IA, y un campo agregado al tipo del dominio no debe viajar solo por existir.
+    """
     return {"insumo_codigo": o.insumo_codigo, "unidad": o.unidad, "n": o.n,
             "minimo": round(o.minimo, 6), "mediana": round(o.mediana, 6),
-            "maximo": round(o.maximo, 6)}
+            "maximo": round(o.maximo, 6),
+            # El modelo tiene que saber que el rango dejó filas afuera: si no, un
+            # "n=35" sobre un insumo que también se usa en otra unidad le parece
+            # evidencia más firme de la que es.
+            "descartados_otra_unidad": o.descartados_otra_unidad}
 
 
 def payload_composicion(item, insumos, ejemplos, observados) -> dict[str, Any]:

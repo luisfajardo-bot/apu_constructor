@@ -75,18 +75,32 @@ def candidate_insumo_to_dict(c: CandidateInsumo) -> dict:
 
 @dataclass(frozen=True)
 class RendimientoObservado:
-    """Cómo se usa un insumo en la biblioteca. SIN dinero: son cantidades físicas."""
+    """Cómo se usa un insumo en la biblioteca. SIN dinero: son cantidades físicas.
+
+    `n` cuenta FILAS de `apu_componentes` en la unidad mayoritaria, no APUs distintos.
+    Hoy coinciden (en la biblioteca real no hay un insumo repetido dentro del mismo
+    APU), pero la PK es `(apu_codigo, shift, seq)` y nada lo impide: si algún día
+    aparecen líneas repetidas, `n` las contará dos veces. El mismo código en DIURNO y
+    en NOCTURNO sí son dos antecedentes distintos, a propósito — el turno es parte de
+    la identidad de un APU.
+    """
     insumo_codigo: str
     unidad: str
     n: int
     minimo: float
     mediana: float
     maximo: float
+    # Filas del mismo insumo en OTRA unidad, dejadas fuera del rango. No es ruido
+    # teórico: el insumo "4288 N" aparece en HR y en JR, con casi 100x de diferencia
+    # de escala. Mezclarlas daría un rango que no significa nada y haría que el
+    # validador llame "atípico" a un rendimiento correcto.
+    descartados_otra_unidad: int = 0
 
     def to_dict(self) -> dict:
         return {"insumo_codigo": self.insumo_codigo, "unidad": self.unidad,
                 "n": self.n, "minimo": round(self.minimo, 6),
-                "mediana": round(self.mediana, 6), "maximo": round(self.maximo, 6)}
+                "mediana": round(self.mediana, 6), "maximo": round(self.maximo, 6),
+                "descartados_otra_unidad": self.descartados_otra_unidad}
 
 
 def _mediana(xs: list[float]) -> float:
@@ -101,16 +115,29 @@ def rendimientos_observados(almacen: Almacen, codigos) -> dict[str, RendimientoO
     Le da al modelo con qué declarar "copiado" o "ajustado", y al validador con qué
     llamar atípico a un rendimiento. Un insumo que no se usa en ningún APU no aparece:
     la ausencia es el dato (`SIN_ANTECEDENTES`), no un rango de ceros.
+
+    Solo entra al rango la UNIDAD MAYORITARIA. Un mismo código puede aparecer con
+    unidades distintas en la biblioteca, y un rango que mezcla HR con JR no describe
+    nada. Las filas de las otras unidades se cuentan en `descartados_otra_unidad`, no
+    se tiran calladas.
     """
     crudo = almacen.apus.rendimientos_por_insumo(codigos)
     out: dict[str, RendimientoObservado] = {}
     for cod, pares in crudo.items():
         # Un rendimiento <= 0 en la biblioteca es un dato roto, no un antecedente.
-        vals = [r for _u, r in pares if r > 0]
-        if not vals:
+        validos = [(u or "", r) for u, r in pares if r > 0]
+        if not validos:
             continue
-        unidades = [u for u, r in pares if r > 0 and u]
+        por_unidad: dict[str, list[float]] = {}
+        for u, r in validos:
+            por_unidad.setdefault(u, []).append(r)
+        # Empate resuelto por orden alfabético: sin esto, cuál unidad gana depende del
+        # orden en que la base devuelva las filas, que ni siquiera es igual entre
+        # SQLite y Postgres.
+        unidad = max(sorted(por_unidad), key=lambda u: len(por_unidad[u]))
+        vals = por_unidad[unidad]
         out[cod] = RendimientoObservado(
-            insumo_codigo=cod, unidad=(unidades[0] if unidades else ""),
-            n=len(vals), minimo=min(vals), mediana=_mediana(vals), maximo=max(vals))
+            insumo_codigo=cod, unidad=unidad, n=len(vals), minimo=min(vals),
+            mediana=_mediana(vals), maximo=max(vals),
+            descartados_otra_unidad=len(validos) - len(vals))
     return out

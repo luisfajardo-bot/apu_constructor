@@ -176,6 +176,12 @@ export interface VistaComposicion {
    *  congelan con la mesa abierta, el 409 de la primera escritura sigue siendo la
    *  red (cubrir eso pedía un poll, que este repo no hace). */
   corrida_modo: "activa" | "congelada";
+  /** Esta línea tiene un costo puesto a mano (igualado al contractual, ver
+   *  "Costo puesto a mano" en CLAUDE.md). Aprobar un APU lo reemplaza por el costo
+   *  calculado — `actualizar_eleccion` lo borra solo — así que la mesa avisa antes
+   *  de que desaparezca en silencio. Mismo criterio que `seqs_sin_apu`: > 0, no
+   *  `!= null`. */
+  costo_a_mano: boolean;
 }
 
 /** Un APU distinto por fila para aplicar sugerencias de la IA en un solo recosteo. */

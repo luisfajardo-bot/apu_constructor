@@ -784,14 +784,17 @@ test("una fila CON APU y sin veredicto no ofrece componer", () => {
   expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
 });
 
-test("una fila con costo puesto a mano no ofrece componer", () => {
-  // Ya declaró su costo (proyectos especiales): no necesita APU.
+test("una fila con costo puesto a mano SÍ ofrece componer", () => {
+  // Igualar al contractual era la salida cuando no había APU: es justo la fila que
+  // más necesita poder componerse. Asignar un APU de verdad borra el costo manual
+  // solo (`actualizar_eleccion`), así que bloquearla acá cerraría el camino en las
+  // líneas que más lo piden (pedido explícito del dueño del producto).
   render(
     <TablaItems corridaId={1}
       items={[{ ...ITEM, apu_codigo: "", apu_nombre: "", costo_manual: true }]}
       onConfirmado={() => {}} onComponer={() => {}} puedeEditar />,
   );
-  expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
+  expect(screen.getByRole("button", { name: /^Componer$/ })).toBeTruthy();
 });
 
 test("Componer avisa al padre con el seq de ESA fila", () => {

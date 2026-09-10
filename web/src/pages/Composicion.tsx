@@ -319,6 +319,18 @@ export default function Composicion() {
         </p>
       )}
 
+      {/* No compite con el aviso de congelada de arriba: ese apaga la mesa entera
+          (con la corrida congelada no se puede aprobar nada, así que este aviso es
+          informativo nomás), y este habla del dato de la fila. Los dos pueden
+          mostrarse juntos sin contradecirse. */}
+      {vista?.costo_a_mano && (
+        <p className="border-l-2 border-revisar bg-revisar-surface px-2 py-1.5 text-xs text-revisar">
+          Esta línea tiene hoy un <span className="font-semibold">costo declarado a
+          mano</span>, igualado al contractual. Aprobar un APU acá lo
+          <span className="font-semibold"> reemplaza por el costo calculado</span>.
+        </p>
+      )}
+
       <p className="border-l-2 border-revisar bg-revisar-surface px-2 py-1.5 text-xs text-revisar">
         Esto es una <span className="font-semibold">propuesta</span> de la IA: todavía
         no se creó nada en la biblioteca. La IA no ve precios ni costos, así que

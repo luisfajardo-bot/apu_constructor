@@ -104,12 +104,14 @@ const CATALOGO = {
   "8801": { nombre: "OFICIAL DE OBRA", unidad: "HC", grupo: "MO" },
 };
 
-/** Las cuatro respuestas del expediente traen CUATRO claves. `corrida_modo` por
- *  defecto "activa": la mayoría de los tests no le interesa el candado de
- *  congelada. */
+/** Las cuatro respuestas del expediente traen CINCO claves. `corrida_modo` por
+ *  defecto "activa" y `costo_a_mano` por defecto false: a la mayoría de los tests
+ *  no le interesa ni el candado de congelada ni el aviso de costo declarado. */
 function vista(vigente: unknown, catalogo: unknown = CATALOGO,
-               corrida_modo: "activa" | "congelada" = "activa") {
-  return { vigente, historial: vigente ? [vigente] : [], catalogo, corrida_modo };
+               corrida_modo: "activa" | "congelada" = "activa",
+               costo_a_mano = false) {
+  return { vigente, historial: vigente ? [vigente] : [], catalogo, corrida_modo,
+          costo_a_mano };
 }
 
 function montar() {
@@ -479,4 +481,20 @@ test("con la corrida congelada se explica por qué", async () => {
   getComposicion.mockResolvedValue(vista(version(), CATALOGO, "congelada"));
   montar();
   expect(await screen.findByText(/congelada/i)).toBeTruthy();
+});
+
+// ─── costo puesto a mano: aprobar lo reemplaza, la mesa avisa ──────────────
+
+test("avisa que aprobar reemplaza el costo declarado a mano", async () => {
+  getComposicion.mockResolvedValue(vista(version(), CATALOGO, "activa", true));
+  montar();
+  expect(await screen.findByText(/costo declarado a mano/)).toBeTruthy();
+  expect(screen.getByText(/reemplaza por el costo calculado/)).toBeTruthy();
+});
+
+test("sin costo a mano no aparece ese aviso", async () => {
+  getComposicion.mockResolvedValue(vista(version(), CATALOGO, "activa", false));
+  montar();
+  await screen.findByText("EXCAVACION MANUAL EN MATERIAL COMUN");
+  expect(screen.queryByText(/costo declarado a mano/)).toBeNull();
 });

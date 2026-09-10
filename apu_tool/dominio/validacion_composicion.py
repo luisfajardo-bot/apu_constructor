@@ -26,12 +26,14 @@ regla que emita N hallazgos restaría N por una sola evaluación y el número me
 from __future__ import annotations
 
 import math
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 from apu_tool import config
 from apu_tool.dominio.compose import RendimientoObservado
-from apu_tool.dominio.composicion import ComponentePropuesto, Propuesta
+from apu_tool.dominio.composicion import (_MAX_CODIGO, ComponentePropuesto,
+                                          Propuesta)
 from apu_tool.nucleo.texto import normalizar
 
 # Orígenes que AFIRMAN un respaldo. Cada uno lo afirma de una forma distinta y por eso
@@ -60,10 +62,15 @@ _PALABRAS_MECANICO = ("MECANIC", "RETRO", "EXCAVADORA", "MOTONIVELADORA",
                       "VIBROCOMPACTADOR")
 
 
-def _corto(texto: str, n: int = 40) -> str:
-    """El código lo escribe el modelo: uno de 10 KB rompe la interfaz que lo muestra."""
-    t = str(texto)
-    return t if len(t) <= n else t[:n] + "…"
+def _corto(codigo: str) -> str:
+    """El código lo escribe el modelo: uno de 10 KB rompe la interfaz que lo muestra.
+
+    Mismo tope que el parseo, importado y no copiado: la confianza (tarea 4) cruza
+    `Hallazgo.componente` con `ComponentePropuesto.codigo`, y si los dos topes se
+    separan, un componente sin evidencia pasaría a contar como respaldado sin que
+    nada lo diga.
+    """
+    return codigo if len(codigo) <= _MAX_CODIGO else codigo[:_MAX_CODIGO] + "…"
 
 
 @dataclass(frozen=True)
@@ -235,12 +242,24 @@ def _validar_componente(c: ComponentePropuesto, ctx: ContextoValidacion,
                                 f"El insumo {cod} no está en el catálogo.", cod))
 
     reglas += 1
-    if (c.funcion == "sub_apu") != (c.tipo == "apu"):
+    if c.funcion == "sub_apu" and c.tipo != "apu":
+        # Solo esta dirección es peligrosa: `tipo` es lo que persiste
+        # `autoria._componentes_de` y lo que decide cómo se costea, mientras que
+        # `funcion` no llega a la base (`apu_componentes` no tiene esa columna). Un
+        # sub-APU guardado como insumo se costea como insumo, y si su código es uno de
+        # los "eco de un APU" sin tarifa cae al piso de $1 — el underbid silencioso que
+        # este repo ya persiguió dos veces.
+        # La dirección inversa (tipo="apu" con otra funcion) no cambia ningún costo, y
+        # bloquearla dejaba sin salida al caso más común: `funcion=""`, que es lo que
+        # el parser produce ante un valor ilegible, y que la mesa no deja editar.
         err.append(Hallazgo(
             "TIPO_INCOHERENTE",
-            f"{cod} declara funcion={c.funcion or '(vacía)'} y tipo={c.tipo}: no "
-            f"coinciden. `tipo` es lo que decide cómo se costea (un sub-APU guardado "
-            f"como insumo se costea como insumo).", cod))
+            f"{cod} dice cumplir función de sub-APU pero está declarado como "
+            f"insumo: así se costearía como insumo.", cod))
+    elif c.tipo == "apu" and c.funcion and c.funcion != "sub_apu":
+        adv.append(Hallazgo(
+            "FUNCION_INESPERADA",
+            f"{cod} es un sub-APU pero su función dice {c.funcion}.", cod))
 
     reglas += 1
     r = c.rendimiento
@@ -286,12 +305,16 @@ def _validar_componente(c: ComponentePropuesto, ctx: ContextoValidacion,
         reglas += 1
         obs = ctx.observados.get(c.codigo)
         unidad_cat = ctx.unidades_catalogo.get(c.codigo)
+        # Normalizadas de los dos lados: "HR" contra " hr " no es una divergencia, y
+        # tomarla por tal se llevaría puesto el RENDIMIENTO_ATIPICO del componente.
+        u_obs = (obs.unidad or "").strip().upper() if obs is not None else ""
+        u_cat = (unidad_cat or "").strip().upper()
         if obs is None or obs.n < config.COMPOSICION_MIN_ANTECEDENTES:
             adv.append(Hallazgo("SIN_ANTECEDENTES",
                                 f"{cod} aparece en {0 if obs is None else obs.n} APUs "
                                 f"de la biblioteca: no hay rango contra el cual "
                                 f"comparar su rendimiento.", cod))
-        elif obs.unidad and unidad_cat is not None and obs.unidad != unidad_cat:
+        elif u_obs and unidad_cat is not None and u_obs != u_cat:
             # `obs.unidad` es la MAYORITARIA de la biblioteca. El caso 4288 N (HR vs
             # JR, ~100x) muestra que si difiere de la del catálogo el rango no compara.
             adv.append(Hallazgo("SIN_ANTECEDENTES",
@@ -320,8 +343,8 @@ def _validar_conjunto(p: Propuesta, ctx: ContextoValidacion
     funciones = {c.funcion for c in comps}
 
     reglas += 1
-    claves = [(c.codigo, c.tipo, c.ref_shift) for c in comps]
-    repetidas = sorted({k[0] for k in claves if claves.count(k) > 1})
+    conteo = Counter((c.codigo, c.tipo, c.ref_shift) for c in comps)
+    repetidas = sorted({k[0] for k, n in conteo.items() if n > 1})
     if repetidas:
         # UN hallazgo con todos los códigos, no uno por par: es una sola regla, y si
         # emitiera N la métrica `superadas` restaría N por una regla evaluada.

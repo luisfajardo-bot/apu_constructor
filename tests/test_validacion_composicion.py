@@ -257,6 +257,77 @@ def test_supuesto_confirmado_no_advierte():
     assert "SUPUESTO_SIN_CONFIRMAR" not in codigos(v.advertencias)
 
 
+# --- candados de la ronda anterior -----------------------------------------
+# Cinco cambios que se verificaron a mano y andan. Son justo los que un refactor
+# rompe sin hacer ruido, así que llevan candado.
+def test_el_piso_de_tolerancia_aguanta_un_redondeo_de_seis_decimales():
+    """Con el piso viejo (1e-9) mandaba la tolerancia relativa, que en un resultado
+    chico es más fina que el redondeo honesto del modelo y lo marcaba corregido."""
+    # 1,2345678 / 1000 = 0,0012345678; el modelo lo devuelve redondeado a 6 decimales.
+    p = Propuesta(componentes=(comp(rendimiento=0.001235,
+                                    calculo=Calculo("division", 1.2345678, 1000,
+                                                    0.001235)),))
+    _, v = validar(p, ctx())
+    assert "CALCULO_CORREGIDO" not in codigos(v.advertencias)
+
+
+def test_el_ciclo_mira_el_turno_y_no_solo_el_codigo():
+    """Un APU es (codigo, turno): el mismo código en DIURNO y en NOCTURNO son dos
+    APUs distintos, y solo uno de los dos cierra el ciclo."""
+    p = Propuesta(componentes=(comp(codigo="SUB", tipo="apu", funcion="sub_apu",
+                                    ref_shift="DIURNO"),))
+    base = dict(codigos_permitidos=frozenset({"SUB"}),
+                componentes_de_apu={("SUB", "DIURNO"): (("YO", "apu", "DIURNO"),)},
+                apu_codigo_propio="YO")
+    _, mismo = validar(p, ctx(turno_propio="DIURNO", **base))
+    _, otro = validar(p, ctx(turno_propio="NOCTURNO", **base))
+    assert "SUBAPU_CICLO" in codigos(mismo.errores)
+    assert "SUBAPU_CICLO" not in codigos(otro.errores)
+
+
+def test_subapus_y_subcontratos_cuentan_como_ejecucion():
+    """La mano de obra está adentro del sub-APU, y adentro del precio del
+    subcontrato: reclamar cuadrilla propia sonaría siempre."""
+    solo_sub = Propuesta(componentes=(comp(codigo="SUB", tipo="apu",
+                                           funcion="sub_apu", ref_shift="DIURNO"),))
+    _, v = validar(solo_sub, ctx(codigos_permitidos=frozenset({"SUB"})))
+    assert "FALTA_MANO_DE_OBRA" not in codigos(v.advertencias)
+    solo_subc = Propuesta(componentes=(comp(codigo="322", funcion="subcontrato",
+                                            rendimiento=1.0),))
+    _, v2 = validar(solo_subc, ctx())
+    assert "FALTA_MANO_DE_OBRA" not in codigos(v2.advertencias)
+
+
+def test_un_rango_en_otra_unidad_no_declara_atipico():
+    """`obs.unidad` es la mayoritaria de la biblioteca (caso 4288 N: HR vs JR, ~100x).
+    Si difiere de la del catálogo, el rango no compara y llamar atípico sería ruido."""
+    obs = {"4279": RendimientoObservado("4279", "JR", 14, 0.40, 0.62, 1.10)}
+    _, v = validar(Propuesta(componentes=(comp(rendimiento=5.0),)),
+                   ctx(observados=obs))
+    assert "RENDIMIENTO_ATIPICO" not in codigos(v.advertencias)
+    assert "SIN_ANTECEDENTES" in codigos(v.advertencias)
+
+
+def test_la_unidad_se_compara_sin_espacios_ni_mayusculas():
+    """`HR` contra ` hr ` no es una divergencia; tomarla por tal se llevaría puesto
+    el RENDIMIENTO_ATIPICO de ese componente."""
+    obs = {"4279": RendimientoObservado("4279", " hr ", 14, 0.40, 0.62, 1.10)}
+    _, v = validar(Propuesta(componentes=(comp(rendimiento=5.0),)),
+                   ctx(observados=obs))
+    assert "RENDIMIENTO_ATIPICO" in codigos(v.advertencias)
+
+
+def test_el_truncado_de_los_mensajes_usa_el_tope_del_parseo():
+    """Mismo número que `_MAX_CODIGO`, importado y no copiado: la confianza (tarea 4)
+    cruza `Hallazgo.componente` con `ComponentePropuesto.codigo`."""
+    from apu_tool.dominio.composicion import _MAX_CODIGO
+    _, v = validar(Propuesta(componentes=(comp(codigo="X" * 10_000),)), ctx())
+    todos = v.errores + v.advertencias
+    assert todos
+    assert all(len(h.componente) <= _MAX_CODIGO + 1 for h in todos)
+    assert all(len(h.mensaje) < 500 for h in todos)
+
+
 # --- forma del resultado ---------------------------------------------------
 def test_la_forma_del_resultado_es_estable():
     _, v = validar(Propuesta(componentes=(comp(),)), ctx())
@@ -323,6 +394,23 @@ def test_funcion_subapu_con_tipo_insumo_es_error():
     _, v = validar(p, ctx(codigos_permitidos=frozenset({"SUB"}),
                           unidades_catalogo={"SUB": "UN"}))
     assert "TIPO_INCOHERENTE" in codigos(v.errores)
+
+
+def test_un_subapu_con_funcion_vacia_no_queda_bloqueado():
+    """`funcion=""` es lo que produce el parser ante un valor ilegible, y la mesa no
+    deja editarla: bloquear ahí no dejaba ningún estado aprobable."""
+    p = Propuesta(componentes=(comp(codigo="SUB", tipo="apu", funcion="",
+                                    ref_shift="DIURNO"),))
+    _, v = validar(p, ctx(codigos_permitidos=frozenset({"SUB"})))
+    assert "TIPO_INCOHERENTE" not in codigos(v.errores)
+
+
+def test_un_subapu_con_funcion_de_insumo_solo_advierte():
+    p = Propuesta(componentes=(comp(codigo="SUB", tipo="apu", funcion="material",
+                                    ref_shift="DIURNO"),))
+    _, v = validar(p, ctx(codigos_permitidos=frozenset({"SUB"})))
+    assert "TIPO_INCOHERENTE" not in codigos(v.errores)
+    assert "FUNCION_INESPERADA" in codigos(v.advertencias)
 
 
 def test_un_subapu_no_arrastra_sin_antecedentes():

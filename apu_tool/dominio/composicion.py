@@ -216,7 +216,11 @@ def _componente_desde(v: Any) -> Optional[ComponentePropuesto]:
         # Conservador: si no se entiende de dónde sale, no se le reconoce evidencia.
         origen=_del_vocabulario(v.get("origen"), ORIGENES, "sin_evidencia"),
         referencias=_referencias_desde(v.get("referencias")),
-        hipotesis=dict(v["hipotesis"]) if isinstance(v.get("hipotesis"), dict) else {},
+        # `hipotesis` es un dict abierto cuyas claves las pone el modelo: se acota
+        # como todo lo demás que viene de él, porque se persiste y se muestra.
+        hipotesis=({_texto(k, 60): (_texto(x) if isinstance(x, str) else x)
+                    for k, x in list(v["hipotesis"].items())[:20]}
+                   if isinstance(v.get("hipotesis"), dict) else {}),
         calculo=_calculo_desde(v.get("calculo")),
         justificacion=_texto(v.get("justificacion")),
         nivel_evidencia=_del_vocabulario(v.get("nivel_evidencia"),

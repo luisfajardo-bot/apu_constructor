@@ -3634,11 +3634,38 @@ def _fila_base(alm: Almacen, corrida_id: int, seq: int, item) -> dict:
             "creada_en": _ahora()}
 
 
+def _es_de_esta_linea(v: Optional[ComposicionRow], row) -> bool:
+    """¿El expediente habla de la actividad que hoy ocupa este `seq`?
+
+    El `seq` SE REUSA: la FK va a `corrida` y no a `corrida_item`, así que un
+    expediente sobrevive al borrado de su línea, y `agregar_items` toma `max(seq)+1`
+    — borrar la ÚLTIMA línea y agregar otra le da el mismo número. Sin esta
+    comparación, `vigente` devolvería el expediente de otra actividad, y una versión
+    `aprobada` haría que aprobar conteste 409 nombrando un APU ajeno: esa línea no se
+    podría componer nunca más.
+
+    Se compara `descripcion` y no el dict entero, por lo mismo que `_vista_item`
+    compara solo `apu_evaluado`: es lo que identifica la actividad. Cambiarle la
+    cantidad a una línea no la convierte en otra cosa.
+    """
+    if v is None:
+        return False
+    return (v.actividad or {}).get("descripcion") == row.item.descripcion
+
+
 def vista(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
-    """La versión vigente y el historial. None si la fila no existe."""
-    if alm.corridas.get_item(corrida_id, seq) is None:
+    """La versión vigente y el historial. None si la fila no existe.
+
+    El historial se devuelve completo (es el registro de correcciones y no miente
+    sobre nada), pero la VIGENTE se descarta si es de otra actividad: es lo que se
+    usa para editar y aprobar.
+    """
+    row = alm.corridas.get_item(corrida_id, seq)
+    if row is None:
         return None
     v = alm.composiciones.vigente(corrida_id, seq)
+    if not _es_de_esta_linea(v, row):
+        v = None
     return {"vigente": v.to_dict() if v else None,
             "historial": [f.to_dict() for f in
                           alm.composiciones.historial(corrida_id, seq)]}

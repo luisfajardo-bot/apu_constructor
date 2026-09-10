@@ -73,6 +73,15 @@ ARMADO_MAX_INTENTOS = 3
 CRUCE_UMBRAL = 0.60   # similitud mínima de nombre para aceptar un cruce aproximado
 CRUCE_MARGEN = 0.10   # ventaja mínima del mejor candidato sobre el segundo
 
+# Umbrales de la composición asistida (dominio/validacion_composicion.py).
+# Techo absurdo por componente: atrapa un rendimiento con la coma corrida (0,5 -> 500)
+# sin bloquear un consumo grande legítimo (arena en m3 por m3 de mampostería).
+COMPOSICION_LIMITE_RENDIMIENTO = 10_000.0
+# Antecedentes mínimos para llamar "atípico" a un rendimiento. Con n=1 o n=2 el "rango"
+# no significa nada y la advertencia sería ruido: por debajo se informa que no hay con
+# qué comparar, que es un dato distinto y útil.
+COMPOSICION_MIN_ANTECEDENTES = 3
+
 # Etiquetas de turno.
 SHIFT_DIURNO = "DIURNO"
 SHIFT_NOCTURNO = "NOCTURNO"

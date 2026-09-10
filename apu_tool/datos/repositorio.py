@@ -155,6 +155,10 @@ class RepositorioApus(Protocol):
         """Como get_components pero para muchos (codigo, shift) en UNA consulta.
         Devuelve {(codigo, shift): [componentes...]} para las claves halladas."""
         ...
+    def rendimientos_por_insumo(self, codigos: Iterable[str]
+                                ) -> dict[str, list[tuple[str, float]]]:
+        """(unidad, rendimiento) con que cada insumo aparece en la biblioteca."""
+        ...
     def component_counts(self) -> dict[tuple[str, str], int]: ...
     def componentes_subapu_candidatos(self) -> list[dict]:
         """Componentes tipo='insumo' cuyo código es un APU (candidatos a sub-APU)."""

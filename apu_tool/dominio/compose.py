@@ -71,3 +71,46 @@ class InsumoRetriever:
 
 def candidate_insumo_to_dict(c: CandidateInsumo) -> dict:
     return {"insumo_codigo": c.codigo, "insumo_nombre": c.nombre, "unidad": c.unidad}
+
+
+@dataclass(frozen=True)
+class RendimientoObservado:
+    """Cómo se usa un insumo en la biblioteca. SIN dinero: son cantidades físicas."""
+    insumo_codigo: str
+    unidad: str
+    n: int
+    minimo: float
+    mediana: float
+    maximo: float
+
+    def to_dict(self) -> dict:
+        return {"insumo_codigo": self.insumo_codigo, "unidad": self.unidad,
+                "n": self.n, "minimo": round(self.minimo, 6),
+                "mediana": round(self.mediana, 6), "maximo": round(self.maximo, 6)}
+
+
+def _mediana(xs: list[float]) -> float:
+    ord_ = sorted(xs)
+    m = len(ord_) // 2
+    return ord_[m] if len(ord_) % 2 else (ord_[m - 1] + ord_[m]) / 2
+
+
+def rendimientos_observados(almacen: Almacen, codigos) -> dict[str, RendimientoObservado]:
+    """Estadística no monetaria de cada insumo en la biblioteca.
+
+    Le da al modelo con qué declarar "copiado" o "ajustado", y al validador con qué
+    llamar atípico a un rendimiento. Un insumo que no se usa en ningún APU no aparece:
+    la ausencia es el dato (`SIN_ANTECEDENTES`), no un rango de ceros.
+    """
+    crudo = almacen.apus.rendimientos_por_insumo(codigos)
+    out: dict[str, RendimientoObservado] = {}
+    for cod, pares in crudo.items():
+        # Un rendimiento <= 0 en la biblioteca es un dato roto, no un antecedente.
+        vals = [r for _u, r in pares if r > 0]
+        if not vals:
+            continue
+        unidades = [u for u, r in pares if r > 0 and u]
+        out[cod] = RendimientoObservado(
+            insumo_codigo=cod, unidad=(unidades[0] if unidades else ""),
+            n=len(vals), minimo=min(vals), mediana=_mediana(vals), maximo=max(vals))
+    return out

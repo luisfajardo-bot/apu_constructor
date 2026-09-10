@@ -248,10 +248,11 @@ lo fija.
   },
   "confianza": "media",
   "confianza_motivos": [
-    {"senal": "respaldo_de_componentes", "valor": "4 de 5 con antecedente vivo", "aporte": "+2"},
-    {"senal": "unidad_de_antecedentes", "valor": "2 de 3 comparten M3", "aporte": "+1"},
-    {"senal": "rendimientos_atipicos", "valor": "1", "aporte": "-1"},
-    {"senal": "supuestos_sin_confirmar", "valor": "1", "aporte": "-1"}
+    {"senal": "respaldo_de_componentes", "detalle": "4 de 5 con antecedente vivo", "aporte": 2},
+    {"senal": "unidad_de_antecedentes", "detalle": "2 de 3 comparten M3", "aporte": 1},
+    {"senal": "rendimientos_atipicos", "detalle": "1", "aporte": -1},
+    {"senal": "supuestos_sin_confirmar", "detalle": "1", "aporte": -1},
+    {"senal": "tope_por_rendimiento_atipico", "detalle": "1 rendimiento(s) que la biblioteca contradice: no puede ser alta", "aporte": 0}
   ],
   "incertidumbre_declarada": 0.35,
   "modelo": "claude-sonnet-5", "prompt_version": "composicion/v2",
@@ -463,11 +464,24 @@ tenemos.
 | Supuestos sin confirmar | −1 cada uno |
 | Todas las validaciones superadas | +1 |
 
-Dos candados:
+Tres candados:
 
 - **Con cualquier error bloqueante, el nivel es `insuficiente`.** Sin excepción.
 - **`incertidumbre_declarada` no entra en la fórmula.** El test que lo fija: dos
   propuestas idénticas con `incertidumbre_declarada` 0.0 y 1.0 dan el mismo nivel.
+- **Con un `RENDIMIENTO_ATIPICO`, el nivel no pasa de `media`.** Es un tope, no una
+  resta: "alta" significa "aprobalo de un vistazo", y un consumo que la biblioteca
+  contradice no lo es por muchas otras señales buenas que tenga. Se descubrió midiendo:
+  con la fórmula original, un componente **8× fuera de rango** en una propuesta por lo
+  demás bien respaldada salía `alta`, porque la señal restaba 1 punto entre ocho. Subir
+  el peso habría sido otro número arbitrario compitiendo con los demás; el tope se
+  explica en una frase y aparece en el desglose. `CANTIDAD_SOSPECHOSA` **no** topea: es
+  lo esperable en un APU global de verdad y castigaría a toda esa familia.
+
+Una nota de nombres: el campo legible de cada motivo se llama **`detalle`**, no `valor`
+— `valor` está en `_FORBIDDEN_KEYS` (por `valor_unitario`/`valor_total`) y
+`assert_no_money` mira nombres de clave, así que el propio guardián reventaba sobre un
+desglose que no lleva un peso adentro.
 
 El desglose (`confianza_motivos`) se guarda y se muestra desplegable bajo el nivel.
 

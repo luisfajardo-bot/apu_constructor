@@ -104,7 +104,7 @@ def test_el_desglose_explica_el_nivel():
     assert conf.motivos                       # nunca vacío
     assert sum(m.aporte for m in conf.motivos) == conf.puntos
     for m in conf.motivos:
-        assert m.senal and m.valor            # todo motivo se puede leer
+        assert m.senal and m.detalle           # todo motivo se puede leer
 
 
 def test_la_senal_de_unidad_ve_la_unidad_del_antecedente():
@@ -126,3 +126,38 @@ def test_el_nivel_siempre_es_del_vocabulario():
     for p in (Propuesta(), SANA, Propuesta(componentes=(comp(codigo="9999"),))):
         corregida, v = validar(p, ctx())
         assert calcular_confianza(corregida, v, ctx()).nivel in NIVELES_CONFIANZA
+
+
+def test_un_rendimiento_atipico_impide_el_nivel_alta():
+    """"Alta" significa "aprobalo de un vistazo". Un consumo que la biblioteca
+    contradice no lo es, por buenas que sean las demás señales."""
+    rara = Propuesta(componentes=(comp(rendimiento=5.0),      # 8x fuera de rango
+                                  comp(codigo="6092", funcion="herramienta",
+                                       rendimiento=1.0)))
+    corregida, v = validar(rara, ctx())
+    conf = calcular_confianza(corregida, v, ctx())
+    assert conf.nivel == "media"
+    assert conf.puntos >= 4          # habría dado "alta" sin el tope
+    assert any(m.senal == "tope_por_rendimiento_atipico" for m in conf.motivos)
+
+
+def test_una_cantidad_sospechosa_no_topea_el_nivel():
+    """Un APU en GLB o KM lleva la cantidad de la obra adentro: la advertencia es
+    esperable y no puede castigar a toda esa familia de actividades.
+
+    El componente sospechoso es "322", que NO está en `ctx().observados`: así
+    dispara CANTIDAD_SOSPECHOSA (supera el techo) pero no RENDIMIENTO_ATIPICO (no
+    hay rango observado contra el cual compararlo) — que es justo lo que este test
+    necesita aislar. Usar "4279" hubiera disparado los dos a la vez y el test no
+    habría probado nada.
+    """
+    from apu_tool import config
+    grande = Propuesta(componentes=(
+        comp(codigo="322", funcion="material",
+             rendimiento=config.COMPOSICION_LIMITE_RENDIMIENTO + 1),
+        comp(codigo="6092", funcion="herramienta", rendimiento=1.0)))
+    corregida, v = validar(grande, ctx())
+    assert any(h.codigo == "CANTIDAD_SOSPECHOSA" for h in v.advertencias)
+    assert not any(h.codigo == "RENDIMIENTO_ATIPICO" for h in v.advertencias)
+    conf = calcular_confianza(corregida, v, ctx())
+    assert not any(m.senal == "tope_por_rendimiento_atipico" for m in conf.motivos)

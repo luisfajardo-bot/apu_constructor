@@ -447,17 +447,15 @@ _DISPERSION_ANCHA = 2.0
 @dataclass(frozen=True)
 class Motivo:
     senal: str
-    valor: str          # legible: "4 de 5 con antecedente vivo"
+    # `detalle` y no `valor`: "valor" está en `_FORBIDDEN_KEYS` (por valor_unitario y
+    # valor_total) y `assert_no_money` mira NOMBRES de clave, no contenido — este
+    # desglose no lleva un peso adentro, pero el guardián no puede saberlo. Un nombre
+    # solo, en Python y en el JSON: partirlo en dos era una trampa para el próximo.
+    detalle: str        # legible: "4 de 5 con antecedente vivo"
     aporte: int
 
     def to_dict(self) -> dict[str, Any]:
-        # La clave serializada es `detalle` y no `valor`: `valor` está en
-        # `_FORBIDDEN_KEYS` de `dominio/privacy.py` (por "valor_total"/"valor
-        # unitario"), y `assert_no_money` mira nombres de clave, no contenido — este
-        # texto es descriptivo ("4 de 5 con antecedente vivo"), pero con esa clave el
-        # guardián lo tomaría por un monto. El atributo Python se llama `valor` sin
-        # problema; solo el JSON hacia afuera cambia de nombre.
-        return {"senal": self.senal, "detalle": self.valor, "aporte": self.aporte}
+        return {"senal": self.senal, "detalle": self.detalle, "aporte": self.aporte}
 
 
 @dataclass(frozen=True)
@@ -553,4 +551,17 @@ def calcular_confianza(p: Propuesta, v: Validacion,
     puntos = sum(m.aporte for m in motivos)
     nivel = ("alta" if puntos >= _UMBRAL_ALTA
              else "media" if puntos >= _UMBRAL_MEDIA else "baja")
+    # Tope, no penalización: "alta" significa "aprobalo de un vistazo", y un consumo
+    # que la biblioteca contradice no es eso por muchas otras señales buenas que
+    # tenga. Como tope se explica en una frase; como peso sería otro número
+    # arbitrario compitiendo con los demás, y ahí un componente 8x fuera de rango
+    # salía "alta" igual. `CANTIDAD_SOSPECHOSA` no topea a propósito: esa advertencia
+    # es lo esperado en un APU global de verdad (GLB, KM), y topear ahí castigaría a
+    # toda una familia legítima de actividades.
+    if atipicos and nivel == "alta":
+        nivel = "media"
+        motivos.append(Motivo(
+            "tope_por_rendimiento_atipico",
+            f"{atipicos} rendimiento(s) que la biblioteca contradice: no puede ser "
+            f"alta", 0))
     return Confianza(nivel, puntos, tuple(motivos))

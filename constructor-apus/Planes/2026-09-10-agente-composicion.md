@@ -1439,7 +1439,7 @@ def test_el_desglose_explica_el_nivel():
     assert conf.motivos                       # nunca vacío
     assert sum(m.aporte for m in conf.motivos) == conf.puntos
     for m in conf.motivos:
-        assert m.senal and m.valor            # todo motivo se puede leer
+        assert m.senal and m.detalle          # todo motivo se puede leer
 
 
 def test_la_senal_de_unidad_ve_la_unidad_del_antecedente():
@@ -1511,11 +1511,14 @@ _DISPERSION_ANCHA = 2.0
 @dataclass(frozen=True)
 class Motivo:
     senal: str
-    valor: str          # legible: "4 de 5 con antecedente vivo"
+    # `detalle` y no `valor`: "valor" está en `_FORBIDDEN_KEYS` (por valor_unitario y
+    # valor_total) y `assert_no_money` mira NOMBRES de clave, no contenido. Con la
+    # clave "valor" el guardián reventaba sobre un desglose que no lleva un peso.
+    detalle: str        # legible: "4 de 5 con antecedente vivo"
     aporte: int
 
     def to_dict(self) -> dict[str, Any]:
-        return {"senal": self.senal, "valor": self.valor, "aporte": self.aporte}
+        return {"senal": self.senal, "detalle": self.detalle, "aporte": self.aporte}
 
 
 @dataclass(frozen=True)
@@ -2189,7 +2192,7 @@ def fila(**kw) -> ComposicionRow:
         validacion={"valido": True, "errores": [], "advertencias": [],
                     "metricas": {"superadas": 9, "totales": 9}},
         confianza="alta",
-        confianza_motivos=[{"senal": "respaldo_de_componentes", "valor": "1 de 1",
+        confianza_motivos=[{"senal": "respaldo_de_componentes", "detalle": "1 de 1",
                             "aporte": 2}],
         antecedentes={"codigos_permitidos": ["4279"], "apus_referencia": ["A1"]},
         modelo="claude-sonnet-5", prompt_version="composicion/v2",
@@ -4090,7 +4093,9 @@ export type NivelConfianza = "alta" | "media" | "baja" | "insuficiente";
 
 export interface MotivoConfianza {
   senal: string;
-  valor: string;
+  /** `detalle` y no `valor`: "valor" está en la denylist de privacidad del backend
+   *  (por valor_unitario / valor_total) y el guardián mira nombres de clave. */
+  detalle: string;
   aporte: number;
 }
 
@@ -4285,7 +4290,7 @@ function vista(over: Record<string, unknown> = {}) {
     validacion: { valido: true, errores: [], advertencias: [],
                   metricas: { superadas: 11, totales: 11 } },
     confianza: "media",
-    confianza_motivos: [{ senal: "respaldo_de_componentes", valor: "1 de 1",
+    confianza_motivos: [{ senal: "respaldo_de_componentes", detalle: "1 de 1",
                           aporte: 2 }],
     antecedentes: { codigos_permitidos: ["4279"],
                     apus_referencia: [{ codigo: "A1", turno: "DIURNO" }] },
@@ -4621,7 +4626,7 @@ maquetado es libre dentro de la convención densa del repo):
 | Elemento | Requisito |
 |---|---|
 | Actividad | se muestra `vigente.actividad.descripcion`, más unidad, cantidad y turno |
-| Confianza | el nivel en mayúsculas; un botón "por qué" que despliega `confianza_motivos` con `senal`, `valor` y `aporte` |
+| Confianza | el nivel en mayúsculas; un botón "por qué" que despliega `confianza_motivos` con `senal`, `detalle` y `aporte` |
 | Incertidumbre | texto que empieza con "El modelo declara …", separado del nivel |
 | Errores | uno por `validacion.errores`, con su `mensaje` visible |
 | Advertencias | uno por `validacion.advertencias`, con su `mensaje` visible |

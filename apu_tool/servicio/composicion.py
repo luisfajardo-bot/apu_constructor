@@ -398,7 +398,8 @@ def aprobar(alm: Almacen, corrida_id: int, seq: int, datos: dict,
 
     Devuelve None si la corrida, la fila o el expediente de esta línea no existen
     (endpoint -> 404). Lanza CorridaCongelada y VersionYaExiste (409),
-    ComposicionInvalida (422) y el ValueError de `autoria.crear_apu` (422).
+    ComposicionInvalida (422: rechazada, o con errores bloqueantes) y el ValueError
+    de `autoria.crear_apu` (422).
 
     Los componentes salen de la VERSIÓN VIGENTE, nunca del cuerpo: aprobar no es una
     oportunidad de editar. Lo único que pone el humano acá es la identidad del APU
@@ -422,6 +423,17 @@ def aprobar(alm: Almacen, corrida_id: int, seq: int, datos: dict,
     if row is None or vig is None:
         return None
     _exigir_version(vig, datos["version_base"])
+    if vig.estado == "rechazada":
+        # `rechazada` tiene que significar algo: si de ahí se salta directo a
+        # `aprobada`, el estado es una etiqueta decorativa. La vía para arrepentirse
+        # existe y es gratis — editar y guardar produce una versión `editada` sobre
+        # la que sí se aprueba, y ese paso queda en el historial. Así un cambio de
+        # opinión se ve, en vez de que una aprobación pise un rechazo sin rastro.
+        # El guardián NO está en `guardar_edicion`: editar una rechazada es
+        # justamente el camino de reapertura.
+        raise ComposicionInvalida(
+            "Esta composición está rechazada. Si querés retomarla, editala y "
+            "guardá: eso abre una versión nueva que sí se puede aprobar.")
     if not (vig.validacion or {}).get("valido"):
         # Lo que quedó registrado como inválido no se aprueba, aunque hoy validara:
         # el camino para eso es corregirlo en la mesa (PUT), que deja su propia

@@ -423,3 +423,35 @@ def test_rechazar_tambien_trae_el_catalogo(app_alm, corrida):
         f"/api/corridas/{corrida}/composicion/1/rechazar",
         json={"version_base": 1, "motivo": "no aplica"}).json()
     assert d["catalogo"]["4279"]["nombre"] == "CUADRILLA"
+
+
+# --- `rechazada` restringe; editar es la reapertura -----------------------
+def test_una_composicion_rechazada_no_se_aprueba_de_una(app_alm, corrida):
+    """`rechazada` restringe: para retomarla hay que editarla, y ese paso queda en
+    el historial. Si no, el estado es decorativo."""
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    c = cliente(app, "editor")
+    c.post(f"/api/corridas/{corrida}/composicion/1/rechazar",
+           json={"version_base": 1, "motivo": "no aplica"})
+    r = c.post(f"/api/corridas/{corrida}/composicion/1/aprobar",
+               json=dict(APROBAR, version_base=2))
+    assert r.status_code == 422
+    assert alm.apus.get_apu("9001", "DIURNO") is None
+
+
+def test_editar_una_rechazada_la_reabre(app_alm, corrida):
+    """La vía de reapertura: editar y guardar da una versión `editada` aprobable."""
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    c = cliente(app, "editor")
+    c.post(f"/api/corridas/{corrida}/composicion/1/rechazar",
+           json={"version_base": 1, "motivo": "no aplica"})
+    e = c.put(f"/api/corridas/{corrida}/composicion/1",
+              json={"version_base": 2, "componentes": COMPONENTES})
+    assert e.status_code == 200
+    assert e.json()["vigente"]["estado"] == "editada"
+    a = c.post(f"/api/corridas/{corrida}/composicion/1/aprobar",
+               json=dict(APROBAR, version_base=3))
+    assert a.status_code == 200
+    assert alm.apus.get_apu("9001", "DIURNO") is not None

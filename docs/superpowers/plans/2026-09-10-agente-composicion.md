@@ -2792,3 +2792,1102 @@ git commit -m "feat(datos): expediente de composicion en Postgres, con paridad p
 ```
 
 ---
+
+## Tarea 9: el orquestador
+
+Cose las piezas y emite los eventos del SSE. Acá muere también la composición vieja
+(`ApuAdvisor.compose_apu` y `Assembler.generar_composicion`), con sus tests migrados: se
+van juntas para que ninguna tarea deje el árbol rojo.
+
+Se parte en tres funciones porque tienen tres llamadores distintos:
+
+- `recuperar()` — arma el contexto (una lectura del catálogo sirve para el `grupo` de
+  los candidatos **y** para `unidades_catalogo` del validador).
+- `evaluar()` — recalcula, valida y calcula la confianza. **La usa el `PUT`**, cuando
+  el humano guarda una edición y no hay que volver a pagarle a la IA.
+- `componer()` — el generador con los eventos; usa las dos anteriores.
+
+**Archivos:**
+- Modificar: `apu_tool/dominio/composicion.py`, `apu_tool/dominio/ai_assist.py`,
+  `apu_tool/dominio/assemble.py`, `tests/test_compose.py`,
+  `tests/test_assemble_generado.py`
+- Test: `tests/test_composicion_motor.py`
+
+- [ ] **Paso 1: escribir la prueba que falla**
+
+```python
+"""El orquestador: eventos, estados y el pegado de las piezas.
+
+El advisor se sustituye; no se llama a la API real.
+"""
+import pytest
+
+from apu_tool.datos.almacen import Almacen
+from apu_tool.dominio.ai_assist import ApuAdvisor, IANoDisponible
+from apu_tool.dominio.composicion import (
+    Calculo, ComponentePropuesto, Propuesta, Referencia, componer, evaluar, recuperar,
+)
+from apu_tool.nucleo.models import Apu, ApuComponent, Insumo, LicitacionItem
+
+ITEM = LicitacionItem("1.3", "EXCAVACION MANUAL EN MATERIAL COMUN", "M3", 120.0,
+                      180000.0, "DIURNO")
+
+
+@pytest.fixture()
+def alm(tmp_path):
+    a = Almacen(tmp_path / "precios.db", tmp_path / "apus.db",
+                tmp_path / "corridas.db")
+    a.reset()
+    a.precios.insert_insumos([
+        Insumo("4279", "CUADRILLA OFICIAL MAS AYUDANTES", "HR", "MO", 40000,
+               "PRECIO IDU"),
+        Insumo("6092", "HERRAMIENTA MENOR", "GLB", "EQ", 2000, "PRECIO IDU"),
+    ])
+    a.apus.insert_apus([Apu("A1", "EXCAVACION MANUAL COMUN", "M3", "DIURNO", "EXCAVACIONES")])
+    a.apus.insert_components([
+        ApuComponent("A1", "DIURNO", "4279", "CUADRILLA", "HR", 0.62, 40000),
+        ApuComponent("A1", "DIURNO", "6092", "HERRAMIENTA MENOR", "GLB", 1.0, 2000),
+    ])
+    return a
+
+
+class AdvisorFalso(ApuAdvisor):
+    def __init__(self, propuesta: Propuesta):
+        self.enabled = True
+        self._client = object()
+        self.model = "falso"
+        self.propuesta = propuesta
+        self.llamadas = 0
+
+    def componer(self, item, insumos, ejemplos, observados):
+        self.llamadas += 1
+        self.insumos_vistos = insumos
+        return self.propuesta
+
+
+def comp(**kw) -> ComponentePropuesto:
+    base = dict(codigo="4279", tipo="insumo", funcion="mano_de_obra",
+                rendimiento=0.62, origen="copiado_de_antecedente",
+                referencias=(Referencia("A1", "DIURNO"),), hipotesis={},
+                calculo=None, justificacion="j", nivel_evidencia="alto",
+                ref_shift="")
+    base.update(kw)
+    return ComponentePropuesto(**base)
+
+
+SANA = Propuesta(componentes=(comp(),
+                              comp(codigo="6092", funcion="herramienta",
+                                   rendimiento=1.0)))
+
+
+def eventos(alm, advisor, item=ITEM) -> list[tuple[str, dict]]:
+    return list(componer(alm, item, advisor))
+
+
+# --- recuperar -------------------------------------------------------------
+def test_recuperar_llena_el_grupo_de_los_candidatos(alm):
+    ctx = recuperar(alm, ITEM)
+    grupos = {i.codigo: i.grupo for i in ctx.insumos}
+    assert grupos.get("4279") == "MO"
+
+
+def test_recuperar_arma_la_lista_blanca_y_las_unidades(alm):
+    ctx = recuperar(alm, ITEM)
+    assert "4279" in ctx.validacion.codigos_permitidos
+    assert ctx.validacion.unidades_catalogo["4279"] == "HR"
+    assert ("A1", "DIURNO") in ctx.validacion.apus_existentes
+    assert ctx.validacion.unidades_de_apu[("A1", "DIURNO")] == "M3"
+
+
+def test_recuperar_trae_los_rendimientos_observados(alm):
+    assert "4279" in recuperar(alm, ITEM).validacion.observados
+
+
+# --- evaluar (el camino del PUT) -------------------------------------------
+def test_evaluar_no_llama_a_la_ia(alm):
+    """Guardar una edición humana no vuelve a pagar una generación."""
+    ctx = recuperar(alm, ITEM)
+    propuesta, validacion, confianza = evaluar(SANA, ctx.validacion)
+    assert validacion.valido is True
+    assert confianza.nivel in ("alta", "media", "baja")
+    assert len(propuesta.componentes) == 2
+
+
+def test_evaluar_recalcula_la_aritmetica(alm):
+    ctx = recuperar(alm, ITEM)
+    mala = Propuesta(componentes=(comp(rendimiento=0.09,
+                                       calculo=Calculo("division", 8, 96, 0.09)),))
+    propuesta, validacion, _ = evaluar(mala, ctx.validacion)
+    assert propuesta.componentes[0].rendimiento == pytest.approx(8 / 96)
+    assert any(h.codigo == "CALCULO_CORREGIDO" for h in validacion.advertencias)
+
+
+# --- componer --------------------------------------------------------------
+def test_los_eventos_salen_en_orden(alm):
+    evs = eventos(alm, AdvisorFalso(SANA))
+    assert [e for e, _ in evs] == ["recuperando", "generando", "validando", "lista"]
+
+
+def test_el_evento_recuperando_dice_cuanto_encontro(alm):
+    _, payload = eventos(alm, AdvisorFalso(SANA))[0]
+    assert set(payload) == {"n_insumos", "n_apus"}
+    assert payload["n_insumos"] > 0
+
+
+def test_el_evento_lista_trae_todo_lo_que_hay_que_guardar(alm):
+    _, payload = eventos(alm, AdvisorFalso(SANA))[-1]
+    assert set(payload) == {"propuesta", "validacion", "confianza",
+                            "confianza_motivos", "antecedentes", "modelo",
+                            "prompt_version"}
+    assert payload["prompt_version"].startswith("composicion/")
+    assert payload["modelo"] == "falso"
+
+
+def test_los_antecedentes_guardan_la_lista_blanca(alm):
+    _, payload = eventos(alm, AdvisorFalso(SANA))[-1]
+    assert "4279" in payload["antecedentes"]["codigos_permitidos"]
+    assert {"codigo": "A1", "turno": "DIURNO"} in \
+        payload["antecedentes"]["apus_referencia"]
+
+
+def test_una_propuesta_vacia_sale_invalida_nunca_lista_en_verde(alm):
+    _, payload = eventos(alm, AdvisorFalso(Propuesta()))[-1]
+    assert payload["validacion"]["valido"] is False
+    assert payload["confianza"] == "insuficiente"
+
+
+def test_un_codigo_inventado_no_pasa(alm):
+    inventada = Propuesta(componentes=(comp(codigo="NO-EXISTE"),))
+    _, payload = eventos(alm, AdvisorFalso(inventada))[-1]
+    codigos = {e["codigo"] for e in payload["validacion"]["errores"]}
+    assert "CODIGO_NO_AUTORIZADO" in codigos
+
+
+def test_la_ia_solo_ve_los_codigos_autorizados(alm):
+    a = AdvisorFalso(SANA)
+    eventos(alm, a)
+    _, payload = eventos(alm, a)[-1]
+    assert {i.codigo for i in a.insumos_vistos} <= \
+        set(payload["antecedentes"]["codigos_permitidos"])
+
+
+def test_sin_credencial_el_evento_es_error(alm):
+    class Sin(AdvisorFalso):
+        def componer(self, *a, **k):
+            raise IANoDisponible("falta ANTHROPIC_API_KEY")
+
+    evs = eventos(alm, Sin(SANA))
+    assert evs[-1][0] == "error"
+    assert "ANTHROPIC_API_KEY" in evs[-1][1]["detail"]
+
+
+def test_una_actividad_sin_candidatos_da_error_legible(alm):
+    vacia = LicitacionItem("9.9", "ZZZZZZ QQQQQQ", "UN", 1.0, 0.0, "DIURNO")
+    alm.precios.reset()
+    alm.apus.reset()
+    evs = eventos(alm, AdvisorFalso(SANA), item=vacia)
+    assert evs[-1][0] == "error"
+
+
+def test_la_privacidad_no_se_traga_nunca(alm):
+    """Una PrivacyViolation sube; NO se convierte en un evento `error` genérico."""
+    from apu_tool.dominio import privacy
+
+    class Fuga(AdvisorFalso):
+        def componer(self, *a, **k):
+            raise privacy.PrivacyViolation("se coló un precio")
+
+    with pytest.raises(privacy.PrivacyViolation):
+        eventos(alm, Fuga(SANA))
+
+
+def test_el_payload_del_evento_lista_no_lleva_dinero(alm):
+    from apu_tool.dominio import privacy
+    _, payload = eventos(alm, AdvisorFalso(SANA))[-1]
+    privacy.assert_no_money(payload)
+```
+
+- [ ] **Paso 2: correr la prueba para verificar que falla**
+
+Ejecuta: `python -m pytest tests/test_composicion_motor.py -q`
+Esperado: FALLA con `ImportError: cannot import name 'componer'`
+
+- [ ] **Paso 3a: agregar el orquestador a `composicion.py`**
+
+Al final de `apu_tool/dominio/composicion.py`:
+
+```python
+# ------------------------------------------------------------- orquestador
+@dataclass(frozen=True)
+class ContextoComposicion:
+    """Todo lo recuperado para una composición: lo que va al modelo y lo que valida."""
+    insumos: tuple                        # CandidateInsumo, con `grupo` lleno
+    ejemplos: tuple                       # DePricedApu de referencia
+    validacion: Any                       # ContextoValidacion
+
+
+def recuperar(almacen, item, *, apu_codigo_propio: str = "",
+              supuestos_confirmados: bool = False) -> ContextoComposicion:
+    """Arma el contexto de una composición con UNA lectura del catálogo.
+
+    Esa lectura sirve para dos cosas que si no se harían por separado: el `grupo` de
+    cada candidato (que viaja al modelo) y `unidades_catalogo` (que usa el validador
+    para saber si un código existe). Una consulta, dos usos.
+    """
+    from dataclasses import replace as _replace
+
+    from apu_tool.dominio.compose import InsumoRetriever, rendimientos_observados
+    from apu_tool.dominio.validacion_composicion import ContextoValidacion
+
+    insumos, ejemplos = InsumoRetriever(almacen).retrieve(item.descripcion, item.shift)
+    codigos = [i.codigo for i in insumos]
+
+    # Una sola consulta al catálogo: grupo (para el modelo) + unidad (para validar).
+    catalogo = almacen.precios.get_candidatos_bulk(codigos)
+    grupos, unidades = {}, {}
+    for cod, cands in catalogo.items():
+        if cands:
+            grupos[cod] = cands[0].grupo or ""
+            unidades[cod] = cands[0].unidad or ""
+    insumos = tuple(_replace(i, grupo=grupos.get(i.codigo, "")) for i in insumos)
+
+    apus = almacen.apus.all_apus()
+    componentes = {}
+    for (cod, turno), comps in almacen.apus.get_components_bulk(
+            [(a.codigo, a.shift) for a in apus]).items():
+        componentes[(cod, turno)] = tuple(
+            (c.insumo_codigo, c.tipo, c.ref_shift) for c in comps)
+
+    ctx = ContextoValidacion(
+        descripcion=item.descripcion, unidad_actividad=item.unidad, shift=item.shift,
+        codigos_permitidos=frozenset(codigos),
+        unidades_catalogo=unidades,
+        apus_existentes=frozenset((a.codigo, a.shift) for a in apus),
+        componentes_de_apu=componentes,
+        observados=rendimientos_observados(almacen, codigos),
+        unidades_de_apu={(a.codigo, a.shift): a.unidad or "" for a in apus},
+        apu_codigo_propio=apu_codigo_propio,
+        supuestos_confirmados=supuestos_confirmados)
+    return ContextoComposicion(tuple(insumos), tuple(ejemplos), ctx)
+
+
+def evaluar(propuesta: Propuesta, ctx_validacion):
+    """Recalcula, valida y calcula la confianza. SIN IA.
+
+    Es el camino del `PUT`: guardar una edición humana no vuelve a pagar una
+    generación. También lo usa `componer` después de la llamada al modelo, así que la
+    propuesta de la IA y la editada a mano pasan por exactamente el mismo filtro.
+    """
+    from apu_tool.dominio.validacion_composicion import calcular_confianza, validar
+
+    corregida, validacion = validar(propuesta, ctx_validacion)
+    return corregida, validacion, calcular_confianza(corregida, validacion,
+                                                     ctx_validacion)
+
+
+def componer(almacen, item, advisor, *, apu_codigo_propio: str = "",
+             supuestos_confirmados: bool = False):
+    """Genera una propuesta y emite los eventos del SSE.
+
+      ('recuperando', {'n_insumos', 'n_apus'})
+      ('generando',   {})
+      ('validando',   {})
+      ('lista',       {propuesta, validacion, confianza, confianza_motivos,
+                       antecedentes, modelo, prompt_version})
+      ('error',       {'detail'})
+
+    Emite eventos y no devuelve un objeto, por lo mismo que `revision.revisar`: el
+    llamador persiste y reporta en vivo, y una conexión muda demasiado rato la corta el
+    proxy. El evento `lista` trae exactamente lo que hay que guardar.
+
+    Una `PrivacyViolation` NO se convierte en un evento `error`: sube. El invariante #1
+    no se maquilla como "no se pudo componer" — mismo criterio que `revision.barrer_lote`.
+    """
+    from apu_tool.dominio import privacy
+    from apu_tool.dominio.ai_assist import PROMPT_VERSION, IANoDisponible
+
+    try:
+        ctx = recuperar(almacen, item, apu_codigo_propio=apu_codigo_propio,
+                        supuestos_confirmados=supuestos_confirmados)
+        yield ("recuperando", {"n_insumos": len(ctx.insumos),
+                               "n_apus": len(ctx.ejemplos)})
+        yield ("generando", {})
+        cruda = advisor.componer(item, list(ctx.insumos), list(ctx.ejemplos),
+                                 ctx.validacion.observados)
+        yield ("validando", {})
+    except privacy.PrivacyViolation:
+        raise                       # el invariante #1 nunca se traga
+    except (IANoDisponible, ValueError) as exc:
+        yield ("error", {"detail": str(exc)})
+        return
+
+    propuesta, validacion, confianza = evaluar(cruda, ctx.validacion)
+    yield ("lista", {
+        "propuesta": propuesta.to_dict(),
+        "validacion": validacion.to_dict(),
+        "confianza": confianza.nivel,
+        "confianza_motivos": [m.to_dict() for m in confianza.motivos],
+        "antecedentes": {
+            "codigos_permitidos": sorted(ctx.validacion.codigos_permitidos),
+            "apus_referencia": [{"codigo": a.codigo, "turno": a.shift}
+                                for a in ctx.ejemplos],
+        },
+        "modelo": advisor.model,
+        "prompt_version": PROMPT_VERSION,
+    })
+```
+
+Y arriba, en el import de `typing`, agrega `Any` si no está:
+
+```python
+from typing import Any, Optional
+```
+
+- [ ] **Paso 3b: borrar la composición vieja**
+
+En `apu_tool/dominio/ai_assist.py`, borra:
+- la dataclass `ComposedComponent`
+- la dataclass `ComposeResult`
+- la constante `_COMPOSE_SYSTEM`
+- la constante `_COMPOSE_SCHEMA`
+- el método `ApuAdvisor.compose_apu` completo
+
+En `apu_tool/dominio/assemble.py`, borra el método `Assembler.generar_composicion`
+completo y el bloque de imports que queda sin uso:
+
+```python
+from apu_tool.dominio.ai_assist import ApuAdvisor, ComposeResult
+from apu_tool.dominio.compose import InsumoRetriever
+```
+
+pasa a:
+
+```python
+from apu_tool.dominio.ai_assist import ApuAdvisor
+```
+
+Borra también la `@property retriever` y el atributo `self._retriever`: nadie los usa
+ya. Deja el `advisor` en el constructor **solo si algún llamador lo pasa**; si no queda
+ninguno, bórralo también y actualiza el docstring de la clase.
+
+- [ ] **Paso 3c: migrar los tests de la composición vieja**
+
+En `tests/test_compose.py`: borra `FakeAdvisor`, `test_retriever_returns_candidates`
+déjalo (sigue probando el retriever) y borra todo test que llame a
+`generar_composicion` o a `compose_apu`. La cobertura equivalente vive ahora en
+`tests/test_composicion_motor.py` y `tests/test_composicion_advisor.py`.
+
+Borra `tests/test_assemble_generado.py` entero: probaba `generar_composicion`.
+
+Verifica que `tests/test_assemble.py::test_armado_nunca_llama_a_la_ia` **sigue estando
+y sigue verde** — es la garantía de que el armado no cambió.
+
+- [ ] **Paso 4: correr las pruebas y verificar que pasan**
+
+```bash
+python -m pytest tests/test_composicion_motor.py -q
+python -m pytest tests/ -q 2>&1 | tail -3
+```
+
+Esperado: `18 passed` en el primero. En la suite completa, el total baja respecto a las
+1036 de base por los tests borrados y sube por los nuevos; **no puede haber ni un
+fallo**. Si `test_servicio_corridas.py` o `test_api_corridas.py` fallan, es porque
+`componer_item` todavía llama a `generar_composicion`: eso se arregla en la tarea 10, así
+que **si ese es el único rojo, anótalo y sigue** — pero no commitees rojo: mueve el
+borrado de `componer_item` a esta tarea si hace falta para dejar verde.
+
+- [ ] **Paso 5: commit**
+
+```bash
+git add apu_tool/dominio/composicion.py apu_tool/dominio/ai_assist.py \
+        apu_tool/dominio/assemble.py tests/test_composicion_motor.py \
+        tests/test_compose.py
+git rm tests/test_assemble_generado.py
+git commit -m "feat(composicion): orquestador con eventos; muere la composicion de dos campos"
+```
+
+---
+
+## Tarea 10: servicio y endpoints
+
+Cinco endpoints. La aprobación es un endpoint y no una cadena en el navegador: llama a
+`autoria.crear_apu` con los componentes de la versión vigente, sella la versión
+`aprobada` y asigna el APU a la fila.
+
+**Sobre la lista blanca en el `PUT`:** existe para que el **modelo** no invente
+códigos. Un humano que agrega un componente desde el buscador del catálogo no está
+inventando, así que al guardar una edición la lista se **amplía** con los códigos que
+mandó el humano y que existen en el catálogo. El guardián que queda es
+`CODIGO_INEXISTENTE`, que es el correcto para una adición humana.
+
+**Archivos:**
+- Crear: `apu_tool/servicio/composicion.py`
+- Modificar: `apu_tool/servicio/rutas.py`, `apu_tool/servicio/esquemas.py`,
+  `apu_tool/servicio/corridas.py` (borrar `componer_item`)
+- Test: `tests/test_api_composicion.py`
+
+- [ ] **Paso 1: escribir la prueba que falla**
+
+```python
+"""Los cinco endpoints de la composición: roles, códigos de error e idempotencia."""
+import json
+
+import pytest
+
+from apu_tool.dominio.composicion import Propuesta
+from apu_tool.nucleo.models import Apu, ApuComponent, Insumo, LicitacionItem
+from tests.conftest import cliente
+
+
+@pytest.fixture()
+def app_alm(tmp_path, monkeypatch):
+    from apu_tool.datos.almacen import Almacen
+    from apu_tool.servicio.app import crear_app
+    alm = Almacen(tmp_path / "precios.db", tmp_path / "apus.db",
+                  tmp_path / "corridas.db")
+    alm.reset()
+    alm.init_schema()
+    alm.precios.insert_insumos([
+        Insumo("4279", "CUADRILLA", "HR", "MO", 40000, "PRECIO IDU"),
+        Insumo("6092", "HERRAMIENTA MENOR", "GLB", "EQ", 2000, "PRECIO IDU"),
+    ])
+    alm.apus.insert_apus([Apu("A1", "EXCAVACION MANUAL", "M3", "DIURNO", "EXCAVACIONES")])
+    alm.apus.insert_components([
+        ApuComponent("A1", "DIURNO", "4279", "CUADRILLA", "HR", 0.62, 40000)])
+    app = crear_app()
+    app.state.almacen = alm
+    return app, alm
+
+
+@pytest.fixture()
+def corrida(app_alm):
+    """Una corrida con una fila SIN APU en seq 1."""
+    from apu_tool.nucleo.models import CorridaItemRow, CorridaMeta
+    _, alm = app_alm
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-10T10:00:00", archivo="x.xlsx",
+        turno_def="DIURNO", use_ai=None, estado="en_revision"))
+    item = LicitacionItem("1.3", "EXCAVACION MANUAL EN MATERIAL COMUN", "M3", 120.0,
+                          180000.0, "DIURNO")
+    alm.corridas.guardar_items(cid, [CorridaItemRow(
+        seq=1, item=item, status="new", apu_codigo=None,
+        apu_nombre="(sin base — armar manual)", unidad="M3", shift="DIURNO",
+        origen="manual", confianza=0.0, explicacion="", componentes=[],
+        candidatos=[])])
+    return cid
+
+
+PROPUESTA = {"componentes": [
+    {"codigo": "4279", "tipo": "insumo", "funcion": "mano_de_obra",
+     "rendimiento": 0.62, "origen": "copiado_de_antecedente",
+     "referencias": [{"apu_codigo": "A1", "turno": "DIURNO"}], "hipotesis": {},
+     "calculo": None, "justificacion": "j", "nivel_evidencia": "alto",
+     "ref_shift": ""}],
+    "supuestos": [], "incertidumbre_declarada": 0.3, "justificacion": "g"}
+
+
+def _sembrar(alm, cid, *, version=1, estado="propuesta", valido=True, propuesta=None):
+    from apu_tool.nucleo.models import ComposicionRow
+    alm.composiciones.agregar(ComposicionRow(
+        id=None, corrida_id=cid, seq=1, version=version, estado=estado,
+        actividad={"item": "1.3", "descripcion": "EXCAVACION MANUAL",
+                   "unidad": "M3", "cantidad": 120.0, "shift": "DIURNO"},
+        ficha=None, propuesta=propuesta or PROPUESTA,
+        validacion={"valido": valido, "errores": [] if valido else [
+            {"codigo": "PROPUESTA_VACIA", "mensaje": "x", "componente": ""}],
+            "advertencias": [], "metricas": {"superadas": 9, "totales": 9}},
+        confianza="alta" if valido else "insuficiente", confianza_motivos=[],
+        antecedentes={"codigos_permitidos": ["4279", "6092"],
+                      "apus_referencia": [{"codigo": "A1", "turno": "DIURNO"}]},
+        modelo="falso", prompt_version="composicion/v2", apu_codigo=None,
+        apu_turno=None, autor="t@test.co", creada_en="2026-09-10T10:00:00",
+        motivo=None))
+
+
+# --- GET -------------------------------------------------------------------
+def test_get_sin_composicion_devuelve_vacio(app_alm, corrida):
+    app, _ = app_alm
+    r = cliente(app, "consulta").get(f"/api/corridas/{corrida}/composicion/1")
+    assert r.status_code == 200
+    assert r.json() == {"vigente": None, "historial": []}
+
+
+def test_get_devuelve_la_vigente_y_el_historial(app_alm, corrida):
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    _sembrar(alm, corrida, version=2, estado="editada")
+    d = cliente(app, "consulta").get(
+        f"/api/corridas/{corrida}/composicion/1").json()
+    assert d["vigente"]["version"] == 2
+    assert len(d["historial"]) == 2
+
+
+def test_get_de_una_fila_inexistente_es_404(app_alm, corrida):
+    app, _ = app_alm
+    r = cliente(app, "consulta").get(f"/api/corridas/{corrida}/composicion/99")
+    assert r.status_code == 404
+
+
+def test_la_respuesta_del_get_no_lleva_dinero(app_alm, corrida):
+    from apu_tool.dominio import privacy
+    app, alm = app_alm
+    _sembrar(alm, corrida)
+    privacy.assert_no_money(
+        cliente(app, "consulta").get(f"/api/corridas/{corrida}/composicion/1").json())
+
+
+# --- PUT (edición humana) --------------------------------------------------
+def test_put_guarda_una_version_nueva_y_revalida(app_alm, corrida):
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    cuerpo = {"version_base": 1, "componentes": PROPUESTA["componentes"]}
+    r = cliente(app, "editor").put(f"/api/corridas/{corrida}/composicion/1",
+                                   json=cuerpo)
+    assert r.status_code == 200
+    assert r.json()["vigente"]["version"] == 2
+    assert r.json()["vigente"]["estado"] == "editada"
+
+
+def test_put_con_una_version_vieja_es_409(app_alm, corrida):
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    _sembrar(alm, corrida, version=2, estado="editada")
+    r = cliente(app, "editor").put(
+        f"/api/corridas/{corrida}/composicion/1",
+        json={"version_base": 1, "componentes": PROPUESTA["componentes"]})
+    assert r.status_code == 409
+
+
+def test_put_acepta_un_insumo_que_agrego_el_humano(app_alm, corrida):
+    """La lista blanca frena al MODELO, no a una persona que elige del catálogo."""
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    nuevo = dict(PROPUESTA["componentes"][0], codigo="6092",
+                 funcion="herramienta", rendimiento=1.0, origen="supuesto_tecnico",
+                 referencias=[])
+    r = cliente(app, "editor").put(
+        f"/api/corridas/{corrida}/composicion/1",
+        json={"version_base": 1,
+              "componentes": PROPUESTA["componentes"] + [nuevo]})
+    assert r.status_code == 200
+    errores = r.json()["vigente"]["validacion"]["errores"]
+    assert not [e for e in errores if e["codigo"] == "CODIGO_NO_AUTORIZADO"]
+
+
+def test_put_rechaza_un_codigo_que_no_esta_en_el_catalogo(app_alm, corrida):
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    falso = dict(PROPUESTA["componentes"][0], codigo="INVENTADO")
+    r = cliente(app, "editor").put(
+        f"/api/corridas/{corrida}/composicion/1",
+        json={"version_base": 1, "componentes": [falso]})
+    assert r.status_code == 200      # se guarda, pero inválida
+    codigos = {e["codigo"] for e in r.json()["vigente"]["validacion"]["errores"]}
+    assert "CODIGO_INEXISTENTE" in codigos or "CODIGO_NO_AUTORIZADO" in codigos
+    assert r.json()["vigente"]["validacion"]["valido"] is False
+
+
+def test_put_necesita_rol_editor(app_alm, corrida):
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    r = cliente(app, "consulta").put(
+        f"/api/corridas/{corrida}/composicion/1",
+        json={"version_base": 1, "componentes": PROPUESTA["componentes"]})
+    assert r.status_code == 403
+
+
+# --- aprobar ---------------------------------------------------------------
+CUERPO_APROBAR = {"version_base": 1, "codigo": "9001", "turno": "DIURNO",
+                  "nombre": "EXCAVACION MANUAL MATERIAL COMUN",
+                  "grupo": "EXCAVACIONES"}
+
+
+def test_aprobar_crea_el_apu_por_autoria_y_lo_asigna_a_la_fila(app_alm, corrida):
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    r = cliente(app, "editor").post(
+        f"/api/corridas/{corrida}/composicion/1/aprobar", json=CUERPO_APROBAR)
+    assert r.status_code == 200
+    assert alm.apus.get_apu("9001", "DIURNO") is not None
+    assert alm.corridas.get_item(corrida, 1).apu_codigo == "9001"
+    assert alm.composiciones.vigente(corrida, 1).estado == "aprobada"
+    assert alm.composiciones.vigente(corrida, 1).apu_codigo == "9001"
+
+
+def test_aprobar_dos_veces_no_crea_dos_apus(app_alm, corrida):
+    """Criterio 32: el doble clic lo frena el índice único, no un if."""
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    c = cliente(app, "editor")
+    r1 = c.post(f"/api/corridas/{corrida}/composicion/1/aprobar",
+                json=CUERPO_APROBAR)
+    r2 = c.post(f"/api/corridas/{corrida}/composicion/1/aprobar",
+                json=CUERPO_APROBAR)
+    assert r1.status_code == 200
+    assert r2.status_code == 409
+    apus, _ = alm.apus.list_apus(q="9001")
+    assert len(apus) == 1
+
+
+def test_aprobar_con_errores_bloqueantes_es_422(app_alm, corrida):
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1, valido=False)
+    r = cliente(app, "editor").post(
+        f"/api/corridas/{corrida}/composicion/1/aprobar", json=CUERPO_APROBAR)
+    assert r.status_code == 422
+
+
+def test_aprobar_con_un_codigo_duplicado_sube_el_error_de_autoria(app_alm, corrida):
+    """No se reimplementan las reglas de unicidad: son de autoria.py."""
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    r = cliente(app, "editor").post(
+        f"/api/corridas/{corrida}/composicion/1/aprobar",
+        json=dict(CUERPO_APROBAR, codigo="A1", nombre="EXCAVACION MANUAL"))
+    assert r.status_code == 422
+    assert "A1" in r.json()["detail"] or "existe" in r.json()["detail"].lower()
+
+
+def test_aprobar_necesita_rol_editor(app_alm, corrida):
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    r = cliente(app, "consulta").post(
+        f"/api/corridas/{corrida}/composicion/1/aprobar", json=CUERPO_APROBAR)
+    assert r.status_code == 403
+
+
+# --- rechazar --------------------------------------------------------------
+def test_rechazar_escribe_una_version_y_no_toca_nada_mas(app_alm, corrida):
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    r = cliente(app, "editor").post(
+        f"/api/corridas/{corrida}/composicion/1/rechazar",
+        json={"version_base": 1, "motivo": "no aplica"})
+    assert r.status_code == 200
+    assert alm.composiciones.vigente(corrida, 1).estado == "rechazada"
+    assert alm.corridas.get_item(corrida, 1).apu_codigo is None
+    assert alm.apus.counts()["apus"] == 1        # no se creó nada
+
+
+# --- generar (SSE) ---------------------------------------------------------
+def test_generar_sin_credencial_es_503(app_alm, corrida, monkeypatch):
+    app, _ = app_alm
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    r = cliente(app, "editor").post(
+        f"/api/corridas/{corrida}/composicion/1/stream")
+    assert r.status_code == 503
+
+
+def test_generar_en_una_corrida_congelada_es_409(app_alm, corrida, monkeypatch):
+    app, alm = app_alm
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    alm.corridas.set_modo(corrida, "congelada")
+    r = cliente(app, "editor").post(
+        f"/api/corridas/{corrida}/composicion/1/stream")
+    assert r.status_code == 409
+
+
+def test_el_endpoint_viejo_de_componer_ya_no_existe(app_alm, corrida):
+    app, _ = app_alm
+    r = cliente(app, "editor").post(f"/api/corridas/{corrida}/componer/1")
+    assert r.status_code == 404
+```
+
+- [ ] **Paso 2: correr la prueba para verificar que falla**
+
+Ejecuta: `python -m pytest tests/test_api_composicion.py -q`
+Esperado: FALLA con 404 en todos los endpoints nuevos.
+
+- [ ] **Paso 3a: los DTOs**
+
+En `apu_tool/servicio/esquemas.py`, al final:
+
+```python
+class ComponenteComposicionIn(BaseModel):
+    """Un componente tal como lo deja el humano en la mesa de revisión."""
+    codigo: str
+    tipo: str = "insumo"
+    funcion: str = ""
+    rendimiento: float
+    origen: str = "supuesto_tecnico"
+    referencias: list[dict] = []
+    hipotesis: dict = {}
+    calculo: Optional[dict] = None
+    justificacion: str = ""
+    nivel_evidencia: str = "bajo"
+    ref_shift: str = ""
+
+
+class ComposicionEditarIn(BaseModel):
+    # La versión sobre la que trabajó el usuario. Si ya hay una mayor, 409: alguien
+    # más la cambió mientras tanto.
+    version_base: int
+    componentes: list[ComponenteComposicionIn]
+    supuestos_confirmados: bool = False
+
+
+class ComposicionAprobarIn(BaseModel):
+    """La identidad del APU la pone el humano; los componentes salen de la versión
+    vigente, no del cuerpo: aprobar no es una oportunidad de editar."""
+    version_base: int
+    codigo: str
+    turno: str
+    nombre: str
+    grupo: str = ""
+    unidad: str = ""
+
+
+class ComposicionRechazarIn(BaseModel):
+    version_base: int
+    motivo: str = ""
+```
+
+- [ ] **Paso 3b: la lógica de servicio**
+
+Crea `apu_tool/servicio/composicion.py`:
+
+```python
+"""Servicio de la composición asistida. Hermano de `servicio/corridas.py`.
+
+No importa `pricing`: el agente no ve dinero ni de rebote. La creación del APU pasa
+por `servicio/autoria.py` — sus reglas de unicidad, gemelo día/noche y auditoría no se
+duplican acá.
+"""
+from __future__ import annotations
+
+import datetime as _dt
+from typing import Optional
+
+from apu_tool.datos.almacen import Almacen
+from apu_tool.datos.repositorio import VersionYaExiste
+from apu_tool.dominio.ai_assist import PROMPT_VERSION, ApuAdvisor, IANoDisponible
+from apu_tool.dominio import privacy
+from apu_tool.dominio.composicion import Propuesta, componer, evaluar, propuesta_desde_json, recuperar
+from apu_tool.nucleo.models import ComposicionRow
+from apu_tool.servicio import autoria
+from apu_tool.servicio.corridas import CorridaCongelada, confirmar_item
+
+__all__ = ["CorridaCongelada", "IANoDisponible", "VersionYaExiste",
+           "ComposicionInvalida", "vista", "generar_stream", "guardar_edicion",
+           "aprobar", "rechazar"]
+
+
+class ComposicionInvalida(Exception):
+    """Se intentó aprobar una composición con errores bloqueantes."""
+
+
+def _ahora() -> str:
+    return _dt.datetime.now().isoformat(timespec="seconds")
+
+
+def _fila_base(alm: Almacen, corrida_id: int, seq: int, item) -> dict:
+    """Los campos que toda versión comparte. `actividad` va DES-MONETIZADA."""
+    return {"corrida_id": corrida_id, "seq": seq,
+            "actividad": privacy.licitacion_item_to_dict(item), "ficha": None,
+            "creada_en": _ahora()}
+
+
+def vista(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
+    """La versión vigente y el historial. None si la fila no existe."""
+    if alm.corridas.get_item(corrida_id, seq) is None:
+        return None
+    v = alm.composiciones.vigente(corrida_id, seq)
+    return {"vigente": v.to_dict() if v else None,
+            "historial": [f.to_dict() for f in
+                          alm.composiciones.historial(corrida_id, seq)]}
+
+
+def _exigir_activa(alm: Almacen, corrida_id: int):
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    if meta.modo == "congelada":
+        raise CorridaCongelada(corrida_id)
+    return meta
+
+
+def generar_stream(alm: Almacen, corrida_id: int, seq: int, actor=None):
+    """Genera una propuesta y la persiste. Devuelve el generador de eventos SSE.
+
+    Valida ANTES de devolver el generador (corrida congelada, fila inexistente, falta
+    de credencial): si no, el error saldría con el stream ya abierto y el cliente
+    vería un 200 que muere solo. Mismo criterio que `revisar_corrida_stream`.
+    """
+    if _exigir_activa(alm, corrida_id) is None:
+        return None
+    row = alm.corridas.get_item(corrida_id, seq)
+    if row is None:
+        return None
+    advisor = ApuAdvisor()
+    if not advisor.enabled:
+        raise IANoDisponible(
+            "Componer un APU con IA necesita ANTHROPIC_API_KEY en el servidor.")
+    vigente = alm.composiciones.vigente(corrida_id, seq)
+    proxima = (vigente.version + 1) if vigente else 1
+    return _eventos(alm, corrida_id, seq, row, advisor, proxima, actor)
+
+
+def _eventos(alm, corrida_id, seq, row, advisor, version, actor):
+    for evento, payload in componer(alm, row.item, advisor):
+        if evento == "lista":
+            fila = ComposicionRow(
+                id=None, version=version, estado="propuesta",
+                propuesta=payload["propuesta"], validacion=payload["validacion"],
+                confianza=payload["confianza"],
+                confianza_motivos=payload["confianza_motivos"],
+                antecedentes=payload["antecedentes"], modelo=payload["modelo"],
+                prompt_version=payload["prompt_version"], apu_codigo=None,
+                apu_turno=None, autor=(actor.email if actor else None), motivo=None,
+                **_fila_base(alm, corrida_id, seq, row.item))
+            alm.composiciones.agregar(fila)
+            yield ("lista", {**payload, "version": version})
+            continue
+        if evento == "error":
+            alm.composiciones.agregar(ComposicionRow(
+                id=None, version=version, estado="error", propuesta=None,
+                validacion=None, confianza=None, confianza_motivos=None,
+                antecedentes=None, modelo=advisor.model,
+                prompt_version=PROMPT_VERSION, apu_codigo=None, apu_turno=None,
+                autor=(actor.email if actor else None), motivo=payload["detail"],
+                **_fila_base(alm, corrida_id, seq, row.item)))
+        yield (evento, payload)
+
+
+def _revalidar(alm, corrida_id, seq, row, componentes, supuestos_confirmados,
+               vigente):
+    """Recalcula y valida una propuesta EDITADA A MANO, sin llamar a la IA.
+
+    La lista blanca de la generación frena al MODELO; una persona que agrega un
+    componente desde el buscador del catálogo no está inventando nada, así que la
+    lista se AMPLÍA con lo que mandó. El guardián que queda es `CODIGO_INEXISTENTE`,
+    que es el correcto para una adición humana.
+    """
+    from dataclasses import replace
+
+    previos = set((vigente.antecedentes or {}).get("codigos_permitidos", []))
+    ctx = recuperar(alm, row.item, supuestos_confirmados=supuestos_confirmados)
+    permitidos = previos | {c["codigo"] for c in componentes} | \
+        ctx.validacion.codigos_permitidos
+    ctxv = replace(ctx.validacion, codigos_permitidos=frozenset(permitidos),
+                   supuestos_confirmados=supuestos_confirmados)
+    base = dict(vigente.propuesta or {})
+    base["componentes"] = componentes
+    return evaluar(propuesta_desde_json(base), ctxv), ctx
+
+
+def guardar_edicion(alm: Almacen, corrida_id: int, seq: int, datos: dict,
+                    actor=None) -> Optional[dict]:
+    """Escribe una versión `editada`. Levanta VersionYaExiste si alguien se adelantó."""
+    if _exigir_activa(alm, corrida_id) is None:
+        return None
+    row = alm.corridas.get_item(corrida_id, seq)
+    vigente = alm.composiciones.vigente(corrida_id, seq)
+    if row is None or vigente is None:
+        return None
+    version = int(datos["version_base"]) + 1
+    (propuesta, validacion, confianza), ctx = _revalidar(
+        alm, corrida_id, seq, row, datos["componentes"],
+        bool(datos.get("supuestos_confirmados")), vigente)
+    alm.composiciones.agregar(ComposicionRow(
+        id=None, version=version, estado="editada", propuesta=propuesta.to_dict(),
+        validacion=validacion.to_dict(), confianza=confianza.nivel,
+        confianza_motivos=[m.to_dict() for m in confianza.motivos],
+        antecedentes={"codigos_permitidos": sorted(ctx.validacion.codigos_permitidos),
+                      "apus_referencia": (vigente.antecedentes or {}).get(
+                          "apus_referencia", [])},
+        modelo=vigente.modelo, prompt_version=vigente.prompt_version,
+        apu_codigo=None, apu_turno=None,
+        autor=(actor.email if actor else None), motivo=None,
+        **_fila_base(alm, corrida_id, seq, row.item)))
+    return vista(alm, corrida_id, seq)
+
+
+def aprobar(alm: Almacen, corrida_id: int, seq: int, datos: dict,
+            actor=None) -> Optional[dict]:
+    """Crea el APU por autoría, sella la versión `aprobada` y lo asigna a la fila.
+
+    Los componentes salen de la versión VIGENTE, no del cuerpo: aprobar no es una
+    oportunidad de editar (para eso está el PUT, que revalida). Del cuerpo viene solo
+    la identidad, que es lo que el humano elige.
+
+    Costura conocida: `crear_apu` escribe en apus.db y el sellado en corridas.db —
+    dos archivos SQLite, sin transacción común. Si lo segundo falla, el APU existe y
+    la fila no lo tiene; se avisa, nunca en silencio.
+    """
+    if _exigir_activa(alm, corrida_id) is None:
+        return None
+    row = alm.corridas.get_item(corrida_id, seq)
+    vigente = alm.composiciones.vigente(corrida_id, seq)
+    if row is None or vigente is None:
+        return None
+    if vigente.estado == "aprobada":
+        raise VersionYaExiste(corrida_id, seq, vigente.version)
+    if not (vigente.validacion or {}).get("valido"):
+        raise ComposicionInvalida(
+            "La composición tiene errores que impiden aprobarla. Corregilos en la "
+            "mesa de revisión y volvé a guardar.")
+
+    version = int(datos["version_base"]) + 1
+    comps = (vigente.propuesta or {}).get("componentes", [])
+    apu = autoria.crear_apu(alm, {
+        "codigo": datos["codigo"], "turno": datos["turno"],
+        "nombre": datos["nombre"], "grupo": datos.get("grupo", ""),
+        "unidad": datos.get("unidad") or row.item.unidad,
+        "componentes": [{"insumo_codigo": c["codigo"],
+                         "rendimiento": c["rendimiento"],
+                         "tipo": c.get("tipo", "insumo"),
+                         "ref_shift": c.get("ref_shift", "")} for c in comps],
+    }, actor=actor)
+    alm.composiciones.agregar(ComposicionRow(
+        id=None, version=version, estado="aprobada", propuesta=vigente.propuesta,
+        validacion=vigente.validacion, confianza=vigente.confianza,
+        confianza_motivos=vigente.confianza_motivos,
+        antecedentes=vigente.antecedentes, modelo=vigente.modelo,
+        prompt_version=vigente.prompt_version, apu_codigo=apu["codigo"],
+        apu_turno=apu["turno"], autor=(actor.email if actor else None), motivo=None,
+        **_fila_base(alm, corrida_id, seq, row.item)))
+    confirmar_item(alm, corrida_id, seq, apu["codigo"], apu["turno"])
+    return vista(alm, corrida_id, seq)
+
+
+def rechazar(alm: Almacen, corrida_id: int, seq: int, datos: dict,
+             actor=None) -> Optional[dict]:
+    """Sella una versión `rechazada`. No toca corrida, biblioteca ni catálogo."""
+    if _exigir_activa(alm, corrida_id) is None:
+        return None
+    row = alm.corridas.get_item(corrida_id, seq)
+    vigente = alm.composiciones.vigente(corrida_id, seq)
+    if row is None or vigente is None:
+        return None
+    alm.composiciones.agregar(ComposicionRow(
+        id=None, version=int(datos["version_base"]) + 1, estado="rechazada",
+        propuesta=vigente.propuesta, validacion=vigente.validacion,
+        confianza=vigente.confianza, confianza_motivos=vigente.confianza_motivos,
+        antecedentes=vigente.antecedentes, modelo=vigente.modelo,
+        prompt_version=vigente.prompt_version, apu_codigo=None, apu_turno=None,
+        autor=(actor.email if actor else None),
+        motivo=str(datos.get("motivo") or ""),
+        **_fila_base(alm, corrida_id, seq, row.item)))
+    return vista(alm, corrida_id, seq)
+```
+
+- [ ] **Paso 3c: las rutas**
+
+En `apu_tool/servicio/rutas.py`, **borra** el endpoint
+`@router.post("/corridas/{cid}/componer/{seq}")` completo y agrega:
+
+```python
+@router.get("/corridas/{cid}/composicion/{seq}")
+def get_composicion(cid: int, seq: int, alm: Almacen = Depends(get_almacen),
+                    _: object = Depends(requiere_rol("consulta"))):
+    d = comp_svc.vista(alm, cid, seq)
+    if d is None:
+        raise HTTPException(status_code=404, detail="Ítem no encontrado.")
+    return d
+
+
+@router.post("/corridas/{cid}/composicion/{seq}/stream")
+def generar_composicion(cid: int, seq: int, alm: Almacen = Depends(get_almacen),
+                        actor=Depends(requiere_rol("editor"))):
+    """Compone un APU con IA para una fila sin APU. Propone; no crea nada."""
+    try:
+        gen = comp_svc.generar_stream(alm, cid, seq, actor=actor)
+    except comp_svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; activala para componer.")
+    except comp_svc.IANoDisponible as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if gen is None:
+        raise HTTPException(status_code=404, detail="Ítem no encontrado.")
+    return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
+
+
+@router.put("/corridas/{cid}/composicion/{seq}")
+def editar_composicion(cid: int, seq: int, body: ComposicionEditarIn,
+                       alm: Almacen = Depends(get_almacen),
+                       actor=Depends(requiere_rol("editor"))):
+    try:
+        d = comp_svc.guardar_edicion(alm, cid, seq, body.model_dump(), actor=actor)
+    except comp_svc.CorridaCongelada:
+        raise HTTPException(status_code=409, detail="La corrida está congelada.")
+    except comp_svc.VersionYaExiste as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if d is None:
+        raise HTTPException(status_code=404, detail="Composición no encontrada.")
+    return d
+
+
+@router.post("/corridas/{cid}/composicion/{seq}/aprobar")
+def aprobar_composicion(cid: int, seq: int, body: ComposicionAprobarIn,
+                        alm: Almacen = Depends(get_almacen),
+                        actor=Depends(requiere_rol("editor"))):
+    """Crea el APU por el alta de siempre y lo asigna a la fila."""
+    try:
+        d = comp_svc.aprobar(alm, cid, seq, body.model_dump(), actor=actor)
+    except comp_svc.CorridaCongelada:
+        raise HTTPException(status_code=409, detail="La corrida está congelada.")
+    except comp_svc.VersionYaExiste as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except comp_svc.ComposicionInvalida as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except ValueError as e:            # las reglas de autoria.py, tal cual
+        raise HTTPException(status_code=422, detail=str(e))
+    if d is None:
+        raise HTTPException(status_code=404, detail="Composición no encontrada.")
+    return d
+
+
+@router.post("/corridas/{cid}/composicion/{seq}/rechazar")
+def rechazar_composicion(cid: int, seq: int, body: ComposicionRechazarIn,
+                         alm: Almacen = Depends(get_almacen),
+                         actor=Depends(requiere_rol("editor"))):
+    try:
+        d = comp_svc.rechazar(alm, cid, seq, body.model_dump(), actor=actor)
+    except comp_svc.CorridaCongelada:
+        raise HTTPException(status_code=409, detail="La corrida está congelada.")
+    except comp_svc.VersionYaExiste as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if d is None:
+        raise HTTPException(status_code=404, detail="Composición no encontrada.")
+    return d
+```
+
+Imports a agregar arriba de `rutas.py`:
+
+```python
+from apu_tool.servicio import composicion as comp_svc
+from apu_tool.servicio.esquemas import (
+    ComposicionAprobarIn, ComposicionEditarIn, ComposicionRechazarIn,
+)
+```
+
+**Ojo con `requiere_rol`:** hoy se usa como `_: object = Depends(requiere_rol("editor"))`
+y se descarta. Acá se necesita el actor para la auditoría y el campo `autor`. Verificá
+que `requiere_rol` devuelva el `Perfil`; si no, usá el mismo patrón que ya usan los
+endpoints de autoría para obtener el actor y ajustá estas firmas en consecuencia.
+
+- [ ] **Paso 3d: borrar `componer_item` del servicio de corridas**
+
+En `apu_tool/servicio/corridas.py`, borra la función `componer_item` completa y el
+import de `ApuAdvisor` si queda sin uso.
+
+- [ ] **Paso 4: correr las pruebas y verificar que pasan**
+
+```bash
+python -m pytest tests/test_api_composicion.py -q
+python -m pytest tests/ -q 2>&1 | tail -3
+```
+
+Esperado: `20 passed` en el primero, y **cero fallos** en la suite completa.
+
+- [ ] **Paso 5: commit**
+
+```bash
+git add apu_tool/servicio/composicion.py apu_tool/servicio/rutas.py \
+        apu_tool/servicio/esquemas.py apu_tool/servicio/corridas.py \
+        tests/test_api_composicion.py
+git commit -m "feat(servicio): cinco endpoints de composicion; aprobar pasa por autoria"
+```
+
+---

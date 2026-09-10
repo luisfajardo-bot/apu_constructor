@@ -36,6 +36,14 @@ def test_el_payload_lleva_exactamente_estas_claves():
     assert set(p["rendimientos_observados"][0]) == {"insumo_codigo", "unidad", "n",
                                                     "minimo", "mediana", "maximo",
                                                     "descartados_otra_unidad"}
+    # Los dos niveles que faltaban. `depriced_apu_to_dict` y
+    # `depriced_component_to_dict` son serializadores HACIA LA IA: un campo agregado
+    # ahí viaja al modelo sin que nadie lo decida, y son código compartido con la
+    # revisión (dominio/revision.py), así que el cambio puede venir de otra feature.
+    assert set(p["apus_referencia"][0]) == {"codigo", "nombre", "unidad", "shift",
+                                            "grupo", "componentes"}
+    assert set(p["apus_referencia"][0]["componentes"][0]) == {
+        "insumo_codigo", "insumo_nombre", "unidad", "rendimiento", "tipo"}
 
 
 def test_el_precio_contractual_de_la_actividad_no_viaja():

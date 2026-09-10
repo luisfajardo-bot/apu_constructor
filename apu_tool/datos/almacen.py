@@ -12,6 +12,7 @@ from pathlib import Path
 from apu_tool import config
 from apu_tool.datos.apus_db import ApusDB
 from apu_tool.datos.carpetas_db import CarpetasDB
+from apu_tool.datos.composiciones_db import ComposicionesDB
 from apu_tool.datos.corridas_db import CorridasDB
 from apu_tool.datos.precios_db import PreciosDB
 
@@ -47,6 +48,7 @@ class Almacen:
             self.apus = ApusDB(apus_path)
             self.corridas = CorridasDB(corridas_path)
             self.carpetas = CarpetasDB(corridas_path)
+            self.composiciones = ComposicionesDB(corridas_path)
             self.perfiles = PerfilesDB(self._seg_path)
             self.auditoria = AuditoriaDB(self._seg_path)
             self._paths = {"precios": Path(precios_path), "apus": Path(apus_path),

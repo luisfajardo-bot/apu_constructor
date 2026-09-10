@@ -4633,6 +4633,7 @@ maquetado es libre dentro de la convención densa del repo):
 | Hallazgo sin `componente` | `componente: ""` significa que es del **conjunto**, no de una fila: se pinta en el bloque de arriba y no resalta ninguna fila. Pasa con `FALTA_MANO_DE_OBRA`, `FALTA_HERRAMIENTA`, `METODO_INCOHERENTE`, `SUPUESTO_SIN_CONFIRMAR` y con `COMPONENTE_DUPLICADO` cuando hay **más de un** código repetido (con uno solo sí trae el código). Los códigos van nombrados dentro del `mensaje` |
 | Rendimiento | `<input>` numérico con `aria-label={\`Rendimiento de ${c.codigo}\`}` |
 | Hipótesis | al desplegar la fila, los pares clave-valor de `hipotesis` junto a la fórmula de `calculo`. **Es el único consumidor de ese campo**: el validador no lo mira, así que si la interfaz no lo muestra, el modelo está gastando tokens en llenar algo que nadie lee |
+| Nivel de evidencia | la columna "Ev." de la tabla. **Igual que `hipotesis`, la interfaz es su único consumidor**: ni el validador ni la confianza lo leen. Si esta columna no se pinta, hay que sacarle las tres líneas al prompt en vez de dejar un campo que nadie mira |
 | Quitar | `<button>` con `aria-label={\`Quitar ${c.codigo}\`}` |
 | Métricas | el cociente "N de M validaciones superadas" se muestra **solo** cuando `validacion.valido` es verdadero. Con errores se lee "N errores" y nada más: un 89 % al lado de un cartel de bloqueo tranquiliza sobre algo que no se puede aprobar |
 | Guardar cambios | llama `guardarComposicion(corridaId, fila, vigente.version, componentes, supuestosConfirmados)`; deshabilitado si no hay cambios |

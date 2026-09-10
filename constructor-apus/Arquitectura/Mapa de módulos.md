@@ -40,6 +40,7 @@ flowchart TD
 | `apus_db.py` | Acceso a apus.db (SQLite): biblioteca histórica de APUs (composición + rendimiento + turno). |
 | `auditoria_db.py` | Acceso SQLite a la tabla `auditoria` (vive en seguridad.db, junto a perfiles). |
 | `carpetas_db.py` | Acceso a la tabla `carpeta` (vive en corridas.db). Implementa RepositorioCarpetas. |
+| `composiciones_db.py` | Acceso a la tabla `composicion` (vive en corridas.db). Implementa |
 | `correcciones.py` | Correcciones de código aplicadas al semillar (normalización mínima). |
 | `corridas_db.py` | Acceso a corridas.db (SQLite): estado de aplicación de un armado en progreso. |
 | `migracion_pg.py` | Migración de catálogo SQLite → Postgres (Supabase). Corridas NO se migran. |

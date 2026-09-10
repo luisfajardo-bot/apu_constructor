@@ -185,6 +185,15 @@ modelo la base para declarar "copiado" o "ajustado", y al validador la base para
 "atípico". Son cantidades físicas, no dinero. `grupo` (`MO`/`EQ`/`MAT`) entra por primera
 vez: es clasificación técnica.
 
+**El esquema JSON de la fase es más corto que el vocabulario del contrato, a
+propósito.** `TIPOS` y `FUNCIONES` incluyen `apu` y `sub_apu`, pero el esquema que se
+le manda al modelo ofrece solo `insumo` y las funciones sin `sub_apu`. Razón: con la
+lista blanca filtrada, esas dos opciones son **trampas garantizadas** — el validador
+las rechaza siempre, así que ofrecérselas al modelo es invitarlo a un error que no
+puede evitar. Es el mismo principio que el filtro del retriever, un nivel más arriba:
+**lo que el modelo no puede expresar, no lo puede errar.** En la fase 3, cuando la IA
+sí proponga sub-APUs, los dos enums vuelven a coincidir con el vocabulario.
+
 **`insumos_disponibles` excluye los sub-APUs, y hay que sostenerlo en el retriever.**
 La decisión de fase es que el contrato y el validador soporten sub-APUs pero la IA
 todavía no los proponga. Eso no se cumple solo: `InsumoRetriever` saca candidatos de

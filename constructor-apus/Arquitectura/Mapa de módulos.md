@@ -66,6 +66,7 @@ flowchart TD
 | `assemble.py` | Orquestador del pipeline por ítem. |
 | `compose.py` | Recuperación de insumos candidatos para la composición generativa. |
 | `composicion.py` | Contrato de la composición asistida. |
+| `composicion_agente.py` | Orquestador de la composición asistida. |
 | `cruce.py` | Resolución del cruce insumo-de-APU -> insumo-de-catálogo, por código + nombre. |
 | `integridad.py` | Chequeo de integridad del vínculo APU -> insumo (que cruza las dos bases). |
 | `licitacion.py` | Lectura de la lista de licitación (entrada) y generación de un ejemplo. |

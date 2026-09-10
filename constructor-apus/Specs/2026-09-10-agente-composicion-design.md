@@ -353,6 +353,24 @@ hay hook en `actualizar_eleccion`, no hay estado que se pise solo, y el historia
 criterio que `ux_corrida_armando_archivo`: las dos peticiones de un doble clic llegan con
 milisegundos de diferencia.
 
+**El `seq` se reusa, y por eso el expediente es caché y no verdad.** La FK apunta a
+`corrida`, no a `corrida_item`, así que un expediente **sobrevive al borrado de su
+línea**. Y `agregar_items` toma `max(seq) + 1`, de modo que borrar la **última** línea y
+agregar otra le da el mismo `seq` — el comentario de `corridas.py` que dice que los
+huecos de un borrado no se reusan vale para los del medio, no para la cola. Sin
+protección, `vigente(cid, seq)` devolvería el expediente de **otra actividad**, y si esa
+versión quedó `aprobada`, el endpoint de aprobar contestaría 409 nombrando un APU ajeno
+y esa línea no se podría componer nunca más.
+
+La protección es la misma que el repo ya usa para el veredicto de la revisión
+(`revision_json` con `apu_evaluado`): **la fila guarda `actividad`, y el servicio ignora
+la vigente cuando su `descripcion` no coincide con la de la línea de hoy.** No se borra
+nada, el append-only queda intacto y no cambia el esquema. Es caché, no verdad: se puede
+volver a componer cuando sea.
+
+Es el primer dato de este repo que sobrevive a la línea que documenta, y por eso el
+problema no existía antes.
+
 ## 8. Cómo se garantiza que la IA nunca vea dinero
 
 Cinco capas, de la más estructural a la más defensiva:

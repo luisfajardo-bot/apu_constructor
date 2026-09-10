@@ -1,4 +1,4 @@
-"""
+﻿"""
 Lógica de la capa de servicio para las corridas (armado web).
 
 No habla HTTP ni con la IA directamente: orquesta el dominio (matcher, assembler,
@@ -254,9 +254,9 @@ def armar_pendientes(alm: Almacen, corrida_id: int, items: list[LicitacionItem],
     se reintenta cuando la base vuelva. Un éxito reinicia el contador (ver config).
     """
     # `enabled=False` y no `use_ai`: el armado NUNCA llama a la IA (audita después, ver
-    # dominio/revision.py; hay un test que lo fija). El Assembler sigue pidiendo un
-    # advisor solo por `generar_composicion`, que es a pedido explícito del usuario y
-    # no pasa por acá; pasarle uno apagado deja la puerta cerrada de este lado.
+    # dominio/revision.py; hay un test que lo fija). El Assembler ya no usa el advisor
+    # para nada — la composición se mudó a `dominio/composicion_agente.py` — pero
+    # pasarle uno apagado deja la puerta cerrada de este lado igual.
     meta = alm.corridas.get_corrida(corrida_id)
     assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False),
                           lista_id=meta.lista_precios_id if meta else None)
@@ -943,48 +943,6 @@ def _eventos_revision(alm: Almacen, corrida_id: int, filas, revisor):
         # IA aparece acá, con el stream ya abierto. Mensaje accionable en vez del
         # "Error interno." genérico.
         yield ("error", {"detail": str(exc)})
-
-
-def componer_item(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
-    """PROPONE una composición para una fila sin APU. No escribe NADA.
-
-    Es el único uso que queda de la composición generativa, y solo se llega acá por
-    un clic del usuario en una fila que la revisión dictaminó `sin_apu`. Lo que
-    vuelve es una propuesta: crear el APU sigue siendo el alta de siempre
-    (`servicio/autoria.py`), con sus validaciones de duplicados. La IA nunca mete
-    un APU en la biblioteca.
-
-    None si la corrida o la fila no existen. Lanza IANoDisponible sin IA (no hay
-    fallback: el determinístico ya dijo que no tiene nada) y ValueError si la IA no
-    pudo componer.
-    """
-    meta = alm.corridas.get_corrida(corrida_id)
-    if meta is None:
-        return None
-    row = alm.corridas.get_item(corrida_id, seq)
-    if row is None:
-        return None
-    advisor = ApuAdvisor()
-    if not advisor.enabled:
-        raise IANoDisponible(
-            "Componer un APU con IA necesita ANTHROPIC_API_KEY en el servidor.")
-    # Misma tarifa que el resto de la corrida (ver `agregar_items`): la propuesta
-    # se compone contra los mismos insumos.
-    assembler = Assembler(alm, advisor=advisor, lista_id=meta.lista_precios_id)
-    ens = assembler.generar_composicion(row.item)
-    if ens is None:
-        raise ValueError("La IA no pudo componer esta actividad. "
-                         "Ármala a mano o agrega el APU a la biblioteca.")
-    # Solo ESTRUCTURA: `generar_composicion` devuelve un AssembledApu costeado, pero
-    # mandar costos de un APU que todavía no existe es ruido (y el precio de cada
-    # insumo ya se ve en el catálogo).
-    return {"seq": row.seq, "nombre": ens.apu_nombre, "unidad": ens.unidad,
-            "shift": ens.shift, "justificacion": ens.explicacion,
-            "confianza": round(ens.confianza, 4),
-            "componentes": [{"insumo_codigo": c.insumo_codigo,
-                             "insumo_nombre": c.insumo_nombre,
-                             "unidad": c.unidad, "rendimiento": c.rendimiento}
-                            for c in ens.componentes]}
 
 
 def listar_corridas(alm: Almacen) -> list[dict]:

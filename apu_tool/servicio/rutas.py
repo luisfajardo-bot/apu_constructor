@@ -1,4 +1,4 @@
-"""Endpoints de la API. Delgados: validan y delegan en apu_tool.servicio.corridas."""
+﻿"""Endpoints de la API. Delgados: validan y delegan en apu_tool.servicio.corridas."""
 from __future__ import annotations
 
 import json
@@ -270,22 +270,6 @@ def revisar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
     return StreamingResponse(_event_stream(gen),
                              media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
-
-
-@router.post("/corridas/{cid}/componer/{seq}")
-def componer_item(cid: int, seq: int, alm: Almacen = Depends(get_almacen),
-                  _: object = Depends(requiere_rol("editor"))):
-    """Propone una composición para una fila sin APU. No crea nada en la biblioteca."""
-    try:
-        d = svc.componer_item(alm, cid, seq)
-    except svc.IANoDisponible as e:
-        # 503 (igual que la revisión): falta configuración del servidor.
-        raise HTTPException(status_code=503, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    if d is None:
-        raise HTTPException(status_code=404, detail="Ítem no encontrado.")
-    return d
 
 
 @router.get("/corridas/{cid}/items/{seq}")

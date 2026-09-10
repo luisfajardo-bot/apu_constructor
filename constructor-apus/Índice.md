@@ -13,6 +13,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 53 plane
 
 - [[Auditorías/auditoria-codigo-2026-07-01|Auditoría de código — Armador de APUs (2026-07-01)]]
 - [[Auditorías/auditoria-codigo-2026-07-08|Auditoría de código — Armador de APUs (2026-07-08)]]
+- [[Auditorías/auditoria-seguridad-2026-08-28|Auditoría de seguridad — Armador de APUs]]
 
 ## Runbooks
 

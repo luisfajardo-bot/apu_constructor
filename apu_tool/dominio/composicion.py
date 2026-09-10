@@ -149,8 +149,23 @@ class Propuesta:
 
 
 # ------------------------------------------------------------------ parseo
-def _texto(v: Any) -> str:
-    return "" if v is None else str(v).strip()
+# Tope de longitud para los textos que vienen del modelo. Un código de insumo real
+# tiene menos de 20 caracteres y una justificación corta cabe de sobra; lo que esto
+# ataja es una respuesta degenerada que rompería la tabla de la interfaz o inflaría
+# la fila persistida. Se acota en el PARSEO y no río abajo porque acá es donde está
+# el borde de confianza: todo lo que sigue ya trabaja con datos acotados.
+#
+# Medido contra las bases reales del repo: el código más largo del catálogo tiene 7
+# caracteres ("10016 N") y el `shift` más largo 8 ("NOCTURNO"), así que 40 sobra.
+# OJO con _MAX_TEXTO si algún día se parsea un NOMBRE de insumo o de APU: los reales
+# llegan a 830 caracteres (`insumos.nombre`) y este tope los cortaría. Hoy no pasa
+# ninguno por acá — el modelo manda códigos y el nombre lo pone el catálogo.
+_MAX_TEXTO = 500
+_MAX_CODIGO = 40
+
+
+def _texto(v: Any, tope: int = _MAX_TEXTO) -> str:
+    return "" if v is None else str(v).strip()[:tope]
 
 
 def _numero(v: Any) -> float:
@@ -172,9 +187,9 @@ def _referencias_desde(v: Any) -> tuple[Referencia, ...]:
     for r in (v if isinstance(v, list) else []):
         if not isinstance(r, dict):
             continue
-        cod = _texto(r.get("apu_codigo"))
+        cod = _texto(r.get("apu_codigo"), _MAX_CODIGO)
         if cod:
-            out.append(Referencia(cod, _texto(r.get("turno")).upper()))
+            out.append(Referencia(cod, _texto(r.get("turno"), _MAX_CODIGO).upper()))
     return tuple(out)
 
 
@@ -192,7 +207,7 @@ def _componente_desde(v: Any) -> Optional[ComponentePropuesto]:
     if not isinstance(v, dict):
         return None          # no es un componente degradable: no hay nada que leer
     return ComponentePropuesto(
-        codigo=_texto(v.get("codigo")),
+        codigo=_texto(v.get("codigo"), _MAX_CODIGO),
         tipo=_del_vocabulario(v.get("tipo"), TIPOS, "insumo"),
         # "" y no un valor del vocabulario: inventarle un rol sería una mentira que el
         # validador daría por buena. Vacío es legible y se marca.
@@ -206,7 +221,7 @@ def _componente_desde(v: Any) -> Optional[ComponentePropuesto]:
         justificacion=_texto(v.get("justificacion")),
         nivel_evidencia=_del_vocabulario(v.get("nivel_evidencia"),
                                          NIVELES_EVIDENCIA, "bajo"),
-        ref_shift=_texto(v.get("ref_shift")).upper(),
+        ref_shift=_texto(v.get("ref_shift"), _MAX_CODIGO).upper(),
     )
 
 

@@ -181,3 +181,13 @@ def test_las_hipotesis_no_quedan_aliasadas_al_json_del_llamador():
     p = propuesta_desde_json(crudo)
     crudo["componentes"][0]["hipotesis"]["horas_jornada"] = 999
     assert p.componentes[0].hipotesis["horas_jornada"] == 8
+
+
+def test_un_codigo_absurdamente_largo_se_acota_en_el_parseo():
+    """La salida del modelo es un borde de confianza: se acota acá, no río abajo.
+    Un código de 10 KB rompe la tabla de la interfaz y se persiste igual, porque la
+    validación trunca los mensajes pero no los datos."""
+    p = propuesta_desde_json(_crudo(codigo="X" * 10_000,
+                                    justificacion="J" * 10_000))
+    assert len(p.componentes[0].codigo) == 40
+    assert len(p.componentes[0].justificacion) == 500

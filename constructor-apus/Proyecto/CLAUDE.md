@@ -58,9 +58,11 @@ Excel histórico ──seed──► SQLite/Postgres (precios, apus, corridas, p
 lista licitación ──► encola ──► worker arma (reanudable) ──► confirma usuario ──► motor de precios
                                                           └─► cuadro resumen (Excel)
 corrida armada ──► revisión con IA (sin dinero) ──► propone veredicto ──► confirma usuario
+fila sin APU ──► composición con IA (sin dinero) ──► validación determinística
+                                    └─► confianza calculada ──► aprueba usuario ──► autoria.crear_apu
 
 Interfaces sobre el mismo pipeline (dominio/pipeline.py):
-  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 58 endpoints) + web/ (React) para multiusuario
+  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 62 endpoints) + web/ (React) para multiusuario
 ```
 
 `apu_tool/config.py` es transversal, fuera de cualquier paquete: rutas, umbrales de
@@ -84,6 +86,7 @@ matching, modelo de IA, clasificación de precios.
 | `apus_db.py`      | SQLite de `apus.db` (biblioteca de APUs) |
 | `carpetas_db.py`  | SQLite de carpetas de corridas |
 | `corridas_db.py`  | SQLite de `corridas.db` (estado de corridas en curso) |
+| `composiciones_db.py` | SQLite del expediente de composición (vive en `corridas.db`, repo aparte por dominio, como `carpetas_db.py`) |
 | `auditoria_db.py` | SQLite de auditoría (`seguridad.db`) |
 | `perfiles_db.py`  | SQLite de perfiles (identidad + rol) |
 | `almacen.py`      | fachada que agrupa los repos SQLite/Postgres |
@@ -100,9 +103,12 @@ matching, modelo de IA, clasificación de precios.
 | `presupuesto.py`         | lectura del presupuesto oficial por capítulos |
 | `matching.py`            | matcher determinístico (fuzzy, sin dependencias externas) |
 | `cruce.py`               | cruce insumo-de-APU ↔ insumo-de-catálogo por código+nombre |
-| `compose.py`             | candidatos de insumos para composición generativa |
+| `compose.py`             | candidatos de insumos para el agente de composición + `rendimientos_observados()` (rango del insumo en la biblioteca) |
+| `composicion.py`         | contrato del agente de composición: vocabularios cerrados, dataclasses, parseo tolerante del JSON del modelo |
+| `validacion_composicion.py` | validador determinístico de una propuesta de composición + confianza calculada por la plataforma |
 | `privacy.py`             | frontera de precios para la IA (invariante #1) |
-| `ai_assist.py`           | IA acotada (Anthropic SDK): compone un APU a pedido |
+| `ai_assist.py`           | IA acotada (Anthropic SDK): propone una composición a pedido (no compone; el usuario aprueba) |
+| `composicion_agente.py`  | orquestador del agente de composición (hermano de `revision.py`): `recuperar()`, `evaluar()`, `componer()` (eventos SSE) |
 | `revision.py`            | revisión con IA de una corrida ya armada (propone, no aplica) |
 | `assemble.py`            | orquestador por ítem |
 | `pricing.py`             | motor de costos (**ÚNICO** que ve dinero) |
@@ -123,7 +129,8 @@ matching, modelo de IA, clasificación de precios.
 | `auth.py`              | autenticación (Supabase Auth) + autorización por rol |
 | `limites.py`           | límite de tamaño de subida + rate limiting |
 | `seguridad_headers.py` | middleware de headers de seguridad (HSTS, CSP, etc.) |
-| `corridas.py`          | lógica de servicio de corridas (armado en vivo, revisión con IA, componer) |
+| `corridas.py`          | lógica de servicio de corridas (armado en vivo, revisión con IA) |
+| `composicion.py`       | lógica de servicio del agente de composición (hermano de `corridas.py`): recuperar, generar (SSE), editar, aprobar, rechazar |
 | `insumos.py`           | lógica de servicio para editar insumos |
 | `insumos_ocultos.py`   | insumos ocultos: eco de un APU, sin uso real (no se borran) |
 | `listas.py`            | listas de precios (tarifas): Principal + una por obra de NP |
@@ -192,6 +199,34 @@ matching, modelo de IA, clasificación de precios.
   revisión corre por minutos sobre filas leídas al abrir el request, así que un
   `set_revision` puede llegar después de una reasignación. Un veredicto sobre otro APU no
   dice nada del actual. Es caché, no verdad: se puede volver a revisar cuando sea.
+- **Expediente de composición.** Cuando una fila queda sin APU, el usuario puede pedirle a
+  la IA una propuesta de composición; el expediente vive en la tabla `composicion`
+  (`corridas.db` / schema `corridas`, repo `datos/composiciones_db.py` +
+  `datos/pg/composiciones_pg.py`) y es **append-only por versión**: cada generación,
+  edición, aprobación o rechazo escribe una fila nueva, nunca actualiza una existente.
+  La `version` la manda el **llamador** (`version_base + 1`), no un `MAX+1` calculado
+  adentro — si se calculara adentro, dos clics seguidos sacarían el mismo número y el
+  índice único (`UNIQUE(corrida_id, seq, version)`, la protección del doble clic) no
+  protegería nada; con la versión explícita el segundo choca y el servicio devuelve 409.
+  `actividad_json` guarda la vista **des-monetizada** (`privacy.licitacion_item_to_dict`,
+  sin `precio_contractual`) y no el `LicitacionItem` crudo — así toda la fila es limpia y
+  se puede reinyectar como evidencia más adelante sin filtrarla de nuevo; es la lección de
+  `plan_json` aplicada antes de tropezar. El expediente **es caché y no verdad**: la FK
+  apunta a `corrida`, no a `corrida_item`, y el `seq` se reusa (borrar la última línea y
+  agregar otra le da el mismo `seq` que tenía la borrada), así que una versión vigente
+  puede hablar de **otra actividad**. La protección es la misma que `revision_json` con
+  `apu_evaluado`: el servicio compara la `descripcion` guardada contra la de la fila de
+  hoy y descarta el expediente si no coincide — no se borra nada, y se puede volver a
+  componer cuando sea. La composición **no se borra ni se invalida** cuando la fila
+  cambia de APU (al revés de `revision_json`): es un expediente con trabajo humano
+  adentro, no un veredicto barato. La **confianza** (`alta|media|baja|insuficiente`) la
+  calcula `validacion_composicion.calcular_confianza` con señales observables —
+  `incertidumbre_declarada` (la del modelo) se guarda **aparte**, en columna propia, y no
+  entra en el cálculo. Aprobar pasa por `servicio/autoria.py::crear_apu` (mismas reglas
+  de unicidad, gemelo día/noche y auditoría que cualquier alta) y sella la versión como
+  `aprobada` con el `apu_codigo` creado — dos archivos SQLite sin transacción común, así
+  que si el sellado falla después de crear el APU, la fila queda sin asignarlo (mensaje
+  accionable, nunca silencio).
 - **Costo puesto a mano.** `corrida_item.costo_manual` (los dos backends) es el costo
   unitario que declaró una persona para una fila: lo escribe el botón "Igualar costo al
   contractual", que copia el `precio_contractual` de las filas marcadas. Es para los
@@ -273,3 +308,23 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   Principal: el respaldo silencioso es justo lo que esta feature evita.
 - No borres listas de precios: una corrida guarda su `lista_precios_id` sin FK, y
   `seed --force` ya las destruye sin poder recuperarlas del Excel (ver Comandos).
+- No le ofrezcas al modelo, en el esquema JSON de la composición, un valor que el
+  validador rechaza siempre. El esquema acota `tipo` a `["insumo"]` y saca `sub_apu` de
+  `funcion` **a propósito**, aunque el vocabulario del contrato (`dominio/composicion.py`)
+  los tenga: con la lista blanca filtrada esas dos opciones son trampas garantizadas —
+  el validador las rechaza siempre. Lo que el modelo no puede expresar, no lo puede errar.
+- No uses la `incertidumbre_declarada` del modelo como confianza de una composición. La
+  confianza la calcula `validacion_composicion.calcular_confianza` con señales
+  observables y guarda su desglose (`confianza_motivos`) aparte; hay un test que falla si
+  el número que declara el modelo mueve el nivel.
+- No conviertas una regla de validación de composición discutible en error bloqueante.
+  **La prueba:** si esta regla se dispara, ¿qué hace el usuario para que deje de
+  dispararse? Si la respuesta no está entre los campos editables de la mesa de revisión,
+  es advertencia, no error. Esta fase lo hizo mal dos veces antes de escribirlo acá: el
+  techo de rendimiento (imposible de bajar si la actividad es global de verdad) y
+  `TIPO_INCOHERENTE` en su dirección inofensiva (`funcion` no se edita en la mesa).
+- No re-derives la lista blanca de una composición al revalidar (`PUT` de una edición
+  humana). Solo **crece**: partí de la persistida (`antecedentes_json.codigos_permitidos`)
+  y ampliala con lo que agregó una persona. Un `recuperar` fresco puede devolver menos
+  códigos que la generación original (un insumo nuevo desplaza a otro fuera del tope, o
+  alguien lo oculta) y dejaría sin autorizar un componente que el modelo propuso bien.

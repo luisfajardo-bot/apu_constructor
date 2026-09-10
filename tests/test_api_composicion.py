@@ -83,7 +83,7 @@ def test_get_sin_composicion_devuelve_vacio(app_alm, corrida):
     app, _ = app_alm
     r = cliente(app, "consulta").get(f"/api/corridas/{corrida}/composicion/1")
     assert r.status_code == 200
-    assert r.json() == {"vigente": None, "historial": []}
+    assert r.json() == {"vigente": None, "historial": [], "catalogo": {}}
 
 
 def test_get_devuelve_la_vigente_y_el_historial(app_alm, corrida):
@@ -364,3 +364,62 @@ def test_el_put_no_pierde_la_lista_blanca_de_la_generacion(app_alm, corrida):
     assert r.status_code == 200
     codigos = {e["codigo"] for e in r.json()["vigente"]["validacion"]["errores"]}
     assert "CODIGO_NO_AUTORIZADO" not in codigos
+
+
+# --- los nombres del catálogo en la respuesta (no en la fila) --------------
+def test_el_get_trae_los_nombres_del_catalogo(app_alm, corrida):
+    """La mesa muestra códigos sin esto, y un código no se puede revisar."""
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    d = cliente(app, "consulta").get(
+        f"/api/corridas/{corrida}/composicion/1").json()
+    assert d["catalogo"]["4279"]["nombre"] == "CUADRILLA"
+    assert d["catalogo"]["4279"]["unidad"] == "HR"
+
+
+def test_el_catalogo_no_lleva_el_precio(app_alm, corrida):
+    """`get_candidatos_bulk` devuelve Insumo, que tiene precio: se copia clave por
+    clave, nunca el objeto entero."""
+    from apu_tool.dominio import privacy
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    d = cliente(app, "consulta").get(
+        f"/api/corridas/{corrida}/composicion/1").json()
+    assert "precio" not in d["catalogo"]["4279"]
+    privacy.assert_no_money(d)
+
+
+def test_un_codigo_fuera_del_catalogo_no_aparece_en_el_mapa(app_alm, corrida):
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1,
+             componentes=[dict(COMPONENTES[0], codigo="INVENTADO")])
+    d = cliente(app, "consulta").get(
+        f"/api/corridas/{corrida}/composicion/1").json()
+    assert d["catalogo"] == {}
+
+
+def test_guardar_una_edicion_no_pierde_los_nombres(app_alm, corrida):
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    d = cliente(app, "editor").put(
+        f"/api/corridas/{corrida}/composicion/1",
+        json={"version_base": 1, "componentes": COMPONENTES}).json()
+    assert d["catalogo"]["4279"]["nombre"] == "CUADRILLA"
+
+
+def test_aprobar_tambien_trae_el_catalogo(app_alm, corrida):
+    """Los cuatro endpoints salen por `vista`: ninguno pierde los nombres."""
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    d = cliente(app, "editor").post(
+        f"/api/corridas/{corrida}/composicion/1/aprobar", json=APROBAR).json()
+    assert d["catalogo"]["4279"]["nombre"] == "CUADRILLA"
+
+
+def test_rechazar_tambien_trae_el_catalogo(app_alm, corrida):
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    d = cliente(app, "editor").post(
+        f"/api/corridas/{corrida}/composicion/1/rechazar",
+        json={"version_base": 1, "motivo": "no aplica"}).json()
+    assert d["catalogo"]["4279"]["nombre"] == "CUADRILLA"

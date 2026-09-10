@@ -146,6 +146,10 @@ def vista(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
     La VIGENTE se descarta si no es de esta línea (ver `_es_de_esta_linea`); el
     HISTORIAL se devuelve completo, porque es el registro de correcciones y no miente
     sobre nada: cada versión dice de qué actividad hablaba.
+
+    `catalogo` enriquece la RESPUESTA (ver `_catalogo_de`), y como los cuatro
+    endpoints que devuelven el expediente salen por acá, los nombres no se pierden
+    después de guardar una edición ni de aprobar.
     """
     row = alm.corridas.get_item(corrida_id, seq)
     if row is None:
@@ -157,7 +161,40 @@ def vista(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
     if vig is not None and not _es_de_esta_linea(vig, row):
         vig = None
     return {"vigente": vig.to_dict() if vig else None,
-            "historial": [h.to_dict() for h in hist]}
+            "historial": [h.to_dict() for h in hist],
+            "catalogo": _catalogo_de(alm, vig)}
+
+
+def _catalogo_de(alm: Almacen, v: Optional[ComposicionRow]) -> dict[str, dict]:
+    """Nombre, unidad y grupo de cada código de la propuesta vigente.
+
+    Va en la RESPUESTA y no en la fila persistida a propósito: la propuesta guarda
+    lo que dijo el modelo, que es solo el código; el nombre lo pone el catálogo y
+    tiene que leerse fresco, o quedaría viejo el día que alguien renombre un insumo.
+    Sin esto la mesa muestra "4279 · 0,62 · mano_de_obra", que no se puede revisar.
+
+    Se copian los TRES campos clave por clave: `get_candidatos_bulk` devuelve
+    `Insumo`, que lleva `precio`, y volcar el objeto entero sacaría dinero por la API
+    de la composición. Es la misma regla que `privacy.rendimiento_observado_to_dict`
+    —copiar campo por campo en el borde— y por eso un campo nuevo en `Insumo` no
+    viaja solo por existir.
+
+    Un código que el catálogo no tiene simplemente NO aparece en el mapa: la mesa
+    muestra el código pelado, que es lo correcto — el validador ya emitió
+    `CODIGO_INEXISTENTE` y eso es justo lo que el usuario tiene que ver.
+
+    Una consulta en lote, no una por componente.
+    """
+    comps = ((v.propuesta or {}).get("componentes") or []) if v else []
+    codigos = [str(c.get("codigo", "")) for c in comps if c.get("codigo")]
+    if not codigos:
+        return {}
+    out: dict[str, dict] = {}
+    for cod, cands in alm.precios.get_candidatos_bulk(codigos).items():
+        if cands:
+            out[cod] = {"nombre": cands[0].nombre, "unidad": cands[0].unidad,
+                        "grupo": cands[0].grupo}
+    return out
 
 
 def _expediente(alm: Almacen, corrida_id: int, seq: int):

@@ -63,6 +63,7 @@ flowchart TD
 | `alertas.py` | Alertas de costeo: motivos por los que un ítem necesita revisión de costo. |
 | `assemble.py` | Orquestador del pipeline por ítem. |
 | `compose.py` | Recuperación de insumos candidatos para la composición generativa. |
+| `composicion.py` | Contrato de la composición asistida y su orquestador. |
 | `cruce.py` | Resolución del cruce insumo-de-APU -> insumo-de-catálogo, por código + nombre. |
 | `integridad.py` | Chequeo de integridad del vínculo APU -> insumo (que cruza las dos bases). |
 | `licitacion.py` | Lectura de la lista de licitación (entrada) y generación de un ejemplo. |

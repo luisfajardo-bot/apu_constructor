@@ -28,7 +28,7 @@ from __future__ import annotations
 import math
 from collections import Counter
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, Optional
 
 from apu_tool import config
 from apu_tool.dominio.compose import RendimientoObservado
@@ -469,13 +469,19 @@ class Confianza:
                 "motivos": [m.to_dict() for m in self.motivos]}
 
 
-def _dispersion(obs: RendimientoObservado) -> float:
-    return (obs.maximo - obs.minimo) / obs.mediana if obs.mediana else 0.0
+def _dispersion(obs: RendimientoObservado) -> Optional[float]:
+    """Amplitud del rango como múltiplo de la mediana. None si no se puede medir:
+    una mediana 0 daría 0.0, que el umbral leería como consenso perfecto."""
+    return (obs.maximo - obs.minimo) / obs.mediana if obs.mediana else None
 
 
 def calcular_confianza(p: Propuesta, v: Validacion,
                        ctx: ContextoValidacion) -> Confianza:
     """El nivel de confianza, calculado FUERA del modelo.
+
+    `p` tiene que ser la propuesta **corregida** que devuelve `validar`, no la que
+    salió del modelo: con la original, `unidad_de_antecedentes` cuenta referencias
+    que ya se limpiaron por muertas y la señal baja sola, sin que nada avise.
 
     `p.incertidumbre_declarada` no se lee acá a propósito: es lo que el modelo dice de
     sí mismo, se guarda y se muestra aparte, y no puede mover un indicador que existe
@@ -484,12 +490,12 @@ def calcular_confianza(p: Propuesta, v: Validacion,
     Con cualquier error bloqueante el nivel es `insuficiente` sin mirar nada más: una
     propuesta que no se puede aprobar no tiene confianza que reportar.
     """
-    if v.errores:
+    comps = p.componentes
+    if v.errores or not comps:
         return Confianza("insuficiente", 0, (Motivo(
             "errores_bloqueantes", f"{len(v.errores)} error(es) que impiden aprobar",
             0),))
 
-    comps = p.componentes
     n = len(comps)
     motivos: list[Motivo] = []
 
@@ -525,8 +531,9 @@ def calcular_confianza(p: Propuesta, v: Validacion,
                           1 if con_masa >= max(1, n // 2) else 0))
 
     usados = [o for c in comps if (o := ctx.observados.get(c.codigo)) is not None]
-    if usados:
-        media = sum(_dispersion(o) for o in usados) / len(usados)
+    dispersiones = [d for o in usados if (d := _dispersion(o)) is not None]
+    if dispersiones:
+        media = sum(dispersiones) / len(dispersiones)
         disp = (1 if media <= _DISPERSION_ESTRECHA
                 else (-1 if media > _DISPERSION_ANCHA else 0))
         motivos.append(Motivo("dispersion_de_rendimientos",
@@ -534,15 +541,30 @@ def calcular_confianza(p: Propuesta, v: Validacion,
 
     atipicos = sum(1 for h in v.advertencias if h.codigo == "RENDIMIENTO_ATIPICO")
     if atipicos:
-        motivos.append(Motivo("rendimientos_atipicos", str(atipicos), -atipicos))
+        # Techo en −2: sin él, los tres castigos por ocurrencia escalan con la
+        # cantidad de componentes mientras el lado positivo está acotado en +6, y el
+        # nivel termina siguiendo al TAMAÑO de la propuesta en vez de a su calidad
+        # (medido: la misma calidad relativa daba media con 6 componentes y baja con
+        # 12). Con techo, el rango queda simétrico: −6 contra +6.
+        motivos.append(Motivo("rendimientos_atipicos", str(atipicos),
+                              -min(2, atipicos)))
 
-    sin_ev = len(sin_respaldo)
+    # Cuenta COMPONENTES, no códigos únicos: dos componentes con el mismo código y
+    # distinto tipo (un "SUB" como sub-APU y otro "SUB" como insumo, que el validador
+    # acepta a propósito) son dos hechos sin respaldo, no uno. Mismo criterio que
+    # `respaldados` arriba, para que las dos cuentas no se desalineen.
+    sin_ev = sum(1 for c in comps if _corto(c.codigo) in sin_respaldo)
     if sin_ev:
-        motivos.append(Motivo("componentes_sin_evidencia", str(sin_ev), -sin_ev))
+        motivos.append(Motivo("componentes_sin_evidencia", str(sin_ev),
+                              -min(2, sin_ev)))
 
     supuestos = len(p.supuestos) if not ctx.supuestos_confirmados else 0
     if supuestos:
-        motivos.append(Motivo("supuestos_sin_confirmar", str(supuestos), -supuestos))
+        # Un supuesto declarado es acción pendiente, no defecto: se va cuando alguien
+        # lo confirma. Cinco supuestos en una actividad nueva es normal, y hundir la
+        # propuesta por eso empuja al modelo a callárselos.
+        motivos.append(Motivo("supuestos_sin_confirmar", str(supuestos),
+                              -min(2, supuestos)))
 
     motivos.append(Motivo("validaciones",
                           f"{v.superadas} de {v.totales} superadas",

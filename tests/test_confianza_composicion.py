@@ -161,3 +161,52 @@ def test_una_cantidad_sospechosa_no_topea_el_nivel():
     assert not any(h.codigo == "RENDIMIENTO_ATIPICO" for h in v.advertencias)
     conf = calcular_confianza(corregida, v, ctx())
     assert not any(m.senal == "tope_por_rendimiento_atipico" for m in conf.motivos)
+
+
+def test_el_nivel_no_depende_del_tamano_de_la_propuesta():
+    """La misma calidad relativa tiene que dar el mismo nivel con 2 componentes que
+    con 12. Sin techo en los castigos por ocurrencia, n=12 daba `baja` donde n=2 y
+    n=6 daban `media` (medido: al agregar el techo n=12 pasa de baja(0) a media(+2),
+    igualando a n=2 y n=6).
+
+    Códigos todos DISTINTOS por componente (S{i}/G{i}, nunca repetidos): repetir
+    código+tipo+turno dispara COMPONENTE_DUPLICADO, que es error y manda todo a
+    `insuficiente` — no es lo que este test quiere medir.
+    """
+    def propuesta_y_ctx(n: int) -> tuple[Propuesta, ContextoValidacion]:
+        comps = []
+        codigos: set[str] = set()
+        unidades: dict[str, str] = {}
+        observados: dict[str, RendimientoObservado] = {}
+        for i in range(n):
+            funcion = "mano_de_obra" if i % 2 == 0 else "herramienta"
+            if i % 3 == 0:                        # un tercio, sin evidencia
+                codigo = f"S{i}"
+                comps.append(comp(codigo=codigo, funcion=funcion, rendimiento=1.0,
+                                  origen="sin_evidencia", referencias=()))
+            else:                                  # el resto, bien respaldado
+                codigo = f"G{i}"
+                comps.append(comp(codigo=codigo, funcion=funcion, rendimiento=1.0,
+                                  origen="copiado_de_antecedente",
+                                  referencias=(Referencia("A1", "DIURNO"),)))
+                observados[codigo] = RendimientoObservado(codigo, "HR", 5,
+                                                           0.9, 1.0, 1.1)
+            codigos.add(codigo)
+            unidades[codigo] = "HR"
+        c = ctx(codigos_permitidos=frozenset(codigos), unidades_catalogo=unidades,
+                observados=observados)
+        return Propuesta(componentes=tuple(comps)), c
+
+    niveles = {}
+    for n in (2, 6, 12):
+        p, c = propuesta_y_ctx(n)
+        niveles[n] = _nivel(p, c)
+    assert len(set(niveles.values())) == 1, niveles
+
+
+def test_el_nivel_baja_es_alcanzable():
+    floja = Propuesta(componentes=(
+        comp(origen="sin_evidencia", referencias=(), rendimiento=5.0),
+        comp(codigo="6092", funcion="herramienta", rendimiento=1.0,
+             origen="sin_evidencia", referencias=())))
+    assert _nivel(floja, ctx()) == "baja"

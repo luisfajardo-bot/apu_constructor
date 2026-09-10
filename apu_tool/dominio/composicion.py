@@ -231,14 +231,27 @@ def _componente_desde(v: Any) -> Optional[ComponentePropuesto]:
 
 
 def _hipotesis_desde(v: Any) -> dict[str, Any]:
-    """Las hipótesis del modelo, sin claves monetarias.
+    """Las hipótesis del modelo, sin claves que huelan a dinero.
 
-    `hipotesis` es el único dict del contrato cuyas CLAVES las pone el modelo (o una
-    persona, en estado `editada`), así que es la única vía por la que un "costo"
-    podría entrar a la propuesta persistida. Y esta fila está diseñada para
-    reinyectarse en un payload futuro: dejarlo pasar significaría que
-    `assert_no_money` reviente al LEER algo que se aceptó al escribirlo. Se filtra
-    acá, en el borde, no río abajo.
+    Es el único dict del contrato cuyas CLAVES las pone el modelo (o una persona, en
+    estado `editada`). En todos los demás payloads las claves las escribimos
+    nosotros, y por eso a `assert_no_money` le alcanza con comparar exacto: sabe qué
+    pusimos. Acá no, así que el filtro es MÁS ESTRICTO que el guardián — descarta
+    cualquier clave que CONTENGA una raíz monetaria, no solo las que la igualan.
+    `costo_estimado` y `valor_m3` no los rechaza `assert_no_money` (la denylist es
+    exact-match), pero no tienen por qué entrar a una propuesta que está diseñada
+    para reinyectarse.
+
+    Y por eso no se arregla ensanchando la denylist: tiene `total`, y
+    `Validacion.to_dict()` devuelve `totales`. Por substring, el guardián empezaría
+    a rechazar la validación que este mismo agente produce. La asimetría es
+    deliberada: estricto donde las claves son ajenas, igual donde son nuestras.
+
+    COSTO CONOCIDO de la raíz `total`: se lleva puestas claves productivas legítimas
+    como `produccion_total`, `horas_totales` o `cantidad_total`. Es a propósito
+    —perder una clave legítima es más barato que dejar entrar dinero— y el modelo
+    tiene cómo decir lo mismo sin esa palabra (`produccion_por_jornada`). Si un día
+    duele, la salida NO es aflojar acá sino que el prompt pida nombres sin `total`.
 
     El import es local a propósito: este módulo es el CONTRATO y no depende de nada a
     nivel de módulo (todo el que importe un tipo se comería la cadena entera). No hay
@@ -252,7 +265,7 @@ def _hipotesis_desde(v: Any) -> dict[str, Any]:
     # modelo, no lo que sobrevive al filtro.
     return {_texto(k, 60): (_texto(x) if isinstance(x, str) else x)
             for k, x in list(v.items())[:20]
-            if str(k).strip().lower() not in _FORBIDDEN_KEYS}
+            if not any(raiz in str(k).strip().lower() for raiz in _FORBIDDEN_KEYS)}
 
 
 def _supuestos_desde(v: Any) -> tuple[Supuesto, ...]:

@@ -184,13 +184,18 @@ def test_las_hipotesis_no_quedan_aliasadas_al_json_del_llamador():
 
 
 def test_una_hipotesis_con_clave_monetaria_no_entra():
-    """`hipotesis` es el único dict cuyas claves pone el modelo, y esta fila está
-    hecha para reinyectarse: una clave prohibida haría reventar el guardián al LEER
-    algo que se aceptó al escribir."""
-    p = propuesta_desde_json(_crudo(hipotesis={"horas_jornada": 8,
-                                               "costo": 350000,
-                                               "precio_unitario": 1}))
-    assert p.componentes[0].hipotesis == {"horas_jornada": 8}
+    """Más estricto que el guardián a propósito: acá las claves las pone el modelo,
+    así que no alcanza con comparar exacto contra la denylist."""
+    p = propuesta_desde_json(_crudo(hipotesis={
+        "horas_jornada": 8,          # legítima
+        "produccion_por_jornada": 96,  # legítima
+        "costo": 350000,             # exacta de la denylist
+        "costo_estimado": 350000,    # contiene una raíz: el guardián NO la rechaza
+        "valor_m3": 1,               # ídem
+        "PRECIO": 9,                 # mayúsculas
+    }))
+    assert p.componentes[0].hipotesis == {"horas_jornada": 8,
+                                          "produccion_por_jornada": 96}
 
 
 def test_un_codigo_absurdamente_largo_se_acota_en_el_parseo():

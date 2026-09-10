@@ -142,6 +142,22 @@ Cada transición escribe una **fila nueva** (append-only por versión). La vigen
 mayor `version`. La fase 2 inserta `requiere_informacion` entre `generando` y `propuesta`;
 nada más cambia.
 
+**`rechazada` restringe de verdad: no se aprueba de una.** Si de ahí se pudiera saltar a
+`aprobada`, el estado sería una etiqueta decorativa. La vía para arrepentirse existe y es
+gratis: **editar y guardar** produce una versión `editada` sobre la que sí se aprueba, y
+ese paso queda en el historial — así un cambio de opinión se ve, en vez de que una
+aprobación pise un rechazo sin rastro. El ciclo completo se lee entero:
+`propuesta → rechazada → editada → aprobada`. Por eso el guardián está **solo** en
+`aprobar`: ponerlo también en `guardar_edicion` cerraría el único camino de reapertura.
+
+**`aprobar` revalida, no confía en lo guardado.** La validación de la versión vigente se
+calculó en otro momento —minutos antes, quizá con otro catálogo— y **sin el código del
+APU**, que recién existe cuando el humano lo elige. Sin revalidar pasaban dos cosas: la
+detección de ciclos de sub-APU no corría nunca (nadie pasaba `apu_codigo_propio`, así que
+la maquinaria *parecía* implementada sin estarlo), y se podía aprobar contra un catálogo
+que ya cambió. Es la misma decisión que este repo tomó con `revision_json` y
+`apu_evaluado`: la caché no es verdad.
+
 ## 5. Qué usa IA y qué es determinístico
 
 | Etapa | Quién |
@@ -591,6 +607,20 @@ advertencias se recalculan al **guardar**, no mientras se teclea. Es el precio c
 el usuario. Si ya existe una mayor → `409` nombrando la actual. Un doble clic en aprobar:
 la segunda petición ve `estado='aprobada'` y devuelve `409` nombrando el `apu_codigo` ya
 creado. Un APU, no dos.
+
+**El orden dentro de `aprobar` es crear → sellar → asignar**, de lo irreversible a lo
+recuperable. Y por eso el 409 del doble clic sale de un chequeo de versión **previo** y no
+del índice único: el índice llegaría tarde — para cuando choca, el APU ya está creado.
+Queda de red de seguridad detrás, no como puerta.
+
+**La lista blanca solo crece.** Al revalidar una edición NO se re-deriva de un `recuperar`
+fresco: se parte de la persistida y se amplía con lo que agregó una persona. Un retrieve
+nuevo puede devolver **menos** códigos (un insumo nuevo desplaza a otro fuera de los 40,
+alguien oculta uno), y entonces un componente que el modelo propuso bien se volvería
+`CODIGO_NO_AUTORIZADO` —error bloqueante— al guardar un cambio de rendimiento que no tiene
+nada que ver, sin forma de arreglarlo desde la mesa. Lo que **sí** se consulta fresco es el
+**catálogo**: sin eso, `CODIGO_INEXISTENTE` daba falso positivo sobre un insumo que una
+persona acababa de elegir del buscador, porque el retrieve no lo traía entre sus candidatos.
 
 **Aprobar es un endpoint, no una cadena en el navegador.** Recibe
 `{codigo, turno, nombre, grupo, version_base}` y llama a `autoria.crear_apu` con los

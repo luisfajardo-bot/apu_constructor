@@ -171,6 +171,11 @@ export interface VistaComposicion {
    *  catálogo NO aparece acá — y eso es correcto, el validador ya emitió
    *  CODIGO_INEXISTENTE y el usuario tiene que verlo. */
   catalogo: Record<string, EntradaCatalogo>;
+  /** Modo de la corrida al momento de cargar el expediente. `congelada` = foto
+   *  inmutable: la mesa se apaga entera. Es una foto, no un estado en vivo — si la
+   *  congelan con la mesa abierta, el 409 de la primera escritura sigue siendo la
+   *  red (cubrir eso pedía un poll, que este repo no hace). */
+  corrida_modo: "activa" | "congelada";
 }
 
 /** Un APU distinto por fila para aplicar sugerencias de la IA en un solo recosteo. */

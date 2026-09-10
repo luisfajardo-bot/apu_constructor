@@ -83,7 +83,30 @@ def test_get_sin_composicion_devuelve_vacio(app_alm, corrida):
     app, _ = app_alm
     r = cliente(app, "consulta").get(f"/api/corridas/{corrida}/composicion/1")
     assert r.status_code == 200
-    assert r.json() == {"vigente": None, "historial": [], "catalogo": {}}
+    assert r.json() == {"vigente": None, "historial": [], "catalogo": {},
+                        "corrida_modo": "activa"}
+
+
+def test_la_vista_dice_si_la_corrida_esta_congelada(app_alm, corrida):
+    """La mesa tiene que poder apagarse antes del primer clic, no después del 409."""
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    c = cliente(app, "consulta")
+    assert c.get(f"/api/corridas/{corrida}/composicion/1").json()[
+        "corrida_modo"] == "activa"
+    alm.corridas.set_modo(corrida, "congelada")
+    assert c.get(f"/api/corridas/{corrida}/composicion/1").json()[
+        "corrida_modo"] == "congelada"
+
+
+def test_una_corrida_congelada_se_puede_LEER(app_alm, corrida):
+    """Congelada apaga la escritura, no la lectura: el expediente sigue consultable."""
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    alm.corridas.set_modo(corrida, "congelada")
+    r = cliente(app, "consulta").get(f"/api/corridas/{corrida}/composicion/1")
+    assert r.status_code == 200
+    assert r.json()["vigente"]["version"] == 1
 
 
 def test_get_devuelve_la_vigente_y_el_historial(app_alm, corrida):

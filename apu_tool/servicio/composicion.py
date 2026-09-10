@@ -154,6 +154,9 @@ def vista(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
     row = alm.corridas.get_item(corrida_id, seq)
     if row is None:
         return None
+    # Mismo camino que `_exigir_activa`, pero sin lanzar: acá la lectura vale
+    # también con la corrida congelada, así que no hay 409 que levantar.
+    meta = alm.corridas.get_corrida(corrida_id)
     # Una sola consulta: la vigente es la última del historial (viene ordenado por
     # `version`), así que pedir las dos cosas serían dos round-trips por lo mismo.
     hist = alm.composiciones.historial(corrida_id, seq)
@@ -162,7 +165,14 @@ def vista(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
         vig = None
     return {"vigente": vig.to_dict() if vig else None,
             "historial": [h.to_dict() for h in hist],
-            "catalogo": _catalogo_de(alm, vig)}
+            "catalogo": _catalogo_de(alm, vig),
+            # El modo de la corrida viaja con el expediente para que la mesa pueda
+            # apagarse ANTES del primer clic, en vez de dejar los botones habilitados y
+            # contestar 409 cuando el usuario ya editó. Sale de la metadata que esta
+            # función ya carga: cero consultas nuevas. Es una foto del momento de cargar
+            # —si la congelan con la mesa abierta, el 409 sigue siendo la red— y eso es
+            # deliberado: cubrir ese caso pedía un poll, que este repo no hace.
+            "corrida_modo": meta.modo}
 
 
 def _catalogo_de(alm: Almacen, v: Optional[ComposicionRow]) -> dict[str, dict]:

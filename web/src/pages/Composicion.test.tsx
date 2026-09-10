@@ -104,9 +104,12 @@ const CATALOGO = {
   "8801": { nombre: "OFICIAL DE OBRA", unidad: "HC", grupo: "MO" },
 };
 
-/** Las cuatro respuestas del expediente traen TRES claves. */
-function vista(vigente: unknown, catalogo: unknown = CATALOGO) {
-  return { vigente, historial: vigente ? [vigente] : [], catalogo };
+/** Las cuatro respuestas del expediente traen CUATRO claves. `corrida_modo` por
+ *  defecto "activa": la mayoría de los tests no le interesa el candado de
+ *  congelada. */
+function vista(vigente: unknown, catalogo: unknown = CATALOGO,
+               corrida_modo: "activa" | "congelada" = "activa") {
+  return { vigente, historial: vigente ? [vigente] : [], catalogo, corrida_modo };
 }
 
 function montar() {
@@ -415,4 +418,65 @@ test("los nombres siguen ahí después de guardar una edición", async () => {
   fireEvent.click(boton(/Guardar cambios/));
   await waitFor(() => expect(guardarComposicion).toHaveBeenCalled());
   expect(await screen.findByText(/CUADRILLA OFICIAL MAS AYUDANTES/)).toBeTruthy();
+});
+
+test("el nombre completo del insumo se lee en el desplegable", async () => {
+  // Nombres reales del catálogo llegan a 830 caracteres; acá alcanza con superar
+  // los 300 para probar que no depende del `title` nativo.
+  const NOMBRE_LARGO = "SUMINISTRO E INSTALACION DE MATERIAL PETREO ".repeat(8).trim();
+  getComposicion.mockResolvedValue(
+    vista(version(), { "4279": { nombre: NOMBRE_LARGO, unidad: "HR", grupo: "MO" } }));
+  montar();
+  const celda = (await screen.findByText(NOMBRE_LARGO)).closest("td");
+  // La celda lo sigue truncando visualmente (la clase de Tailwind, no un recorte
+  // del string): el nombre entero vive en el DOM en un solo sitio hasta desplegar.
+  expect(celda?.className).toMatch(/truncate/);
+  expect(screen.getAllByText(NOMBRE_LARGO).length).toBe(1);
+  fireEvent.click(screen.getByLabelText("Ver supuestos de 4279"));
+  expect(screen.getAllByText(NOMBRE_LARGO).length).toBe(2);
+});
+
+// ─── corrida congelada: foto inmutable, la mesa se apaga entera ────────────
+
+test("con la corrida congelada la mesa no ofrece ninguna acción que escriba", async () => {
+  getComposicion.mockResolvedValue(vista(version(), CATALOGO, "congelada"));
+  montar();
+  await screen.findByText("EXCAVACION MANUAL EN MATERIAL COMUN");
+  expect(screen.queryByRole("button", { name: /Generar propuesta/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Guardar cambios/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Regenerar/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Rechazar$/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Aprobar y crear APU/ })).toBeNull();
+});
+
+test("con la corrida congelada tampoco se puede editar un rendimiento", async () => {
+  getComposicion.mockResolvedValue(vista(version(), CATALOGO, "congelada"));
+  montar();
+  await screen.findByText("4279");
+  expect(screen.queryByLabelText("Rendimiento de 4279")).toBeNull();
+  expect(screen.queryByLabelText("Quitar 4279")).toBeNull();
+  expect(screen.queryByPlaceholderText(/Buscar insumo/i)).toBeNull();
+});
+
+test("una corrida congelada igual muestra el expediente completo", async () => {
+  getComposicion.mockResolvedValue(vista({
+    ...version(),
+    validacion: {
+      valido: true, errores: [],
+      advertencias: [{ codigo: "RENDIMIENTO_ATIPICO",
+                       mensaje: "0,083 HR queda 79 % por debajo del rango observado.",
+                       componente: "4279" }],
+      metricas: { superadas: 11, totales: 12 },
+    },
+  }, CATALOGO, "congelada"));
+  montar();
+  expect(await screen.findByText("4279")).toBeTruthy();
+  expect(screen.getByText(/Confianza: MEDIA/)).toBeTruthy();
+  expect(screen.getByText(/79 % por debajo del rango observado/)).toBeTruthy();
+});
+
+test("con la corrida congelada se explica por qué", async () => {
+  getComposicion.mockResolvedValue(vista(version(), CATALOGO, "congelada"));
+  montar();
+  expect(await screen.findByText(/congelada/i)).toBeTruthy();
 });

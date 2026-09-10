@@ -43,7 +43,7 @@ const ETAPAS: Record<string, string> = {
 };
 
 /** Chevron + Código + Insumo + Un. + Rend. + Función + Origen + Ev. La celda de
- *  quitar se suma aparte, solo con rol editor. */
+ *  quitar se suma aparte, solo sin `soloLectura` (rol editor y corrida activa). */
 const COLS_TABLA = 8;
 
 const num = (n: number) =>
@@ -158,6 +158,13 @@ export default function Composicion() {
 
   const vigente = vista?.vigente ?? null;
   const catalogo = vista?.catalogo ?? {};
+  // `corrida_modo` es una FOTO del momento de cargar (ver `VistaComposicion`): si la
+  // congelan con la mesa abierta, esto no se entera y el 409 de la primera escritura
+  // sigue siendo la red. Es la misma condición que el rol `consulta` — las dos
+  // apagan la escritura por igual — así que se junta en una sola derivada en vez de
+  // repetir "puedeEditar && !congelada" en cada gate de la mesa.
+  const congelada = vista?.corrida_modo === "congelada";
+  const soloLectura = !puedeEditar || congelada;
   const propuesta = vigente?.propuesta ?? null;
   const validacion = vigente?.validacion ?? null;
   const actividad = vigente?.actividad ?? null;
@@ -299,6 +306,19 @@ export default function Composicion() {
         </div>
       </div>
 
+      {/* Tono `info` (azul) y no `destructive`/`revisar`: esto no es un error de la
+          propuesta, es el estado de la corrida — no debe competir visualmente con
+          los hallazgos de la validación de más abajo. Va primero porque explica por
+          qué el resto de la mesa está apagada. */}
+      {congelada && (
+        <p className="border-l-2 border-info bg-info-surface px-2 py-1.5 text-xs text-info">
+          Esta corrida está <span className="font-semibold">congelada</span>: es una
+          foto fija y esta mesa quedó de solo lectura, aunque el expediente se sigue
+          viendo entero. Si querés componer o editar esta propuesta, activá la
+          corrida desde su vista.
+        </p>
+      )}
+
       <p className="border-l-2 border-revisar bg-revisar-surface px-2 py-1.5 text-xs text-revisar">
         Esto es una <span className="font-semibold">propuesta</span> de la IA: todavía
         no se creó nada en la biblioteca. La IA no ve precios ni costos, así que
@@ -314,7 +334,7 @@ export default function Composicion() {
               ? ` El último intento falló: ${vigente.motivo}`
               : ""}
           </p>
-          {puedeEditar && (
+          {!soloLectura && (
             <Button size="sm" disabled={etapa !== null} onClick={generar}>
               {etapa !== null ? "Componiendo…" : "Generar propuesta"}
             </Button>
@@ -412,7 +432,7 @@ export default function Composicion() {
                 <TableHead className="text-xs w-28">Función</TableHead>
                 <TableHead className="text-xs w-36">Origen</TableHead>
                 <TableHead className="text-xs w-16">Ev.</TableHead>
-                {puedeEditar && <TableHead className="text-xs w-8" />}
+                {!soloLectura && <TableHead className="text-xs w-8" />}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -452,11 +472,15 @@ export default function Composicion() {
                         )}
                       </TableCell>
                       {/* El nombre puede ser larguísimo (830 caracteres en el
-                          catálogo real): se trunca a una línea y el completo queda
-                          en el `title`. Una tabla densa no sobrevive un párrafo. */}
+                          catálogo real): la celda lo trunca a una línea. El completo
+                          va en el desplegable de la fila (ver más abajo) y NO en un
+                          `title` nativo — el tooltip del sistema tarda ~1s en salir y
+                          lo parte en muchas líneas, el peor lugar para el campo que
+                          dice QUÉ ES el insumo. Dos formas de leer lo mismo, y una
+                          mala, es una de más. */}
                       <TableCell className="max-w-[22rem] truncate text-xs align-top">
                         {ficha ? (
-                          <span title={ficha.nombre}>{ficha.nombre}</span>
+                          <span>{ficha.nombre}</span>
                         ) : (
                           <span className="font-medium text-destructive">
                             no está en el catálogo
@@ -473,7 +497,7 @@ export default function Composicion() {
                         {ficha?.unidad || "—"}
                       </TableCell>
                       <TableCell className="text-xs text-right align-top">
-                        {puedeEditar ? (
+                        {!soloLectura ? (
                           <input
                             type="number"
                             min="0"
@@ -499,7 +523,7 @@ export default function Composicion() {
                             el validador ni la confianza lo leen. */}
                         {f.c.nivel_evidencia}
                       </TableCell>
-                      {puedeEditar && (
+                      {!soloLectura && (
                         <TableCell className="w-8 px-1 py-1 align-top">
                           <button
                             type="button"
@@ -516,9 +540,16 @@ export default function Composicion() {
 
                     {abiertaEsta && (
                       <TableRow className="bg-muted/20 hover:bg-muted/20">
-                        <TableCell colSpan={COLS_TABLA + (puedeEditar ? 1 : 0)}
+                        <TableCell colSpan={COLS_TABLA + (!soloLectura ? 1 : 0)}
                                    className="px-8 py-2">
                           <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                            {/* El nombre completo del insumo: la celda de la fila lo
+                                trunca, acá se lee entero con el ancho de la fila
+                                entera — el lugar cómodo para el campo que dice qué
+                                ES el insumo, no el tooltip nativo. */}
+                            {ficha && (
+                              <span className="font-medium text-foreground">{ficha.nombre}</span>
+                            )}
                             {f.c.justificacion && <span>{f.c.justificacion}</span>}
                             {f.c.calculo && (
                               <span className="font-mono text-[11px] text-foreground">
@@ -554,7 +585,7 @@ export default function Composicion() {
               })}
               {filas.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={COLS_TABLA + (puedeEditar ? 1 : 0)}
+                  <TableCell colSpan={COLS_TABLA + (!soloLectura ? 1 : 0)}
                              className="py-4 text-center text-xs text-muted-foreground">
                     La propuesta quedó sin componentes.
                   </TableCell>
@@ -563,7 +594,7 @@ export default function Composicion() {
             </TableBody>
           </Table>
 
-          {puedeEditar && (
+          {!soloLectura && (
             <div className="max-w-md">
               <BuscadorInsumo
                 codigo=""
@@ -587,7 +618,7 @@ export default function Composicion() {
                   {s.supuesto} — {s.impacto}
                 </p>
               ))}
-              {puedeEditar && (
+              {!soloLectura && (
                 <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <input
                     type="checkbox"
@@ -609,7 +640,7 @@ export default function Composicion() {
           )}
 
           {/* Acciones */}
-          {puedeEditar && (
+          {!soloLectura && (
             <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t bg-background/95 px-2 py-2 backdrop-blur">
               <Button size="sm" variant="outline" disabled={!hayCambios || guardando}
                       onClick={guardar}>

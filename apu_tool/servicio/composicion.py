@@ -121,10 +121,17 @@ def _sello(corrida_id: int, row: CorridaItemRow, base: Optional[ComposicionRow],
     `actividad` se guarda SIEMPRE des-monetizada: `licitacion_item_to_dict` y nunca
     el `LicitacionItem` crudo, que trae `precio_contractual`. Ningún módulo de
     `datos/` lo impide, así que el punto de paso es este.
+
+    `codigo_sugerido` va acá y NO en `privacy.licitacion_item_to_dict`: esa función
+    es compartida con el payload de la revisión con IA, y sumarle un campo cambiaría
+    lo que ve el modelo en las dos features. Este código lo necesita la PANTALLA
+    (para precargar la identidad del APU nuevo), no el modelo. No es dinero, así que
+    la fila sigue siendo reinyectable.
     """
     datos = dict(
         id=None, corrida_id=corrida_id, seq=row.seq, version=version, estado=estado,
-        actividad=privacy.licitacion_item_to_dict(row.item),
+        actividad={**privacy.licitacion_item_to_dict(row.item),
+                   "codigo_sugerido": row.item.codigo_sugerido},
         ficha=base.ficha if base else None,
         propuesta=base.propuesta if base else None,
         validacion=base.validacion if base else None,

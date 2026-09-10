@@ -700,6 +700,7 @@ export default function Composicion() {
           descripcion={actividad.descripcion}
           unidad={actividad.unidad}
           shift={actividad.shift}
+          codigoSugerido={actividad.codigo_sugerido}
           onCancelar={() => setIdentidad(false)}
           onAceptar={aprobar}
         />
@@ -718,17 +719,22 @@ const inputCls =
   "h-7 w-full rounded border border-border bg-transparent px-1.5 text-xs outline-none focus-visible:border-ring";
 
 function DialogoIdentidad({
-  descripcion, unidad, shift, onCancelar, onAceptar,
+  descripcion, unidad, shift, codigoSugerido, onCancelar, onAceptar,
 }: {
   descripcion: string;
   unidad: string;
   shift: string;
+  /** Código IDU del presupuesto (`actividad.codigo_sugerido`). Si la línea quedó
+   *  sin APU es porque ese código no está en la biblioteca, así que es el que
+   *  debería llevar el APU nuevo — pero es una PRECARGA: el usuario la puede
+   *  cambiar como cualquier otro campo del diálogo. */
+  codigoSugerido?: string;
   onCancelar: () => void;
   onAceptar: (d: {
     codigo: string; turno: string; nombre: string; grupo: string; unidad: string;
   }) => Promise<void>;
 }) {
-  const [codigo, setCodigo] = useState("");
+  const [codigo, setCodigo] = useState(codigoSugerido?.trim() || "");
   const [turno, setTurno] = useState(
     (shift || "").toUpperCase().startsWith("N") ? "NOCTURNO" : "DIURNO");
   const [nombre, setNombre] = useState(descripcion);

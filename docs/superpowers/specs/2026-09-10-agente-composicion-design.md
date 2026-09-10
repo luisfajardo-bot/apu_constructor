@@ -367,27 +367,36 @@ rendimientos observados.
 | `PROPUESTA_VACIA` | cero componentes |
 | `CODIGO_NO_AUTORIZADO` | el código no estaba en la lista blanca de esta generación |
 | `CODIGO_INEXISTENTE` | no existe en el catálogo (ni en la biblioteca si `tipo='apu'`) |
-| `CANTIDAD_INVALIDA` | ≤ 0, `NaN`, `inf`, o por encima de `COMPOSICION_LIMITE_RENDIMIENTO` |
+| `CANTIDAD_INVALIDA` | ≤ 0, `NaN` o `inf` — el motor no puede costear eso |
+| `TIPO_INCOHERENTE` | `funcion = sub_apu` con `tipo ≠ apu`, o al revés |
 | `COMPONENTE_DUPLICADO` | mismo `(codigo, tipo, ref_shift)` dos veces |
 | `SUBAPU_INEXISTENTE` | el sub-APU no existe en ese turno |
 | `SUBAPU_CICLO` | el sub-APU se referencia a sí mismo o cierra un ciclo |
 | `CALCULO_IMPOSIBLE` | denominador 0, o factores no finitos |
 
 Dos umbrales nuevos en `config.py`, junto a los del matcher y los del cruce:
-`COMPOSICION_LIMITE_RENDIMIENTO` (techo absurdo por componente, para atrapar un
-rendimiento con la coma corrida) y `COMPOSICION_MIN_ANTECEDENTES` (3: por debajo no hay
+`COMPOSICION_LIMITE_RENDIMIENTO` y `COMPOSICION_MIN_ANTECEDENTES` (3: por debajo no hay
 rango contra el cual llamar atípico a nada).
+
+**Por qué el techo advierte y no bloquea** (corregido tras la revisión de la tarea 3):
+un APU medido en GLB o en KM lleva la cantidad de la obra adentro — 15.000 M2 de
+señalización en un PMT global — y supera cualquier techo de forma legítima. Bloquearlo
+dejaba la propuesta **sin ningún estado en el que se pudiera aprobar**, ni corrigiéndola
+a mano, porque el `PUT` revalida. Y el techo casi no atrapaba el error que lo motivó: la
+coma corrida típica (0,5 → 500) pasa por debajo sin despeinarse — eso lo atrapa
+`RENDIMIENTO_ATIPICO`, que compara contra la biblioteca. Lo que sigue bloqueando es lo
+que el motor no puede costear: `NaN`, infinito y todo lo que no sea positivo.
 
 **Advertencias — se ven, no bloquean:**
 
 | Código | Regla |
 |---|---|
 | `CALCULO_CORREGIDO` | Python recalculó y dio distinto; manda Python |
+| `CANTIDAD_SOSPECHOSA` | por encima de `COMPOSICION_LIMITE_RENDIMIENTO` |
 | `RENDIMIENTO_ATIPICO` | fuera del rango observado del mismo insumo, con `n ≥ COMPOSICION_MIN_ANTECEDENTES` |
-| `SIN_ANTECEDENTES` | `n < COMPOSICION_MIN_ANTECEDENTES`: no hay contra qué comparar |
+| `SIN_ANTECEDENTES` | `n < COMPOSICION_MIN_ANTECEDENTES`, o el rango está en otra unidad que el catálogo: no hay contra qué comparar |
 | `SIN_EVIDENCIA` | `origen = sin_evidencia`, o `referencias` vacío con un origen que las exige |
 | `REFERENCIA_INEXISTENTE` | un `apu_codigo` de `referencias` ya no existe; se limpia |
-| `UNIDAD_DISTINTA_DEL_CATALOGO` | la unidad declarada ≠ la del catálogo; manda el catálogo |
 | `FALTA_MANO_DE_OBRA` | ninguna función es `mano_de_obra` ni `equipo` |
 | `FALTA_HERRAMIENTA` | hay mano de obra y no hay herramienta ni equipo |
 | `METODO_INCOHERENTE` | la descripción dice manual y hay equipo pesado, o dice mecánico y no hay equipo |
@@ -408,6 +417,15 @@ cuando hay un `calculo` que lo contradice.
 detección es por palabra clave en la descripción (`MANUAL`/`A MANO` contra
 `MECANIC`/`RETRO`/`EXCAVADORA`). Por eso es advertencia y no error, y va marcada con un
 `ponytail:` que apunta a la fase 3, donde la hace la ficha.
+
+**No hay regla de unidad del componente, y es correcto.** Un borrador de este diseño
+listaba una advertencia `UNIDAD_DISTINTA_DEL_CATALOGO` que resultó imposible de violar:
+`ComponentePropuesto` **no tiene campo `unidad`**, así que el modelo nunca la declara —
+la unidad de un insumo la pone el catálogo y punto. Tampoco tiene sentido comparar la
+unidad del componente con la de la actividad: que una cuadrilla en `HR` componga una
+actividad en `M3` es exactamente lo normal, porque el rendimiento *es* HR por M3. Se
+eliminó de la lista en vez de implementarse; el test que la cubría no probaba nada
+(`assert v.valido is True`) y se reemplazó por uno que fija que el campo no existe.
 
 ### 9.2 La confianza
 

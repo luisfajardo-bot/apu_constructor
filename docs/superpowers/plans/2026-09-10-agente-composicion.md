@@ -1551,9 +1551,12 @@ def calcular_confianza(p: Propuesta, v: Validacion,
     n = len(comps)
     motivos: list[Motivo] = []
 
-    respaldados = sum(1 for c in comps
-                      if c.origen in _ORIGENES_CON_ANTECEDENTE + (
-                          "calculado_desde_produccion",) and c.referencias)
+    # Respaldado = el validador NO le puso SIN_EVIDENCIA. Se lee de los hallazgos en
+    # vez de recalcular la regla acá: cuando esto parcheaba la constante por su cuenta
+    # (`_ORIGENES_CON_ANTECEDENTE + ("calculado_desde_produccion",)`), el validador y
+    # la confianza decían cosas distintas del mismo componente.
+    sin_respaldo = {h.componente for h in v.advertencias if h.codigo == "SIN_EVIDENCIA"}
+    respaldados = sum(1 for c in comps if c.codigo not in sin_respaldo)
     frac = respaldados / n if n else 0.0
     aporte = 2 if frac >= 0.8 else (1 if frac >= 0.5 else 0)
     motivos.append(Motivo("respaldo_de_componentes",
@@ -4620,8 +4623,10 @@ maquetado es libre dentro de la convención densa del repo):
 | Incertidumbre | texto que empieza con "El modelo declara …", separado del nivel |
 | Errores | uno por `validacion.errores`, con su `mensaje` visible |
 | Advertencias | uno por `validacion.advertencias`, con su `mensaje` visible |
+| Hallazgo sin `componente` | `componente: ""` significa que es del **conjunto**, no de una fila: se pinta en el bloque de arriba y no resalta ninguna fila. Pasa con `FALTA_MANO_DE_OBRA`, `FALTA_HERRAMIENTA`, `METODO_INCOHERENTE`, `SUPUESTO_SIN_CONFIRMAR` y con `COMPONENTE_DUPLICADO` cuando hay **más de un** código repetido (con uno solo sí trae el código). Los códigos van nombrados dentro del `mensaje` |
 | Rendimiento | `<input>` numérico con `aria-label={\`Rendimiento de ${c.codigo}\`}` |
 | Quitar | `<button>` con `aria-label={\`Quitar ${c.codigo}\`}` |
+| Métricas | el cociente "N de M validaciones superadas" se muestra **solo** cuando `validacion.valido` es verdadero. Con errores se lee "N errores" y nada más: un 89 % al lado de un cartel de bloqueo tranquiliza sobre algo que no se puede aprobar |
 | Guardar cambios | llama `guardarComposicion(corridaId, fila, vigente.version, componentes, supuestosConfirmados)`; deshabilitado si no hay cambios |
 | Regenerar | llama `generar()` |
 | Rechazar | llama `rechazarComposicion(corridaId, fila, vigente.version, motivo)` |

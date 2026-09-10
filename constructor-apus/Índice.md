@@ -26,6 +26,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 53 plane
 - [[Otros/estado-ia-revisora|Estado — la IA pasa de armar a revisar]]
 - [[Otros/estado-login-google|Dónde quedó el login con Google]]
 - [[Otros/listas-precios-np|Listas de precios y APUs de No Previstos (NP)]]
+- [[Otros/pendientes-agente-composicion|Pendientes del agente de composición asistida]]
 - [[Otros/smoke-test-listas-np|Smoke test — Listas de precios / APUs de No Previstos (NP)]]
 
 ## Specs (diseños)

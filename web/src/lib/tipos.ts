@@ -78,6 +78,10 @@ export interface ResumenRevision {
   sin_veredicto: number;
 }
 
+// @deprecated: lo borra la tarea 12 junto con DialogoComposicion.tsx — contrato viejo
+// de POST /corridas/{id}/componer/{seq}, ya reemplazado por el expediente de
+// composicion.ts (ComposicionVersion). Sigue vivo porque DialogoComposicion.tsx y
+// corridas.ts::componerItem todavía lo usan.
 export interface ComponenteComposicion {
   insumo_codigo: string;
   insumo_nombre: string;
@@ -85,8 +89,7 @@ export interface ComponenteComposicion {
   rendimiento: number;
 }
 
-/** Composición PROPUESTA por la IA para una fila sin APU (POST .../componer/{seq}).
- *  No persiste nada: quien aplica es el usuario, vía el alta normal de APUs. */
+// @deprecated: lo borra la tarea 12 junto con DialogoComposicion.tsx (ver arriba).
 export interface ComposicionPropuesta {
   seq: number;
   nombre: string;
@@ -95,6 +98,89 @@ export interface ComposicionPropuesta {
   justificacion: string;
   confianza: number;
   componentes: ComponenteComposicion[];
+}
+
+/** Un componente propuesto, con todo lo que lo explica. Espejo del contrato de
+ *  `apu_tool/dominio/composicion.py`. Ningún campo es monetario, a propósito. */
+export interface ComponentePropuesto {
+  codigo: string;
+  tipo: "insumo" | "apu";
+  funcion: string;              // "" = la IA no dijo un rol legible
+  rendimiento: number;
+  origen: string;
+  referencias: { apu_codigo: string; turno: string }[];
+  hipotesis: Record<string, unknown>;
+  calculo: {
+    operacion: string; numerador: number; denominador: number; resultado: number;
+  } | null;
+  justificacion: string;
+  nivel_evidencia: "alto" | "medio" | "bajo";
+  ref_shift: string;
+}
+
+export interface Hallazgo {
+  codigo: string;
+  mensaje: string;
+  componente: string;           // "" = hallazgo del conjunto, no de una fila
+}
+
+export interface ValidacionComposicion {
+  valido: boolean;
+  errores: Hallazgo[];
+  advertencias: Hallazgo[];
+  metricas: { superadas: number; totales: number };
+}
+
+/** El nivel lo calcula la plataforma. `incertidumbre_declarada` (lo que el modelo
+ *  dice de sí mismo) va aparte y NO influye: se muestra rotulada como dato suyo. */
+export type NivelConfianza = "alta" | "media" | "baja" | "insuficiente";
+
+export interface MotivoConfianza {
+  senal: string;
+  /** `detalle` y no `valor`: "valor" está en la denylist de privacidad del backend
+   *  (por valor_unitario / valor_total) y el guardián mira nombres de clave. */
+  detalle: string;
+  aporte: number;
+}
+
+export type EstadoComposicion =
+  | "generando" | "propuesta" | "editada" | "aprobada" | "rechazada" | "error";
+
+export interface ComposicionVersion {
+  corrida_id: number;
+  seq: number;
+  version: number;
+  estado: EstadoComposicion;
+  actividad: {
+    item: string; descripcion: string; unidad: string; cantidad: number;
+    shift: string;
+  };
+  ficha: null;                  // fase 2
+  propuesta: {
+    componentes: ComponentePropuesto[];
+    supuestos: { campo: string; supuesto: string; impacto: string }[];
+    incertidumbre_declarada: number;
+    justificacion: string;
+  } | null;
+  validacion: ValidacionComposicion | null;
+  confianza: NivelConfianza | null;
+  confianza_motivos: MotivoConfianza[] | null;
+  antecedentes: {
+    codigos_permitidos: string[];
+    apus_referencia: { codigo: string; turno: string }[];
+  } | null;
+  modelo: string | null;
+  prompt_version: string | null;
+  apu_codigo: string | null;
+  apu_turno: string | null;
+  autor: string | null;
+  creada_en: string;
+  motivo: string | null;
+}
+
+export interface VistaComposicion {
+  vigente: ComposicionVersion | null;
+  historial: ComposicionVersion[];
 }
 
 /** Un APU distinto por fila para aplicar sugerencias de la IA en un solo recosteo. */

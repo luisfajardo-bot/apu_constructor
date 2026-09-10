@@ -180,7 +180,7 @@ export function parseSse(block: string): { event: string; data: unknown } | null
  *  auth + chequeo de 401/ok + bucle de lectura del stream que usa `revisarCorridaStream`
  *  (revisión con IA): el consumidor decide qué hacer con cada evento, incluyendo cuándo
  *  terminar (lanzar acá dentro de `onEvent` rechaza la promesa de afuera). */
-async function consumirSse(
+export async function consumirSse(
   path: string,
   init: RequestInit,
   onEvent: (ev: { event: string; data: unknown }) => void,

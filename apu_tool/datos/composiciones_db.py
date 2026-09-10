@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 
 from apu_tool import config
-from apu_tool.datos.repositorio import VersionYaExiste
+from apu_tool.datos.repositorio import CorridaEliminada, VersionYaExiste
 from apu_tool.nucleo.models import ComposicionRow
 
 _COLS = ("corrida_id", "seq", "version", "estado", "actividad_json", "ficha_json",
@@ -84,6 +84,15 @@ class ComposicionesDB:
             with self.connect() as c:
                 c.execute(sql, _params(fila))
         except sqlite3.IntegrityError as exc:
+            # `IntegrityError` cubre DOS violaciones y significan cosas distintas para
+            # el usuario: el índice único es "alguien más la cambió mientras
+            # trabajabas" (un 409 de concurrencia), y el FK a `corrida` es "la corrida
+            # ya no existe" (la borraron mientras componías). Confundirlas manda a
+            # buscar un conflicto de edición que no pasó. Se distingue por
+            # `sqlite_errorname` (no por el texto del mensaje, que no está
+            # garantizado), mismo criterio que `corridas_db.agregar_item`.
+            if getattr(exc, "sqlite_errorname", "") == "SQLITE_CONSTRAINT_FOREIGNKEY":
+                raise CorridaEliminada(fila.corrida_id) from exc
             raise VersionYaExiste(fila.corrida_id, fila.seq, fila.version) from exc
 
     def vigente(self, corrida_id: int, seq: int) -> Optional[ComposicionRow]:

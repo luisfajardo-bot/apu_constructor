@@ -37,10 +37,10 @@ def alm(tmp_path):
     a = Almacen(tmp_path / "precios.db", tmp_path / "apus.db",
                 tmp_path / "corridas.db")
     a.init_schema()
-    # `composicion.corrida_id` es NOT NULL REFERENCES corrida(id) ON DELETE CASCADE
-    # (mismo trato que corrida_item, ver corridas_db.agregar_item): hacen falta
-    # corridas reales para que el FK no rechace el INSERT. Quedan con id 1 y 2
-    # (AUTOINCREMENT arranca en 1), que es lo que usan las filas de prueba.
+    # Las corridas se crean de verdad: `composicion.corrida_id` tiene FK con CASCADE,
+    # igual que `corrida_item`, así que un id inventado no falla por la lógica de
+    # versiones sino por falta de fila padre — y ese caso tiene su propio test.
+    # Quedan con id 1 y 2 (AUTOINCREMENT arranca en 1), que es lo que usan las filas.
     from apu_tool.nucleo.models import CorridaMeta
     for _ in range(2):
         a.corridas.crear_corrida(CorridaMeta(
@@ -124,3 +124,12 @@ def test_no_hay_columna_para_el_razonamiento_del_modelo(alm):
     from dataclasses import fields
     nombres = {f.name for f in fields(ComposicionRow)}
     assert not (nombres & {"thinking", "razonamiento", "pensamiento", "reasoning"})
+
+
+def test_una_corrida_borrada_no_se_reporta_como_choque_de_version(alm):
+    """Las dos violaciones son IntegrityError pero significan cosas distintas: un
+    choque de versión manda al usuario a buscar un conflicto de edición, y acá lo
+    que pasó es que la corrida ya no está."""
+    from apu_tool.datos.repositorio import CorridaEliminada
+    with pytest.raises(CorridaEliminada):
+        alm.composiciones.agregar(fila(corrida_id=9999))

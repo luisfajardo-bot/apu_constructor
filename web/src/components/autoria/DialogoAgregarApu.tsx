@@ -127,11 +127,12 @@ export function DialogoAgregarApu({
   const [grupos, setGrupos] = useState<string[]>([]);
   const [conflicto, setConflicto] = useState<ConflictoAlta | null>(null);
 
-  // Precarga la cabecera y la composición desde `inicial`. Corre en los tres modos:
-  // editar y duplicar traen un APU de la biblioteca, y `crear` la usa para arrancar
-  // de una propuesta de la IA (ver DialogoComposicion) — ahí `codigo` y `grupo`
-  // vienen vacíos a propósito, para que los elija el usuario. Sin `inicial` (el
-  // caso normal de crear) no hace nada.
+  // Precarga la cabecera y la composición desde `inicial`. Hoy la usan editar y
+  // duplicar, que traen un APU de la biblioteca. `crear` con `inicial` ya no tiene
+  // llamador: era el viejo diálogo de composición, y la mesa que lo reemplazó
+  // (`pages/Composicion.tsx`) NO reusa este alta a propósito — obligaría a editar
+  // los componentes dos veces, y por eso tiene su propio diálogo de identidad. El
+  // modo sigue soportado igual; sin `inicial` no hace nada.
   useEffect(() => {
     if (!open || !inicial) return;
     const duplicando = modo === "duplicar";
@@ -654,13 +655,13 @@ export function DialogoAgregarApu({
 
 // ─── Buscador de insumo (autocompletado) ───────────────────────────────────────
 
-interface BuscadorInsumoProps {
+export interface BuscadorInsumoProps {
   codigo: string;
   nombre: string;
   onElegir: (ins: Insumo) => void;
 }
 
-function BuscadorInsumo({ codigo, nombre, onElegir }: BuscadorInsumoProps) {
+export function BuscadorInsumo({ codigo, nombre, onElegir }: BuscadorInsumoProps) {
   const [q, setQ] = useState("");
   const [resultados, setResultados] = useState<Insumo[]>([]);
   const [abierto, setAbierto] = useState(false);

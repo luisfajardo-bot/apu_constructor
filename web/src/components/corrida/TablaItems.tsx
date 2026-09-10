@@ -14,7 +14,6 @@ import SubApuBadge from "@/components/SubApuBadge";
 import BuscadorApu from "@/components/corrida/BuscadorApu";
 import CabeceraFiltros from "@/components/corrida/CabeceraFiltros";
 import { DialogoAgregarApu } from "@/components/autoria/DialogoAgregarApu";
-import DialogoComposicion from "@/components/corrida/DialogoComposicion";
 import { cop, pct } from "@/lib/moneda";
 import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
 import {
@@ -34,6 +33,28 @@ interface TablaItemsProps {
   control?: ControlCorridaTabla;
   /** Rol editor: habilita crear un APU nuevo (duplicar) desde la corrida. */
   puedeEditar?: boolean;
+  /** Abre la mesa de composición de esa línea. Es una prop y no un <Link> ni un
+   *  useNavigate acá adentro: esta tabla se monta SIN Router en sus tests, y
+   *  cualquiera de los dos reventaría con "useHref() may be used only in the
+   *  context of a <Router>". Quien navega es la página, que sí está dentro. */
+  onComponer?: (seq: number) => void;
+}
+
+/** ¿Esta línea puede componerse con IA?
+ *
+ *  Sin APU (el determinístico no encontró nada), o con el veredicto `sin_apu` de la
+ *  revisión sobre una fila que sí tiene APU. NO cuando el costo está puesto a mano:
+ *  esa línea ya declaró su costo (proyectos especiales) y no necesita APU.
+ *
+ *  Antes esto exigía haber corrido la revisión con IA sobre TODA la corrida para que
+ *  apareciera el botón en una sola fila. */
+export function ofreceComponer(it: ItemCuadro, puedeEditar: boolean): boolean {
+  if (!puedeEditar) return false;
+  // `costo_manual` viaja como BOOLEANO en el contrato HTTP (servicio/corridas.py lo
+  // arma con `ens.costo_a_mano`), así que el candado es el booleano; un `> 0` no
+  // compila y no diría nada más.
+  if (it.costo_manual) return false;
+  return !it.apu_codigo || it.revision?.dictamen === "sin_apu";
 }
 
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
@@ -47,6 +68,7 @@ export default function TablaItems({
   readOnly = false,
   control,
   puedeEditar = false,
+  onComponer,
 }: TablaItemsProps) {
   // Con `control`, el padre ya entrega las filas filtradas/ordenadas y controla
   // "Solo revisión". Sin `control` (modo vivo), se mantiene el filtro local de hoy.
@@ -68,10 +90,6 @@ export default function TablaItems({
   // más reciente vive en un ref.
   const [cargandoDuplicar, setCargandoDuplicar] = useState<number | null>(null);
   const ultimoPedidoDuplicarRef = useRef<number | null>(null);
-  // Fila para la que se le está pidiendo a la IA una composición (dictamen
-  // `sin_apu`). Es una sola: el diálogo es modal, así que no hay dos en vuelo.
-  const [componer, setComponer] = useState<ItemCuadro | null>(null);
-
   // Selección para las acciones en lote. Guarda seqs, no índices: la tabla se
   // reordena y se filtra, y un índice dejaría de apuntar a la misma fila.
   const [marcadas, setMarcadas] = useState<Set<number>>(new Set());
@@ -99,6 +117,10 @@ export default function TablaItems({
   // Sin una sola fila revisada la columna Veredicto estaría entera vacía, y una
   // columna vacía igual empuja el scroll horizontal: no se dibuja.
   const hayVeredicto = items.some((it) => it.revision);
+  // Misma razón que `hayVeredicto`: sin una sola fila que ofrezca componer la
+  // columna quedaría entera vacía y aun así empujaría el scroll horizontal.
+  const hayAcciones = onComponer !== undefined
+    && items.some((it) => ofreceComponer(it, puedeAplicarIA));
 
   function alternar(idx: number, seq: number, conShift: boolean) {
     const desde = anclaSeqRef.current === null
@@ -211,20 +233,6 @@ export default function TablaItems({
     const v = it.revision;
     if (!v || v.dictamen !== "cambiar" || !v.apu_sugerido) return;
     await asignarA(it, v.apu_sugerido, v.turno_sugerido);
-  }
-
-  /** El usuario creó un APU a partir de la propuesta de la IA: se le asigna a la
-   *  fila que lo pidió. El APU YA existe (lo creó el alta, con su propio toast);
-   *  si la asignación falla hay que decirlo, el silencio haría pensar que no pasó
-   *  nada. */
-  async function apuCompuesto(it: ItemCuadro, codigo: string, turno: string) {
-    setComponer(null);
-    const ok = await asignarA(it, codigo, turno);
-    if (!ok) {
-      toast.error(
-        `APU ${codigo} creado; no se pudo asignar al ítem — asignalo con Cambiar APU.`,
-      );
-    }
   }
 
   /** `apu` undefined = confirmar el APU que cada línea ya tiene. */
@@ -344,10 +352,12 @@ export default function TablaItems({
     }
   }
 
-  // 1 chevron + 12 columnas de datos, más Veredicto cuando hay alguno y la de
-  // selección cuando está activa. Se mira `items` (no `visible`): así la cabecera
-  // y el colSpan de las filas expandidas/vacías salen SIEMPRE del mismo dato.
-  const TOTAL_COLS = 13 + (hayVeredicto ? 1 : 0) + (seleccionable ? 1 : 0);
+  // 1 chevron + 12 columnas de datos, más Veredicto cuando hay alguno, Acciones
+  // cuando alguna fila ofrece componer, y la de selección cuando está activa. Se
+  // mira `items` (no `visible`): así la cabecera y el colSpan de las filas
+  // expandidas/vacías salen SIEMPRE del mismo dato.
+  const TOTAL_COLS =
+    13 + (hayVeredicto ? 1 : 0) + (hayAcciones ? 1 : 0) + (seleccionable ? 1 : 0);
 
   return (
     <div className="flex flex-col gap-2">
@@ -401,7 +411,7 @@ export default function TablaItems({
       <Table>
         {control ? (
           <CabeceraFiltros control={control} conSeleccion={seleccionable}
-                           conVeredicto={hayVeredicto} />
+                           conVeredicto={hayVeredicto} conAcciones={hayAcciones} />
         ) : (
           <TableHeader>
             <TableRow>
@@ -419,6 +429,7 @@ export default function TablaItems({
               <TableHead className="text-xs w-28 text-right">Total Costo</TableHead>
               <TableHead className="text-xs w-28 text-right">Margen</TableHead>
               <TableHead className="text-xs w-16 text-right">%</TableHead>
+              {hayAcciones && <TableHead className="text-xs w-24">Acciones</TableHead>}
             </TableRow>
           </TableHeader>
         )}
@@ -486,7 +497,6 @@ export default function TablaItems({
                         aplicando={aplicandoIA === it.seq}
                         bloqueado={aplicandoIA !== null}
                         onAplicar={() => aplicarSugerencia(it)}
-                        onComponer={() => setComponer(it)}
                       />
                     </TableCell>
                   )}
@@ -515,6 +525,20 @@ export default function TablaItems({
                   <TableCell className="text-xs text-right font-mono tabular-nums">
                     {pct(it.margen_pct)}
                   </TableCell>
+                  {hayAcciones && (
+                    <TableCell className="text-xs">
+                      {ofreceComponer(it, puedeAplicarIA) && (
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          title="Abrir la mesa de composición con IA de esta actividad (no crea nada)"
+                          onClick={() => onComponer?.(it.seq)}
+                        >
+                          Componer
+                        </Button>
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
 
                 {/* Inline expansion row */}
@@ -605,17 +629,6 @@ export default function TablaItems({
         />
       )}
 
-      {componer && (
-        <DialogoComposicion
-          key={`comp-${componer.seq}`}
-          open
-          corridaId={corridaId}
-          seq={componer.seq}
-          descripcion={componer.descripcion}
-          onOpenChange={(v) => { if (!v) setComponer(null); }}
-          onCreado={(codigo, turno) => apuCompuesto(componer, codigo, turno)}
-        />
-      )}
     </div>
   );
 }
@@ -626,14 +639,13 @@ export default function TablaItems({
 // con dictamen `cambiar` es garantía suya, no algo de lo que dependa la interfaz.
 
 function CeldaVeredicto({
-  item, puedeAplicar, aplicando, bloqueado, onAplicar, onComponer,
+  item, puedeAplicar, aplicando, bloqueado, onAplicar,
 }: {
   item: ItemCuadro;
   puedeAplicar: boolean;
   aplicando: boolean;
   bloqueado: boolean;
   onAplicar: () => void;
-  onComponer: () => void;
 }) {
   const v = item.revision;
   // Sin veredicto. NO se puede distinguir "la IA no contestó esta fila" de "esta
@@ -651,9 +663,8 @@ function CeldaVeredicto({
     );
   }
   const ofreceAplicar = puedeAplicar && v.dictamen === "cambiar" && !!v.apu_sugerido;
-  // `sin_apu` = la IA concluyó que la biblioteca no tiene nada adecuado. Recién ahí
-  // se ofrece la composición generativa, y solo porque la pide una persona.
-  const ofreceComponer = puedeAplicar && v.dictamen === "sin_apu";
+  // Componer NO vive acá: dejó de depender de que haya veredicto y se ofrece desde
+  // la columna Acciones de cualquier fila sin APU (ver `ofreceComponer`).
   return (
     <span className="inline-flex items-center gap-1">
       <span
@@ -671,17 +682,6 @@ function CeldaVeredicto({
           onClick={onAplicar}
         >
           {aplicando ? "Aplicando…" : "Aplicar"}
-        </Button>
-      )}
-      {ofreceComponer && (
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={bloqueado}
-          title="Pedirle a la IA una composición para esta actividad (no crea nada)"
-          onClick={onComponer}
-        >
-          Componer
         </Button>
       )}
     </span>

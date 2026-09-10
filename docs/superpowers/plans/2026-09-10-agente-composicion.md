@@ -34,7 +34,8 @@ explícita** — `master` autodespliega.
 
 | Archivo | Responsabilidad |
 |---|---|
-| `apu_tool/dominio/composicion.py` | **nuevo.** Vocabularios cerrados, dataclasses del contrato, parseo tolerante del JSON del modelo, orquestador `componer()` |
+| `apu_tool/dominio/composicion.py` | **nuevo.** Contrato puro: vocabularios cerrados, dataclasses, parseo tolerante del JSON del modelo |
+| `apu_tool/dominio/composicion_agente.py` | **nuevo.** Orquestador: `recuperar()`, `evaluar()`, `componer()` |
 | `apu_tool/dominio/validacion_composicion.py` | **nuevo.** Validador determinístico + confianza calculada. Sin IA, sin dinero, sin motor de precios |
 | `apu_tool/dominio/compose.py` | + `RendimientoObservado` y `rendimientos_observados()` |
 | `apu_tool/dominio/privacy.py` | + `payload_composicion()` y sus helpers |
@@ -1210,8 +1211,9 @@ def _validar_componente(c: ComponentePropuesto, ctx: ContextoValidacion
         pct = abs(r - ref) / ref * 100 if ref else 0.0
         lado = "por debajo" if r < obs.minimo else "por encima"
         adv.append(Hallazgo("RENDIMIENTO_ATIPICO",
-                            f"{r:g} queda {pct:.0f} % {lado} del rango observado "
-                            f"({obs.minimo:g}-{obs.maximo:g}, n={obs.n}).", c.codigo))
+                            f"{r:g} {obs.unidad} queda {pct:.0f} % {lado} del rango "
+                            f"observado ({obs.minimo:g}-{obs.maximo:g} {obs.unidad}, "
+                            f"n={obs.n}).", c.codigo))
 
     return err, adv, reglas
 
@@ -1435,7 +1437,7 @@ def test_el_desglose_explica_el_nivel():
     assert conf.motivos                       # nunca vacío
     assert sum(m.aporte for m in conf.motivos) == conf.puntos
     for m in conf.motivos:
-        assert m.senal and m.valor            # todo motivo se puede leer
+        assert m.senal and m.detalle          # todo motivo se puede leer
 
 
 def test_la_senal_de_unidad_ve_la_unidad_del_antecedente():
@@ -1507,11 +1509,14 @@ _DISPERSION_ANCHA = 2.0
 @dataclass(frozen=True)
 class Motivo:
     senal: str
-    valor: str          # legible: "4 de 5 con antecedente vivo"
+    # `detalle` y no `valor`: "valor" está en `_FORBIDDEN_KEYS` (por valor_unitario y
+    # valor_total) y `assert_no_money` mira NOMBRES de clave, no contenido. Con la
+    # clave "valor" el guardián reventaba sobre un desglose que no lleva un peso.
+    detalle: str        # legible: "4 de 5 con antecedente vivo"
     aporte: int
 
     def to_dict(self) -> dict[str, Any]:
-        return {"senal": self.senal, "valor": self.valor, "aporte": self.aporte}
+        return {"senal": self.senal, "detalle": self.detalle, "aporte": self.aporte}
 
 
 @dataclass(frozen=True)
@@ -1549,9 +1554,12 @@ def calcular_confianza(p: Propuesta, v: Validacion,
     n = len(comps)
     motivos: list[Motivo] = []
 
-    respaldados = sum(1 for c in comps
-                      if c.origen in _ORIGENES_CON_ANTECEDENTE + (
-                          "calculado_desde_produccion",) and c.referencias)
+    # Respaldado = el validador NO le puso SIN_EVIDENCIA. Se lee de los hallazgos en
+    # vez de recalcular la regla acá: cuando esto parcheaba la constante por su cuenta
+    # (`_ORIGENES_CON_ANTECEDENTE + ("calculado_desde_produccion",)`), el validador y
+    # la confianza decían cosas distintas del mismo componente.
+    sin_respaldo = {h.componente for h in v.advertencias if h.codigo == "SIN_EVIDENCIA"}
+    respaldados = sum(1 for c in comps if c.codigo not in sin_respaldo)
     frac = respaldados / n if n else 0.0
     aporte = 2 if frac >= 0.8 else (1 if frac >= 0.5 else 0)
     motivos.append(Motivo("respaldo_de_componentes",
@@ -1669,7 +1677,8 @@ def test_el_payload_lleva_exactamente_estas_claves():
     assert set(p["insumos_disponibles"][0]) == {"insumo_codigo", "insumo_nombre",
                                                 "unidad", "grupo"}
     assert set(p["rendimientos_observados"][0]) == {"insumo_codigo", "unidad", "n",
-                                                    "minimo", "mediana", "maximo"}
+                                                    "minimo", "mediana", "maximo",
+                                                    "descartados_otra_unidad"}
 
 
 def test_el_precio_contractual_de_la_actividad_no_viaja():
@@ -1756,10 +1765,18 @@ Al final de `apu_tool/dominio/privacy.py`, **antes** de la clase `PrivacyViolati
 
 ```python
 def rendimiento_observado_to_dict(o) -> dict[str, Any]:
-    """Estadística de uso de un insumo en la biblioteca. Cantidades físicas, no dinero."""
+    """Estadística de uso de un insumo en la biblioteca. Cantidades físicas, no dinero.
+
+    Se copia clave por clave y no se delega en `o.to_dict()`: este es el borde hacia
+    la IA, y un campo agregado al tipo del dominio no debe viajar solo por existir.
+    """
     return {"insumo_codigo": o.insumo_codigo, "unidad": o.unidad, "n": o.n,
             "minimo": round(o.minimo, 6), "mediana": round(o.mediana, 6),
-            "maximo": round(o.maximo, 6)}
+            "maximo": round(o.maximo, 6),
+            # El modelo tiene que saber que el rango dejó filas afuera: si no, un
+            # "n=35" sobre un insumo que también se usa en otra unidad le parece
+            # evidencia más firme de la que es.
+            "descartados_otra_unidad": o.descartados_otra_unidad}
 
 
 def payload_composicion(item, insumos, ejemplos, observados) -> dict[str, Any]:
@@ -2173,7 +2190,7 @@ def fila(**kw) -> ComposicionRow:
         validacion={"valido": True, "errores": [], "advertencias": [],
                     "metricas": {"superadas": 9, "totales": 9}},
         confianza="alta",
-        confianza_motivos=[{"senal": "respaldo_de_componentes", "valor": "1 de 1",
+        confianza_motivos=[{"senal": "respaldo_de_componentes", "detalle": "1 de 1",
                             "aporte": 2}],
         antecedentes={"codigos_permitidos": ["4279"], "apus_referencia": ["A1"]},
         modelo="claude-sonnet-5", prompt_version="composicion/v2",
@@ -2808,10 +2825,38 @@ Se parte en tres funciones porque tienen tres llamadores distintos:
 - `componer()` — el generador con los eventos; usa las dos anteriores.
 
 **Archivos:**
-- Modificar: `apu_tool/dominio/composicion.py`, `apu_tool/dominio/ai_assist.py`,
-  `apu_tool/dominio/assemble.py`, `tests/test_compose.py`,
-  `tests/test_assemble_generado.py`
+- Crear: `apu_tool/dominio/composicion_agente.py`
+- Modificar: `apu_tool/dominio/ai_assist.py`, `apu_tool/dominio/assemble.py`,
+  `tests/test_compose.py`, `tests/test_assemble_generado.py`
 - Test: `tests/test_composicion_motor.py`
+
+> **Cambio respecto al borrador del plan** (revisión de calidad de la tarea 1): el
+> orquestador va en un **archivo hermano**, no al final de `composicion.py`. Razón: el
+> orquestador arrastra `Almacen` y la fachada del SDK, y todo el que importe el
+> contrato — el validador, `esquemas.py`, el servicio — se los comería. Es el mismo
+> reparto que ya tiene el repo entre `revision.py` y `ai_assist.py`. Como efecto
+> secundario desaparecen los imports dentro de funciones que el borrador usaba para
+> esquivar ese acoplamiento: acá van todos arriba, normales.
+>
+> En el código de abajo, donde dice "al final de `composicion.py`", va en
+> `composicion_agente.py`, con estos imports a nivel de módulo:
+>
+> ```python
+> from dataclasses import dataclass, replace
+> from typing import Any
+>
+> from apu_tool.dominio import privacy
+> from apu_tool.dominio.ai_assist import PROMPT_VERSION, IANoDisponible
+> from apu_tool.dominio.compose import InsumoRetriever, rendimientos_observados
+> from apu_tool.dominio.composicion import Propuesta, propuesta_desde_json
+> from apu_tool.dominio.validacion_composicion import (
+>     ContextoValidacion, calcular_confianza, validar,
+> )
+> ```
+>
+> Y el test importa `componer`, `evaluar` y `recuperar` de
+> `apu_tool.dominio.composicion_agente` (los tipos siguen viniendo de
+> `apu_tool.dominio.composicion`).
 
 - [ ] **Paso 1: escribir la prueba que falla**
 
@@ -2825,8 +2870,9 @@ import pytest
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.ai_assist import ApuAdvisor, IANoDisponible
 from apu_tool.dominio.composicion import (
-    Calculo, ComponentePropuesto, Propuesta, Referencia, componer, evaluar, recuperar,
+    Calculo, ComponentePropuesto, Propuesta, Referencia,
 )
+from apu_tool.dominio.composicion_agente import componer, evaluar, recuperar
 from apu_tool.nucleo.models import Apu, ApuComponent, Insumo, LicitacionItem
 
 ITEM = LicitacionItem("1.3", "EXCAVACION MANUAL EN MATERIAL COMUN", "M3", 120.0,
@@ -3562,7 +3608,8 @@ from apu_tool.datos.almacen import Almacen
 from apu_tool.datos.repositorio import VersionYaExiste
 from apu_tool.dominio.ai_assist import PROMPT_VERSION, ApuAdvisor, IANoDisponible
 from apu_tool.dominio import privacy
-from apu_tool.dominio.composicion import Propuesta, componer, evaluar, propuesta_desde_json, recuperar
+from apu_tool.dominio.composicion import Propuesta, propuesta_desde_json
+from apu_tool.dominio.composicion_agente import componer, evaluar, recuperar
 from apu_tool.nucleo.models import ComposicionRow
 from apu_tool.servicio import autoria
 from apu_tool.servicio.corridas import CorridaCongelada, confirmar_item
@@ -3587,11 +3634,38 @@ def _fila_base(alm: Almacen, corrida_id: int, seq: int, item) -> dict:
             "creada_en": _ahora()}
 
 
+def _es_de_esta_linea(v: Optional[ComposicionRow], row) -> bool:
+    """¿El expediente habla de la actividad que hoy ocupa este `seq`?
+
+    El `seq` SE REUSA: la FK va a `corrida` y no a `corrida_item`, así que un
+    expediente sobrevive al borrado de su línea, y `agregar_items` toma `max(seq)+1`
+    — borrar la ÚLTIMA línea y agregar otra le da el mismo número. Sin esta
+    comparación, `vigente` devolvería el expediente de otra actividad, y una versión
+    `aprobada` haría que aprobar conteste 409 nombrando un APU ajeno: esa línea no se
+    podría componer nunca más.
+
+    Se compara `descripcion` y no el dict entero, por lo mismo que `_vista_item`
+    compara solo `apu_evaluado`: es lo que identifica la actividad. Cambiarle la
+    cantidad a una línea no la convierte en otra cosa.
+    """
+    if v is None:
+        return False
+    return (v.actividad or {}).get("descripcion") == row.item.descripcion
+
+
 def vista(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
-    """La versión vigente y el historial. None si la fila no existe."""
-    if alm.corridas.get_item(corrida_id, seq) is None:
+    """La versión vigente y el historial. None si la fila no existe.
+
+    El historial se devuelve completo (es el registro de correcciones y no miente
+    sobre nada), pero la VIGENTE se descarta si es de otra actividad: es lo que se
+    usa para editar y aprobar.
+    """
+    row = alm.corridas.get_item(corrida_id, seq)
+    if row is None:
         return None
     v = alm.composiciones.vigente(corrida_id, seq)
+    if not _es_de_esta_linea(v, row):
+        v = None
     return {"vigente": v.to_dict() if v else None,
             "historial": [f.to_dict() for f in
                           alm.composiciones.historial(corrida_id, seq)]}
@@ -4044,7 +4118,9 @@ export type NivelConfianza = "alta" | "media" | "baja" | "insuficiente";
 
 export interface MotivoConfianza {
   senal: string;
-  valor: string;
+  /** `detalle` y no `valor`: "valor" está en la denylist de privacidad del backend
+   *  (por valor_unitario / valor_total) y el guardián mira nombres de clave. */
+  detalle: string;
   aporte: number;
 }
 
@@ -4239,7 +4315,7 @@ function vista(over: Record<string, unknown> = {}) {
     validacion: { valido: true, errores: [], advertencias: [],
                   metricas: { superadas: 11, totales: 11 } },
     confianza: "media",
-    confianza_motivos: [{ senal: "respaldo_de_componentes", valor: "1 de 1",
+    confianza_motivos: [{ senal: "respaldo_de_componentes", detalle: "1 de 1",
                           aporte: 2 }],
     antecedentes: { codigos_permitidos: ["4279"],
                     apus_referencia: [{ codigo: "A1", turno: "DIURNO" }] },
@@ -4575,12 +4651,16 @@ maquetado es libre dentro de la convención densa del repo):
 | Elemento | Requisito |
 |---|---|
 | Actividad | se muestra `vigente.actividad.descripcion`, más unidad, cantidad y turno |
-| Confianza | el nivel en mayúsculas; un botón "por qué" que despliega `confianza_motivos` con `senal`, `valor` y `aporte` |
+| Confianza | el nivel en mayúsculas; un botón "por qué" que despliega `confianza_motivos` con `senal`, `detalle` y `aporte` |
 | Incertidumbre | texto que empieza con "El modelo declara …", separado del nivel |
 | Errores | uno por `validacion.errores`, con su `mensaje` visible |
 | Advertencias | uno por `validacion.advertencias`, con su `mensaje` visible |
+| Hallazgo sin `componente` | `componente: ""` significa que es del **conjunto**, no de una fila: se pinta en el bloque de arriba y no resalta ninguna fila. Pasa con `FALTA_MANO_DE_OBRA`, `FALTA_HERRAMIENTA`, `METODO_INCOHERENTE`, `SUPUESTO_SIN_CONFIRMAR` y con `COMPONENTE_DUPLICADO` cuando hay **más de un** código repetido (con uno solo sí trae el código). Los códigos van nombrados dentro del `mensaje` |
 | Rendimiento | `<input>` numérico con `aria-label={\`Rendimiento de ${c.codigo}\`}` |
+| Hipótesis | al desplegar la fila, los pares clave-valor de `hipotesis` junto a la fórmula de `calculo`. **Es el único consumidor de ese campo**: el validador no lo mira, así que si la interfaz no lo muestra, el modelo está gastando tokens en llenar algo que nadie lee |
+| Nivel de evidencia | la columna "Ev." de la tabla. **Igual que `hipotesis`, la interfaz es su único consumidor**: ni el validador ni la confianza lo leen. Si esta columna no se pinta, hay que sacarle las tres líneas al prompt en vez de dejar un campo que nadie mira |
 | Quitar | `<button>` con `aria-label={\`Quitar ${c.codigo}\`}` |
+| Métricas | el cociente "N de M validaciones superadas" se muestra **solo** cuando `validacion.valido` es verdadero. Con errores se lee "N errores" y nada más: un 89 % al lado de un cartel de bloqueo tranquiliza sobre algo que no se puede aprobar |
 | Guardar cambios | llama `guardarComposicion(corridaId, fila, vigente.version, componentes, supuestosConfirmados)`; deshabilitado si no hay cambios |
 | Regenerar | llama `generar()` |
 | Rechazar | llama `rechazarComposicion(corridaId, fila, vigente.version, motivo)` |
@@ -4709,7 +4789,8 @@ En la tabla de `apu_tool/dominio/`, agrega dos filas y corrige la de `compose.py
 
 ```markdown
 | `compose.py`             | candidatos de insumos + rendimientos observados de la biblioteca |
-| `composicion.py`         | contrato del agente de composición + orquestador (propone; no aplica) |
+| `composicion.py`         | contrato del agente de composición (tipos y parseo, sin dependencias) |
+| `composicion_agente.py`  | orquestador de la composición (propone; nunca aplica) |
 | `validacion_composicion.py` | validador determinístico + confianza calculada (sin IA, sin dinero) |
 ```
 

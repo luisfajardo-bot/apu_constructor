@@ -21,10 +21,17 @@ from apu_tool.nucleo.models import DePricedApu, DePricedComponent
 
 @dataclass(frozen=True)
 class CandidateInsumo:
-    """Insumo candidato SIN dinero (código, nombre, unidad)."""
+    """Insumo candidato SIN dinero (código, nombre, unidad, grupo).
+
+    `grupo` es clasificación técnica (MO/EQ/MAT), no monetaria, y lo llena el
+    orquestador con la misma consulta al catálogo con la que arma `unidades_catalogo`
+    para el validador: una lectura, dos usos. Por defecto vacío para que el retriever
+    siga construyendo candidatos sin consultar nada.
+    """
     codigo: str
     nombre: str
     unidad: str
+    grupo: str = ""
 
 
 class InsumoRetriever:
@@ -38,19 +45,37 @@ class InsumoRetriever:
     ) -> tuple[list[CandidateInsumo], list[DePricedApu]]:
         """Devuelve (insumos_candidatos, apus_ejemplo) — todo sin dinero."""
         # 1) APUs análogos -> sus insumos + sirven de ejemplo.
+        #
+        # UN solo recorrido: antes había dos, y el primero (el de los ejemplos) volvía
+        # a pedir los mismos APUs que el segundo. En SQLite no se nota, pero cada
+        # `get_depriced_apu` son DOS consultas en Postgres (`get_apu` +
+        # `get_components`), así que eran round-trips tirados contra Supabase en el
+        # camino de generación.
+        #
+        # El corte de los ejemplos va por ÍNDICE (`i < max_ejemplos`) y no por cuántos
+        # se llevan acumulados: el bucle viejo iteraba `cands[:max_ejemplos]`, así que
+        # un candidato que no resolvía gastaba su cupo en vez de cederlo al siguiente.
+        # Contar los acumulados daría más ejemplos que antes en ese caso — mismo
+        # código, otro payload hacia el modelo.
         cands = self.matcher.candidates(descripcion, shift, top_n=8)
         ejemplos: list[DePricedApu] = []
         insumos: dict[str, CandidateInsumo] = {}
-        for c in cands[:max_ejemplos]:
+        for i, c in enumerate(cands):
             dp = self.alm.apus.get_depriced_apu(c.apu_codigo, shift)
             if dp is None:
                 continue
-            ejemplos.append(dp)
-        for c in cands:
-            dp = self.alm.apus.get_depriced_apu(c.apu_codigo, shift)
-            if dp is None:
-                continue
+            if i < max_ejemplos:
+                ejemplos.append(dp)
             for comp in dp.componentes:
+                # Los sub-APUs NO entran al conjunto candidato. El contrato y el
+                # validador los soportan, pero en esta fase la IA no los propone: los
+                # ~1500 APUs duplicarían la lista blanca y traerían el riesgo de
+                # anidar un APU dentro de sí mismo, cuando todavía no sabemos si el
+                # modelo compone bien con solo insumos (eso es la fase 3). Sin este
+                # filtro el modelo ve un código de APU disfrazado de insumo, lo
+                # propone de buena fe y se come un CODIGO_INEXISTENTE que no es suyo.
+                if comp.tipo == "apu":
+                    continue
                 if comp.insumo_codigo and comp.insumo_codigo not in insumos:
                     insumos[comp.insumo_codigo] = CandidateInsumo(
                         comp.insumo_codigo, comp.insumo_nombre, comp.unidad)
@@ -70,4 +95,75 @@ class InsumoRetriever:
 
 
 def candidate_insumo_to_dict(c: CandidateInsumo) -> dict:
-    return {"insumo_codigo": c.codigo, "insumo_nombre": c.nombre, "unidad": c.unidad}
+    return {"insumo_codigo": c.codigo, "insumo_nombre": c.nombre,
+            "unidad": c.unidad, "grupo": c.grupo}
+
+
+@dataclass(frozen=True)
+class RendimientoObservado:
+    """Cómo se usa un insumo en la biblioteca. SIN dinero: son cantidades físicas.
+
+    `n` cuenta FILAS de `apu_componentes` en la unidad mayoritaria, no APUs distintos.
+    Hoy coinciden (en la biblioteca real no hay un insumo repetido dentro del mismo
+    APU), pero la PK es `(apu_codigo, shift, seq)` y nada lo impide: si algún día
+    aparecen líneas repetidas, `n` las contará dos veces. El mismo código en DIURNO y
+    en NOCTURNO sí son dos antecedentes distintos, a propósito — el turno es parte de
+    la identidad de un APU.
+    """
+    insumo_codigo: str
+    unidad: str
+    n: int
+    minimo: float
+    mediana: float
+    maximo: float
+    # Filas del mismo insumo en OTRA unidad, dejadas fuera del rango. No es ruido
+    # teórico: el insumo "4288 N" aparece en HR y en JR, con casi 100x de diferencia
+    # de escala. Mezclarlas daría un rango que no significa nada y haría que el
+    # validador llame "atípico" a un rendimiento correcto.
+    descartados_otra_unidad: int = 0
+
+    def to_dict(self) -> dict:
+        return {"insumo_codigo": self.insumo_codigo, "unidad": self.unidad,
+                "n": self.n, "minimo": round(self.minimo, 6),
+                "mediana": round(self.mediana, 6), "maximo": round(self.maximo, 6),
+                "descartados_otra_unidad": self.descartados_otra_unidad}
+
+
+def _mediana(xs: list[float]) -> float:
+    ord_ = sorted(xs)
+    m = len(ord_) // 2
+    return ord_[m] if len(ord_) % 2 else (ord_[m - 1] + ord_[m]) / 2
+
+
+def rendimientos_observados(almacen: Almacen, codigos) -> dict[str, RendimientoObservado]:
+    """Estadística no monetaria de cada insumo en la biblioteca.
+
+    Le da al modelo con qué declarar "copiado" o "ajustado", y al validador con qué
+    llamar atípico a un rendimiento. Un insumo que no se usa en ningún APU no aparece:
+    la ausencia es el dato (`SIN_ANTECEDENTES`), no un rango de ceros.
+
+    Solo entra al rango la UNIDAD MAYORITARIA. Un mismo código puede aparecer con
+    unidades distintas en la biblioteca, y un rango que mezcla HR con JR no describe
+    nada. Las filas de las otras unidades se cuentan en `descartados_otra_unidad`, no
+    se tiran calladas.
+    """
+    crudo = almacen.apus.rendimientos_por_insumo(codigos)
+    out: dict[str, RendimientoObservado] = {}
+    for cod, pares in crudo.items():
+        # Un rendimiento <= 0 en la biblioteca es un dato roto, no un antecedente.
+        validos = [(u or "", r) for u, r in pares if r > 0]
+        if not validos:
+            continue
+        por_unidad: dict[str, list[float]] = {}
+        for u, r in validos:
+            por_unidad.setdefault(u, []).append(r)
+        # Empate resuelto por orden alfabético: sin esto, cuál unidad gana depende del
+        # orden en que la base devuelva las filas, que ni siquiera es igual entre
+        # SQLite y Postgres.
+        unidad = max(sorted(por_unidad), key=lambda u: len(por_unidad[u]))
+        vals = por_unidad[unidad]
+        out[cod] = RendimientoObservado(
+            insumo_codigo=cod, unidad=unidad, n=len(vals), minimo=min(vals),
+            mediana=_mediana(vals), maximo=max(vals),
+            descartados_otra_unidad=len(validos) - len(vals))
+    return out

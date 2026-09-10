@@ -78,23 +78,104 @@ export interface ResumenRevision {
   sin_veredicto: number;
 }
 
-export interface ComponenteComposicion {
-  insumo_codigo: string;
-  insumo_nombre: string;
-  unidad: string;
+/** Un componente propuesto, con todo lo que lo explica. Espejo del contrato de
+ *  `apu_tool/dominio/composicion.py`. Ningún campo es monetario, a propósito. */
+export interface ComponentePropuesto {
+  codigo: string;
+  tipo: "insumo" | "apu";
+  funcion: string;              // "" = la IA no dijo un rol legible
   rendimiento: number;
+  origen: string;
+  referencias: { apu_codigo: string; turno: string }[];
+  hipotesis: Record<string, unknown>;
+  calculo: {
+    operacion: string; numerador: number; denominador: number; resultado: number;
+  } | null;
+  justificacion: string;
+  nivel_evidencia: "alto" | "medio" | "bajo";
+  ref_shift: string;
 }
 
-/** Composición PROPUESTA por la IA para una fila sin APU (POST .../componer/{seq}).
- *  No persiste nada: quien aplica es el usuario, vía el alta normal de APUs. */
-export interface ComposicionPropuesta {
+export interface Hallazgo {
+  codigo: string;
+  mensaje: string;
+  componente: string;           // "" = hallazgo del conjunto, no de una fila
+}
+
+export interface ValidacionComposicion {
+  valido: boolean;
+  errores: Hallazgo[];
+  advertencias: Hallazgo[];
+  metricas: { superadas: number; totales: number };
+}
+
+/** El nivel lo calcula la plataforma. `incertidumbre_declarada` (lo que el modelo
+ *  dice de sí mismo) va aparte y NO influye: se muestra rotulada como dato suyo. */
+export type NivelConfianza = "alta" | "media" | "baja" | "insuficiente";
+
+export interface MotivoConfianza {
+  senal: string;
+  /** `detalle` y no `valor`: "valor" está en la denylist de privacidad del backend
+   *  (por valor_unitario / valor_total) y el guardián mira nombres de clave. */
+  detalle: string;
+  aporte: number;
+}
+
+export type EstadoComposicion =
+  | "generando" | "propuesta" | "editada" | "aprobada" | "rechazada" | "error";
+
+export interface ComposicionVersion {
+  corrida_id: number;
   seq: number;
+  version: number;
+  estado: EstadoComposicion;
+  actividad: {
+    item: string; descripcion: string; unidad: string; cantidad: number;
+    shift: string;
+  };
+  ficha: null;                  // fase 2
+  propuesta: {
+    componentes: ComponentePropuesto[];
+    supuestos: { campo: string; supuesto: string; impacto: string }[];
+    incertidumbre_declarada: number;
+    justificacion: string;
+  } | null;
+  validacion: ValidacionComposicion | null;
+  confianza: NivelConfianza | null;
+  confianza_motivos: MotivoConfianza[] | null;
+  antecedentes: {
+    codigos_permitidos: string[];
+    apus_referencia: { codigo: string; turno: string }[];
+  } | null;
+  modelo: string | null;
+  prompt_version: string | null;
+  apu_codigo: string | null;
+  apu_turno: string | null;
+  autor: string | null;
+  creada_en: string;
+  motivo: string | null;
+}
+
+export interface EntradaCatalogo {
   nombre: string;
   unidad: string;
-  shift: string;
-  justificacion: string;
-  confianza: number;
-  componentes: ComponenteComposicion[];
+  grupo: string;
+}
+
+export interface VistaComposicion {
+  vigente: ComposicionVersion | null;
+  historial: ComposicionVersion[];
+  /** Nombre y unidad de cada código de la propuesta vigente. Viene de la respuesta
+   *  y no de la fila persistida: la propuesta guarda lo que dijo el modelo (solo el
+   *  código) y el nombre se lee fresco del catálogo. Un código que no está en el
+   *  catálogo NO aparece acá — y eso es correcto, el validador ya emitió
+   *  CODIGO_INEXISTENTE y el usuario tiene que verlo. */
+  catalogo: Record<string, EntradaCatalogo>;
+  /** Modo de la corrida al momento de cargar el expediente. `congelada` = foto
+   *  inmutable: la mesa se apaga entera. Es una foto, no un estado en vivo — si la
+   *  congelan con la mesa abierta, el 409 de la primera escritura sigue siendo la
+   *  red (cubrir eso pedía un poll, que este repo no hace). */
+  corrida_modo: "activa" | "congelada";
 }
 
 /** Un APU distinto por fila para aplicar sugerencias de la IA en un solo recosteo. */

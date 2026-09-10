@@ -9,8 +9,8 @@ from __future__ import annotations
 from typing import Iterable, Optional, Protocol, runtime_checkable
 
 from apu_tool.nucleo.models import (
-    Apu, ApuComponent, Carpeta, CorridaItemRow, CorridaMeta, DePricedApu, EventoAuditoria,
-    Insumo, ListaPrecios, Perfil,
+    Apu, ApuComponent, Carpeta, ComposicionRow, CorridaItemRow, CorridaMeta, DePricedApu,
+    EventoAuditoria, Insumo, ListaPrecios, Perfil,
 )
 
 
@@ -45,6 +45,20 @@ class ArmadoDuplicado(Exception):
                 f"archivo dos veces." if corrida_id else ": esperá a que termine.")
         super().__init__(f"Ya hay un armado en curso de «{archivo}» en esta carpeta"
                          + cola)
+
+
+class VersionYaExiste(Exception):
+    """Se intentó escribir una versión de composición que ya está.
+
+    La levanta el índice único `ux_composicion_version`, no una comprobación previa:
+    las dos peticiones de un doble clic leerían la misma versión vigente y las dos
+    creerían estar escribiendo la siguiente. El servicio la traduce a un 409.
+    """
+
+    def __init__(self, corrida_id: int, seq: int, version: int):
+        super().__init__(f"La composición {corrida_id}/{seq} ya tiene la versión "
+                         f"{version}: alguien más la cambió mientras trabajabas.")
+        self.corrida_id, self.seq, self.version = corrida_id, seq, version
 
 
 @runtime_checkable
@@ -154,6 +168,10 @@ class RepositorioApus(Protocol):
                             ) -> dict[tuple[str, str], list[ApuComponent]]:
         """Como get_components pero para muchos (codigo, shift) en UNA consulta.
         Devuelve {(codigo, shift): [componentes...]} para las claves halladas."""
+        ...
+    def rendimientos_por_insumo(self, codigos: Iterable[str]
+                                ) -> dict[str, list[tuple[str, float]]]:
+        """(unidad, rendimiento) con que cada insumo aparece en la biblioteca."""
         ...
     def component_counts(self) -> dict[tuple[str, str], int]: ...
     def componentes_subapu_candidatos(self) -> list[dict]:
@@ -399,4 +417,19 @@ class RepositorioAuditoria(Protocol):
                limit: int = 100, offset: int = 0) -> tuple[list[dict], int]:
         """Lectura paginada (abre su propia conexión). antes/despues/contexto ya
         parseados a objetos Python (dict/None). Orden ts desc."""
+        ...
+
+
+@runtime_checkable
+class RepositorioComposiciones(Protocol):
+    def agregar(self, fila: ComposicionRow, conn=None) -> None:
+        """Escribe una versión NUEVA. Levanta VersionYaExiste si esa versión ya está."""
+        ...
+
+    def vigente(self, corrida_id: int, seq: int) -> Optional[ComposicionRow]:
+        """La versión de mayor número, o None si nunca se compuso esta fila."""
+        ...
+
+    def historial(self, corrida_id: int, seq: int) -> list[ComposicionRow]:
+        """Todas las versiones, de la más vieja a la más nueva."""
         ...

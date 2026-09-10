@@ -17,6 +17,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
+from apu_tool.datos.repositorio import VersionYaExiste
 from apu_tool.dominio.licitacion import read_licitacion
 from apu_tool.dominio.pipeline import BibliotecaVacia, ensure_seeded, generate_sample
 from apu_tool.nucleo.models import LicitacionItem
@@ -25,6 +26,7 @@ from apu_tool.servicio import armador
 from apu_tool.servicio import auditoria as auditoria_svc
 from apu_tool.servicio import autoria
 from apu_tool.servicio import carpetas as carpetas_svc
+from apu_tool.servicio import composicion as composicion_svc
 from apu_tool.servicio import corridas as svc
 from apu_tool.servicio.carpetas import CarpetaInvalida, CarpetaNoVacia
 from apu_tool.servicio import insumos as insumos_svc
@@ -38,6 +40,7 @@ from apu_tool.servicio import limites
 from pydantic import BaseModel
 from apu_tool.servicio.esquemas import (
     AgregarLineasIn, ApuEditIn, ApuNuevoIn, BorrarLineasIn, CambiosIn, ConfirmarIn,
+    ComposicionAprobarIn, ComposicionEditarIn, ComposicionRechazarIn,
     ConfirmarLoteIn, EstadoIn, IgualarCostoIn, InsumoNuevoIn, ListaPreciosIn, RolIn,
     StatusOut, UsuarioInvitarIn)
 
@@ -272,20 +275,84 @@ def revisar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
                              headers={"Cache-Control": "no-cache"})
 
 
-@router.post("/corridas/{cid}/componer/{seq}")
-def componer_item(cid: int, seq: int, alm: Almacen = Depends(get_almacen),
-                  _: object = Depends(requiere_rol("editor"))):
-    """Propone una composición para una fila sin APU. No crea nada en la biblioteca."""
+# ---- composición asistida (el expediente de una fila sin APU) ----
+# Cinco endpoints sobre la MISMA fila: leer el expediente, generar (SSE), guardar la
+# edición humana, aprobar y rechazar. `consulta` lee; los cuatro que escriben piden
+# `editor`, incluido aprobar: da de alta un APU en la biblioteca.
+def _composicion_o_error(llamada):
+    """Traduce al contrato HTTP lo que levanta `servicio/composicion.py`.
+
+    `ValueError` es el de las reglas de `autoria.py` (código repetido, rendimiento en
+    0): 422 y no 400, porque el cuerpo está bien formado y lo que el dominio rechaza
+    es la entidad. Sin este `except`, lo atraparía el handler global de ValueError de
+    `app.py` y saldría un 400 con "Solicitud inválida.", perdiendo el motivo.
+    """
     try:
-        d = svc.componer_item(alm, cid, seq)
-    except svc.IANoDisponible as e:
-        # 503 (igual que la revisión): falta configuración del servidor.
-        raise HTTPException(status_code=503, detail=str(e))
-    except ValueError as e:
+        v = llamada()
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para modificar.")
+    except VersionYaExiste as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except (composicion_svc.ComposicionInvalida, ValueError) as e:
         raise HTTPException(status_code=422, detail=str(e))
-    if d is None:
-        raise HTTPException(status_code=404, detail="Ítem no encontrado.")
-    return d
+    if v is None:
+        raise HTTPException(status_code=404, detail="Fila no encontrada.")
+    return v
+
+
+@router.get("/corridas/{cid}/composicion/{seq}")
+def get_composicion(cid: int, seq: int, alm: Almacen = Depends(get_almacen),
+                    _: object = Depends(requiere_rol("consulta"))):
+    v = composicion_svc.vista(alm, cid, seq)
+    if v is None:
+        raise HTTPException(status_code=404, detail="Fila no encontrada.")
+    return v
+
+
+@router.post("/corridas/{cid}/composicion/{seq}/stream")
+def componer_composicion(cid: int, seq: int, alm: Almacen = Depends(get_almacen),
+                         actor=Depends(requiere_rol("editor"))):
+    """Compone un APU para esta fila con IA. Propone; aprobar es del usuario."""
+    try:
+        # Valida ANTES de devolver el generador, igual que la revisión: con el stream
+        # ya abierto, el error saldría dentro de un 200 que muere solo.
+        gen = composicion_svc.generar_stream(alm, cid, seq, actor)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para componer.")
+    except svc.IANoDisponible as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if gen is None:
+        raise HTTPException(status_code=404, detail="Fila no encontrada.")
+    return StreamingResponse(_event_stream(gen),
+                             media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
+
+
+@router.put("/corridas/{cid}/composicion/{seq}")
+def editar_composicion(cid: int, seq: int, body: ComposicionEditarIn,
+                       alm: Almacen = Depends(get_almacen),
+                       actor=Depends(requiere_rol("editor"))):
+    return _composicion_o_error(
+        lambda: composicion_svc.guardar_edicion(alm, cid, seq, body.model_dump(),
+                                                actor))
+
+
+@router.post("/corridas/{cid}/composicion/{seq}/aprobar")
+def aprobar_composicion(cid: int, seq: int, body: ComposicionAprobarIn,
+                        alm: Almacen = Depends(get_almacen),
+                        actor=Depends(requiere_rol("editor"))):
+    return _composicion_o_error(
+        lambda: composicion_svc.aprobar(alm, cid, seq, body.model_dump(), actor))
+
+
+@router.post("/corridas/{cid}/composicion/{seq}/rechazar")
+def rechazar_composicion(cid: int, seq: int, body: ComposicionRechazarIn,
+                         alm: Almacen = Depends(get_almacen),
+                         actor=Depends(requiere_rol("editor"))):
+    return _composicion_o_error(
+        lambda: composicion_svc.rechazar(alm, cid, seq, body.model_dump(), actor))
 
 
 @router.get("/corridas/{cid}/items/{seq}")

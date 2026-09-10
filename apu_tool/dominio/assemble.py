@@ -16,12 +16,10 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from apu_tool.dominio.ai_assist import ApuAdvisor, ComposeResult
-from apu_tool.dominio.compose import InsumoRetriever
+from apu_tool.dominio.ai_assist import ApuAdvisor
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.matching import Matcher
 from apu_tool.nucleo.models import (
-    ApuComponent,
     AssembledApu,
     LicitacionItem,
     MatchResult,
@@ -40,13 +38,15 @@ class Assembler:
         # número que la vista. None = Principal.
         self.lista_id = lista_id
         self.pricing = PricingEngine(almacen, lista_id=lista_id)
+        # Nadie lo usa ADENTRO: la composición se mudó a `composicion_agente.py`. Se
+        # queda porque es donde `test_armado_nunca_llama_a_la_ia` mete su espía, que
+        # es el candado de que el armado siga siendo determinístico.
         self.advisor = advisor or ApuAdvisor()
-        # Matcher / retriever / índice de códigos son PEREZOSOS: construirlos lee el
-        # catálogo completo de APUs (2 consultas) y arma un índice invertido en CPU.
+        # Matcher e índice de códigos son PEREZOSOS: construirlos lee el catálogo
+        # completo de APUs (2 consultas) y arma un índice invertido en CPU.
         # El camino de confirmar/reasignar (reassemble_with_choice -> _build) NO los
         # usa, así que no se deben pagar ahí. Se materializan al primer acceso (armado).
         self._matcher: Optional[Matcher] = None
-        self._retriever: Optional[InsumoRetriever] = None
         self._codigos_apu_cache: Optional[set] = None
 
     @property
@@ -54,12 +54,6 @@ class Assembler:
         if self._matcher is None:
             self._matcher = Matcher(self.alm.apus.apu_index())
         return self._matcher
-
-    @property
-    def retriever(self) -> InsumoRetriever:
-        if self._retriever is None:
-            self._retriever = InsumoRetriever(self.alm, self.matcher)
-        return self._retriever
 
     @property
     def _codigos_apu(self) -> set:
@@ -124,42 +118,6 @@ class Assembler:
                 progress(i, total, item.descripcion)
             out.append(self.assemble_item(item))
         return out
-
-    # --------------------------------------------------- composición generativa
-    def generar_composicion(self, item: LicitacionItem) -> Optional[AssembledApu]:
-        """Compone un APU desde cero con la IA para una actividad nueva.
-
-        NO la llama el armado: es a pedido explícito del usuario (endpoint
-        `/corridas/{id}/componer/{seq}`), y lo que devuelve es una PROPUESTA que
-        alguien tiene que confirmar. Devuelve None si no hay IA o si no se pudo
-        componer. Es la única razón por la que el `Assembler` sigue recibiendo un
-        `advisor`.
-        """
-        insumos, ejemplos = self.retriever.retrieve(item.descripcion, item.shift)
-        result: Optional[ComposeResult] = self.advisor.compose_apu(item, insumos, ejemplos)
-        if result is None or not result.componentes:
-            return None
-
-        comps: list[ApuComponent] = []
-        for cc in result.componentes:
-            cands = self.alm.precios.get_candidatos(cc.insumo_codigo)
-            if not cands:
-                continue
-            ins = cands[0]   # la IA solo da código; el costeo re-resuelve por nombre
-            comps.append(ApuComponent(
-                apu_codigo="", shift=item.shift, insumo_codigo=ins.codigo,
-                insumo_nombre=ins.nombre, unidad=ins.unidad,
-                rendimiento=cc.rendimiento, precio_unitario_hist=0.0))
-        if not comps:
-            return None
-
-        costed, total = self.pricing.cost_components(comps)
-        expl = f"[IA: composición generada] {result.justificacion}".strip()
-        return AssembledApu(
-            item=item, apu_codigo=None, apu_nombre=item.descripcion,
-            unidad=item.unidad, shift=item.shift, componentes=costed,
-            costo_unitario=total, status=MatchStatus.REVIEW,
-            confianza=result.confianza, origen="generado", explicacion=expl)
 
     # --------------------------------------------------------------- interno
     def _build(self, item: LicitacionItem, apu_codigo: str, shift: str,

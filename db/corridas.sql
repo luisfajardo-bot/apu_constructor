@@ -62,3 +62,38 @@ CREATE TABLE IF NOT EXISTS corrida_item (
 );
 
 CREATE INDEX IF NOT EXISTS ix_corrida_item ON corrida_item(corrida_id, seq);
+
+-- Expediente de composición asistida: una fila POR VERSIÓN (append-only). La vigente
+-- es la de mayor `version`; el historial de correcciones es la tabla entera.
+-- SIN dinero a propósito: `actividad_json` guarda la vista des-monetizada del ítem
+-- (sin precio_contractual), así la fila completa se puede reinyectar en un payload
+-- hacia la IA. No hay columna para razonamiento del modelo.
+CREATE TABLE IF NOT EXISTS composicion (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  corrida_id      INTEGER NOT NULL REFERENCES corrida(id) ON DELETE CASCADE,
+  seq             INTEGER NOT NULL,
+  version         INTEGER NOT NULL,
+  estado          TEXT NOT NULL,
+  actividad_json  TEXT NOT NULL,
+  ficha_json      TEXT,
+  propuesta_json  TEXT,
+  validacion_json TEXT,
+  confianza       TEXT,
+  confianza_json  TEXT,
+  antecedentes_json TEXT,
+  modelo          TEXT,
+  prompt_version  TEXT,
+  apu_codigo      TEXT,
+  apu_turno       TEXT,
+  autor           TEXT,
+  creada_en       TEXT NOT NULL,
+  motivo          TEXT
+);
+-- La protección del doble clic, y por eso es un índice y no un `if`: las dos
+-- peticiones de un doble clic llegan con milisegundos de diferencia y las dos leerían
+-- la misma versión vigente. Mismo criterio que ux_corrida_armando_archivo.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_composicion_version
+  ON composicion(corrida_id, seq, version);
+-- Sin índice secundario sobre (corrida_id, seq): `ux_composicion_version` ya lo cubre
+-- por prefijo izquierdo, y las dos únicas consultas del repo filtran por esas dos
+-- columnas y ordenan por `version`, que es exactamente su forma.

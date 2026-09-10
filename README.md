@@ -19,9 +19,11 @@ resumen** que compara el **precio contractual** contra el **precio de costo**.
 2. Recibe una **lista de licitación** (Excel/CSV: ítem, descripción, unidad,
    cantidad, precio contractual, turno).
 3. Para cada actividad:
-   - **matching** determinístico contra el histórico (filtrado por turno);
-   - los casos **dudosos o nuevos** los resuelve la **IA acotada** (propone el APU
-     base, con justificación y confianza) para que tú **confirmes**;
+   - **matching** determinístico contra el histórico (filtrado por turno) — nunca
+     usa IA;
+   - si no encuentra nada, la fila queda **sin APU** y podés pedirle a la **IA
+     acotada** una **propuesta de composición** (insumos + rendimientos, sin
+     dinero) para revisarla en una mesa editable y **aprobarla** vos;
    - el **motor de precios** costea la composición llamando a los precios vigentes
      de los insumos.
 4. Entrega el **cuadro resumen** (Excel): por ítem y total, contractual vs. costo,
@@ -132,8 +134,9 @@ Un Excel o CSV con encabezados (el lector reconoce variantes de nombre):
 ```
 Excel histórico ──ingest──► SQLite (insumos, apus, componentes)
                                   │
-lista licitación ──► matching ──► IA acotada (sin dinero) ──► confirma usuario
-                                  │
+lista licitación ──► matching (determinístico, sin IA) ──► sin APU: pedile a la
+                                  │                          IA una composición
+                                  │                          (sin dinero) ──► aprobás
                                   └─► motor de precios ──► cuadro resumen (Excel)
 ```
 
@@ -146,7 +149,7 @@ lista licitación ──► matching ──► IA acotada (sin dinero) ──►
 | `licitacion.py`| lectura de la lista de entrada + ejemplo |
 | `matching.py`  | matcher determinístico (fuzzy, sin dependencias) |
 | `privacy.py`   | frontera de precios para la IA |
-| `ai_assist.py` | IA acotada + fallback determinístico |
+| `ai_assist.py` | IA acotada: propone una composición a pedido (nunca aplica) |
 | `pricing.py`   | motor de costos (único que ve dinero) |
 | `assemble.py`  | orquestador por ítem |
 | `report.py`    | cuadro resumen en Excel |

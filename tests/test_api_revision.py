@@ -1,9 +1,6 @@
 """Endpoint de revisión: SSE, rol, corrida congelada, persistencia del veredicto."""
-import json
-
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio import revision
-from apu_tool.dominio.ai_assist import ComposedComponent, ComposeResult
 from apu_tool.nucleo.models import (
     Apu, ApuComponent, CorridaItemRow, CorridaMeta, Insumo, LicitacionItem,
 )
@@ -259,107 +256,6 @@ def test_asignacion_con_seq_inexistente_se_saltea(tmp_path):
     assert r.status_code == 200, r.text
     filas = {f.seq: f for f in alm.corridas.get_items(cid)}
     assert filas[0].apu_codigo == "200" and 999 not in filas
-
-
-# --- Componer con IA, solo a pedido -------------------------------------------
-# Único uso vivo de la composición generativa: se llega por un clic del usuario en
-# una fila que la revisión dictaminó `sin_apu`. Devuelve una PROPUESTA; el alta del
-# APU sigue siendo la de siempre.
-
-class _AdvisorDoble:
-    """Stand-in de ApuAdvisor ya habilitado (`enabled` es lo que mira el servicio)."""
-    enabled = True
-
-    def __init__(self, resultado):
-        self.resultado = resultado
-
-    def compose_apu(self, item, insumos, ejemplos):
-        return self.resultado
-
-
-def _compuesto(codigo="4279", rendimiento=2.0):
-    return ComposeResult(componentes=[ComposedComponent(codigo, rendimiento)],
-                         justificacion="cuadrilla base", confianza=0.7)
-
-
-def _con_advisor(monkeypatch, resultado):
-    monkeypatch.setattr(svc, "ApuAdvisor", lambda *a, **k: _AdvisorDoble(resultado))
-
-
-def test_componer_devuelve_propuesta_sin_persistir(tmp_path, monkeypatch):
-    cli, alm = _cliente_api(tmp_path)
-    cid = _corrida_armada(alm)
-    _con_advisor(monkeypatch, _compuesto())
-
-    antes = alm.counts()
-    r = cli.post(f"/api/corridas/{cid}/componer/0")
-    assert r.status_code == 200, r.text
-    d = r.json()
-    assert d["seq"] == 0
-    assert d["componentes"][0]["insumo_codigo"] == "4279"
-    assert d["componentes"][0]["rendimiento"] == 2.0
-    assert "justificacion" in d
-    # Ni un APU, ni un componente, ni una fila de corrida: la propuesta no escribe.
-    assert alm.counts() == antes
-    fila = alm.corridas.get_item(cid, 0)
-    assert fila.apu_codigo == "100" and fila.componentes == []   # la fila quedó igual
-    assert fila.revision is None                                 # ni un veredicto
-
-
-def test_la_propuesta_no_lleva_dinero(tmp_path, monkeypatch):
-    """`generar_composicion` devuelve un AssembledApu COSTEADO; la propuesta que sale
-    al usuario describe estructura (insumos y rendimientos), no costos."""
-    cli, alm = _cliente_api(tmp_path)
-    cid = _corrida_armada(alm)
-    _con_advisor(monkeypatch, _compuesto())
-
-    d = cli.post(f"/api/corridas/{cid}/componer/0").json()
-    assert d["componentes"]
-    for c in d["componentes"]:
-        assert set(c) == {"insumo_codigo", "insumo_nombre", "unidad", "rendimiento"}
-    plano = json.dumps(d)
-    for prohibido in ("precio", "costo", "fuente_precio", "40000"):
-        assert prohibido not in plano, prohibido
-
-
-def test_componer_sin_ia_da_503(tmp_path, monkeypatch):
-    """Mismo criterio que la revisión: falta de IA = servicio no disponible."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    cli, alm = _cliente_api(tmp_path)
-    cid = _corrida_armada(alm)
-    r = cli.post(f"/api/corridas/{cid}/componer/0")
-    assert r.status_code == 503, r.text
-    assert "ANTHROPIC_API_KEY" in r.json()["detail"]
-
-
-def test_componer_sin_composicion_da_422(tmp_path, monkeypatch):
-    cli, alm = _cliente_api(tmp_path)
-    cid = _corrida_armada(alm)
-    _con_advisor(monkeypatch, None)
-    r = cli.post(f"/api/corridas/{cid}/componer/0")
-    assert r.status_code == 422, r.text
-    assert alm.counts()["apus"] == 2
-
-
-def test_componer_fila_inexistente_da_404(tmp_path, monkeypatch):
-    cli, alm = _cliente_api(tmp_path)
-    cid = _corrida_armada(alm)
-    _con_advisor(monkeypatch, _compuesto())
-    assert cli.post(f"/api/corridas/{cid}/componer/99").status_code == 404
-
-
-def test_componer_corrida_inexistente_da_404(tmp_path, monkeypatch):
-    cli, _alm = _cliente_api(tmp_path)
-    _con_advisor(monkeypatch, _compuesto())
-    assert cli.post("/api/corridas/999/componer/0").status_code == 404
-
-
-def test_consulta_no_puede_componer(tmp_path, monkeypatch):
-    _cli, alm = _cliente_api(tmp_path)
-    cid = _corrida_armada(alm)
-    _con_advisor(monkeypatch, _compuesto())
-    consulta = cliente(create_app(almacen=alm), rol="consulta")
-    assert consulta.post(f"/api/corridas/{cid}/componer/0").status_code == 403
 
 
 # --- El veredicto lleva el APU que evaluó: red contra la carrera ---------------

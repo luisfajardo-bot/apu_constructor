@@ -93,7 +93,8 @@ la descripción diga "SUMINISTRO E INSTALACIÓN DE TUBERÍA" sin diámetro ni ma
 
 | Archivo | Estado | Responsabilidad |
 |---|---|---|
-| `dominio/composicion.py` | **nuevo** | tipos del contrato, orquestador `componer()`, transiciones de estado |
+| `dominio/composicion.py` | **nuevo** | tipos del contrato y parseo tolerante, sin dependencias de otras capas |
+| `dominio/composicion_agente.py` | **nuevo** | orquestador `componer()`, transiciones de estado |
 | `dominio/validacion_composicion.py` | **nuevo** | validador determinístico + confianza calculada |
 | `dominio/compose.py` | ampliado | el retriever sigue igual (fase 3 lo cambia) + `rendimientos_observados()` |
 | `dominio/ai_assist.py` | ampliado | `ApuAdvisor.componer()` con el esquema v2 + `PROMPT_VERSION` |
@@ -141,6 +142,22 @@ Cada transición escribe una **fila nueva** (append-only por versión). La vigen
 mayor `version`. La fase 2 inserta `requiere_informacion` entre `generando` y `propuesta`;
 nada más cambia.
 
+**`rechazada` restringe de verdad: no se aprueba de una.** Si de ahí se pudiera saltar a
+`aprobada`, el estado sería una etiqueta decorativa. La vía para arrepentirse existe y es
+gratis: **editar y guardar** produce una versión `editada` sobre la que sí se aprueba, y
+ese paso queda en el historial — así un cambio de opinión se ve, en vez de que una
+aprobación pise un rechazo sin rastro. El ciclo completo se lee entero:
+`propuesta → rechazada → editada → aprobada`. Por eso el guardián está **solo** en
+`aprobar`: ponerlo también en `guardar_edicion` cerraría el único camino de reapertura.
+
+**`aprobar` revalida, no confía en lo guardado.** La validación de la versión vigente se
+calculó en otro momento —minutos antes, quizá con otro catálogo— y **sin el código del
+APU**, que recién existe cuando el humano lo elige. Sin revalidar pasaban dos cosas: la
+detección de ciclos de sub-APU no corría nunca (nadie pasaba `apu_codigo_propio`, así que
+la maquinaria *parecía* implementada sin estarlo), y se podía aprobar contra un catálogo
+que ya cambió. Es la misma decisión que este repo tomó con `revision_json` y
+`apu_evaluado`: la caché no es verdad.
+
 ## 5. Qué usa IA y qué es determinístico
 
 | Etapa | Quién |
@@ -183,6 +200,23 @@ insumo candidato, en cuántos APUs de la biblioteca aparece y con qué rango. Le
 modelo la base para declarar "copiado" o "ajustado", y al validador la base para decir
 "atípico". Son cantidades físicas, no dinero. `grupo` (`MO`/`EQ`/`MAT`) entra por primera
 vez: es clasificación técnica.
+
+**El esquema JSON de la fase es más corto que el vocabulario del contrato, a
+propósito.** `TIPOS` y `FUNCIONES` incluyen `apu` y `sub_apu`, pero el esquema que se
+le manda al modelo ofrece solo `insumo` y las funciones sin `sub_apu`. Razón: con la
+lista blanca filtrada, esas dos opciones son **trampas garantizadas** — el validador
+las rechaza siempre, así que ofrecérselas al modelo es invitarlo a un error que no
+puede evitar. Es el mismo principio que el filtro del retriever, un nivel más arriba:
+**lo que el modelo no puede expresar, no lo puede errar.** En la fase 3, cuando la IA
+sí proponga sub-APUs, los dos enums vuelven a coincidir con el vocabulario.
+
+**`insumos_disponibles` excluye los sub-APUs, y hay que sostenerlo en el retriever.**
+La decisión de fase es que el contrato y el validador soporten sub-APUs pero la IA
+todavía no los proponga. Eso no se cumple solo: `InsumoRetriever` saca candidatos de
+los componentes de los APUs de referencia, y un componente con `tipo="apu"` entraba a
+la lista blanca **disfrazado de insumo** — el modelo lo proponía de buena fe y se comía
+un `CODIGO_INEXISTENTE` que no era suyo. El filtro va en el retriever, no en el prompt:
+lo que el modelo no ve, no lo puede proponer.
 
 ### 6.2 Lo que la IA devuelve
 
@@ -227,10 +261,27 @@ validador escriba reglas ("no hay ni mano de obra ni equipo", "hay cuadrilla sin
 herramienta"); un texto libre no se puede validar y se vuelve un campo decorativo. La
 descripción de qué hace el insumo en *esta* actividad va en `justificacion`.
 
+**`hipotesis` no se valida, y es a propósito.** Ningún hallazgo del validador la mira.
+Su valor es **explicativo**: es el razonamiento productivo detrás del rendimiento — "8
+horas de jornada ÷ 96 m³/día" — y va a la mesa de revisión para que un ingeniero pueda
+discutir el criterio y no solo el número. Que no se valide no significa que sobre;
+significa que **la interfaz tiene que mostrarla**, o el campo se vuelve peso muerto que
+el modelo llena con `{}`.
+
 **Ninguna clave del contrato es monetaria.** No hay `precio`, `costo`, `valor`, `total`
 ni `monto` en ningún nivel. Es deliberado: la propuesta persistida se puede reinyectar en
 un payload futuro (regenerar con contexto, fase 4) sin volver a filtrarla. Hay un test que
 lo fija.
+
+**El contrato guarda códigos, no nombres — y la respuesta HTTP tiene que agregarlos.**
+`ComponentePropuesto` solo lleva `codigo`, porque es lo único que el modelo elige: el
+nombre y la unidad los pone el catálogo. Pero eso deja la mesa de revisión mostrando
+`4279 · 0,62 · mano_de_obra`, que no se puede juzgar; `CUADRILLA OFICIAL MAS AYUDANTES`
+sí. La solución no es meter el nombre en la propuesta persistida (sería duplicar el
+catálogo y quedaría viejo), sino que el **servicio enriquezca la respuesta** con un
+`catalogo: {codigo: {nombre, unidad, grupo}}` armado con una consulta en lote sobre los
+códigos de la propuesta. La fila persistida queda pura —lo que dijo el modelo— y los
+datos de presentación viajan aparte, siempre frescos.
 
 ### 6.3 Lo que devuelve la plataforma
 
@@ -247,10 +298,11 @@ lo fija.
   },
   "confianza": "media",
   "confianza_motivos": [
-    {"senal": "respaldo_de_componentes", "valor": "4 de 5 con antecedente vivo", "aporte": "+2"},
-    {"senal": "unidad_de_antecedentes", "valor": "2 de 3 comparten M3", "aporte": "+1"},
-    {"senal": "rendimientos_atipicos", "valor": "1", "aporte": "-1"},
-    {"senal": "supuestos_sin_confirmar", "valor": "1", "aporte": "-1"}
+    {"senal": "respaldo_de_componentes", "detalle": "4 de 5 con antecedente vivo", "aporte": 2},
+    {"senal": "unidad_de_antecedentes", "detalle": "2 de 3 comparten M3", "aporte": 1},
+    {"senal": "rendimientos_atipicos", "detalle": "1", "aporte": -1},
+    {"senal": "supuestos_sin_confirmar", "detalle": "1", "aporte": -1},
+    {"senal": "tope_por_rendimiento_atipico", "detalle": "1 rendimiento(s) que la biblioteca contradice: no puede ser alta", "aporte": 0}
   ],
   "incertidumbre_declarada": 0.35,
   "modelo": "claude-sonnet-5", "prompt_version": "composicion/v2",
@@ -327,6 +379,24 @@ hay hook en `actualizar_eleccion`, no hay estado que se pise solo, y el historia
 criterio que `ux_corrida_armando_archivo`: las dos peticiones de un doble clic llegan con
 milisegundos de diferencia.
 
+**El `seq` se reusa, y por eso el expediente es caché y no verdad.** La FK apunta a
+`corrida`, no a `corrida_item`, así que un expediente **sobrevive al borrado de su
+línea**. Y `agregar_items` toma `max(seq) + 1`, de modo que borrar la **última** línea y
+agregar otra le da el mismo `seq` — el comentario de `corridas.py` que dice que los
+huecos de un borrado no se reusan vale para los del medio, no para la cola. Sin
+protección, `vigente(cid, seq)` devolvería el expediente de **otra actividad**, y si esa
+versión quedó `aprobada`, el endpoint de aprobar contestaría 409 nombrando un APU ajeno
+y esa línea no se podría componer nunca más.
+
+La protección es la misma que el repo ya usa para el veredicto de la revisión
+(`revision_json` con `apu_evaluado`): **la fila guarda `actividad`, y el servicio ignora
+la vigente cuando su `descripcion` no coincide con la de la línea de hoy.** No se borra
+nada, el append-only queda intacto y no cambia el esquema. Es caché, no verdad: se puede
+volver a componer cuando sea.
+
+Es el primer dato de este repo que sobrevive a la línea que documenta, y por eso el
+problema no existía antes.
+
 ## 8. Cómo se garantiza que la IA nunca vea dinero
 
 Cinco capas, de la más estructural a la más defensiva:
@@ -368,28 +438,38 @@ rendimientos observados.
 | `PROPUESTA_VACIA` | cero componentes |
 | `CODIGO_NO_AUTORIZADO` | el código no estaba en la lista blanca de esta generación |
 | `CODIGO_INEXISTENTE` | no existe en el catálogo (ni en la biblioteca si `tipo='apu'`) |
-| `CANTIDAD_INVALIDA` | ≤ 0, `NaN`, `inf`, o por encima de `COMPOSICION_LIMITE_RENDIMIENTO` |
+| `CANTIDAD_INVALIDA` | ≤ 0, `NaN` o `inf` — el motor no puede costear eso |
+| `TIPO_INCOHERENTE` | `funcion = sub_apu` con `tipo ≠ apu` — **solo esa dirección** |
 | `COMPONENTE_DUPLICADO` | mismo `(codigo, tipo, ref_shift)` dos veces |
 | `SUBAPU_INEXISTENTE` | el sub-APU no existe en ese turno |
 | `SUBAPU_CICLO` | el sub-APU se referencia a sí mismo o cierra un ciclo |
 | `CALCULO_IMPOSIBLE` | denominador 0, o factores no finitos |
 
 Dos umbrales nuevos en `config.py`, junto a los del matcher y los del cruce:
-`COMPOSICION_LIMITE_RENDIMIENTO` (techo absurdo por componente, para atrapar un
-rendimiento con la coma corrida) y `COMPOSICION_MIN_ANTECEDENTES` (3: por debajo no hay
+`COMPOSICION_LIMITE_RENDIMIENTO` y `COMPOSICION_MIN_ANTECEDENTES` (3: por debajo no hay
 rango contra el cual llamar atípico a nada).
+
+**Por qué el techo advierte y no bloquea** (corregido tras la revisión de la tarea 3):
+un APU medido en GLB o en KM lleva la cantidad de la obra adentro — 15.000 M2 de
+señalización en un PMT global — y supera cualquier techo de forma legítima. Bloquearlo
+dejaba la propuesta **sin ningún estado en el que se pudiera aprobar**, ni corrigiéndola
+a mano, porque el `PUT` revalida. Y el techo casi no atrapaba el error que lo motivó: la
+coma corrida típica (0,5 → 500) pasa por debajo sin despeinarse — eso lo atrapa
+`RENDIMIENTO_ATIPICO`, que compara contra la biblioteca. Lo que sigue bloqueando es lo
+que el motor no puede costear: `NaN`, infinito y todo lo que no sea positivo.
 
 **Advertencias — se ven, no bloquean:**
 
 | Código | Regla |
 |---|---|
 | `CALCULO_CORREGIDO` | Python recalculó y dio distinto; manda Python |
+| `CANTIDAD_SOSPECHOSA` | por encima de `COMPOSICION_LIMITE_RENDIMIENTO` |
 | `RENDIMIENTO_ATIPICO` | fuera del rango observado del mismo insumo, con `n ≥ COMPOSICION_MIN_ANTECEDENTES` |
-| `SIN_ANTECEDENTES` | `n < COMPOSICION_MIN_ANTECEDENTES`: no hay contra qué comparar |
-| `SIN_EVIDENCIA` | `origen = sin_evidencia`, o `referencias` vacío con un origen que las exige |
+| `SIN_ANTECEDENTES` | `n < COMPOSICION_MIN_ANTECEDENTES`, o el rango está en otra unidad que el catálogo: no hay contra qué comparar |
+| `SIN_EVIDENCIA` | el origen afirma un respaldo que no está: `sin_evidencia` siempre; `copiado`/`ajustado` sin referencia viva; `calculado_desde_produccion` sin la cuenta; `supuesto_tecnico` sin ningún supuesto declarado |
+| `FUNCION_INESPERADA` | `tipo = apu` con una `funcion` que no es `sub_apu` |
 | `REFERENCIA_INEXISTENTE` | un `apu_codigo` de `referencias` ya no existe; se limpia |
-| `UNIDAD_DISTINTA_DEL_CATALOGO` | la unidad declarada ≠ la del catálogo; manda el catálogo |
-| `FALTA_MANO_DE_OBRA` | ninguna función es `mano_de_obra` ni `equipo` |
+| `FALTA_MANO_DE_OBRA` | ninguna función ejecuta trabajo: ni `mano_de_obra`, ni `equipo`, ni `sub_apu`, ni `subcontrato` (los dos últimos lo llevan adentro) |
 | `FALTA_HERRAMIENTA` | hay mano de obra y no hay herramienta ni equipo |
 | `METODO_INCOHERENTE` | la descripción dice manual y hay equipo pesado, o dice mecánico y no hay equipo |
 | `SUPUESTO_SIN_CONFIRMAR` | hay supuestos declarados y nadie los aceptó |
@@ -410,6 +490,31 @@ detección es por palabra clave en la descripción (`MANUAL`/`A MANO` contra
 `MECANIC`/`RETRO`/`EXCAVADORA`). Por eso es advertencia y no error, y va marcada con un
 `ponytail:` que apunta a la fase 3, donde la hace la ficha.
 
+**La prueba que toda regla bloqueante tiene que pasar: ¿existe un estado aprobable?**
+Un error bloquea la aprobación, y el `PUT` revalida cada edición — así que una regla
+que se dispara sobre algo que el usuario **no puede cambiar desde la mesa de revisión**
+deja la propuesta muerta: no hay forma de arreglarla, solo de borrar el componente o
+tirar todo. Esta fase cometió el error dos veces antes de escribirlo acá: el techo de
+rendimiento (imposible de bajar si la actividad es global de verdad) y
+`TIPO_INCOHERENTE` en su dirección inofensiva (`funcion` no es editable en la mesa, y
+`funcion=""` es lo que produce el parser ante un valor ilegible). **Antes de agregar un
+error, respondé: si esto se dispara, ¿qué hace el usuario para que deje de dispararse?**
+Si la respuesta no está entre los campos editables, es advertencia.
+
+**Por qué `TIPO_INCOHERENTE` es asimétrico.** `tipo` es lo que persiste
+`autoria._componentes_de` y lo que decide cómo se costea; `funcion` no llega nunca a la
+base. Un sub-APU declarado como insumo se costea como insumo y puede caer al piso de $1
+— bloquea. Un sub-APU con la función mal escrita no cambia ningún costo — advierte.
+
+**No hay regla de unidad del componente, y es correcto.** Un borrador de este diseño
+listaba una advertencia `UNIDAD_DISTINTA_DEL_CATALOGO` que resultó imposible de violar:
+`ComponentePropuesto` **no tiene campo `unidad`**, así que el modelo nunca la declara —
+la unidad de un insumo la pone el catálogo y punto. Tampoco tiene sentido comparar la
+unidad del componente con la de la actividad: que una cuadrilla en `HR` componga una
+actividad en `M3` es exactamente lo normal, porque el rendimiento *es* HR por M3. Se
+eliminó de la lista en vez de implementarse; el test que la cubría no probaba nada
+(`assert v.valido is True`) y se reemplazó por uno que fija que el campo no existe.
+
 ### 9.2 La confianza
 
 Cuatro niveles: **alta · media · baja · insuficiente**. Sin porcentajes: no hay masa de
@@ -422,16 +527,50 @@ tenemos.
 | APUs de referencia que comparten unidad con la actividad | +1 |
 | Cantidad de antecedentes comparables | +1 si ≥ 3 |
 | Dispersión de los rendimientos observados de los insumos usados | +1 estrecha / −1 muy dispersa |
-| Componentes con `RENDIMIENTO_ATIPICO` | −1 cada uno |
-| Componentes con `SIN_EVIDENCIA` | −1 cada uno |
-| Supuestos sin confirmar | −1 cada uno |
+| Componentes con `RENDIMIENTO_ATIPICO` | −1 cada uno, **con techo en −2** |
+| Componentes con `SIN_EVIDENCIA` | −1 cada uno, **con techo en −2** |
+| Supuestos sin confirmar | −1 cada uno, **con techo en −2** |
 | Todas las validaciones superadas | +1 |
 
-Dos candados:
+Tres candados:
 
 - **Con cualquier error bloqueante, el nivel es `insuficiente`.** Sin excepción.
 - **`incertidumbre_declarada` no entra en la fórmula.** El test que lo fija: dos
   propuestas idénticas con `incertidumbre_declarada` 0.0 y 1.0 dan el mismo nivel.
+- **Con un `RENDIMIENTO_ATIPICO`, el nivel no pasa de `media`.** Es un tope, no una
+  resta: "alta" significa "aprobalo de un vistazo", y un consumo que la biblioteca
+  contradice no lo es por muchas otras señales buenas que tenga. Se descubrió midiendo:
+  con la fórmula original, un componente **8× fuera de rango** en una propuesta por lo
+  demás bien respaldada salía `alta`, porque la señal restaba 1 punto entre ocho. Subir
+  el peso habría sido otro número arbitrario compitiendo con los demás; el tope se
+  explica en una frase y aparece en el desglose. `CANTIDAD_SOSPECHOSA` **no** topea: es
+  lo esperable en un APU global de verdad y castigaría a toda esa familia.
+
+**Por qué los castigos llevan techo.** Sin él, las tres señales negativas restan una por
+ocurrencia **sin límite** mientras las positivas están acotadas en +6, y el nivel
+termina siguiendo al **tamaño** de la propuesta en vez de a su calidad: medido, la misma
+calidad relativa daba `media` con 6 componentes y `baja` con 12. En la biblioteca real
+la mediana es 4 componentes por APU y el p90 es 7, así que el daño caía justo en las
+composiciones grandes — las de actividades sin análogo, que es donde esto se usa. Con
+techo en −2 el rango queda simétrico (−6 contra +6) y ningún caso que daba `baja`
+legítimamente sube a `alta`.
+
+Hay además una **redundancia deliberada** que conviene conocer: `respaldo_de_componentes`,
+`componentes_sin_evidencia` y `validaciones` se derivan las tres del mismo conjunto
+`sin_respaldo`, así que un componente sin respaldo mueve tres señales. Se acepta —
+significa que la falta de evidencia pesa fuerte, que es lo correcto — pero es la razón
+de que un solo componente flojo cueste 2 puntos de 6, y hay que tenerla presente antes
+de agregar una cuarta señal derivada del mismo hecho.
+
+Un supuesto sin confirmar es **acción pendiente del usuario, no defecto**: se va cuando
+alguien lo confirma. Por eso lleva techo como los otros dos — castigar sin límite la
+declaración honesta de supuestos empuja al modelo a callárselos, que es el incentivo
+exactamente al revés del que esta feature quiere.
+
+Una nota de nombres: el campo legible de cada motivo se llama **`detalle`**, no `valor`
+— `valor` está en `_FORBIDDEN_KEYS` (por `valor_unitario`/`valor_total`) y
+`assert_no_money` mira nombres de clave, así que el propio guardián reventaba sobre un
+desglose que no lleva un peso adentro.
 
 El desglose (`confianza_motivos`) se guarda y se muestra desplegable bajo el nivel.
 
@@ -468,6 +607,20 @@ advertencias se recalculan al **guardar**, no mientras se teclea. Es el precio c
 el usuario. Si ya existe una mayor → `409` nombrando la actual. Un doble clic en aprobar:
 la segunda petición ve `estado='aprobada'` y devuelve `409` nombrando el `apu_codigo` ya
 creado. Un APU, no dos.
+
+**El orden dentro de `aprobar` es crear → sellar → asignar**, de lo irreversible a lo
+recuperable. Y por eso el 409 del doble clic sale de un chequeo de versión **previo** y no
+del índice único: el índice llegaría tarde — para cuando choca, el APU ya está creado.
+Queda de red de seguridad detrás, no como puerta.
+
+**La lista blanca solo crece.** Al revalidar una edición NO se re-deriva de un `recuperar`
+fresco: se parte de la persistida y se amplía con lo que agregó una persona. Un retrieve
+nuevo puede devolver **menos** códigos (un insumo nuevo desplaza a otro fuera de los 40,
+alguien oculta uno), y entonces un componente que el modelo propuso bien se volvería
+`CODIGO_NO_AUTORIZADO` —error bloqueante— al guardar un cambio de rendimiento que no tiene
+nada que ver, sin forma de arreglarlo desde la mesa. Lo que **sí** se consulta fresco es el
+**catálogo**: sin eso, `CODIGO_INEXISTENTE` daba falso positivo sobre un insumo que una
+persona acababa de elegir del buscador, porque el retrieve no lo traía entre sus candidatos.
 
 **Aprobar es un endpoint, no una cadena en el navegador.** Recibe
 `{codigo, turno, nombre, grupo, version_base}` y llama a `autoria.crear_apu` con los

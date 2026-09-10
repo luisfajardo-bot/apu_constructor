@@ -1,5 +1,16 @@
 # Estado — la IA pasa de armar a revisar
 
+> **Documento histórico** (snapshot al mergear esta rama, 2026-09-07). El repo tiene el
+> hábito de no reescribir estos `estado-*.md` cuando una feature posterior toca el mismo
+> código — son la foto del día del merge, no una referencia viva. La rama
+> `feat/agente-composicion` (2026-09-10) **reemplazó por completo** lo que este documento
+> llama "composición generativa": `componer_item`, `ComposeResult`, `ComposedComponent` y
+> `web/src/components/corrida/DialogoComposicion.tsx` ya no existen. Lo que hoy hace eso
+> es el **agente de composición** — ver `docs/superpowers/specs/2026-09-10-agente-composicion-design.md`
+> y las tablas de `dominio/`, `datos/` y `servicio/` en [CLAUDE.md](../CLAUDE.md). El resto
+> de este documento (revisión con IA, veredictos, candado de filas sin APU) sigue vigente
+> sin cambios.
+
 Rama `feat/ia-revisora-post-armado`, **rebaseada sobre `origin/master`** (`7fdc6dd`) el
 2026-09-07. Nació encima de `feat/distancias-transporte-proyecto` (base `7be02a9`), pero
 esa rama sigue esperando la demo con el superior y esta ya está lista, así que se

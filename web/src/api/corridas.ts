@@ -1,7 +1,6 @@
 import { apiGet, apiPost, apiDelete, authHeader, descargarArchivo, mensajeDeError, ErrorApi } from "@/api/client";
 import type {
   AsignacionIA,
-  ComposicionPropuesta,
   StatusResponse,
   CorridaDetalle,
   CorridaEncolada,
@@ -119,12 +118,6 @@ export function aplicarSugerencias(
   });
 }
 
-/** Propone una composición para una fila `sin_apu`. No persiste nada: crear el
- *  APU sigue siendo el alta normal, con sus validaciones de duplicados. */
-export function componerItem(id: number, seq: number): Promise<ComposicionPropuesta> {
-  return apiPost<ComposicionPropuesta>(`/corridas/${id}/componer/${seq}`);
-}
-
 /** Qué se agregaría con este Excel (y qué ya está en la corrida). No escribe. */
 export function previewLineas(id: number, form: FormData): Promise<PreviewLineas> {
   return apiPost<PreviewLineas>(`/corridas/${id}/items/preview`, form);
@@ -180,7 +173,7 @@ export function parseSse(block: string): { event: string; data: unknown } | null
  *  auth + chequeo de 401/ok + bucle de lectura del stream que usa `revisarCorridaStream`
  *  (revisión con IA): el consumidor decide qué hacer con cada evento, incluyendo cuándo
  *  terminar (lanzar acá dentro de `onEvent` rechaza la promesa de afuera). */
-async function consumirSse(
+export async function consumirSse(
   path: string,
   init: RequestInit,
   onEvent: (ev: { event: string; data: unknown }) => void,

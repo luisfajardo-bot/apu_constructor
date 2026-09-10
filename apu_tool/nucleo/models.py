@@ -214,7 +214,14 @@ class AssembledApu:
     status: MatchStatus
     confianza: float
     explicacion: str = ""
-    origen: str = "historico"     # "historico" | "generado" | "manual"
+    # "historico" | "manual". Ya NADIE produce "generado": murió con la composición
+    # de dos campos (`Assembler.generar_composicion`), que se mudó al orquestador
+    # `dominio/composicion_agente.py` y propone en vez de armar. No lo revivas
+    # creyendo que es un valor vivo. Se sigue leyendo como texto libre a propósito:
+    # `corrida_item.origen` es una columna persistida y las filas armadas antes de
+    # que la IA dejara de armar pueden traerlo, así que validarlo contra un
+    # vocabulario cerrado rompería corridas viejas.
+    origen: str = "historico"
 
     @property
     def costo_total(self) -> int:
@@ -298,3 +305,53 @@ class CorridaItemRow:
     # Costo unitario puesto a mano (proyectos especiales). None = costear normal desde
     # la composición. NUNCA entra a un payload de la IA: es dinero (ver privacy.py).
     costo_manual: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class ComposicionRow:
+    """Una VERSIÓN del expediente de composición de una fila de corrida.
+
+    Append-only: cada acción que cambia la propuesta (generar, regenerar, editar,
+    aprobar, rechazar) escribe una fila nueva y la vigente es la de mayor `version`.
+    El historial de correcciones sale gratis, y es lo que la fase 4 va a leer como
+    evidencia.
+
+    NO lleva dinero, y es deliberado: `actividad` guarda la vista des-monetizada
+    (`privacy.licitacion_item_to_dict`), no el `LicitacionItem` crudo, que traería
+    `precio_contractual`. Así la fila entera se puede reinyectar en un payload hacia la
+    IA sin volver a filtrarla. Es la lección de `plan_json`, aplicada antes de tropezar.
+
+    Tampoco hay campo para razonamiento del modelo: solo justificaciones cortas, datos
+    estructurados, referencias y decisiones observables.
+    """
+    id: Optional[int]
+    corrida_id: int
+    seq: int
+    version: int
+    estado: str                       # de dominio.composicion.ESTADOS
+    actividad: dict
+    ficha: Optional[dict]             # fase 2; None en fase 1
+    propuesta: Optional[dict]
+    validacion: Optional[dict]
+    confianza: Optional[str]          # alta | media | baja | insuficiente
+    confianza_motivos: Optional[list]
+    antecedentes: Optional[dict]
+    modelo: Optional[str]
+    prompt_version: Optional[str]
+    apu_codigo: Optional[str]         # el APU creado, solo si estado == 'aprobada'
+    apu_turno: Optional[str]
+    autor: Optional[str]
+    creada_en: str
+    motivo: Optional[str]             # el error, o la razón del rechazo
+
+    def to_dict(self) -> dict:
+        return {
+            "corrida_id": self.corrida_id, "seq": self.seq, "version": self.version,
+            "estado": self.estado, "actividad": self.actividad, "ficha": self.ficha,
+            "propuesta": self.propuesta, "validacion": self.validacion,
+            "confianza": self.confianza, "confianza_motivos": self.confianza_motivos,
+            "antecedentes": self.antecedentes, "modelo": self.modelo,
+            "prompt_version": self.prompt_version, "apu_codigo": self.apu_codigo,
+            "apu_turno": self.apu_turno, "autor": self.autor,
+            "creada_en": self.creada_en, "motivo": self.motivo,
+        }

@@ -54,6 +54,7 @@ export default function CabeceraFiltros({
   control,
   conSeleccion = false,
   conVeredicto = true,
+  conAcciones = false,
 }: {
   control: ControlCorridaTabla;
   /** Layout: reserva la celda de la columna de checkboxes cuando la selección está activa. */
@@ -61,6 +62,9 @@ export default function CabeceraFiltros({
   /** false = la corrida no tiene ni un veredicto: la columna no se dibuja (14
    *  columnas no caben en un portátil, y esta estaría entera vacía). */
   conVeredicto?: boolean;
+  /** true = alguna fila ofrece Componer: se reserva la celda de esa columna. No
+   *  se filtra ni se ordena por ella (no es un dato de la línea, es un botón). */
+  conAcciones?: boolean;
 }) {
   const cols = conVeredicto ? COLS : COLS.filter((c) => c.clave !== "veredicto");
   const flecha = (clave: ClaveColumna) =>
@@ -84,6 +88,7 @@ export default function CabeceraFiltros({
             </button>
           </TableHead>
         ))}
+        {conAcciones && <TableHead className="text-xs w-24">Acciones</TableHead>}
       </TableRow>
       <TableRow className="hover:bg-transparent">
         {conSeleccion && <TableHead className="w-8 px-1" />}
@@ -127,6 +132,7 @@ export default function CabeceraFiltros({
             </TableHead>
           );
         })}
+        {conAcciones && <TableHead className="w-24 py-1" />}
       </TableRow>
     </TableHeader>
   );

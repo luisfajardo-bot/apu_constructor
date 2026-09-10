@@ -81,6 +81,16 @@ def test_sin_credencial_levanta_ia_no_disponible():
         a.componer(ITEM, INSUMOS, EJEMPLOS, OBS)
 
 
+def test_sdk_ausente_no_se_confunde_con_credencial_faltante():
+    """Un SDK no instalado y una credencial ausente son causas distintas: mandar el
+    mismo mensaje hace revisar la variable equivocada. Mismo criterio que
+    `Revisor._pedir`."""
+    a = ApuAdvisor(enabled=False)
+    a._sdk_ausente = True
+    with pytest.raises(IANoDisponible, match="SDK"):
+        a.componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+
+
 def test_sin_insumos_candidatos_levanta_valueerror():
     """No hay lista blanca: pedirle algo al modelo sería invitarlo a inventar."""
     with pytest.raises(ValueError):
@@ -110,16 +120,41 @@ def test_un_429_del_sdk_no_se_confunde_con_falta_de_credencial():
     assert not isinstance(exc.value, IANoDisponible)
 
 
-def test_el_esquema_declara_los_vocabularios_cerrados():
-    """Si el esquema y el parser se desincronizan, el modelo puede mandar un valor
-    que el esquema acepta y el parser degrada en silencio."""
+def test_el_esquema_acota_el_vocabulario_al_alcance_de_la_fase():
+    """El enum es más corto que el vocabulario del contrato a propósito: en esta fase
+    la IA no propone sub-APUs, y ofrecerle un valor que el validador rechaza siempre
+    es tenderle una trampa. En la fase 3 vuelven a coincidir."""
     from apu_tool.dominio.ai_assist import _ESQUEMA_COMPOSICION
     from apu_tool.dominio.composicion import (
-        FUNCIONES, NIVELES_EVIDENCIA, OPERACIONES, ORIGENES, TIPOS,
+        FUNCIONES, NIVELES_EVIDENCIA, OPERACIONES, ORIGENES,
     )
     props = _ESQUEMA_COMPOSICION["properties"]["componentes"]["items"]["properties"]
-    assert props["funcion"]["enum"] == list(FUNCIONES)
+    assert props["tipo"]["enum"] == ["insumo"]
+    assert "sub_apu" not in props["funcion"]["enum"]
+    assert set(props["funcion"]["enum"]) == set(FUNCIONES) - {"sub_apu"}
     assert props["origen"]["enum"] == list(ORIGENES)
     assert props["nivel_evidencia"]["enum"] == list(NIVELES_EVIDENCIA)
-    assert props["tipo"]["enum"] == list(TIPOS)
     assert props["calculo"]["properties"]["operacion"]["enum"] == list(OPERACIONES)
+
+
+def test_una_respuesta_cortada_por_limite_de_tokens_no_se_lee_como_vacia():
+    """`stop_reason == "max_tokens"` es una respuesta TRUNCADA, no una propuesta
+    vacía: sin distinguirlas, el usuario lee "la IA no propuso nada" cuando el
+    problema es el techo de tokens."""
+    class Cortada(AdvisorFalso):
+        def _pedir_al_sdk(self, *a, **k):
+            return SimpleNamespace(
+                stop_reason="max_tokens",
+                content=[SimpleNamespace(type="text", text="{")])
+
+    with pytest.raises(RuntimeError, match="cortó por longitud"):
+        Cortada("").componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+
+
+def test_una_respuesta_sin_bloque_de_texto_da_propuesta_vacia():
+    """Con pensamiento adaptativo, una respuesta de puro pensamiento es real."""
+    class SinTexto(AdvisorFalso):
+        def _pedir_al_sdk(self, *a, **k):
+            return SimpleNamespace(content=[SimpleNamespace(type="thinking")])
+
+    assert SinTexto("").componer(ITEM, INSUMOS, EJEMPLOS, OBS).componentes == ()

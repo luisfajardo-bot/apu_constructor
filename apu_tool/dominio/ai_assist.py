@@ -29,7 +29,7 @@ from apu_tool import config
 from apu_tool.dominio import privacy
 from apu_tool.dominio.compose import CandidateInsumo, candidate_insumo_to_dict
 from apu_tool.dominio.composicion import (
-    FUNCIONES, NIVELES_EVIDENCIA, OPERACIONES, ORIGENES, TIPOS, Propuesta,
+    FUNCIONES, NIVELES_EVIDENCIA, OPERACIONES, ORIGENES, Propuesta,
     propuesta_desde_json,
 )
 from apu_tool.nucleo.models import DePricedApu, LicitacionItem
@@ -118,7 +118,7 @@ _COMPOSE_SCHEMA = {
 # Versión del prompt de composición. Se guarda con cada propuesta: sin esto, cuando el
 # modelo empiece a proponer distinto no hay forma de saber si cambió el modelo o el
 # prompt. Se sube A MANO al tocar `_SISTEMA_COMPOSICION` o `_ESQUEMA_COMPOSICION`.
-PROMPT_VERSION = "composicion/v3"
+PROMPT_VERSION = "composicion/v4"
 
 _SISTEMA_COMPOSICION = """\
 Eres un ingeniero de costos de obra civil. Te dan una ACTIVIDAD de licitación que no
@@ -134,32 +134,39 @@ Reglas estrictas:
   se rechaza entero: no inventes ninguno.
 - NUNCA recibirás precios ni costos, y no debes inventarlos ni pedirlos.
 - Los rendimientos son cantidades FÍSICAS por unidad de la actividad.
+- En `rendimientos_observados`, `descartados_otra_unidad` cuenta filas del mismo
+  insumo medidas en OTRA unidad, que quedaron fuera del rango. Un `n` alto con
+  descartes altos es evidencia más débil de lo que parece.
 - Cuando derives un rendimiento de una hipótesis de producción, escribe la fórmula en
-  `calculo`. Un programa la recalcula y manda su resultado sobre el tuyo, así que no te
-  esfuerces en la aritmética: esfuérzate en la hipótesis.
+  `calculo`: la aritmética la verifica un programa y su resultado manda sobre el tuyo;
+  esfuérzate en la hipótesis, no en la cuenta.
 - `hipotesis` es el razonamiento productivo detrás del rendimiento, en pares
   clave-valor: por ejemplo {"horas_jornada": 8, "produccion_por_jornada": 96,
   "unidad_produccion": "m3/dia"}. No se valida, se le muestra a un ingeniero de costos
   para que pueda discutir el criterio y no solo el número. Si el rendimiento viene
-  copiado de un antecedente y no de una hipótesis propia, mandá {}.
+  copiado de un antecedente y no de una hipótesis propia, manda {}.
 - `funcion` es el ROL del insumo dentro del APU, del vocabulario cerrado. No es el
   nombre de la actividad; eso va en `justificacion`.
 - `origen` dice de dónde sale el rendimiento, y es lo que la plataforma usa para
   medir cuánto respaldo tiene la propuesta. Sé honesto:
-  - "copiado_de_antecedente": lo tomaste igual de un APU de referencia. Citalo.
+  - "copiado_de_antecedente": lo tomaste igual de un APU de referencia. Cítalo.
   - "ajustado_de_antecedente": partiste de uno y lo moviste por una razón que
-    explicás en `justificacion`. Citalo igual.
-  - "calculado_desde_produccion": lo derivaste de una hipótesis. Mandá `calculo`.
-  - "supuesto_tecnico": lo pusiste por criterio, sin antecedente ni cuenta. Declará
+    explicas en `justificacion`. Cítalo igual. Si además hiciste una cuenta, usa
+    este valor y manda igual el `calculo`.
+  - "calculado_desde_produccion": lo derivaste de una hipótesis. Manda `calculo`.
+  - "supuesto_tecnico": lo pusiste por criterio, sin antecedente ni cuenta. Declara
     el supuesto en `supuestos`.
-  - "sin_evidencia": no tenés en qué apoyarte. Es una respuesta legítima y preferible
-    a inventar un respaldo.
+  - "sin_evidencia": no tienes en qué apoyarte. Es una respuesta legítima y
+    preferible a inventar un respaldo.
 - `nivel_evidencia` es qué tan firme es ese respaldo: "alto" si el antecedente es
   directamente comparable, "medio" si hay que extrapolar, "bajo" si es analogía
   lejana.
 - `referencias` solo puede citar APUs que estén en los de referencia que te dimos.
 - Si algún dato que falta cambiaría materialmente la composición, decláralo en
-  `supuestos` en vez de inventarlo en silencio. Declararlos no te penaliza.
+  `supuestos` en vez de inventarlo en silencio: declararlos baja la confianza mucho
+  menos que esconderlos.
+- `incertidumbre_declarada`: 0 = no tienes ninguna duda, 1 = es pura conjetura. Es lo
+  CONTRARIO de una confianza; no lo llenes como si fuera "qué tan seguro estás".
 - Incluye típicamente mano de obra o equipo, herramienta y materiales según la
   actividad. Entre 2 y 12 componentes.
 
@@ -175,8 +182,16 @@ _ESQUEMA_COMPOSICION = {
                 "type": "object",
                 "properties": {
                     "codigo": {"type": "string"},
-                    "tipo": {"type": "string", "enum": list(TIPOS)},
-                    "funcion": {"type": "string", "enum": list(FUNCIONES)},
+                    # En esta fase el enum es MÁS CORTO que el vocabulario del
+                    # contrato, a propósito: la lista blanca solo lleva códigos de
+                    # insumo (el retriever filtra los sub-APUs), así que `tipo="apu"`
+                    # y `funcion="sub_apu"` son trampas — el validador los rechaza
+                    # siempre. El contrato y el validador SÍ soportan sub-APUs; lo que
+                    # falta es que la IA los proponga, y eso es la fase 3. Cuando
+                    # llegue, esto vuelve a `list(TIPOS)` y `list(FUNCIONES)`.
+                    "tipo": {"type": "string", "enum": ["insumo"]},
+                    "funcion": {"type": "string",
+                                "enum": [f for f in FUNCIONES if f != "sub_apu"]},
                     "rendimiento": {"type": "number"},
                     "origen": {"type": "string", "enum": list(ORIGENES)},
                     "referencias": {
@@ -240,12 +255,17 @@ class ApuAdvisor:
         self.model = model
         self.enabled = config.ai_available() if enabled is None else enabled
         self._client = None
+        # Dos causas de "no se puede", dos mensajes: sin este flag, un SDK no
+        # instalado se reportaba como "falta ANTHROPIC_API_KEY" y mandaba a revisar
+        # la variable equivocada. Mismo criterio que `Revisor._pedir`.
+        self._sdk_ausente = False
         if self.enabled:
             try:
                 import anthropic
                 self._client = anthropic.Anthropic()
             except Exception:
                 self.enabled = False  # sin SDK -> compose_apu devuelve None
+                self._sdk_ausente = True
 
     def compose_apu(
         self,
@@ -321,6 +341,10 @@ class ApuAdvisor:
         `revision.Revisor.profundizar`, que degrada a "dudoso".
         """
         if not self.enabled or self._client is None:
+            if getattr(self, "_sdk_ausente", False):
+                raise IANoDisponible(
+                    "Componer un APU con IA necesita el SDK de anthropic instalado "
+                    "en el servidor.")
             raise IANoDisponible(
                 "Componer un APU con IA necesita ANTHROPIC_API_KEY en el servidor.")
         if not insumos:
@@ -340,6 +364,12 @@ class ApuAdvisor:
             if credencial_invalida(exc):
                 raise IANoDisponible(MSG_CREDENCIAL) from exc
             raise
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            # Truncada, no vacía. Sin esto el usuario lee "la IA no propuso ningún
+            # componente" y va a revisar la actividad, cuando el problema es el techo.
+            raise RuntimeError(
+                "La respuesta de la IA se cortó por longitud: vuelve a intentar o "
+                "reduce la cantidad de insumos candidatos.")
         texto = next((b.text for b in resp.content if b.type == "text"), "{}")
         try:
             data = json.loads(texto)

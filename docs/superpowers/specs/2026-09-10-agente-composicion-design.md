@@ -457,9 +457,9 @@ tenemos.
 | APUs de referencia que comparten unidad con la actividad | +1 |
 | Cantidad de antecedentes comparables | +1 si ≥ 3 |
 | Dispersión de los rendimientos observados de los insumos usados | +1 estrecha / −1 muy dispersa |
-| Componentes con `RENDIMIENTO_ATIPICO` | −1 cada uno |
-| Componentes con `SIN_EVIDENCIA` | −1 cada uno |
-| Supuestos sin confirmar | −1 cada uno |
+| Componentes con `RENDIMIENTO_ATIPICO` | −1 cada uno, **con techo en −2** |
+| Componentes con `SIN_EVIDENCIA` | −1 cada uno, **con techo en −2** |
+| Supuestos sin confirmar | −1 cada uno, **con techo en −2** |
 | Todas las validaciones superadas | +1 |
 
 Tres candados:
@@ -475,6 +475,27 @@ Tres candados:
   el peso habría sido otro número arbitrario compitiendo con los demás; el tope se
   explica en una frase y aparece en el desglose. `CANTIDAD_SOSPECHOSA` **no** topea: es
   lo esperable en un APU global de verdad y castigaría a toda esa familia.
+
+**Por qué los castigos llevan techo.** Sin él, las tres señales negativas restan una por
+ocurrencia **sin límite** mientras las positivas están acotadas en +6, y el nivel
+termina siguiendo al **tamaño** de la propuesta en vez de a su calidad: medido, la misma
+calidad relativa daba `media` con 6 componentes y `baja` con 12. En la biblioteca real
+la mediana es 4 componentes por APU y el p90 es 7, así que el daño caía justo en las
+composiciones grandes — las de actividades sin análogo, que es donde esto se usa. Con
+techo en −2 el rango queda simétrico (−6 contra +6) y ningún caso que daba `baja`
+legítimamente sube a `alta`.
+
+Hay además una **redundancia deliberada** que conviene conocer: `respaldo_de_componentes`,
+`componentes_sin_evidencia` y `validaciones` se derivan las tres del mismo conjunto
+`sin_respaldo`, así que un componente sin respaldo mueve tres señales. Se acepta —
+significa que la falta de evidencia pesa fuerte, que es lo correcto — pero es la razón
+de que un solo componente flojo cueste 2 puntos de 6, y hay que tenerla presente antes
+de agregar una cuarta señal derivada del mismo hecho.
+
+Un supuesto sin confirmar es **acción pendiente del usuario, no defecto**: se va cuando
+alguien lo confirma. Por eso lleva techo como los otros dos — castigar sin límite la
+declaración honesta de supuestos empuja al modelo a callárselos, que es el incentivo
+exactamente al revés del que esta feature quiere.
 
 Una nota de nombres: el campo legible de cada motivo se llama **`detalle`**, no `valor`
 — `valor` está en `_FORBIDDEN_KEYS` (por `valor_unitario`/`valor_total`) y

@@ -48,6 +48,7 @@ flowchart TD
 | `pg/apus_pg.py` | Backend Postgres de APUs. Implementa RepositorioApus. Port 1:1 de apus_db.py. |
 | `pg/auditoria_pg.py` | Backend Postgres de auditoría (seguridad.auditoria). Implementa RepositorioAuditoria. |
 | `pg/carpetas_pg.py` | Backend Postgres de carpetas. Implementa RepositorioCarpetas. Port de carpetas_db.py. |
+| `pg/composiciones_pg.py` | Backend Postgres del expediente de composición. Implementa RepositorioComposiciones. |
 | `pg/conexion.py` | Pool de conexiones Postgres (Supabase) para el backend de nube. |
 | `pg/corridas_pg.py` | Backend Postgres de corridas. Implementa RepositorioCorridas. Port de corridas_db.py. |
 | `pg/perfiles_pg.py` | Acceso Postgres a seguridad.perfiles. Implementa RepositorioPerfiles. Port de perfiles_db. |

@@ -79,6 +79,35 @@ ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS ultimo_error TEXT;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS armando_por TEXT;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS armando_desde TEXT;
 
+-- Expediente de composición asistida. Equivalente a la tabla `composicion` de
+-- db/corridas.sql: una fila POR VERSIÓN (append-only); la vigente es la de mayor
+-- `version`. SIN dinero: actividad_json guarda la vista des-monetizada del ítem.
+CREATE TABLE IF NOT EXISTS corridas.composicion (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    corrida_id      BIGINT NOT NULL REFERENCES corridas.corrida(id) ON DELETE CASCADE,
+    seq             INTEGER NOT NULL,
+    version         INTEGER NOT NULL,
+    estado          TEXT NOT NULL,
+    actividad_json  TEXT NOT NULL,
+    ficha_json      TEXT,
+    propuesta_json  TEXT,
+    validacion_json TEXT,
+    confianza       TEXT,
+    confianza_json  TEXT,
+    antecedentes_json TEXT,
+    modelo          TEXT,
+    prompt_version  TEXT,
+    apu_codigo      TEXT,
+    apu_turno       TEXT,
+    autor           TEXT,
+    creada_en       TEXT NOT NULL,
+    motivo          TEXT
+);
+-- La protección del doble clic, y por eso es un índice y no un `if`.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_composicion_version
+    ON corridas.composicion(corrida_id, seq, version);
+CREATE INDEX IF NOT EXISTS ix_composicion ON corridas.composicion(corrida_id, seq);
+
 -- Bootstrap "Sin clasificar" + backfill de corridas sin carpeta (idempotente).
 INSERT INTO corridas.carpeta (nombre, creada_en)
     SELECT 'Sin clasificar', to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS')

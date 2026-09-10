@@ -3891,3 +3891,995 @@ git commit -m "feat(servicio): cinco endpoints de composicion; aprobar pasa por 
 ```
 
 ---
+
+## Tarea 11: cliente y tipos del frontend
+
+Reusa `consumirSse` de `api/corridas.ts` (el mismo que usa la revisión): no se escribe
+un lector de streams nuevo.
+
+**Archivos:**
+- Crear: `web/src/api/composicion.ts`, `web/src/api/composicion.test.ts`
+- Modificar: `web/src/lib/tipos.ts`, `web/src/api/corridas.ts` (exportar `consumirSse`)
+
+- [ ] **Paso 1: escribir la prueba que falla**
+
+Crea `web/src/api/composicion.test.ts`:
+
+```ts
+import { beforeEach, expect, test, vi } from "vitest";
+
+const apiGet = vi.fn();
+const apiPut = vi.fn();
+const apiPost = vi.fn();
+const consumirSse = vi.fn();
+
+vi.mock("./client", () => ({
+  apiGet: (...a: unknown[]) => apiGet(...a),
+  apiPut: (...a: unknown[]) => apiPut(...a),
+  apiPost: (...a: unknown[]) => apiPost(...a),
+}));
+vi.mock("./corridas", () => ({
+  consumirSse: (...a: unknown[]) => consumirSse(...a),
+}));
+
+beforeEach(() => {
+  apiGet.mockReset().mockResolvedValue({ vigente: null, historial: [] });
+  apiPut.mockReset().mockResolvedValue({ vigente: null, historial: [] });
+  apiPost.mockReset().mockResolvedValue({ vigente: null, historial: [] });
+  consumirSse.mockReset().mockResolvedValue(undefined);
+});
+
+test("getComposicion pega al GET de la fila", async () => {
+  const { getComposicion } = await import("./composicion");
+  await getComposicion(7, 3);
+  expect(apiGet).toHaveBeenCalledWith("/corridas/7/composicion/3");
+});
+
+test("guardarComposicion manda version_base y componentes", async () => {
+  const { guardarComposicion } = await import("./composicion");
+  await guardarComposicion(7, 3, 2, [{ codigo: "4279", rendimiento: 0.5 }] as never, true);
+  expect(apiPut).toHaveBeenCalledWith("/corridas/7/composicion/3", {
+    version_base: 2,
+    componentes: [{ codigo: "4279", rendimiento: 0.5 }],
+    supuestos_confirmados: true,
+  });
+});
+
+test("aprobarComposicion manda la identidad del APU", async () => {
+  const { aprobarComposicion } = await import("./composicion");
+  await aprobarComposicion(7, 3, {
+    version_base: 2, codigo: "9001", turno: "DIURNO", nombre: "X", grupo: "G",
+    unidad: "M3",
+  });
+  expect(apiPost).toHaveBeenCalledWith("/corridas/7/composicion/3/aprobar", {
+    version_base: 2, codigo: "9001", turno: "DIURNO", nombre: "X", grupo: "G",
+    unidad: "M3",
+  });
+});
+
+test("rechazarComposicion manda el motivo", async () => {
+  const { rechazarComposicion } = await import("./composicion");
+  await rechazarComposicion(7, 3, 2, "no aplica");
+  expect(apiPost).toHaveBeenCalledWith("/corridas/7/composicion/3/rechazar", {
+    version_base: 2, motivo: "no aplica",
+  });
+});
+
+test("generarComposicionStream usa el SSE con POST", async () => {
+  const { generarComposicionStream } = await import("./composicion");
+  await generarComposicionStream(7, 3, () => {});
+  expect(consumirSse).toHaveBeenCalled();
+  const [path, init] = consumirSse.mock.calls[0];
+  expect(path).toBe("/corridas/7/composicion/3/stream");
+  expect((init as { method: string }).method).toBe("POST");
+});
+
+test("los eventos del stream llegan tipados al callback", async () => {
+  // OJO: `consumirSse` entrega `{ event, data }` (en inglés), no `{ evento, datos }`.
+  // Es el contrato que ya usa `revisarCorridaStream`; no se renombra por capricho.
+  consumirSse.mockImplementation(
+    async (_p: string, _i: unknown, onEvent: (e: { event: string; data: unknown }) => void) => {
+      onEvent({ event: "recuperando", data: { n_insumos: 40, n_apus: 3 } });
+      onEvent({ event: "lista", data: { version: 1 } });
+    },
+  );
+  const { generarComposicionStream } = await import("./composicion");
+  const vistos: string[] = [];
+  await generarComposicionStream(7, 3, (e) => vistos.push(e.event));
+  expect(vistos).toEqual(["recuperando", "lista"]);
+});
+```
+
+- [ ] **Paso 2: correr la prueba para verificar que falla**
+
+Ejecuta: `cd web && npx vitest run src/api/composicion.test.ts`
+Esperado: FALLA con `Failed to resolve import "./composicion"`
+
+- [ ] **Paso 3a: exportar `consumirSse`**
+
+En `web/src/api/corridas.ts`, cambia `async function consumirSse(` por
+`export async function consumirSse(`. Es la misma plomería de fetch + auth + lectura
+del stream que ya usa la revisión; escribir otra sería duplicarla.
+
+- [ ] **Paso 3b: los tipos**
+
+En `web/src/lib/tipos.ts`, **reemplaza** `ComposicionPropuesta` y
+`ComponenteComposicion` (el contrato viejo de dos campos ya no existe) por:
+
+```ts
+/** Un componente propuesto, con todo lo que lo explica. Espejo del contrato de
+ *  `apu_tool/dominio/composicion.py`. Ningún campo es monetario, a propósito. */
+export interface ComponentePropuesto {
+  codigo: string;
+  tipo: "insumo" | "apu";
+  funcion: string;              // "" = la IA no dijo un rol legible
+  rendimiento: number;
+  origen: string;
+  referencias: { apu_codigo: string; turno: string }[];
+  hipotesis: Record<string, unknown>;
+  calculo: {
+    operacion: string; numerador: number; denominador: number; resultado: number;
+  } | null;
+  justificacion: string;
+  nivel_evidencia: "alto" | "medio" | "bajo";
+  ref_shift: string;
+}
+
+export interface Hallazgo {
+  codigo: string;
+  mensaje: string;
+  componente: string;           // "" = hallazgo del conjunto, no de un componente
+}
+
+export interface ValidacionComposicion {
+  valido: boolean;
+  errores: Hallazgo[];
+  advertencias: Hallazgo[];
+  metricas: { superadas: number; totales: number };
+}
+
+/** El nivel lo calcula la plataforma. `incertidumbre_declarada` (lo que el modelo
+ *  dice de sí mismo) va aparte y NO influye: se muestra rotulada como dato suyo. */
+export type NivelConfianza = "alta" | "media" | "baja" | "insuficiente";
+
+export interface MotivoConfianza {
+  senal: string;
+  valor: string;
+  aporte: number;
+}
+
+export interface ComposicionVersion {
+  corrida_id: number;
+  seq: number;
+  version: number;
+  estado: "generando" | "propuesta" | "editada" | "aprobada" | "rechazada" | "error";
+  actividad: {
+    item: string; descripcion: string; unidad: string; cantidad: number; shift: string;
+  };
+  ficha: null;                  // fase 2
+  propuesta: {
+    componentes: ComponentePropuesto[];
+    supuestos: { campo: string; supuesto: string; impacto: string }[];
+    incertidumbre_declarada: number;
+    justificacion: string;
+  } | null;
+  validacion: ValidacionComposicion | null;
+  confianza: NivelConfianza | null;
+  confianza_motivos: MotivoConfianza[] | null;
+  antecedentes: {
+    codigos_permitidos: string[];
+    apus_referencia: { codigo: string; turno: string }[];
+  } | null;
+  modelo: string | null;
+  prompt_version: string | null;
+  apu_codigo: string | null;
+  apu_turno: string | null;
+  autor: string | null;
+  creada_en: string;
+  motivo: string | null;
+}
+
+export interface VistaComposicion {
+  vigente: ComposicionVersion | null;
+  historial: ComposicionVersion[];
+}
+```
+
+- [ ] **Paso 3c: el cliente**
+
+Crea `web/src/api/composicion.ts`:
+
+```ts
+import { apiGet, apiPost, apiPut } from "./client";
+import { consumirSse } from "./corridas";
+import type { ComponentePropuesto, VistaComposicion } from "@/lib/tipos";
+
+/** La versión vigente y el historial. Es lo que hace que recargar la página funcione:
+ *  la propuesta vive en la base, no en el estado del navegador. */
+export function getComposicion(id: number, seq: number): Promise<VistaComposicion> {
+  return apiGet<VistaComposicion>(`/corridas/${id}/composicion/${seq}`);
+}
+
+/** Guarda la edición humana. `versionBase` es la versión sobre la que se trabajó: si
+ *  alguien se adelantó, el servidor devuelve 409 en vez de pisarla. */
+export function guardarComposicion(
+  id: number,
+  seq: number,
+  versionBase: number,
+  componentes: ComponentePropuesto[],
+  supuestosConfirmados: boolean,
+): Promise<VistaComposicion> {
+  return apiPut<VistaComposicion>(`/corridas/${id}/composicion/${seq}`, {
+    version_base: versionBase,
+    componentes,
+    supuestos_confirmados: supuestosConfirmados,
+  });
+}
+
+export interface IdentidadApu {
+  version_base: number;
+  codigo: string;
+  turno: string;
+  nombre: string;
+  grupo: string;
+  unidad: string;
+}
+
+/** Crea el APU por el alta de siempre y lo asigna a la fila. La IA nunca escribe en
+ *  la biblioteca: este endpoint lo dispara una persona. */
+export function aprobarComposicion(
+  id: number, seq: number, identidad: IdentidadApu,
+): Promise<VistaComposicion> {
+  return apiPost<VistaComposicion>(
+    `/corridas/${id}/composicion/${seq}/aprobar`, identidad);
+}
+
+export function rechazarComposicion(
+  id: number, seq: number, versionBase: number, motivo: string,
+): Promise<VistaComposicion> {
+  return apiPost<VistaComposicion>(`/corridas/${id}/composicion/${seq}/rechazar`, {
+    version_base: versionBase,
+    motivo,
+  });
+}
+
+/** La forma que entrega `consumirSse`: `event` y `data`, en inglés. Es el contrato que
+ *  ya consume `revisarCorridaStream` — renombrarlo acá obligaría a tocar el lector de
+ *  streams, que funciona y es compartido. */
+export interface EventoComposicion {
+  event: string;
+  data: unknown;
+}
+
+/** Genera la propuesta por SSE. Si la conexión se corta, la propuesta igual quedó
+ *  guardada: recargar la página la levanta. */
+export function generarComposicionStream(
+  id: number,
+  seq: number,
+  onEvent: (e: EventoComposicion) => void,
+): Promise<void> {
+  return consumirSse(
+    `/corridas/${id}/composicion/${seq}/stream`, { method: "POST" }, onEvent);
+}
+```
+
+- [ ] **Paso 4: correr las pruebas y verificar que pasan**
+
+```bash
+cd web && npx vitest run src/api/composicion.test.ts
+```
+
+Esperado: `6 passed`
+
+- [ ] **Paso 5: commit**
+
+```bash
+git add web/src/api/composicion.ts web/src/api/composicion.test.ts \
+        web/src/api/corridas.ts web/src/lib/tipos.ts
+git commit -m "feat(web): cliente y tipos de la composicion, sobre el SSE que ya existe"
+```
+
+---
+
+## Tarea 12: la mesa de revisión y la puerta de entrada
+
+La página con URL propia y el disparador nuevo. Acá muere `DialogoComposicion.tsx`.
+
+**La fase 0 va en este commit y no antes**, a propósito: cambiar el disparador sobre un
+modal que vamos a borrar es trabajo tirado.
+
+**Archivos:**
+- Crear: `web/src/pages/Composicion.tsx`, `web/src/pages/Composicion.test.tsx`
+- Modificar: `web/src/App.tsx` (la ruta),
+  `web/src/components/corrida/TablaItems.tsx` (el disparador)
+- Borrar: `web/src/components/corrida/DialogoComposicion.tsx`,
+  `web/src/components/corrida/DialogoComposicion.test.tsx`
+
+- [ ] **Paso 1: escribir la prueba que falla**
+
+Crea `web/src/pages/Composicion.test.tsx`:
+
+```tsx
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, expect, test, vi } from "vitest";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+
+const getComposicion = vi.fn();
+const guardarComposicion = vi.fn();
+const aprobarComposicion = vi.fn();
+const rechazarComposicion = vi.fn();
+const generarComposicionStream = vi.fn();
+
+vi.mock("@/api/composicion", () => ({
+  getComposicion: (...a: unknown[]) => getComposicion(...a),
+  guardarComposicion: (...a: unknown[]) => guardarComposicion(...a),
+  aprobarComposicion: (...a: unknown[]) => aprobarComposicion(...a),
+  rechazarComposicion: (...a: unknown[]) => rechazarComposicion(...a),
+  generarComposicionStream: (...a: unknown[]) => generarComposicionStream(...a),
+}));
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ perfil: { rol: "editor" } }) }));
+
+const COMPONENTE = {
+  codigo: "4279", tipo: "insumo", funcion: "mano_de_obra", rendimiento: 0.62,
+  origen: "copiado_de_antecedente",
+  referencias: [{ apu_codigo: "A1", turno: "DIURNO" }], hipotesis: {},
+  calculo: null, justificacion: "Cuadrilla de antecedentes", nivel_evidencia: "alto",
+  ref_shift: "",
+};
+
+function vista(over: Record<string, unknown> = {}) {
+  const vigente = {
+    corrida_id: 7, seq: 3, version: 1, estado: "propuesta",
+    actividad: { item: "1.3", descripcion: "EXCAVACION MANUAL", unidad: "M3",
+                 cantidad: 120, shift: "DIURNO" },
+    ficha: null,
+    propuesta: { componentes: [COMPONENTE], supuestos: [],
+                 incertidumbre_declarada: 0.35, justificacion: "g" },
+    validacion: { valido: true, errores: [], advertencias: [],
+                  metricas: { superadas: 11, totales: 11 } },
+    confianza: "media",
+    confianza_motivos: [{ senal: "respaldo_de_componentes", valor: "1 de 1",
+                          aporte: 2 }],
+    antecedentes: { codigos_permitidos: ["4279"],
+                    apus_referencia: [{ codigo: "A1", turno: "DIURNO" }] },
+    modelo: "claude-sonnet-5", prompt_version: "composicion/v2", apu_codigo: null,
+    apu_turno: null, autor: "t@test.co", creada_en: "2026-09-10T10:00:00",
+    motivo: null, ...over,
+  };
+  return { vigente, historial: [vigente] };
+}
+
+function montar() {
+  return render(
+    <MemoryRouter initialEntries={["/corridas/7/componer/3"]}>
+      <Routes>
+        <Route path="/corridas/:id/componer/:seq" element={<Pagina />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+let Pagina: React.ComponentType;
+
+beforeEach(async () => {
+  getComposicion.mockReset().mockResolvedValue(vista());
+  guardarComposicion.mockReset().mockResolvedValue(vista({ version: 2 }));
+  aprobarComposicion.mockReset().mockResolvedValue(vista({ estado: "aprobada" }));
+  rechazarComposicion.mockReset().mockResolvedValue(vista({ estado: "rechazada" }));
+  generarComposicionStream.mockReset().mockResolvedValue(undefined);
+  Pagina = (await import("./Composicion")).default;
+});
+
+test("al abrir levanta la composicion guardada", async () => {
+  montar();
+  await waitFor(() => expect(getComposicion).toHaveBeenCalledWith(7, 3));
+  expect(await screen.findByText(/EXCAVACION MANUAL/)).toBeTruthy();
+});
+
+test("pinta los componentes con su origen y justificacion", async () => {
+  montar();
+  expect(await screen.findByText("4279")).toBeTruthy();
+  expect(screen.getByText(/copiado_de_antecedente/)).toBeTruthy();
+});
+
+test("muestra el nivel de confianza calculado y su desglose", async () => {
+  montar();
+  expect(await screen.findByText(/MEDIA/i)).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: /por qué/i }));
+  expect(screen.getByText(/respaldo_de_componentes/)).toBeTruthy();
+});
+
+test("la incertidumbre del modelo se muestra rotulada como suya", async () => {
+  montar();
+  expect(await screen.findByText(/el modelo declara/i)).toBeTruthy();
+});
+
+test("editar un rendimiento y guardar manda la version base", async () => {
+  montar();
+  const campo = await screen.findByLabelText(/rendimiento de 4279/i);
+  await userEvent.clear(campo);
+  await userEvent.type(campo, "0.8");
+  await userEvent.click(screen.getByRole("button", { name: /guardar cambios/i }));
+  await waitFor(() => expect(guardarComposicion).toHaveBeenCalled());
+  const [, , versionBase, comps] = guardarComposicion.mock.calls[0];
+  expect(versionBase).toBe(1);
+  expect((comps as { rendimiento: number }[])[0].rendimiento).toBe(0.8);
+});
+
+test("borrar un componente lo saca de lo que se guarda", async () => {
+  montar();
+  await userEvent.click(await screen.findByRole("button",
+    { name: /quitar 4279/i }));
+  await userEvent.click(screen.getByRole("button", { name: /guardar cambios/i }));
+  await waitFor(() => expect(guardarComposicion).toHaveBeenCalled());
+  expect(guardarComposicion.mock.calls[0][3]).toEqual([]);
+});
+
+test("con errores bloqueantes no se puede aprobar", async () => {
+  getComposicion.mockResolvedValue(vista({
+    validacion: { valido: false,
+      errores: [{ codigo: "CODIGO_INEXISTENTE", mensaje: "no existe",
+                  componente: "4279" }],
+      advertencias: [], metricas: { superadas: 10, totales: 11 } },
+    confianza: "insuficiente",
+  }));
+  montar();
+  const boton = await screen.findByRole("button", { name: /aprobar/i });
+  expect((boton as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/no existe/)).toBeTruthy();
+});
+
+test("con solo advertencias si se puede aprobar", async () => {
+  getComposicion.mockResolvedValue(vista({
+    validacion: { valido: true, errores: [],
+      advertencias: [{ codigo: "RENDIMIENTO_ATIPICO", mensaje: "42 % fuera",
+                       componente: "4279" }],
+      metricas: { superadas: 10, totales: 11 } },
+  }));
+  montar();
+  const boton = await screen.findByRole("button", { name: /aprobar/i });
+  expect((boton as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.getByText(/42 % fuera/)).toBeTruthy();
+});
+
+test("sin composicion ofrece generar y no la pide sola", async () => {
+  getComposicion.mockResolvedValue({ vigente: null, historial: [] });
+  montar();
+  expect(await screen.findByRole("button", { name: /generar propuesta/i })).toBeTruthy();
+  expect(generarComposicionStream).not.toHaveBeenCalled();
+});
+
+test("generar muestra el avance por etapas", async () => {
+  getComposicion.mockResolvedValue({ vigente: null, historial: [] });
+  generarComposicionStream.mockImplementation(
+    async (_i: number, _s: number, onEvent: (e: { event: string; data: unknown }) => void) => {
+      onEvent({ event: "recuperando", data: { n_insumos: 40, n_apus: 3 } });
+      onEvent({ event: "generando", data: {} });
+    },
+  );
+  montar();
+  await userEvent.click(await screen.findByRole("button",
+    { name: /generar propuesta/i }));
+  await waitFor(() => expect(screen.getByText(/antecedentes/i)).toBeTruthy());
+});
+
+test("rechazar no crea nada y vuelve", async () => {
+  montar();
+  await userEvent.click(await screen.findByRole("button", { name: /rechazar/i }));
+  await waitFor(() => expect(rechazarComposicion).toHaveBeenCalled());
+  expect(aprobarComposicion).not.toHaveBeenCalled();
+});
+
+test("un lector de solo consulta no ve las acciones que escriben", async () => {
+  vi.doMock("@/lib/auth", () => ({ useAuth: () => ({ perfil: { rol: "consulta" } }) }));
+  vi.resetModules();
+  const Solo = (await import("./Composicion")).default;
+  render(
+    <MemoryRouter initialEntries={["/corridas/7/componer/3"]}>
+      <Routes><Route path="/corridas/:id/componer/:seq" element={<Solo />} /></Routes>
+    </MemoryRouter>,
+  );
+  await screen.findByText(/EXCAVACION MANUAL/);
+  expect(screen.queryByRole("button", { name: /aprobar/i })).toBeNull();
+});
+```
+
+Y en `web/src/components/corrida/TablaItems.test.tsx`, en el bloque de Componer (junto
+a `test("con dictamen sin_apu y rol editor aparece Componer")`, que es el caso hermano
+y hoy pasa), agrega la puerta de entrada nueva. Los cuatro tests que ya están siguen
+valiendo tal cual: `sin_apu` con editor sigue ofreciendo, sin editor no, y congelada no.
+
+```tsx
+// ─── Fase 0: componer sale de cualquier fila sin APU ─────────────────────────
+// Antes el botón exigía haber corrido la revisión con IA sobre TODA la corrida para
+// que apareciera en una sola fila. Ahora una fila que el determinístico no resolvió
+// lo ofrece por sí sola.
+
+const boton = () => screen.queryByRole("button", { name: /^Componer$/ });
+
+test("una fila sin APU ofrece componer sin haber corrido la revisión", () => {
+  render(
+    <TablaItems corridaId={1}
+      items={[{ ...ITEM, apu_codigo: null, revision: null, costo_manual: null }]}
+      onConfirmado={() => {}} onComponer={() => {}} puedeEditar />,
+  );
+  expect(boton()).toBeTruthy();
+});
+
+test("una fila con APU asignado y sin veredicto no ofrece componer", () => {
+  // El determinístico resolvió: la IA no rehace lo que ya está bien (invariante 2).
+  render(
+    <TablaItems corridaId={1}
+      items={[{ ...ITEM, apu_codigo: "3010", revision: null, costo_manual: null }]}
+      onConfirmado={() => {}} onComponer={() => {}} puedeEditar />,
+  );
+  expect(boton()).toBeNull();
+});
+
+test("una fila con costo puesto a mano no ofrece componer", () => {
+  // Proyectos especiales: la línea ya declaró su costo, no necesita APU.
+  render(
+    <TablaItems corridaId={1}
+      items={[{ ...ITEM, apu_codigo: null, revision: null, costo_manual: 250000 }]}
+      onConfirmado={() => {}} onComponer={() => {}} puedeEditar />,
+  );
+  expect(boton()).toBeNull();
+});
+
+test("componer avisa al padre con el seq, no navega solo", () => {
+  // TablaItems se monta SIN Router en estos tests: la navegación es del padre.
+  const onComponer = vi.fn();
+  render(
+    <TablaItems corridaId={1}
+      items={[{ ...ITEM, seq: 4, apu_codigo: null, revision: null,
+                costo_manual: null }]}
+      onConfirmado={() => {}} onComponer={onComponer} puedeEditar />,
+  );
+  boton()!.click();
+  expect(onComponer).toHaveBeenCalledWith(4);
+});
+```
+
+Los cuatro tests de Componer que ya existen necesitan la prop nueva: agregales
+`onComponer={() => {}}`.
+
+- [ ] **Paso 2: correr las pruebas para verificar que fallan**
+
+```bash
+cd web && npx vitest run src/pages/Composicion.test.tsx
+```
+
+Esperado: FALLA con `Failed to resolve import "./Composicion"`
+
+- [ ] **Paso 3a: la página**
+
+Crea `web/src/pages/Composicion.tsx`. Densa, table-first, sin cards (la convención de
+este repo). La estructura:
+
+```tsx
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/lib/auth";
+import { puede } from "@/components/rutas";
+import {
+  aprobarComposicion, generarComposicionStream, getComposicion,
+  guardarComposicion, rechazarComposicion,
+} from "@/api/composicion";
+import type {
+  ComponentePropuesto, NivelConfianza, VistaComposicion,
+} from "@/lib/tipos";
+
+const ETIQUETA_ETAPA: Record<string, string> = {
+  recuperando: "Buscando antecedentes en la biblioteca…",
+  generando: "La IA está armando la propuesta…",
+  validando: "Recalculando y validando…",
+};
+
+const COLOR_CONFIANZA: Record<NivelConfianza, string> = {
+  alta: "text-ok", media: "text-revisar", baja: "text-revisar",
+  insuficiente: "text-destructive",
+};
+
+/** Mesa de revisión de una composición asistida.
+ *
+ *  La propuesta vive en la BASE, no en este componente: recargar la página la levanta
+ *  igual, y una conexión que se corta a mitad de la generación no la pierde. Lo único
+ *  que es estado local son las ediciones sin guardar.
+ *
+ *  La IA no ve precios y esta pantalla tampoco los muestra: acá se decide la
+ *  ESTRUCTURA del APU. El costo aparece cuando el motor determinístico lo calcula,
+ *  después de crear el APU. */
+export default function Composicion() {
+  const { id, seq } = useParams();
+  const corridaId = Number(id);
+  const fila = Number(seq);
+  const navegar = useNavigate();
+  const { perfil } = useAuth();
+  const puedeEditar = puede(perfil?.rol, "editor");
+
+  const [vista, setVista] = useState<VistaComposicion | null>(null);
+  const [borrador, setBorrador] = useState<ComponentePropuesto[] | null>(null);
+  const [etapa, setEtapa] = useState<string | null>(null);
+  const [ocupado, setOcupado] = useState(false);
+  const [verMotivos, setVerMotivos] = useState(false);
+
+  const cargar = useCallback(async () => {
+    const v = await getComposicion(corridaId, fila);
+    setVista(v);
+    setBorrador(v.vigente?.propuesta?.componentes ?? null);
+  }, [corridaId, fila]);
+
+  useEffect(() => { void cargar(); }, [cargar]);
+
+  const vigente = vista?.vigente ?? null;
+  const validacion = vigente?.validacion ?? null;
+  const componentes = borrador ?? [];
+  const sucio = useMemo(
+    () => JSON.stringify(componentes) !==
+      JSON.stringify(vigente?.propuesta?.componentes ?? []),
+    [componentes, vigente],
+  );
+
+  async function conError(fn: () => Promise<VistaComposicion>) {
+    setOcupado(true);
+    try {
+      const v = await fn();
+      setVista(v);
+      setBorrador(v.vigente?.propuesta?.componentes ?? null);
+      return v;
+    } catch (e) {
+      // El mensaje es el del backend (409 versión vieja, 422 reglas de autoría,
+      // 503 sin credencial): dice qué hacer, y un texto propio lo taparía.
+      toast.error(e instanceof Error ? e.message : "No se pudo completar la acción.");
+      return null;
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function generar() {
+    setOcupado(true);
+    setEtapa("recuperando");
+    try {
+      await generarComposicionStream(corridaId, fila, (ev) => {
+        if (ev.event === "error") {
+          toast.error((ev.data as { detail: string }).detail);
+          setEtapa(null);
+          return;
+        }
+        setEtapa(ev.event === "lista" ? null : ev.event);
+      });
+      await cargar();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Se cortó la generación.");
+      await cargar();   // pudo haberse guardado igual
+    } finally {
+      setEtapa(null);
+      setOcupado(false);
+    }
+  }
+
+  // …render: cabecera con la actividad y "Volver a la corrida"; panel de confianza
+  // con el desglose desplegable y la incertidumbre del modelo rotulada aparte;
+  // bloques de errores y advertencias; la tabla editable de componentes; los
+  // supuestos; los APUs de referencia; y la barra de acciones.
+}
+```
+
+**Requisitos del render que fijan los tests** (implementalos tal cual, el resto del
+maquetado es libre dentro de la convención densa del repo):
+
+| Elemento | Requisito |
+|---|---|
+| Actividad | se muestra `vigente.actividad.descripcion`, más unidad, cantidad y turno |
+| Confianza | el nivel en mayúsculas; un botón "por qué" que despliega `confianza_motivos` con `senal`, `valor` y `aporte` |
+| Incertidumbre | texto que empieza con "El modelo declara …", separado del nivel |
+| Errores | uno por `validacion.errores`, con su `mensaje` visible |
+| Advertencias | uno por `validacion.advertencias`, con su `mensaje` visible |
+| Rendimiento | `<input>` numérico con `aria-label={\`Rendimiento de ${c.codigo}\`}` |
+| Quitar | `<button>` con `aria-label={\`Quitar ${c.codigo}\`}` |
+| Guardar cambios | llama `guardarComposicion(corridaId, fila, vigente.version, componentes, supuestosConfirmados)`; deshabilitado si no hay cambios |
+| Regenerar | llama `generar()` |
+| Rechazar | llama `rechazarComposicion(corridaId, fila, vigente.version, motivo)` |
+| Aprobar y crear APU | `disabled` cuando `!validacion?.valido`; abre el diálogo de identidad |
+| Sin composición | botón "Generar propuesta"; **no** se genera sola al montar (cada corrida es plata) |
+| Etapas | mientras `etapa !== null`, el texto de `ETIQUETA_ETAPA[etapa]` |
+| Rol | con rol `consulta` no se renderiza ninguna acción que escriba |
+
+El diálogo de identidad es un modal chico con `codigo`, `turno` (select DIURNO/NOCTURNO),
+`nombre` (precargado con la descripción de la actividad), `grupo` (el desplegable de
+grupos que ya existe) y `unidad` (precargada con la de la actividad). Al aceptar llama
+`aprobarComposicion` y, si va bien, `navegar(\`/corridas/${corridaId}\`)`.
+
+**No se reusa `DialogoAgregarApu` completo** a propósito: obligaría a editar los
+componentes dos veces, en la mesa y otra vez en el alta.
+
+- [ ] **Paso 3b: la ruta**
+
+En `web/src/App.tsx`, junto a la ruta de la corrida:
+
+```tsx
+<Route path="/corridas/:id/componer/:seq" element={<Composicion />} />
+```
+
+con su import. Si las rutas están dentro de un `<RequiereRol minimo="consulta">`,
+poné esta en el mismo bloque: leer la mesa es de `consulta`, escribir es de `editor` y
+eso ya lo controla la página.
+
+- [ ] **Paso 3c: la puerta de entrada (fase 0)**
+
+En `web/src/components/corrida/TablaItems.tsx`:
+
+1. Borra el `import DialogoComposicion`, el estado `componer`, el bloque
+   `{componer && <DialogoComposicion … />}` y la función `apuCompuesto`.
+2. Reemplaza la condición de hoy:
+
+```tsx
+const ofreceComponer = puedeAplicar && v.dictamen === "sin_apu";
+```
+
+por una regla que no dependa de haber corrido la revisión:
+
+```tsx
+/** ¿Esta línea puede componerse con IA?
+ *
+ *  Sin APU (el determinístico no encontró nada), o con el veredicto `sin_apu` de la
+ *  revisión sobre una fila que sí tiene APU. NO cuando hay `costo_manual`: esa línea
+ *  ya declaró su costo (proyectos especiales) y no necesita APU.
+ *
+ *  Antes esto exigía haber corrido la revisión con IA sobre TODA la corrida para que
+ *  apareciera el botón en una sola fila. */
+function ofreceComponer(it: ItemCuadro, puedeEditar: boolean): boolean {
+  if (!puedeEditar) return false;
+  if (it.costo_manual != null && it.costo_manual > 0) return false;
+  return !it.apu_codigo || it.revision?.dictamen === "sin_apu";
+}
+```
+
+3. El botón sigue siendo un botón con `onComponer`, **no un `<Link>`**. Los tests de
+   `TablaItems.test.tsx` montan el componente **sin Router**, así que un `<Link>` (o un
+   `useNavigate` adentro) rompería los 40 tests que ya existen con
+   `useHref() may be used only in the context of a <Router>`. La navegación la hace el
+   padre, que sí está dentro del Router:
+
+```tsx
+// TablaItems.tsx — el botón, en la columna de acciones de la fila (ya no en la celda
+// del veredicto: dejó de depender de que haya veredicto).
+{ofreceComponer(it, puedeEditar && !readOnly) && (
+  <Button size="sm" variant="outline" onClick={() => onComponer(it.seq)}>
+    Componer
+  </Button>
+)}
+```
+
+```tsx
+// Corrida.tsx — el padre navega.
+const navegar = useNavigate();
+// …
+<TablaItems
+  corridaId={id}
+  items={items}
+  onConfirmado={recargar}
+  puedeEditar={puedeEditar}
+  readOnly={congelada}
+  onComponer={(seq) => navegar(`/corridas/${id}/componer/${seq}`)}
+/>
+```
+
+La prop `onComponer` ya existe en `TablaItems` (hoy hace `setComponer(it)`): cambia su
+firma a `(seq: number) => void` y su implementación en el padre. Un cambio de tipo, no
+una prop nueva.
+
+4. Borra `web/src/components/corrida/DialogoComposicion.tsx` y su test.
+
+- [ ] **Paso 4: correr las pruebas y verificar que pasan**
+
+```bash
+cd web && npx vitest run
+cd web && npm run build
+```
+
+Esperado: toda la suite de vitest verde y el build sin errores. **`npm run build`
+(que corre `tsc -b`), no `tsc --noEmit`**: la lección de `nombre-corridas` fue que
+`--noEmit` deja pasar errores que el build sí encuentra.
+
+- [ ] **Paso 5: commit**
+
+```bash
+git add web/src/pages/Composicion.tsx web/src/pages/Composicion.test.tsx \
+        web/src/App.tsx web/src/components/corrida/TablaItems.tsx \
+        web/src/components/corrida/TablaItems.test.tsx
+git rm web/src/components/corrida/DialogoComposicion.tsx \
+       web/src/components/corrida/DialogoComposicion.test.tsx
+git commit -m "feat(web): mesa de revision con URL propia; componer sale de cualquier fila sin APU"
+```
+
+---
+
+## Tarea 13: documentación
+
+**Archivos:** `CLAUDE.md`, `README.md`, `docs/ARQUITECTURA.md`, mapa de módulos.
+
+- [ ] **Paso 1: `CLAUDE.md`**
+
+En la tabla de `apu_tool/dominio/`, agrega dos filas y corrige la de `compose.py`:
+
+```markdown
+| `compose.py`             | candidatos de insumos + rendimientos observados de la biblioteca |
+| `composicion.py`         | contrato del agente de composición + orquestador (propone; no aplica) |
+| `validacion_composicion.py` | validador determinístico + confianza calculada (sin IA, sin dinero) |
+```
+
+En la tabla de `apu_tool/datos/`:
+
+```markdown
+| `composiciones_db.py` | SQLite del expediente de composición (append-only por versión) |
+```
+
+En la tabla de `apu_tool/servicio/`:
+
+```markdown
+| `composicion.py`       | servicio de la composición asistida (genera, edita, aprueba por autoría) |
+```
+
+En el diagrama de flujo, después de la línea de la revisión:
+
+```
+fila sin APU ──► composición con IA (sin dinero) ──► validación determinística
+                                        └─► confianza calculada ──► aprueba usuario ──► autoria.crear_apu
+```
+
+En **Datos**, una entrada nueva (el estilo de las que ya están: qué, por qué, y la
+trampa):
+
+```markdown
+- **Expediente de composición.** Cuando el matcher no encuentra nada, el usuario puede
+  pedirle a la IA una composición para esa fila. Lo que vuelve es un **expediente**, no
+  dos columnas: cada componente declara su función, de dónde sale el rendimiento
+  (`origen`), qué APU lo respalda, la hipótesis productiva y la fórmula. Python
+  **recalcula** esa fórmula y su resultado manda sobre el número del modelo
+  (`CALCULO_CORREGIDO`); `dominio/validacion_composicion.py` aplica el resto de las
+  reglas, y la **confianza la calcula la plataforma**, no el modelo — lo que el modelo
+  dice de sí mismo se guarda como `incertidumbre_declarada` y **no entra en la fórmula**.
+  Todo se persiste en `composicion`, **append-only por versión** (`ux_composicion_version`
+  es la protección del doble clic, no un `if`): generar, regenerar, editar, aprobar y
+  rechazar escriben una fila nueva, y la vigente es la de mayor `version`. El historial
+  es el registro de correcciones. `actividad_json` guarda la vista **des-monetizada** del
+  ítem, no el `LicitacionItem`: así la fila entera se puede reinyectar en un payload
+  hacia la IA sin volver a filtrarla (la lección de `plan_json`). Una composición **no se
+  borra** cuando la fila cambia de APU — al revés que `revision_json` —: un veredicto es
+  caché barata, un expediente tiene trabajo humano adentro. Aprobar pasa por
+  `servicio/autoria.py`; la IA nunca escribe en la biblioteca. Endpoints:
+  `GET/PUT /api/corridas/{id}/composicion/{seq}`, `POST …/stream|aprobar|rechazar`.
+```
+
+En **No hacer**:
+
+```markdown
+- No dejes que la IA proponga un código que no esté en la lista blanca de esa
+  generación (`antecedentes.codigos_permitidos`): `CODIGO_NO_AUTORIZADO` existe para
+  eso. La lista **sí** se amplía cuando una PERSONA agrega un componente desde el
+  buscador del catálogo — frena al modelo, no al usuario — y ahí el guardián que
+  queda es `CODIGO_INEXISTENTE`.
+- No uses la `incertidumbre_declarada` del modelo como confianza. La confianza la
+  calcula `validacion_composicion.calcular_confianza` con señales observables y guarda
+  su desglose. Hay un test que falla si el número del modelo mueve el nivel.
+- No conviertas una regla de ingeniería discutible en error bloqueante. Bloquean el
+  código inexistente, la cantidad que no es un número y el sub-APU que cicla; el
+  rendimiento raro, la herramienta que falta y el método que no cuadra **advierten**.
+```
+
+- [ ] **Paso 2: `README.md` y `docs/ARQUITECTURA.md`**
+
+Actualizá donde se describa la composición con IA: hoy dicen que es una llamada que
+devuelve insumos y rendimiento. Reemplazá por el expediente (contrato explicable,
+validación determinística, confianza calculada, persistencia versionada) y mencioná la
+ruta `/corridas/{id}/componer/{seq}`.
+
+- [ ] **Paso 3: el mapa de módulos**
+
+```bash
+python scripts/actualizar_vault.py    # o el que use el hook pre-commit
+python -m pytest tests/test_mapa_arquitectura.py tests/test_actualizar_vault.py -q
+```
+
+Esperado: verde. Ese test compara la documentación de arquitectura contra los imports
+reales; si falla, la tabla de `CLAUDE.md` tiene un módulo mal escrito.
+
+- [ ] **Paso 4: commit**
+
+```bash
+git add CLAUDE.md README.md docs/ARQUITECTURA.md constructor-apus/
+git commit -m "docs: el agente de composicion en CLAUDE.md, README y arquitectura"
+```
+
+---
+
+## Tarea 14: verificación
+
+- [ ] **Paso 1: la suite completa**
+
+```bash
+python -m pytest tests/ -q 2>&1 | tail -5
+```
+
+Esperado: **cero fallos**. La base era 1036 pasadas / 15 saltadas; el total cambia (se
+borraron los tests de la composición vieja y entraron ~120 nuevos), lo que no puede
+cambiar es que no haya rojo.
+
+- [ ] **Paso 2: el frontend, con el build de verdad**
+
+```bash
+cd web && npx vitest run && npm run build
+```
+
+`npm run build` corre `tsc -b`. **No sirve `tsc --noEmit`**: en la rama de nombre de
+corridas dejó pasar un error que el build sí encontró, ya en producción.
+
+- [ ] **Paso 3: la migración contra un Postgres real**
+
+Levantá la base desechable (receta registrada: binarios portables EDB, puerto 55433) y:
+
+```bash
+TEST_DATABASE_URL=postgresql://...:55433/apu python -m pytest tests/ -q 2>&1 | tail -5
+```
+
+Esperado: los tests de Postgres corren en vez de saltarse, y todos pasan. **Nunca
+apuntes esto a producción**: hacen `DROP SCHEMA`.
+
+- [ ] **Paso 4: smoke test en el navegador, con actividades reales**
+
+Este paso **no es opcional** y es el que puede tumbar el diseño: el riesgo número uno es
+que el contrato rico le cargue la atención al modelo y produzca **peores** rendimientos
+que el de dos campos. Los tests unitarios no pueden verlo.
+
+Levantá el servidor local (`scripts/servidor_local.py`) con `ANTHROPIC_API_KEY` puesta y,
+sobre una corrida real, componé al menos **cinco actividades** de familias distintas
+(una excavación, un concreto, una tubería, un transporte, una señalización). Por cada
+una anotá en `smoke-test-composicion-2026-09-XX.md`:
+
+- ¿los insumos elegidos son los correctos para la actividad?
+- ¿los rendimientos son plausibles para un ingeniero de costos?
+- ¿el `origen` declarado es honesto (dice `sin_evidencia` cuando no tiene antecedente)?
+- ¿las advertencias apuntan a cosas reales o son ruido?
+- ¿el nivel de confianza coincide con tu juicio?
+- ¿cuánto tardó y cuántos tokens costó?
+
+Comprobá además, en el navegador:
+
+- recargar la página en medio de una generación y que la propuesta aparezca igual;
+- editar un rendimiento, guardar, y que las advertencias se recalculen;
+- doble clic en "Aprobar" y que se cree **un** APU, no dos;
+- que una corrida sin filas pendientes no ofrezca componer en ninguna línea;
+- que con `ANTHROPIC_API_KEY` sin poner, la app siga funcionando y el botón dé un 503
+  con mensaje accionable.
+
+- [ ] **Paso 5: pedir la revisión y el permiso de push**
+
+```bash
+git log --oneline master..HEAD
+```
+
+Presentá el resumen, el resultado del smoke test y **pedí aprobación explícita antes de
+hacer push**: `master` autodespliega a producción.
+
+---
+
+## Cobertura de los criterios de aceptación
+
+| Criterios | Tarea que los fija |
+|---|---|
+| 1, 2, 3, 4 — el determinístico no cambia | 9 (regresión), 12 (la corrida sin pendientes), 14 |
+| 5, 8 — la actividad pendiente arranca y cancelar no toca nada | 10, 12 |
+| 9, 10, 11, 12 — privacidad | 5, 7, 10 |
+| 15, 16 — códigos y referencias rastreables | 3, 9 |
+| 17, 18, 19, 20, 21 — generación | 1, 6, 9 |
+| 22, 23, 24, 25, 26, 27 — validación y confianza | 3, 4 |
+| 28, 29, 30, 31, 32 — aprobación | 10 |
+| 33, 34, 35, 36 — persistencia | 7, 8, 12 |
+
+**Fuera de esta fase:** 6 y 7 (preguntas críticas) → fase 2; 13 y 14 (recuperación
+guiada por la ficha) → fase 3. **32 de 36.**

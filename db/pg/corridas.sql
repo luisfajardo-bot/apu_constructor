@@ -106,7 +106,9 @@ CREATE TABLE IF NOT EXISTS corridas.composicion (
 -- La protección del doble clic, y por eso es un índice y no un `if`.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_composicion_version
     ON corridas.composicion(corrida_id, seq, version);
-CREATE INDEX IF NOT EXISTS ix_composicion ON corridas.composicion(corrida_id, seq);
+-- Sin índice secundario sobre (corrida_id, seq): `ux_composicion_version` ya lo cubre
+-- por prefijo izquierdo, y las dos únicas consultas del repo filtran por esas dos
+-- columnas y ordenan por `version`, que es exactamente su forma.
 
 -- Bootstrap "Sin clasificar" + backfill de corridas sin carpeta (idempotente).
 INSERT INTO corridas.carpeta (nombre, creada_en)

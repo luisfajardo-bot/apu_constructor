@@ -1,7 +1,11 @@
 """Paridad SQLite ↔ Postgres del expediente de composición (criterio 33).
 
-Reusa el constructor de filas de `test_composiciones_db.py` contra el otro backend:
-una lista de casos aparte se desincroniza el día que alguien agrega uno en un solo lado.
+No repite CADA caso de `test_composiciones_db.py`: solo los que dependen del
+backend (constraints, cascada, orden persistido, aislamiento por corrida/seq). Los
+agnósticos del backend (que la fila no lleve dinero, que no haya columna de
+razonamiento) no necesitan gemelo y viven una sola vez del lado SQLite. Reusa el
+constructor de filas de ese archivo contra el otro backend: una lista de casos
+aparte se desincroniza el día que alguien agrega uno en un solo lado.
 
 Los de Postgres se saltan sin TEST_DATABASE_URL. OJO: hacen DROP SCHEMA — nunca
 apuntarlos a producción (ver el guard autouse de tests/conftest.py).
@@ -67,6 +71,23 @@ def test_pg_el_historial_viene_en_orden(repo_pg):
         repo_pg.agregar(fila(corrida_id=cid, version=n, estado=est))
     assert [f.estado for f in repo_pg.historial(cid, 7)] == [
         "propuesta", "editada", "aprobada"]
+
+
+def test_pg_cada_fila_es_de_su_corrida_y_su_seq(repo_pg):
+    """El índice único es (corrida_id, seq, version): dos corridas pueden compartir
+    `seq` sin chocar entre sí. `repo_pg` solo trae UNA corrida creada; la segunda se
+    crea acá mismo, igual que hace la fixture para la primera."""
+    cid1 = _cid(repo_pg)
+    with repo_pg.cx.connection() as c:
+        c.execute("INSERT INTO corridas.corrida "
+                  "(creada_en, archivo, turno_def, estado) "
+                  "VALUES ('2026-09-10','y.xlsx','DIURNO','en_revision')")
+    cid2 = _cid(repo_pg)
+    repo_pg.agregar(fila(corrida_id=cid1, seq=7))
+    repo_pg.agregar(fila(corrida_id=cid1, seq=8))
+    repo_pg.agregar(fila(corrida_id=cid2, seq=7))
+    assert repo_pg.vigente(cid1, 8).seq == 8
+    assert repo_pg.vigente(cid2, 7).corrida_id == cid2
 
 
 def test_pg_repetir_una_version_choca_igual_que_sqlite(repo_pg):

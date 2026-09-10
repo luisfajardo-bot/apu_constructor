@@ -94,4 +94,6 @@ CREATE TABLE IF NOT EXISTS composicion (
 -- la misma versión vigente. Mismo criterio que ux_corrida_armando_archivo.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_composicion_version
   ON composicion(corrida_id, seq, version);
-CREATE INDEX IF NOT EXISTS ix_composicion ON composicion(corrida_id, seq);
+-- Sin índice secundario sobre (corrida_id, seq): `ux_composicion_version` ya lo cubre
+-- por prefijo izquierdo, y las dos únicas consultas del repo filtran por esas dos
+-- columnas y ordenan por `version`, que es exactamente su forma.

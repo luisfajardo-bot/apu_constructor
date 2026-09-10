@@ -135,6 +135,17 @@ def test_una_corrida_borrada_no_se_reporta_como_choque_de_version(alm):
         alm.composiciones.agregar(fila(corrida_id=9999))
 
 
+def test_borrar_la_corrida_se_lleva_sus_composiciones(alm):
+    """En SQLite el CASCADE depende de un PRAGMA de runtime, no del esquema: si
+    alguien saca `PRAGMA foreign_keys = ON` de la conexión que borra, Postgres sigue
+    bien y este lado deja huérfanos en silencio."""
+    alm.composiciones.agregar(fila())
+    assert alm.composiciones.vigente(1, 7) is not None
+    alm.corridas.eliminar_corrida(1)
+    assert alm.composiciones.vigente(1, 7) is None
+    assert alm.composiciones.historial(1, 7) == []
+
+
 def test_una_violacion_inesperada_no_se_disfraza_de_choque_de_version(alm):
     """Un bug nuestro tiene que verse, no salir como conflicto de concurrencia: ese
     mensaje es falso y tranquilizador, y manda a reintentar en vez de a reportar.

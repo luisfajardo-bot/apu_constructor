@@ -88,6 +88,18 @@ def test_recuperar_trae_los_rendimientos_observados(alm):
     assert "4279" in recuperar(alm, ITEM).validacion.observados
 
 
+def test_generar_no_lee_el_arbol_de_subapus(alm):
+    """Su único lector es la detección de ciclos, que no puede disparar sin código
+    propio. Cargarlo igual son dos round-trips contra Supabase por composición."""
+    ctx = recuperar(alm, ITEM)
+    assert ctx.validacion.componentes_de_apu == {}
+
+
+def test_aprobar_si_lo_lee(alm):
+    ctx = recuperar(alm, ITEM, apu_codigo_propio="9001")
+    assert ("A1", "DIURNO") in ctx.validacion.componentes_de_apu
+
+
 # --- evaluar (el camino del PUT) -------------------------------------------
 def test_evaluar_no_llama_a_la_ia(alm):
     """Guardar una edición humana no vuelve a pagar una generación."""

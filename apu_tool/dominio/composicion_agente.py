@@ -52,12 +52,31 @@ def recuperar(almacen: Almacen, item, *, apu_codigo_propio: str = "",
             unidades[cod] = cands[0].unidad or ""
     insumos = tuple(replace(i, grupo=grupos.get(i.codigo, "")) for i in insumos)
 
+    # `all_apus` es incondicional: se gana el pan siempre (`apus_existentes` limpia
+    # las referencias muertas y `unidades_de_apu` alimenta la señal de unidad de la
+    # confianza).
     apus = almacen.apus.all_apus()
-    componentes = {}
-    for (cod, turno), comps in almacen.apus.get_components_bulk(
-            [(a.codigo, a.shift) for a in apus]).items():
-        componentes[(cod, turno)] = tuple(
-            (c.insumo_codigo, c.tipo, c.ref_shift) for c in comps)
+
+    # `componentes_de_apu` alimenta UN solo lector: la detección de ciclos de sub-APU
+    # (`_cierra_ciclo`), que devuelve False de entrada cuando no hay código propio —
+    # o sea durante toda la generación. Solo al APROBAR existe un código con el que un
+    # ciclo sea posible. Cargarlo siempre costaba 5.213 filas por composición: en
+    # SQLite 30 ms de 102, pero en Postgres son dos round-trips contra Supabase desde
+    # Render, y este repo ya pagó una feature entera por sacar round-trips
+    # innecesarios de este mismo camino.
+    #
+    # La condición es el MISMO campo del que depende el lector, no una copia de su
+    # regla: `_cierra_ciclo` corta con `if not propio` y acá se carga con
+    # `if apu_codigo_propio`. Por eso no pueden desalinearse, y por eso el árbol vacío
+    # no es un falso negativo: cuando está vacío, el lector ya había cortado antes de
+    # mirarlo. Si algún día el ciclo se detecta con otra cosa que el código propio,
+    # esta condición se mueve con él.
+    componentes: dict = {}
+    if apu_codigo_propio:
+        for (cod, turno), comps in almacen.apus.get_components_bulk(
+                [(a.codigo, a.shift) for a in apus]).items():
+            componentes[(cod, turno)] = tuple(
+                (c.insumo_codigo, c.tipo, c.ref_shift) for c in comps)
 
     ctx = ContextoValidacion(
         descripcion=item.descripcion, unidad_actividad=item.unidad, shift=item.shift,

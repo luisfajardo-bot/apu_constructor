@@ -214,7 +214,14 @@ class AssembledApu:
     status: MatchStatus
     confianza: float
     explicacion: str = ""
-    origen: str = "historico"     # "historico" | "generado" | "manual"
+    # "historico" | "manual". Ya NADIE produce "generado": murió con la composición
+    # de dos campos (`Assembler.generar_composicion`), que se mudó al orquestador
+    # `dominio/composicion_agente.py` y propone en vez de armar. No lo revivas
+    # creyendo que es un valor vivo. Se sigue leyendo como texto libre a propósito:
+    # `corrida_item.origen` es una columna persistida y las filas armadas antes de
+    # que la IA dejara de armar pueden traerlo, así que validarlo contra un
+    # vocabulario cerrado rompería corridas viejas.
+    origen: str = "historico"
 
     @property
     def costo_total(self) -> int:

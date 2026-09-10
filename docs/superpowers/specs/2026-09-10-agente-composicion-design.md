@@ -368,7 +368,7 @@ rendimientos observados.
 | `CODIGO_NO_AUTORIZADO` | el código no estaba en la lista blanca de esta generación |
 | `CODIGO_INEXISTENTE` | no existe en el catálogo (ni en la biblioteca si `tipo='apu'`) |
 | `CANTIDAD_INVALIDA` | ≤ 0, `NaN` o `inf` — el motor no puede costear eso |
-| `TIPO_INCOHERENTE` | `funcion = sub_apu` con `tipo ≠ apu`, o al revés |
+| `TIPO_INCOHERENTE` | `funcion = sub_apu` con `tipo ≠ apu` — **solo esa dirección** |
 | `COMPONENTE_DUPLICADO` | mismo `(codigo, tipo, ref_shift)` dos veces |
 | `SUBAPU_INEXISTENTE` | el sub-APU no existe en ese turno |
 | `SUBAPU_CICLO` | el sub-APU se referencia a sí mismo o cierra un ciclo |
@@ -395,9 +395,10 @@ que el motor no puede costear: `NaN`, infinito y todo lo que no sea positivo.
 | `CANTIDAD_SOSPECHOSA` | por encima de `COMPOSICION_LIMITE_RENDIMIENTO` |
 | `RENDIMIENTO_ATIPICO` | fuera del rango observado del mismo insumo, con `n ≥ COMPOSICION_MIN_ANTECEDENTES` |
 | `SIN_ANTECEDENTES` | `n < COMPOSICION_MIN_ANTECEDENTES`, o el rango está en otra unidad que el catálogo: no hay contra qué comparar |
-| `SIN_EVIDENCIA` | `origen = sin_evidencia`, o `referencias` vacío con un origen que las exige |
+| `SIN_EVIDENCIA` | el origen afirma un respaldo que no está: `sin_evidencia` siempre; `copiado`/`ajustado` sin referencia viva; `calculado_desde_produccion` sin la cuenta; `supuesto_tecnico` sin ningún supuesto declarado |
+| `FUNCION_INESPERADA` | `tipo = apu` con una `funcion` que no es `sub_apu` |
 | `REFERENCIA_INEXISTENTE` | un `apu_codigo` de `referencias` ya no existe; se limpia |
-| `FALTA_MANO_DE_OBRA` | ninguna función es `mano_de_obra` ni `equipo` |
+| `FALTA_MANO_DE_OBRA` | ninguna función ejecuta trabajo: ni `mano_de_obra`, ni `equipo`, ni `sub_apu`, ni `subcontrato` (los dos últimos lo llevan adentro) |
 | `FALTA_HERRAMIENTA` | hay mano de obra y no hay herramienta ni equipo |
 | `METODO_INCOHERENTE` | la descripción dice manual y hay equipo pesado, o dice mecánico y no hay equipo |
 | `SUPUESTO_SIN_CONFIRMAR` | hay supuestos declarados y nadie los aceptó |
@@ -417,6 +418,22 @@ cuando hay un `calculo` que lo contradice.
 detección es por palabra clave en la descripción (`MANUAL`/`A MANO` contra
 `MECANIC`/`RETRO`/`EXCAVADORA`). Por eso es advertencia y no error, y va marcada con un
 `ponytail:` que apunta a la fase 3, donde la hace la ficha.
+
+**La prueba que toda regla bloqueante tiene que pasar: ¿existe un estado aprobable?**
+Un error bloquea la aprobación, y el `PUT` revalida cada edición — así que una regla
+que se dispara sobre algo que el usuario **no puede cambiar desde la mesa de revisión**
+deja la propuesta muerta: no hay forma de arreglarla, solo de borrar el componente o
+tirar todo. Esta fase cometió el error dos veces antes de escribirlo acá: el techo de
+rendimiento (imposible de bajar si la actividad es global de verdad) y
+`TIPO_INCOHERENTE` en su dirección inofensiva (`funcion` no es editable en la mesa, y
+`funcion=""` es lo que produce el parser ante un valor ilegible). **Antes de agregar un
+error, respondé: si esto se dispara, ¿qué hace el usuario para que deje de dispararse?**
+Si la respuesta no está entre los campos editables, es advertencia.
+
+**Por qué `TIPO_INCOHERENTE` es asimétrico.** `tipo` es lo que persiste
+`autoria._componentes_de` y lo que decide cómo se costea; `funcion` no llega nunca a la
+base. Un sub-APU declarado como insumo se costea como insumo y puede caer al piso de $1
+— bloquea. Un sub-APU con la función mal escrita no cambia ningún costo — advierte.
 
 **No hay regla de unidad del componente, y es correcto.** Un borrador de este diseño
 listaba una advertencia `UNIDAD_DISTINTA_DEL_CATALOGO` que resultó imposible de violar:

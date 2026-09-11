@@ -55,6 +55,32 @@ def credencial_invalida(exc: BaseException) -> bool:
     return getattr(exc, "status_code", None) in _ESTADOS_DE_CREDENCIAL
 
 
+MSG_SIN_SALDO = ("La cuenta de Anthropic del servidor no tiene saldo. Compra "
+                 "créditos en console.anthropic.com (Plans & Billing) y vuelve a "
+                 "intentar.")
+
+# Un 400 por saldo agotado NO es un fallo pasajero que convenga reintentar: es
+# configuración del servidor, igual que una credencial vencida, y hay que decirlo con
+# el mismo detalle. Sin esto la API mandaba "Your credit balance is too low" —
+# perfectamente accionable— y el usuario leía "Error interno", buscando en la
+# aplicación un problema que estaba en la consola de Anthropic.
+#
+# Se mira el TEXTO porque la API no da un código propio para este caso: el estado es
+# 400 y el tipo `invalid_request_error`, los mismos que un esquema mal armado (que sí
+# es un bug nuestro). Es frágil a que Anthropic cambie la redacción, y por eso el
+# degradado es seguro: si deja de coincidir, se vuelve al comportamiento de antes
+# —mensaje genérico y traceback completo en el log—, no a un error peor.
+_SENALES_SIN_SALDO = ("credit balance", "purchase credits", "plans & billing")
+
+
+def sin_saldo(exc: BaseException) -> bool:
+    """¿Este 400 es por saldo agotado, y no por un payload mal armado?"""
+    if getattr(exc, "status_code", None) != 400:
+        return False
+    texto = str(getattr(exc, "message", "") or exc).lower()
+    return any(s in texto for s in _SENALES_SIN_SALDO)
+
+
 # Versión del prompt de composición. Se guarda con cada propuesta: sin esto, cuando el
 # modelo empiece a proponer distinto no hay forma de saber si cambió el modelo o el
 # prompt. Se sube A MANO al tocar `_SISTEMA_COMPOSICION` o `_ESQUEMA_COMPOSICION`.
@@ -240,6 +266,8 @@ class ApuAdvisor:
         except Exception as exc:
             if credencial_invalida(exc):
                 raise IANoDisponible(MSG_CREDENCIAL) from exc
+            if sin_saldo(exc):
+                raise IANoDisponible(MSG_SIN_SALDO) from exc
             raise
         if getattr(resp, "stop_reason", None) == "max_tokens":
             # Truncada, no vacía. Sin esto el usuario lee "la IA no propuso ningún

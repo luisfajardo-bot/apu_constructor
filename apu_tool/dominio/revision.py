@@ -33,7 +33,7 @@ from typing import Any, Iterator, Optional
 from apu_tool import config
 from apu_tool.dominio import privacy
 from apu_tool.dominio.ai_assist import (
-    MSG_CREDENCIAL, IANoDisponible, credencial_invalida,
+    MSG_CREDENCIAL, MSG_SIN_SALDO, IANoDisponible, credencial_invalida, sin_saldo,
 )
 from apu_tool.nucleo.models import CorridaItemRow, DePricedApu
 
@@ -264,6 +264,8 @@ class Revisor:
             # sube hasta el 503 (o el evento `error` del SSE, con el stream abierto).
             if credencial_invalida(exc):
                 raise IANoDisponible(MSG_CREDENCIAL) from exc
+            if sin_saldo(exc):
+                raise IANoDisponible(MSG_SIN_SALDO) from exc
             raise
         texto = next((b.text for b in resp.content if b.type == "text"), "{}")
         try:

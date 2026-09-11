@@ -662,3 +662,31 @@ def test_un_fallo_pasajero_sigue_cayendo_en_sin_respuesta(codigo):
     429 o un 500 en un aborto. Esos se tragan, el lote se pierde y el barrido sigue."""
     r = _revisor_con_cliente(_ClienteQueFalla(codigo))
     assert _barrer(r, [_fila(0, "EXCAVACION MANUAL", "100")]) == (set(), {0})
+
+
+class _ErrorSDKConMensaje(_ErrorSDK):
+    """Como `_ErrorSDK`, pero con `message`: lo único que mira `sin_saldo` además del
+    `status_code`, y que un 401/403/429 no necesita."""
+    def __init__(self, status_code, message):
+        super().__init__(status_code)
+        self.message = message
+
+
+class _ClienteQueFallaConMensaje(_ClienteQueFalla):
+    def __init__(self, status_code, message):
+        super().__init__(status_code)
+        self.message = message
+
+    def create(self, **kw):
+        raise _ErrorSDKConMensaje(self.status_code, self.message)
+
+
+def test_sin_saldo_no_se_disfraza_de_fila_sin_respuesta():
+    """Mismo arreglo que la credencial inválida, para el 400 de saldo agotado: sin
+    esto el barrido entero caería en `sin_respuesta` y el usuario buscaría el
+    problema en la corrida en vez de en la consola de Anthropic."""
+    r = _revisor_con_cliente(_ClienteQueFallaConMensaje(
+        400, "Your credit balance is too low to access the Anthropic API. Please "
+             "go to Plans & Billing to upgrade or purchase credits."))
+    with pytest.raises(revision.IANoDisponible, match="saldo"):
+        _barrer(r, [_fila(0, "EXCAVACION MANUAL", "100")])

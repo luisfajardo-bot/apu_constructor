@@ -11,6 +11,7 @@ permite armar el APU por código directo.
 """
 from __future__ import annotations
 
+import re
 import unicodedata
 from pathlib import Path
 
@@ -34,6 +35,26 @@ def _norm(s) -> str:
     s = "".join(c for c in unicodedata.normalize("NFD", str(s or ""))
                 if unicodedata.category(c) != "Mn")
     return s.strip().lower()
+
+
+# Caracteres que se van del encabezado antes de comparar. Los ordinales (º, °, ª) se
+# traducen a letra en vez de borrarse: así `Nº`, `N°` y `No.` colapsan al mismo "no",
+# que es lo que permite mapear la columna por nombre y no por letra de Excel.
+_FUERA_ENCABEZADO = str.maketrans(
+    {"º": "o", "°": "o", "ª": "a", ".": "", "(": "", ")": "", ",": "", ":": "", ";": ""})
+
+
+def norm_encabezado(s) -> str:
+    """Encabezado comparable: sin tildes, minúsculas, sin puntuación, espacios colapsados.
+
+    Es la pieza que hace que el parser NO dependa de las letras de columna. El archivo
+    del IDU trae `ITEM`/`ÍTEM`, `Nº`/`N°`, `UND.`, `A.I.U` entre paréntesis y saltos de
+    línea dentro del texto del encabezado; todo eso colapsa acá.
+    """
+    t = "".join(c for c in unicodedata.normalize("NFD", str(s if s is not None else ""))
+                if unicodedata.category(c) != "Mn")
+    t = t.lower().translate(_FUERA_ENCABEZADO)
+    return re.sub(r"\s+", " ", t).strip()
 
 
 def _to_float(v) -> float:

@@ -147,6 +147,15 @@ reordenando en Python según la lista de ids.
 
 ## 7. Cosas chicas que quedaron abiertas
 
+- **Los errores de la API que NO son 401/403/400-por-saldo siguen saliendo como
+  "Error interno".** Hoy se traducen tres casos: credencial inválida (401/403), saldo
+  agotado (400 con las señales de facturación) y falta de SDK. Todo lo demás cae al
+  `except Exception` de `_event_stream`, con el detalle solo en el log. El primer
+  intento real de componer en producción se perdió exactamente así — ver el caso del
+  saldo, ya arreglado. Vale revisar, cuando aparezca el siguiente, si hay otra familia
+  de errores que merezca su propio mensaje: un 429 sostenido, por ejemplo, es "la
+  cuenta está pasada de rate limit", no un fallo de la aplicación.
+
 - **La mesa no detecta que la corrida se congeló mientras está abierta.** Cubre el caso
   de abrirla ya congelada (el estado viaja con el expediente); si la congelan después, el
   409 de la primera escritura sigue siendo la red. Cubrir eso pedía un poll de fondo, que
@@ -166,8 +175,10 @@ reordenando en Python según la lista de ids.
 
 ## 8. Verificación pendiente en producción
 
-- [ ] Confirmar que **`ANTHROPIC_API_KEY` está puesta en Render**. Es la misma variable
-      que ya usa la revisión con IA, así que probablemente sí; sin ella el botón
-      Componer responde 503 con su mensaje.
+- [x] **`ANTHROPIC_API_KEY` está puesta en Render** — confirmado: la petición llegó a
+      la API y el rechazo vino del otro lado.
+- [ ] **Comprar créditos en Anthropic.** El primer intento real de componer falló con
+      un 400: *"Your credit balance is too low"*. La cuenta no tiene saldo. Con la
+      estimación de $0,03–0,07 por composición, US$10 alcanzan para 150–300.
 - [ ] Correr el punto 1 de este documento y anotar los resultados en un
       `smoke-test-composicion-AAAA-MM-DD.md`, como se hizo con las features anteriores.

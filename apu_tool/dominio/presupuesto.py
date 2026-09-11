@@ -62,6 +62,67 @@ def norm_encabezado(s) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+def _decimales_del_formato(formato: str) -> int:
+    """Cuántos decimales declara un formato numérico de Excel: '0.000' -> 3, '0' -> 0."""
+    f = str(formato or "")
+    if "." not in f:
+        return 0
+    return sum(1 for c in f.split(".", 1)[1] if c in "0#")
+
+
+def item_pago_texto(valor, formato: str = "") -> str:
+    """El ítem de pago como TEXTO, recuperando los ceros que el float de Excel perdió.
+
+    Excel guarda `2.010` como el float `2.01`: openpyxl entrega el número, no lo que se
+    ve en pantalla. El formato de la celda (`'0.000'`) dice cuántos decimales tenía, así
+    que el cero es recuperable y no hay que adivinarlo. En el archivo de referencia son
+    100 de 1939 filas.
+
+    Nunca se vuelve a convertir a float después de esto: el ítem de pago es texto.
+    """
+    if valor is None:
+        return ""
+    if isinstance(valor, bool):          # bool es int en Python; no es un ítem de pago
+        return ""
+    if isinstance(valor, float):
+        if valor != valor:               # NaN
+            return ""
+        decimales = _decimales_del_formato(formato)
+        if decimales:
+            return f"{valor:.{decimales}f}"
+        return str(int(valor)) if valor.is_integer() else f"{valor:g}"
+    if isinstance(valor, int):
+        return str(valor)
+    return str(valor).strip()
+
+
+def normalizar_item_pago(s) -> str:
+    """Forma canónica del ítem de pago: coma decimal a punto, sufijo de turno separado.
+
+    `2,001-N`, `2.001-N` y `2.001 N` son el MISMO ítem. Trabaja solo con texto, así que
+    `2.010` conserva su cero (ver `item_pago_texto`).
+    """
+    t = str(s if s is not None else "").strip().strip('"').strip("'").strip()
+    t = t.replace(",", ".")
+    return re.sub(r"[\s\-_]+", " ", t).strip().upper()
+
+
+def capitulo_de(s) -> str:
+    """El capítulo al que pertenece un ítem de pago: '2.014 N' -> '2'. '' si no hay.
+
+    Es el prefijo ENTERO hasta el primer separador. No se usa una división de punto
+    flotante (`item/prefijo == 1`): con `2.010` el float ya perdió el cero antes de
+    llegar acá, y la división arrastraría ese error a la estructura.
+    """
+    m = re.match(r"(\d+)", normalizar_item_pago(s))
+    return str(int(m.group(1))) if m else ""
+
+
+def es_item_entero(s) -> bool:
+    """El ítem de pago representa SOLO el entero del capítulo, sin parte subordinada."""
+    return normalizar_item_pago(s).isdigit()
+
+
 def _to_float(v) -> float:
     if v is None:
         return 0.0

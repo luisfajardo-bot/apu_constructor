@@ -35,3 +35,6 @@ def test_norm_encabezado_quita_puntos_y_parentesis():
 def test_norm_encabezado_tolera_none_y_numeros():
     assert norm_encabezado(None) == ""
     assert norm_encabezado(3007) == "3007"
+    # openpyxl entrega los enteros de una celda como float: 3007.0, no 3007. Sin el
+    # guard, el punto decimal se pierde como puntuación y esto daría "30070".
+    assert norm_encabezado(3007.0) == "3007"

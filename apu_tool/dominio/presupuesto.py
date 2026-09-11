@@ -51,6 +51,11 @@ def norm_encabezado(s) -> str:
     del IDU trae `ITEM`/`ÍTEM`, `Nº`/`N°`, `UND.`, `A.I.U` entre paréntesis y saltos de
     línea dentro del texto del encabezado; todo eso colapsa acá.
     """
+    # openpyxl entrega las celdas numéricas como float (3007.0, no 3007) y el punto
+    # decimal se lo comería `_FUERA_ENCABEZADO` junto con el de `UND.`: 3007.0 saldría
+    # como "30070". Mismo guard que ya usa `_code` unas líneas más abajo.
+    if isinstance(s, float) and not isinstance(s, bool) and s.is_integer():
+        s = int(s)
     t = "".join(c for c in unicodedata.normalize("NFD", str(s if s is not None else ""))
                 if unicodedata.category(c) != "Mn")
     t = t.lower().translate(_FUERA_ENCABEZADO)

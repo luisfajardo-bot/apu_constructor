@@ -27,6 +27,8 @@ from apu_tool.servicio import auditoria as auditoria_svc
 from apu_tool.servicio import autoria
 from apu_tool.servicio import carpetas as carpetas_svc
 from apu_tool.servicio import composicion as composicion_svc
+from apu_tool.dominio import entrada
+from apu_tool.nucleo.models import EntidadOrigen
 from apu_tool.servicio import corridas as svc
 from apu_tool.servicio.carpetas import CarpetaInvalida, CarpetaNoVacia
 from apu_tool.servicio import insumos as insumos_svc
@@ -143,25 +145,28 @@ def eliminar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
     return {"eliminada": cid}
 
 
-def _items_del_upload(nombre: str, contenido: bytes, turno: str) -> list[LicitacionItem]:
-    """Bytes de una lista subida -> ítems de licitación. Traduce a 400 los fallos de
-    lectura (columna faltante, ítem sin turno, archivo que no es Excel)."""
-    suf = Path(nombre or "lic.xlsx").suffix or ".xlsx"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suf) as tmp:
-        tmp.write(contenido)
-        tmp_path = tmp.name
+def _entidad_o_400(valor):
+    """Texto -> EntidadOrigen. Una entidad inventada es un error de la petición, no
+    una razón para adivinar el lector genérico."""
     try:
-        items = read_licitacion(tmp_path, default_shift=turno, require_turno=True)
+        return entrada.parse_entidad(valor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except (zipfile.BadZipFile, InvalidFileException):
-        raise HTTPException(status_code=400,
-                            detail="El archivo no es un Excel válido o está corrupto.")
-    finally:
-        os.unlink(tmp_path)
-    if not items:
-        raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
-    return items
+
+
+def _leer_o_400(entidad, nombre: str, contenido: bytes,
+                default_shift: str = config.SHIFT_DIURNO):
+    """Bytes subidos -> LecturaPresupuesto, con el lector de esa entidad.
+
+    Traduce a 400 los errores BLOQUEANTES del lector (hoja incompatible, columna que
+    falta, ítem sin turno, archivo que no es Excel). A diferencia de la previa —que los
+    MUESTRA para que el usuario los lea— acá no hay nada que decidir: no se crea una
+    corrida de un archivo que no se pudo leer.
+    """
+    lectura = svc.leer_para_corrida(entidad, contenido, nombre, default_shift)
+    if lectura.errores:
+        raise HTTPException(status_code=400, detail=" ".join(lectura.errores))
+    return lectura
 
 
 def _encolar(alm: Almacen, archivo: str, items: list[LicitacionItem], turno: str,
@@ -196,22 +201,53 @@ def _encolada(cid: int, total: int) -> dict:
     return {"id": cid, "total": total, "estado": "armando"}
 
 
+@router.post("/corridas/previsualizar")
+async def previsualizar_corrida(entidad: str = Form(...),
+                                archivo: UploadFile = File(...),
+                                _: object = Depends(requiere_rol("consulta"))):
+    """Qué se detectó en el archivo. NO escribe nada: no hay borrador que limpiar.
+
+    El navegador se queda con el archivo y lo reenvía al aprobar; el parser es
+    determinístico, así que la segunda lectura da la misma estructura. Si diera otra,
+    `POST /corridas` responde 400, que es la respuesta correcta.
+    """
+    ent = _entidad_o_400(entidad)
+    return svc.previsualizar(ent, await archivo.read(),
+                             archivo.filename or "archivo.xlsx")
+
+
 @router.post("/corridas")
 async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
                         use_ai: Optional[bool] = Form(None),
                         carpeta_id: int = Form(...),
                         nombre: Optional[str] = Form(None),
                         lista_id: Optional[int] = Form(None),
+                        entidad: str = Form("NO_IDENTIFICADA"),
+                        confirmada: bool = Form(False),
                         archivo: UploadFile = File(...),
                         alm: Almacen = Depends(get_almacen),
-                        _: object = Depends(requiere_rol("consulta"))):
+                        actor: object = Depends(requiere_rol("consulta"))):
     if alm.carpetas.get(carpeta_id) is None:
         raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
     _validar_lista(alm, lista_id)
     _asegurar_biblioteca(alm)
-    items = _items_del_upload(archivo.filename, await archivo.read(), turno)
-    return _encolar(alm, archivo.filename or "licitacion", items, turno, use_ai,
-                    carpeta_id=carpeta_id, nombre=nombre, lista_precios_id=lista_id)
+    ent = _entidad_o_400(entidad)
+    if entrada.requiere_confirmacion(ent) and not confirmada:
+        # La estructura tiene que pasar por la pantalla de previsualización. Sin esto,
+        # un POST directo saltaría la única revisión humana de 14 capítulos y 1939 filas.
+        raise HTTPException(
+            status_code=400,
+            detail="La estructura detectada debe confirmarse antes de crear la "
+                   "corrida. Previsualiza el archivo y aprueba el resumen.")
+    nombre_archivo = archivo.filename or "licitacion"
+    # El servidor RELEE y revalida: `confirmada=true` es lo que dice el cliente, no una
+    # prueba. Un archivo distinto al que se previsualizó rebota acá con 400.
+    lectura = _leer_o_400(ent, nombre_archivo, await archivo.read())
+    origen = (svc.origen_de(ent, lectura, nombre_archivo, getattr(actor, "email", ""))
+              if entrada.requiere_confirmacion(ent) else None)
+    return _encolar(alm, nombre_archivo, lectura.items, turno, use_ai,
+                    carpeta_id=carpeta_id, nombre=nombre, lista_precios_id=lista_id,
+                    origen=origen)
 
 
 @router.post("/sample")
@@ -462,7 +498,11 @@ async def preview_lineas(cid: int, archivo: UploadFile = File(...),
                          _: object = Depends(requiere_rol("consulta"))):
     """Qué se agregaría con este Excel y qué ya está en la corrida. No escribe nada."""
     meta = _meta_o_404(alm, cid)
-    items = _items_del_upload(archivo.filename, await archivo.read(), meta.turno_def)
+    # Importador genérico: estas son líneas sueltas para una corrida que ya existe, no
+    # un presupuesto con estructura. Va por el mismo camino que el resto para que la
+    # traducción de errores a 400 sea una sola.
+    items = _leer_o_400(EntidadOrigen.NO_IDENTIFICADA, archivo.filename or "lineas.xlsx",
+                        await archivo.read(), meta.turno_def).items
     return svc.preview_agregar(alm, cid, items)
 
 
@@ -472,7 +512,11 @@ async def importar_lineas(cid: int, archivo: UploadFile = File(...),
                           _: object = Depends(requiere_rol("consulta"))):
     """Agrega a la corrida las líneas del Excel (solo las que faltaron)."""
     meta = _meta_o_404(alm, cid)
-    items = _items_del_upload(archivo.filename, await archivo.read(), meta.turno_def)
+    # Importador genérico: estas son líneas sueltas para una corrida que ya existe, no
+    # un presupuesto con estructura. Va por el mismo camino que el resto para que la
+    # traducción de errores a 400 sea una sola.
+    items = _leer_o_400(EntidadOrigen.NO_IDENTIFICADA, archivo.filename or "lineas.xlsx",
+                        await archivo.read(), meta.turno_def).items
     return _agregar_o_error(alm, cid, items)
 
 

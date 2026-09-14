@@ -116,8 +116,8 @@ def _estructura(componentes) -> list[dict]:
 MAX_FILAS_SENALADAS = 50
 
 
-def leer_para_corrida(entidad: EntidadOrigen, contenido: bytes,
-                      nombre_archivo: str) -> LecturaPresupuesto:
+def leer_para_corrida(entidad: EntidadOrigen, contenido: bytes, nombre_archivo: str,
+                      default_shift: str = config.SHIFT_DIURNO) -> LecturaPresupuesto:
     """Bytes subidos -> LecturaPresupuesto, con el lector de esa entidad.
 
     El archivo se escribe a un temporal porque openpyxl necesita una ruta; se borra
@@ -129,7 +129,7 @@ def leer_para_corrida(entidad: EntidadOrigen, contenido: bytes,
         tmp.write(contenido)
         ruta = tmp.name
     try:
-        return entrada.leer(entidad, ruta)
+        return entrada.leer(entidad, ruta, default_shift=default_shift)
     finally:
         os.unlink(ruta)
 

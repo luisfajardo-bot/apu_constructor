@@ -9,7 +9,9 @@ from types import SimpleNamespace
 import pytest
 
 from apu_tool.dominio import privacy
-from apu_tool.dominio.ai_assist import PROMPT_VERSION, ApuAdvisor, IANoDisponible
+from apu_tool.dominio.ai_assist import (
+    PROMPT_VERSION, ApuAdvisor, IANoDisponible, sin_saldo,
+)
 from apu_tool.dominio.compose import CandidateInsumo, RendimientoObservado
 from apu_tool.nucleo.models import DePricedApu, DePricedComponent, LicitacionItem
 
@@ -118,6 +120,50 @@ def test_un_429_del_sdk_no_se_confunde_con_falta_de_credencial():
     with pytest.raises(Exception) as exc:
         Lenta("").componer(ITEM, INSUMOS, EJEMPLOS, OBS)
     assert not isinstance(exc.value, IANoDisponible)
+
+
+def test_un_400_por_saldo_agotado_dice_que_falta_saldo():
+    """La API manda un mensaje accionable; convertirlo en "Error interno" manda al
+    usuario a buscar en la aplicación un problema que está en la consola."""
+    class SinSaldo(AdvisorFalso):
+        def _pedir_al_sdk(self, *a, **k):
+            raise type("E", (Exception,), {
+                "status_code": 400,
+                "message": ("Your credit balance is too low to access the Anthropic "
+                            "API. Please go to Plans & Billing to upgrade or "
+                            "purchase credits."),
+            })()
+
+    with pytest.raises(IANoDisponible) as exc:
+        SinSaldo("").componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert "saldo" in str(exc.value).lower()
+
+
+def test_un_400_que_no_es_de_saldo_no_se_disfraza():
+    """Un 400 por un payload mal armado es un bug NUESTRO y tiene que verse crudo,
+    no salir como un problema de facturación."""
+    class Payload(AdvisorFalso):
+        def _pedir_al_sdk(self, *a, **k):
+            raise type("E", (Exception,), {
+                "status_code": 400,
+                "message": "tools.0.custom.input_schema: invalid schema",
+            })()
+
+    with pytest.raises(Exception) as exc:
+        Payload("").componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert not isinstance(exc.value, IANoDisponible)
+
+
+@pytest.mark.parametrize("status_code, message, esperado", [
+    (400, "Your credit balance is too low to access the Anthropic API. Please go "
+          "to Plans & Billing to upgrade or purchase credits.", True),
+    (401, "invalid x-api-key", False),
+    (429, "rate limit exceeded", False),
+    (400, "tools.0.custom.input_schema: invalid schema", False),
+])
+def test_sin_saldo_solo_reconoce_el_400_de_facturacion(status_code, message, esperado):
+    exc = type("E", (Exception,), {"status_code": status_code, "message": message})()
+    assert sin_saldo(exc) is esperado
 
 
 def test_el_esquema_acota_el_vocabulario_al_alcance_de_la_fase():

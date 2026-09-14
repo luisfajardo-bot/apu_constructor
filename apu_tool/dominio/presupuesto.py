@@ -90,7 +90,11 @@ def item_pago_texto(valor, formato: str = "") -> str:
         decimales = _decimales_del_formato(formato)
         if decimales:
             return f"{valor:.{decimales}f}"
-        return str(int(valor)) if valor.is_integer() else f"{valor:g}"
+        # `str(valor)` y NO `f"{valor:g}"`: `:g` corta a 6 cifras significativas, así
+        # que 123456.789 saldría "123457" — perder un dígito es exactamente lo que esta
+        # función existe para evitar. `str` de un float da la representación más corta
+        # que vuelve al mismo número, sin tope ni notación científica en este rango.
+        return str(int(valor)) if valor.is_integer() else str(valor)
     if isinstance(valor, int):
         return str(valor)
     return str(valor).strip()
@@ -102,7 +106,11 @@ def normalizar_item_pago(s) -> str:
     `2,001-N`, `2.001-N` y `2.001 N` son el MISMO ítem. Trabaja solo con texto, así que
     `2.010` conserva su cero (ver `item_pago_texto`).
     """
-    t = str(s if s is not None else "").strip().strip('"').strip("'").strip()
+    # Un solo `strip` con el juego completo de caracteres: encadenar
+    # `.strip('"').strip("'")` deja las comillas anidadas al revés ('"2.001"' con la
+    # simple por fuera), y ahí `capitulo_de` no encontraría el dígito inicial y la fila
+    # se saldría de su capítulo en silencio.
+    t = str(s if s is not None else "").strip(" \t\n\r'\"")
     t = t.replace(",", ".")
     return re.sub(r"[\s\-_]+", " ", t).strip().upper()
 

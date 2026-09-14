@@ -64,6 +64,17 @@ def test_item_pago_texto_pasa_el_texto_tal_cual():
 def test_item_pago_texto_sin_formato_util_no_inventa_decimales():
     assert item_pago_texto(2.001, "General") == "2.001"
     assert item_pago_texto(7.0, "General") == "7"
+    # Sin formato útil tampoco puede PERDER dígitos: un `:g` cortaría a 6 cifras
+    # significativas y esto daría "123457".
+    assert item_pago_texto(123456.789, "General") == "123456.789"
+
+
+def test_item_pago_texto_descarta_booleanos_y_nan():
+    # `bool` es `int` en Python: sin el guard, True se leería como el ítem "1" y la
+    # fila entraría al capítulo 1. NaN es lo que deja una fórmula rota.
+    assert item_pago_texto(True, "0.000") == ""
+    assert item_pago_texto(False, "0.000") == ""
+    assert item_pago_texto(float("nan"), "0.000") == ""
 
 
 def test_normalizar_item_pago_unifica_separadores_y_sufijo_de_turno():
@@ -73,6 +84,9 @@ def test_normalizar_item_pago_unifica_separadores_y_sufijo_de_turno():
     assert normalizar_item_pago("2.001-N") == "2.001 N"
     assert normalizar_item_pago("2,001-N") == "2.001 N"
     assert normalizar_item_pago('"2.001"') == "2.001"
+    assert normalizar_item_pago("'2.001'") == "2.001"
+    # Comillas anidadas al revés: la simple por fuera, la doble por dentro.
+    assert normalizar_item_pago("'\"2.001\"'") == "2.001"
 
 
 def test_normalizar_item_pago_no_pierde_ceros():
@@ -89,6 +103,8 @@ def test_capitulo_de_saca_el_prefijo_entero():
     assert capitulo_de("2") == "2"
     assert capitulo_de("") == ""
     assert capitulo_de("SUBTOTAL") == ""
+    # Celda vacía de Excel: las tareas siguientes llaman esto sobre valores crudos.
+    assert capitulo_de(None) == ""
 
 
 def test_es_item_entero_distingue_capitulo_de_actividad():
@@ -97,3 +113,4 @@ def test_es_item_entero_distingue_capitulo_de_actividad():
     assert es_item_entero("2.001") is False
     assert es_item_entero("2.001 N") is False
     assert es_item_entero("") is False
+    assert es_item_entero(None) is False

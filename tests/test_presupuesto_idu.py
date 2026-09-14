@@ -114,3 +114,70 @@ def test_es_item_entero_distingue_capitulo_de_actividad():
     assert es_item_entero("2.001 N") is False
     assert es_item_entero("") is False
     assert es_item_entero(None) is False
+
+
+# --------------------------------------------------------------- clasificación
+from apu_tool.dominio.presupuesto import (  # noqa: E402
+    ACTIVIDAD, CAPITULO, ENCABEZADO, IGNORADA, SUBTITULO, SUBTOTAL, TURNO,
+    clasificar_fila,
+)
+
+
+def _clasificar(codigo="", item_pago="", descripcion="", cantidad=None,
+                es_encabezado=False):
+    return clasificar_fila(codigo=codigo, item_pago=item_pago,
+                           descripcion=descripcion, cantidad=cantidad,
+                           es_encabezado=es_encabezado)
+
+
+def test_clasificar_capitulo():
+    # Fila 13 del archivo real: Nº vacío, ítem de pago entero, descripción.
+    assert _clasificar(item_pago="1", descripcion="PRELIMINARES") == CAPITULO
+    assert _clasificar(item_pago="10", descripcion="RED DE ALCANTARILLADO") == CAPITULO
+
+
+def test_clasificar_actividad():
+    # Fila 16: código IDU + cantidad > 0.
+    assert _clasificar(codigo="3007", item_pago="1.001",
+                       descripcion="REPLANTEO GENERAL", cantidad=74234) == ACTIVIDAD
+    # Nocturna: el código trae el sufijo N.
+    assert _clasificar(codigo="3007 N", item_pago="1.001 N",
+                       descripcion="REPLANTEO GENERAL", cantidad=24745) == ACTIVIDAD
+
+
+def test_clasificar_turno_subtitulo_y_subtotal():
+    assert _clasificar(descripcion="TURNO DIURNO") == TURNO
+    assert _clasificar(descripcion="TURNO NOCTURNO") == TURNO
+    assert _clasificar(descripcion="LOCALIZACIÓN Y REPLANTEO") == SUBTITULO
+    assert _clasificar(descripcion="PAVIMENTO RÍGIDO") == SUBTITULO
+    assert _clasificar(codigo="Subtotal ") == SUBTOTAL
+    assert _clasificar(codigo="Subtotal") == SUBTOTAL
+
+
+def test_clasificar_encabezado_repetido():
+    # Fila 2201: el segundo encabezado NO puede contar como actividad.
+    assert _clasificar(codigo="Nº", item_pago="ÍTEM DE PAGO",
+                       descripcion="DESCRIPCIÓN", es_encabezado=True) == ENCABEZADO
+
+
+def test_clasificar_resumen_notas_y_vacias():
+    # Filas 2204+: texto largo en la columna Nº, sin descripción y sin cantidad.
+    assert _clasificar(codigo="VALOR PARA OBRAS SIN REDES (INCLUYE A.I.U)") == IGNORADA
+    assert _clasificar(codigo="TOTAL OBRAS LICITACIÓN ( A+B+C+D)") == IGNORADA
+    assert _clasificar() == IGNORADA
+
+
+def test_clasificar_no_cuenta_actividad_sin_cantidad_positiva():
+    assert _clasificar(codigo="3007", item_pago="1.001", descripcion="X",
+                       cantidad=0) == IGNORADA
+    assert _clasificar(codigo="3007", item_pago="1.001", descripcion="X",
+                       cantidad=None) == IGNORADA
+    assert _clasificar(codigo="3007", item_pago="1.001", descripcion="X",
+                       cantidad="n/a") == IGNORADA
+
+
+def test_clasificar_capitulo_gana_sobre_subtitulo():
+    # Con ítem entero manda CAPITULO aunque también tenga descripción.
+    assert _clasificar(item_pago="2", descripcion="PAVIMENTOS") == CAPITULO
+    # Sin ítem entero, la misma forma es un subtítulo.
+    assert _clasificar(item_pago="", descripcion="PAVIMENTOS") == SUBTITULO

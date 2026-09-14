@@ -19,6 +19,7 @@ import openpyxl
 
 from apu_tool import config
 from apu_tool.nucleo.models import LicitacionItem
+from apu_tool.nucleo.texto import normalizar
 
 # Índices de columna (0-idx) en la hoja FOR 1-PPTO OFICIAL.
 COL_CODIGO = 2
@@ -129,6 +130,59 @@ def capitulo_de(s) -> str:
 def es_item_entero(s) -> bool:
     """El ítem de pago representa SOLO el entero del capítulo, sin parte subordinada."""
     return normalizar_item_pago(s).isdigit()
+
+
+# Tipos de fila del Formulario 1. Vocabulario cerrado: lo consume `leer_formulario_idu`
+# y los tests. Solo ACTIVIDAD produce un LicitacionItem; solo CAPITULO y TURNO mueven el
+# estado del recorrido; SUBTOTAL se guarda para conciliar; el resto no existe aguas abajo.
+ACTIVIDAD = "ACTIVIDAD"
+CAPITULO = "CAPITULO"
+TURNO = "TURNO"
+SUBTITULO = "SUBTITULO"
+SUBTOTAL = "SUBTOTAL"
+ENCABEZADO = "ENCABEZADO"
+IGNORADA = "IGNORADA"
+
+
+def _cantidad_valida(v) -> bool:
+    """La cantidad es un número positivo. `not (x > 0)` cierra el NaN de un solo golpe."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return False
+    return v > 0
+
+
+def clasificar_fila(*, codigo: str, item_pago: str, descripcion: str,
+                    cantidad, es_encabezado: bool = False) -> str:
+    """Qué es esta fila del Formulario 1. Determinístico, sin IA y sin heurísticas.
+
+    El ORDEN importa y es parte del contrato: la primera regla que aplica gana.
+      1. encabezado repetido      -> ENCABEZADO   (la fila 2201 del archivo real)
+      2. todo vacío               -> IGNORADA
+      3. col Nº empieza "subtotal"-> SUBTOTAL
+      4. Nº vacío + ítem entero   -> CAPITULO
+      5. Nº vacío + "TURNO…"      -> TURNO
+      6. Nº vacío + descripción   -> SUBTITULO
+      7. cantidad > 0 + Nº        -> ACTIVIDAD
+      8. resto                    -> IGNORADA    (resumen, notas, firmas, valores globales)
+    """
+    if es_encabezado:
+        return ENCABEZADO
+    cod = str(codigo or "").strip()
+    desc = str(descripcion or "").strip()
+    if not cod and not desc and not str(item_pago or "").strip() \
+            and not _cantidad_valida(cantidad):
+        return IGNORADA
+    if cod and normalizar(cod).startswith("SUBTOTAL"):
+        return SUBTOTAL
+    if not cod and desc:
+        if es_item_entero(item_pago):
+            return CAPITULO
+        if normalizar(desc).startswith("TURNO"):
+            return TURNO
+        return SUBTITULO
+    if cod and _cantidad_valida(cantidad):
+        return ACTIVIDAD
+    return IGNORADA
 
 
 def _to_float(v) -> float:

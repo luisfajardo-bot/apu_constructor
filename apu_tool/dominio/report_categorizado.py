@@ -86,9 +86,11 @@ def resumen_por_capitulo(apus: list[AssembledApu]) -> list[dict]:
             "diferencia": contractual - costo,
             "margen_pct": ((contractual - costo) / contractual) if contractual else 0.0,
             "cobertura": (len(costeadas) / len(filas)) if filas else 0.0,
-            # Ponderada por valor: un capítulo puede estar al 96 % por conteo y al 40 %
-            # por plata si las dos actividades que faltan son las caras. Medido en el
-            # archivo real: el capítulo 2 tiene 52 actividades y dos valen 5.700 millones.
+            # Ponderada por valor: un capítulo puede estar casi entero por conteo y a
+            # media máquina por plata, si lo que falta son las actividades caras.
+            # Medido en el archivo real: en PAVIMENTOS, 2 de 42 actividades son el 32 %
+            # del capítulo; en RED DE GAS, 2 de 8 son el 57 %. Sin esta métrica, "95 %
+            # costeado" puede significar que falta la mitad del dinero.
             "cobertura_valor": (sum(a.contractual_total for a in costeadas) / contractual
                                 if contractual else 0.0),
             "completo": (len(costeadas) == len(filas)
@@ -97,44 +99,74 @@ def resumen_por_capitulo(apus: list[AssembledApu]) -> list[dict]:
     return salida
 
 
-def _build_resumen_capitulo(ws, grupos: dict[str, list[AssembledApu]]) -> None:
-    headers = ["Capítulo", "Total Contractual", "Total Costo",
-               "Margen Total", "Margen %"]
-    ws.append(headers)
-    _style_header(ws, 1, len(headers))
+HOJA_CAPITULOS = "RESUMEN POR CAPÍTULO"
+
+_COLUMNAS_CAPITULO = ["Capítulo", "Nombre", "Actividades", "Con APU", "Sin APU",
+                      "Contractual", "Contractual sin AIU", "Costo interno",
+                      "Diferencia", "Margen %", "Cobertura", "Cobertura $", "Estado"]
+
+
+def hay_capitulos(apus: list[AssembledApu]) -> bool:
+    """Al menos una actividad trae capítulo. Es la condición para escribir la hoja."""
+    return any(a.item.capitulo_codigo for a in apus)
+
+
+def escribir_hoja_capitulos(ws, apus: list[AssembledApu]) -> None:
+    """La hoja RESUMEN POR CAPÍTULO. La escriben los DOS cuadros (report.py y este).
+
+    NO calcula: consume `resumen_por_capitulo`, la única función que suma por capítulo.
+    Antes esta hoja tenía su propia suma; tenerla acá y en la API era el camino directo
+    a dos números distintos para la misma corrida.
+    """
+    ws.append(_COLUMNAS_CAPITULO)
+    _style_header(ws, 1, len(_COLUMNAS_CAPITULO))
     ws.freeze_panes = "A2"
 
-    g_contractual = g_costo = 0.0
-    for cap, apus in grupos.items():
-        c = sum(a.contractual_total for a in apus)
-        k = sum(a.costo_total for a in apus)
-        m = c - k
-        ws.append([cap, c, k, m, (m / c) if c else 0.0])
+    filas = resumen_por_capitulo(apus)
+    for c in filas:
+        ws.append([c["codigo"], c["nombre"], c["actividades"], c["con_apu"],
+                   c["sin_apu"], c["contractual"], c["contractual_sin_aiu"],
+                   c["costo"], c["diferencia"], c["margen_pct"], c["cobertura"],
+                   c["cobertura_valor"],
+                   "Completo" if c["completo"] else "Incompleto"])
         r = ws.max_row
-        for col in (2, 3, 4):
+        for col in (6, 7, 8, 9):
             ws.cell(row=r, column=col).number_format = _MONEY
-        ws.cell(row=r, column=5).number_format = _PCT
-        g_contractual += c
-        g_costo += k
+        for col in (10, 11, 12):
+            ws.cell(row=r, column=col).number_format = _PCT
+        if not c["completo"]:
+            # El capítulo tiene actividades sin costear: el margen NO es definitivo y la
+            # fila se pinta para que no se lea como si lo fuera.
+            for col in range(1, len(_COLUMNAS_CAPITULO) + 1):
+                ws.cell(row=r, column=col).fill = _WARN_FILL
 
-    g_margen = g_contractual - g_costo
-    ws.append(["GRAN TOTAL", g_contractual, g_costo, g_margen,
-               (g_margen / g_contractual) if g_contractual else 0.0])
+    contractual = sum(c["contractual"] for c in filas)
+    costo = sum(c["costo"] for c in filas)
+    ws.append(["", "GRAN TOTAL", sum(c["actividades"] for c in filas),
+               sum(c["con_apu"] for c in filas), sum(c["sin_apu"] for c in filas),
+               contractual, sum(c["contractual_sin_aiu"] for c in filas), costo,
+               contractual - costo,
+               ((contractual - costo) / contractual) if contractual else 0.0,
+               None, None,
+               "Completo" if all(c["completo"] for c in filas) else "Incompleto"])
     r = ws.max_row
-    for col in (2, 3, 4):
-        cell = ws.cell(row=r, column=col)
-        cell.number_format = _MONEY
-        cell.font = Font(bold=True)
-    ws.cell(row=r, column=5).number_format = _PCT
-    for col in range(1, len(headers) + 1):
+    for col in (6, 7, 8, 9):
+        celda = ws.cell(row=r, column=col)
+        celda.number_format = _MONEY
+        celda.font = Font(bold=True)
+    ws.cell(row=r, column=10).number_format = _PCT
+    for col in range(1, len(_COLUMNAS_CAPITULO) + 1):
         ws.cell(row=r, column=col).fill = _TOTAL_FILL
-    ws.cell(row=r, column=1).font = Font(bold=True)
-    _autosize(ws, {1: 46, 2: 18, 3: 16, 4: 16, 5: 10})
+    ws.cell(row=r, column=2).font = Font(bold=True)
+    _autosize(ws, {1: 10, 2: 42, 3: 12, 4: 10, 5: 10, 6: 18, 7: 20, 8: 16,
+                   9: 16, 10: 10, 11: 11, 12: 12, 13: 12})
 
 
 def _build_detalle(ws, grupos: dict[str, list[AssembledApu]]) -> None:
-    headers = ["Ítem", "Descripción", "Und", "Cantidad", "P. Contractual",
-               "Costo Unit.", "Margen Unit.", "Margen %", "Total Contractual",
+    headers = ["Ítem", "Descripción", "Und", "Cantidad",
+               "P. Contractual", "P. Contractual sin AIU",
+               "Costo Unit.", "Margen Unit.", "Margen %",
+               "Total Contractual", "Total Contractual sin AIU",
                "Total Costo", "Margen Total", "Estado"]
     ws.append(headers)
     _style_header(ws, 1, len(headers))
@@ -150,15 +182,17 @@ def _build_detalle(ws, grupos: dict[str, list[AssembledApu]]) -> None:
         for a in apus:
             ws.append([
                 a.item.item, a.item.descripcion, a.unidad, a.item.cantidad,
-                a.item.precio_contractual, a.costo_unitario, a.margen_unitario,
-                a.margen_pct, a.contractual_total, a.costo_total, a.margen_total,
+                a.item.precio_contractual, a.item.precio_contractual_sin_aiu,
+                a.costo_unitario, a.margen_unitario, a.margen_pct,
+                a.contractual_total, a.contractual_total_sin_aiu,
+                a.costo_total, a.margen_total,
                 _STATUS_LABEL.get(a.status, a.status),
             ])
             r = ws.max_row
             ws.cell(row=r, column=4).number_format = _REND
-            for col in (5, 6, 7, 9, 10, 11):
+            for col in (5, 6, 7, 8, 10, 11, 12, 13):
                 ws.cell(row=r, column=col).number_format = _MONEY
-            ws.cell(row=r, column=8).number_format = _PCT
+            ws.cell(row=r, column=9).number_format = _PCT
             if alertas_costeo(a):
                 for col in range(1, len(headers) + 1):
                     ws.cell(row=r, column=col).fill = _ALERT_FILL
@@ -167,17 +201,18 @@ def _build_detalle(ws, grupos: dict[str, list[AssembledApu]]) -> None:
                     ws.cell(row=r, column=col).fill = _WARN_FILL
 
         sc = sum(a.contractual_total for a in apus)
+        sc_sin = sum(a.contractual_total_sin_aiu for a in apus)
         sk = sum(a.costo_total for a in apus)
-        ws.append(["", f"Subtotal {cap}", "", "", "", "", "", "",
-                   sc, sk, sc - sk, ""])
+        ws.append(["", f"Subtotal {cap}", "", "", "", "", "", "", "",
+                   sc, sc_sin, sk, sc - sk, ""])
         r = ws.max_row
-        for col in (9, 10, 11):
+        for col in (10, 11, 12, 13):
             cell = ws.cell(row=r, column=col)
             cell.number_format = _MONEY
             cell.font = Font(bold=True)
         ws.cell(row=r, column=2).font = Font(bold=True)
-    _autosize(ws, {1: 9, 2: 46, 3: 6, 4: 12, 5: 16, 6: 14, 7: 14, 8: 10,
-                   9: 18, 10: 16, 11: 16, 12: 12})
+    _autosize(ws, {1: 9, 2: 46, 3: 6, 4: 12, 5: 16, 6: 20, 7: 14, 8: 14, 9: 10,
+                   10: 18, 11: 20, 12: 16, 13: 16, 14: 12})
 
 
 def _build_apus(ws, apus: list[AssembledApu]) -> None:
@@ -242,8 +277,8 @@ def write_report_categorizado(apus: list[AssembledApu], path: Path | str,
     grupos = agrupar_por_capitulo(apus)
 
     wb = openpyxl.Workbook()
-    _build_resumen_capitulo(wb.active, grupos)
-    wb.active.title = "RESUMEN POR CAPÍTULO"
+    escribir_hoja_capitulos(wb.active, apus)
+    wb.active.title = HOJA_CAPITULOS
     _build_detalle(wb.create_sheet("DETALLE"), grupos)
     _build_apus(wb.create_sheet("APUS"), apus)
     _build_alertas(wb.create_sheet("ALERTAS"), apus)

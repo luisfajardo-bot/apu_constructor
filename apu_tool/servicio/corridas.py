@@ -362,6 +362,15 @@ def plan_de(alm: Almacen, corrida_id: int) -> list[LicitacionItem]:
     vez de lo que decía el Excel. Un campo renombrado o borrado, en cambio, levanta
     `TypeError` — ruidoso, que es lo correcto para el caso peligroso. Si algún día hay
     que cambiar la forma de `LicitacionItem`, hay que mirar las corridas en cola.
+
+    Y el caso que NO es simétrico, medido al agregar los campos de la ruta IDU: un plan
+    escrito por la versión NUEVA y leído por la VIEJA también levanta `TypeError`, por
+    las claves que su constructor no conoce. Pasa solo en la ventana de un deploy —
+    mientras la instancia vieja drena puede reclamar una corrida que creó la nueva— y
+    se recupera solo: el worker cuenta el fallo, la corrida cae en `armado_detenido`
+    con el motivo, y el botón de reintentar la arma bien contra la instancia nueva. No
+    corrompe nada. Se documenta acá para que nadie pierda media hora entendiendo un
+    `TypeError` que se arregla con un clic.
     """
     crudo = alm.corridas.get_plan(corrida_id)
     if not crudo:

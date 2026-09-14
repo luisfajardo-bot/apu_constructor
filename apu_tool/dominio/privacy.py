@@ -30,6 +30,12 @@ _FORBIDDEN_KEYS = {
     "unitario_sin_aiu", "unitario_con_aiu",
     # Lo que el Excel del IDU trae y el parser concilia.
     "total_excel", "subtotales_excel", "conciliacion",
+    # Las claves del dict de `report_categorizado.resumen_por_capitulo`. Hoy NINGÚN
+    # camino las lleva hacia la IA (sus tres consumidores son la API HTTP y las dos
+    # hojas de Excel), pero son dinero con nombre genérico: el día que alguien quiera
+    # darle a la IA "contexto del capítulo" pasando ese dict, se filtrarían en silencio.
+    # El resto de sus claves ya estaba cubierto por `costo`, `margen` y las de arriba.
+    "contractual", "diferencia", "margen_pct", "cobertura_valor",
     # `origen_json` va por la MISMA razón que `plan_json`: lleva la conciliación
     # —o sea dinero— adentro, así que el objeto entero no puede cruzar la frontera.
     "origen_json",

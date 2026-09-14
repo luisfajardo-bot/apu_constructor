@@ -107,3 +107,62 @@ def test_el_origen_de_la_corrida_nunca_viaja_entero():
     # origen_json lleva la conciliación (dinero) adentro: misma razón que plan_json.
     with pytest.raises(PrivacyViolation):
         assert_no_money({"corrida": {"origen_json": {"entidad": "IDU"}}})
+
+
+def test_las_claves_del_resumen_por_capitulo_estan_cubiertas():
+    """Todo lo que `resumen_por_capitulo` devuelve y sea dinero dispara la violación.
+
+    Hoy ese dict no llega a la IA por ningún camino —lo consumen la API HTTP y las dos
+    hojas de Excel—, pero sus claves son genéricas (`contractual`, `diferencia`) y el
+    día que alguien quiera darle "contexto del capítulo" al modelo se filtrarían sin
+    que nada salte. Este test recorre las claves REALES de la función, así que una
+    clave monetaria nueva que se agregue allá rompe acá.
+    """
+    from apu_tool.dominio.report_categorizado import resumen_por_capitulo
+    from apu_tool.nucleo.models import AssembledApu, MatchStatus
+
+    item = LicitacionItem(item="2.001", descripcion="X", unidad="M3", cantidad=1.0,
+                          precio_contractual=100.0, shift="DIURNO",
+                          capitulo_codigo="2", capitulo_nombre="PAVIMENTOS")
+    fila = resumen_por_capitulo([AssembledApu(
+        item=item, apu_codigo="A1", apu_nombre="A", unidad="M3", shift="DIURNO",
+        componentes=[], costo_unitario=0.0, status=MatchStatus.NEW, confianza=0.0)])[0]
+
+    # Las que son dinero tienen que estar cubiertas por nombre.
+    MONETARIAS = {"contractual", "contractual_sin_aiu", "costo", "diferencia",
+                  "margen_pct", "cobertura_valor"}
+    assert MONETARIAS <= set(fila), "cambió la forma de resumen_por_capitulo"
+    for clave in MONETARIAS:
+        with pytest.raises(PrivacyViolation):
+            assert_no_money({"capitulo": {clave: 1}})
+
+
+def test_una_advertencia_con_monto_en_el_texto_NO_la_atrapa_el_guardian():
+    """Tripwire del hueco conocido, documentado en vez de escondido.
+
+    `assert_no_money` mira nombres de clave, no valores: una `Advertencia` cuyo
+    `detalle` dice «El Excel dice 67.153…» pasa limpia. Por eso la regla operativa es
+    que una advertencia NUNCA entra a un payload hacia la IA (ver su docstring y
+    CLAUDE.md). Si algún día alguien hace que el guardián mire contenido, este test
+    falla y hay que venir a decidir a conciencia — que es justo lo que queremos.
+    """
+    from apu_tool.dominio.presupuesto import Advertencia
+    aviso = Advertencia("total_fila_no_concilia", 16,
+                        "El Excel dice 100.290.134 y el recálculo da 100.290.135.")
+    assert_no_money({"advertencia": aviso.to_dict()})   # NO levanta: ese es el hueco
+    assert "100.290.134" in aviso.to_dict()["detalle"]
+
+
+def test_los_modulos_de_ia_no_importan_el_parser_ni_el_reporte():
+    """Guarda mecánica: el parser y el resumen por capítulo manejan dinero y texto con
+    montos adentro. Los tres módulos que hablan con la IA no pueden ni importarlos.
+
+    Espejo de `test_servicio_no_importa_ai_assist`. Hoy ninguno lo hace; esto lo fija.
+    """
+    from pathlib import Path
+    raiz = Path(__file__).resolve().parent.parent / "apu_tool" / "dominio"
+    for nombre in ("ai_assist.py", "revision.py", "composicion_agente.py"):
+        fuente = (raiz / nombre).read_text(encoding="utf-8")
+        for prohibido in ("presupuesto", "report_categorizado", "report"):
+            assert f"import {prohibido}" not in fuente, f"{nombre} importa {prohibido}"
+            assert f"from apu_tool.dominio.{prohibido}" not in fuente, nombre

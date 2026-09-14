@@ -442,7 +442,10 @@ export default function Corrida() {
       {/* Resumen por capítulo. Solo aparece si la corrida vino de un presupuesto con
           capítulos (ruta IDU). El backend manda las filas YA sumadas: acá no se suma
           dinero, se pinta. */}
-      <ResumenCapitulos capitulos={corrida?.capitulos ?? []} />
+      {corrida && (
+        <ResumenCapitulos capitulos={corrida.capitulos ?? []}
+                          totales={corrida.totales} />
+      )}
 
       {/* Dense table. `onComponer` navega a la mesa de composición y le manda la
           descripción como PISTA: antes de que exista una propuesta el expediente

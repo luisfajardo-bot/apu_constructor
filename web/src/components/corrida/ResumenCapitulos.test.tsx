@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import ResumenCapitulos from "@/components/corrida/ResumenCapitulos";
-import type { CapituloCorrida } from "@/lib/tipos";
+import type { CapituloCorrida, Totales } from "@/lib/tipos";
 
 const CAPS: CapituloCorrida[] = [
   { codigo: "1", nombre: "PRELIMINARES", orden: 1, actividades: 2, con_apu: 2,
@@ -14,11 +14,22 @@ const CAPS: CapituloCorrida[] = [
     cobertura: 40 / 42, cobertura_valor: 0.68, completo: false },
 ];
 
+// Los totales los manda el BACKEND: el componente los pinta, no los suma. Acá se
+// mandan valores que NO son la suma de las filas, justamente para que el test falle
+// si alguien vuelve a calcularlos en el navegador.
+const TOTALES: Totales = {
+  contractual: 37281873523, costo: 26100000000, margen: 11181873523,
+  margen_pct: 0.2999, n_items: 44, n_revision: 2,
+};
+
+const pintar = (capitulos = CAPS, totales = TOTALES) =>
+  render(<ResumenCapitulos capitulos={capitulos} totales={totales} />);
+
 const fila = (nombre: string) => screen.getByText(nombre).closest("tr")!;
 
 describe("ResumenCapitulos", () => {
   it("muestra una fila por capítulo con contractual y costo", () => {
-    render(<ResumenCapitulos capitulos={CAPS} />);
+    pintar();
     expect(screen.getByText("PRELIMINARES")).toBeTruthy();
     expect(screen.getByText("PAVIMENTOS")).toBeTruthy();
     expect(screen.getByText("$137.605.594")).toBeTruthy();
@@ -26,14 +37,14 @@ describe("ResumenCapitulos", () => {
   });
 
   it("cuenta las actividades sin APU en vez de esconderlas", () => {
-    render(<ResumenCapitulos capitulos={CAPS} />);
+    pintar();
     const f = fila("PAVIMENTOS");
     expect(f.textContent).toContain("40");   // con APU
     expect(f.textContent).toContain("2");    // sin APU
   });
 
   it("marca el margen como parcial cuando el capítulo está incompleto", () => {
-    render(<ResumenCapitulos capitulos={CAPS} />);
+    pintar();
     expect(fila("PAVIMENTOS").textContent).toMatch(/parcial/i);
     expect(fila("PAVIMENTOS").textContent).toMatch(/incompleto/i);
     expect(fila("PRELIMINARES").textContent).not.toMatch(/parcial/i);
@@ -41,27 +52,38 @@ describe("ResumenCapitulos", () => {
   });
 
   it("muestra la cobertura por conteo y por valor", () => {
-    render(<ResumenCapitulos capitulos={CAPS} />);
+    pintar();
     const f = fila("PAVIMENTOS");
     expect(f.textContent).toContain("95.2%");   // 40/42 por conteo
     expect(f.textContent).toContain("68.0%");   // por valor
   });
 
   it("avisa en el encabezado cuántos capítulos no están costeados del todo", () => {
-    render(<ResumenCapitulos capitulos={CAPS} />);
+    pintar();
     expect(screen.getByText(/1 sin costear del todo/)).toBeTruthy();
   });
 
-  it("el total es la suma de las filas", () => {
-    render(<ResumenCapitulos capitulos={CAPS} />);
+  it("el dinero del total viene del backend, no de sumar las filas", () => {
+    // Totales deliberadamente DISTINTOS de la suma de CAPS: si el componente volviera
+    // a sumar en el navegador, estos asserts fallarían.
+    pintar(CAPS, { ...TOTALES, contractual: 999, costo: 111, margen: 888,
+                   margen_pct: 0.888 });
     const total = screen.getByText("TOTAL").closest("tr")!;
-    expect(total.textContent).toContain("$37.281.873.523");   // contractual
-    expect(total.textContent).toContain("$26.100.000.000");   // costo
-    expect(total.textContent).toContain("44");                // actividades
+    expect(total.textContent).toContain("$999");
+    expect(total.textContent).toContain("$111");
+    expect(total.textContent).toContain("$888");
+    expect(total.textContent).toContain("88.8%");
+  });
+
+  it("los conteos si se suman en el cliente: no son dinero", () => {
+    pintar();
+    const total = screen.getByText("TOTAL").closest("tr")!;
+    expect(total.textContent).toContain("44");   // 2 + 42 actividades
+    expect(total.textContent).toContain("42");   // 2 + 40 con APU
   });
 
   it("no se dibuja cuando la corrida no tiene capítulos", () => {
-    const { container } = render(<ResumenCapitulos capitulos={[]} />);
+    const { container } = pintar([]);
     expect(container.firstChild).toBeNull();
   });
 });

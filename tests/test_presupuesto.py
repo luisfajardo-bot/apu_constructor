@@ -38,7 +38,8 @@ def _mini_ppto(path):
     fila()  # fila 1 vacía
     # Encabezado de tabla (fila de títulos): se ignora (no hay codigo+cantidad).
     fila({2: "N°", 3: "ITEM DE PAGO", 6: "DESCRIPCION", 7: "UND.", 8: "CANTIDAD",
-          9: "VALOR UNITARIO BASICO", 10: "VALOR + AIU"})
+          9: "VALOR UNITARIO BASICO (SIN A.I.U)", 10: "VALOR UNITARIO (INCLUYE A.I.U)",
+          11: "VALOR TOTAL"})
     # Capítulo 7 (tiene número en [3]).
     fila({3: 7, 6: "REDES ELÉCTRICAS EXTERNAS"})
     fila({6: "TURNO DIURNO"})
@@ -67,7 +68,10 @@ def test_read_presupuesto_items_y_herencia(tmp_path):
     assert exc.descripcion == "EXCAVACION MANUAL PARA RED"
     assert exc.unidad == "M3"
     assert exc.cantidad == 6445
-    assert exc.precio_contractual == 49473      # columna [9], NO [10]
+    # El contractual de la ruta IDU es el valor unitario CON AIU (col [10]), que es
+    # el que concilia con el VALOR TOTAL del Excel. El basico sin AIU viaja aparte.
+    assert exc.precio_contractual == 67153
+    assert exc.precio_contractual_sin_aiu == 49473
     assert exc.shift == "DIURNO"
     assert "REDES ELÉCTRICAS EXTERNAS" in exc.categoria
 

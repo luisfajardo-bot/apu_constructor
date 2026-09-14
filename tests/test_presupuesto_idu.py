@@ -309,3 +309,128 @@ def test_fixture_reproduce_la_estructura_del_archivo_real(tmp_path):
     assert _es_fila_encabezado(filas[24], mapeo)   # el encabezado repetido
     n_actividades = len(ACTIVIDADES_CAP_1) + len(ACTIVIDADES_CAP_2)
     assert n_actividades == 5
+
+
+# ----------------------------------------------------- el lector completo
+from apu_tool.dominio.presupuesto import leer_formulario_idu  # noqa: E402
+
+
+def test_lee_hoja_encabezado_y_estructura(tmp_path):
+    lec = leer_formulario_idu(escribir_formulario(tmp_path / "f1.xlsx"))
+    assert lec.errores == []
+    assert lec.hoja == "PROPUESTA ECONÓMICA"
+    assert lec.fila_encabezado == 5               # 1-based, como lo ve el usuario
+    assert lec.parser_version == "idu-f1/1"
+    assert [c.codigo for c in lec.capitulos] == ["1", "2"]
+    assert [c.nombre for c in lec.capitulos] == ["PRELIMINARES", "PAVIMENTOS"]
+    assert [c.orden for c in lec.capitulos] == [1, 2]
+    assert len(lec.items) == len(ACTIVIDADES_CAP_1) + len(ACTIVIDADES_CAP_2)
+
+
+def test_no_cuenta_turnos_subtitulos_subtotales_ni_encabezados(tmp_path):
+    lec = leer_formulario_idu(escribir_formulario(tmp_path / "f1.xlsx"))
+    descripciones = {i.descripcion for i in lec.items}
+    for basura in ("TURNO DIURNO", "TURNO NOCTURNO", "PRELIMINARES", "PAVIMENTOS",
+                   "LOCALIZACIÓN Y REPLANTEO", "PAVIMENTO FLEXIBLE", "DESCRIPCION",
+                   "VALOR PARA OBRAS SIN REDES (INCLUYE A.I.U)"):
+        assert basura not in descripciones
+    assert lec.filas_ignoradas > 0
+    assert any(a.tipo == "encabezado_repetido" for a in lec.advertencias)
+
+
+def test_cada_actividad_hereda_capitulo_y_turno(tmp_path):
+    lec = leer_formulario_idu(escribir_formulario(tmp_path / "f1.xlsx"))
+    por_item = {i.item_pago_original: i for i in lec.items}
+    diurna = por_item["1.001"]
+    assert diurna.capitulo_codigo == "1"
+    assert diurna.capitulo_nombre == "PRELIMINARES"
+    assert diurna.categoria == "1 · PRELIMINARES"   # derivado, para report_categorizado
+    assert diurna.shift == "DIURNO"
+    assert diurna.codigo_sugerido == "3007"
+    nocturna = por_item["1,001-N"]
+    assert nocturna.shift == "NOCTURNO"
+    assert nocturna.codigo_sugerido == "3007 N"
+    assert nocturna.capitulo_codigo == "1"
+
+
+def test_preserva_el_item_original_y_recupera_el_cero(tmp_path):
+    lec = leer_formulario_idu(escribir_formulario(tmp_path / "f1.xlsx"))
+    originales = [i.item_pago_original for i in lec.items]
+    assert "2.010" in originales          # el float 2.01 con formato 0.000
+    assert "1,001-N" in originales        # el texto, tal cual venía
+    assert "2,011-N" in originales
+
+
+def test_las_dos_columnas_de_precio(tmp_path):
+    lec = leer_formulario_idu(escribir_formulario(tmp_path / "f1.xlsx"))
+    replanteo = next(i for i in lec.items if i.item_pago_original == "1.001")
+    assert replanteo.cantidad == 100
+    assert replanteo.precio_contractual == 1351             # col K, CON AIU
+    assert replanteo.precio_contractual_sin_aiu == 1056      # col J, SIN AIU
+    assert replanteo.fila_origen > 0
+
+
+def test_conciliacion_contra_los_subtotales_del_excel(tmp_path):
+    lec = leer_formulario_idu(escribir_formulario(tmp_path / "f1.xlsx"))
+    c = lec.conciliacion
+    assert c["subtotales_ok"] is True
+    assert c["diferencia"] == 0
+    assert c["contractual_con_aiu"] == c["subtotales_excel"]
+    assert c["contractual_sin_aiu"] < c["contractual_con_aiu"]
+    assert [a for a in lec.advertencias if a.tipo == "total_fila_no_concilia"] == []
+
+
+def test_hoja_gemela_se_avisa_y_no_duplica_actividades(tmp_path):
+    lec = leer_formulario_idu(
+        escribir_formulario(tmp_path / "f1.xlsx", con_hoja_gemela=True))
+    assert lec.hoja == "PROPUESTA ECONÓMICA"
+    assert len(lec.items) == 5
+    assert any(a.tipo == "hoja_ambigua" for a in lec.advertencias)
+
+
+def test_sin_hoja_compatible_es_error_bloqueante(tmp_path):
+    lec = leer_formulario_idu(escribir_formulario(tmp_path / "f1.xlsx", hoja="DATOS"))
+    assert lec.items == []
+    assert any("sin_hoja" in e for e in lec.errores)
+
+
+def test_falta_columna_obligatoria_es_error_bloqueante(tmp_path):
+    lec = leer_formulario_idu(
+        escribir_formulario(tmp_path / "f1.xlsx", sin_columna_cantidad=True))
+    assert any("falta_columna" in e and "cantidad" in e for e in lec.errores)
+    assert lec.items == []
+
+
+def test_archivo_que_no_es_excel_es_error_bloqueante(tmp_path):
+    malo = tmp_path / "no-es.xlsx"
+    malo.write_bytes(b"esto no es un zip")
+    lec = leer_formulario_idu(malo)
+    assert any("archivo_invalido" in e for e in lec.errores)
+    assert lec.items == []
+
+
+def test_avisa_si_la_oferta_viene_diligenciada(tmp_path):
+    # En el archivo de referencia las columnas de oferta están en cero. Si algún día
+    # llegan con valor, el parser NO las lee — pero avisa, en vez de callarse.
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    ws = wb["PROPUESTA ECONÓMICA"]
+    for fila in (10, 13):                      # las dos actividades del capítulo 1
+        ws.cell(row=fila, column=15).value = 1200
+    wb.save(p)
+    lec = leer_formulario_idu(p)
+    avisos = [a for a in lec.advertencias if a.tipo == "oferta_diligenciada"]
+    assert len(avisos) == 1
+    assert "2" in avisos[0].detalle           # cuántas filas traen oferta
+    # Y NO cambia el contractual: se sigue leyendo la columna oficial con AIU.
+    assert next(i for i in lec.items
+                if i.item_pago_original == "1.001").precio_contractual == 1351
+
+
+def test_read_presupuesto_sigue_funcionando(tmp_path):
+    # El envoltorio viejo (CLI y GUI) no cambia de firma ni de comportamiento.
+    from apu_tool.dominio.presupuesto import read_presupuesto
+    items = read_presupuesto(escribir_formulario(tmp_path / "f1.xlsx"),
+                             hoja="PROPUESTA ECONÓMICA")
+    assert len(items) == 5
+    assert items[0].categoria == "1 · PRELIMINARES"

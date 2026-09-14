@@ -7,6 +7,7 @@ import type {
   CorridaResumen,
   DetalleItem,
   LineaNueva,
+  PreviaPresupuesto,
   PreviewLineas,
   ProgresoRevision,
   ResumenRevision,
@@ -29,6 +30,12 @@ export function crearSample(): Promise<CorridaEncolada> {
  *  ese error trae el id, y `corridaEnCurso` lo saca. */
 export function crearCorrida(form: FormData): Promise<CorridaEncolada> {
   return apiPost<CorridaEncolada>("/corridas", form);
+}
+
+/** Qué se detectó en el archivo, SIN crear nada. El navegador se queda con el archivo
+ *  y lo reenvía al aprobar: no hay borrador en el servidor que expirar ni limpiar. */
+export function previsualizarCorrida(form: FormData): Promise<PreviaPresupuesto> {
+  return apiPost<PreviaPresupuesto>("/corridas/previsualizar", form);
 }
 
 /** Devuelve a la cola una corrida en `armado_detenido` (rol editor). Lo ya armado se

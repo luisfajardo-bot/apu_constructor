@@ -80,3 +80,35 @@ Ni el `truncate`, ni el `sticky`, ni `100cqw` son visibles desde un test. Esa pa
 verifica **en el navegador**, a 390px de ancho y a pantalla completa, antes de
 cualquier push. Es la lección de `dialogo-texto-sin-prompt`: en cambios de UI el
 navegador va antes del push.
+
+## Cambios durante la implementación
+
+Dos cosas salieron de verificar en el navegador a 390px, no del diseño en papel:
+
+1. **El motivo del candidato deja de ser columna** y pasa a segunda línea bajo el
+   nombre. Con 5 columnas (Código · Nombre · Score · Motivo · Elegir) la tabla de
+   candidatos no cabe en un teléfono: el nombre quedaba en una tira de ~90px, diez
+   líneas. Sin esa columna queda en ~155px y cinco líneas.
+2. **Score y la columna del botón pierden el ancho fijo** (`w-14`, `w-24`). Cada una
+   se achica a su contenido y el sobrante se lo queda Nombre.
+
+### Nota de verificación: fidelidad del banco de pruebas
+
+La verificación se hizo con Chrome headless sobre una página estática que replica el
+DOM del componente con el CSS ya compilado. Dos trampas encontradas ahí:
+
+- **Chrome headless no baja de 500px de viewport.** Pedir `--window-size=390` recorta
+  la captura a 390 pero renderiza a 500: se ve un "corte" que no existe. Para simular
+  un teléfono hay que envolver la página en un `<div style="width:390px">`.
+- **`TableCell` usa `cn()` con `tailwind-merge`**, que *reemplaza* el
+  `whitespace-nowrap` base por el `whitespace-normal` que uno le pasa. Un banco de
+  pruebas que escriba las dos clases a mano en el HTML no reproduce eso: gana `nowrap`
+  por orden en la hoja de estilos, y aparece un corte falso.
+
+Medidas reales del navegador que confirman el punto 3 del diseño (viewport 500):
+
+```
+container=484  type:inline-size     el @container aplica
+tabla=950                            la tabla es más ancha que la pantalla
+sticky=484  css:484px  pos:sticky    el panel mide la PANTALLA, no la tabla
+```

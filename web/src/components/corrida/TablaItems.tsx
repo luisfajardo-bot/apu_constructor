@@ -408,7 +408,16 @@ export default function TablaItems({
         )}
       </div>
 
-      {/* Dense table */}
+      {/* Dense table.
+          El `@container` es para que el panel desplegado de cada fila pueda medir
+          el ancho VISIBLE de la tabla con `100cqw`: ese panel es un <td colSpan>
+          que abarca las ~14 columnas, o sea mide el ancho de la TABLA (~1400px),
+          no el de la pantalla. Va acá y no en `ui/table.tsx` porque
+          `container-type: inline-size` crea bloque contenedor y contexto de
+          apilamiento, y ese primitivo lo comparten todas las tablas de la app.
+          El <div> no reindenta la tabla a propósito: serían ~180 líneas de diff
+          en blanco. */}
+      <div className="@container">
       <Table>
         {control ? (
           <CabeceraFiltros control={control} conSeleccion={seleccionable}
@@ -441,7 +450,7 @@ export default function TablaItems({
 
             return (
               <Fragment key={it.seq}>
-                <TableRow className="hover:bg-muted/40">
+                <TableRow className="hover:bg-muted/40 [&>td]:align-top">
                   {seleccionable && (
                     <TableCell className="w-8 px-1 py-1">
                       <input
@@ -476,8 +485,16 @@ export default function TablaItems({
                       </svg>
                     </button>
                   </TableCell>
-                  <TableCell className="text-xs max-w-[240px] truncate">
-                    {it.descripcion}
+                  <TableCell className="text-xs">
+                    {/* El max-width va en el <div> y no en el <td>: en tablas de
+                        layout automático el navegador trata el max-width de una
+                        celda como sugerencia y puede ignorarlo. Elástico: en
+                        monitor ancho llega a 420px y casi todo cabe en 1-2
+                        líneas, en celular baja a 240px y cabe sin scroll. */}
+                    <div className="min-w-[240px] max-w-[420px] whitespace-normal
+                                    break-words">
+                      {it.descripcion}
+                    </div>
                   </TableCell>
                   <TableCell className="text-xs">{it.unidad}</TableCell>
                   <TableCell className="text-xs text-right font-mono">
@@ -545,7 +562,15 @@ export default function TablaItems({
                 {/* Inline expansion row */}
                 {abierto && (
                   <TableRow key={`expand-${it.seq}`} className="bg-muted/20 hover:bg-muted/20">
-                    <TableCell colSpan={TOTAL_COLS} className="px-8 py-3">
+                    <TableCell colSpan={TOTAL_COLS} className="p-0">
+                      {/* `sticky left-0` clava el panel al borde izquierdo del
+                          área visible aunque la tabla esté scrolleada a la
+                          derecha, y `100cqw` le da el ancho de la pantalla en vez
+                          del de la tabla. `whitespace-normal` porque el <td>
+                          hereda el `whitespace-nowrap` del primitivo TableCell y
+                          eso deja cualquier texto del panel en una sola línea. */}
+                      <div className="sticky left-0 w-[100cqw] whitespace-normal
+                                      px-4 py-3 sm:px-8">
                       {estado === "cargando" && (
                         <p className="text-xs text-muted-foreground py-2">
                           cargando…
@@ -569,6 +594,7 @@ export default function TablaItems({
                           onDuplicar={abrirDuplicar}
                         />
                       )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 )}
@@ -587,6 +613,7 @@ export default function TablaItems({
           )}
         </TableBody>
       </Table>
+      </div>
 
       {seleccionable && haySeleccion && (
         <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t bg-background/95 px-2 py-2 backdrop-blur">
@@ -723,8 +750,18 @@ function DetalleExpandido({
       <div className="flex items-center gap-3 flex-wrap text-xs">
         <EstadoBadge status={detalle.status} costoManual={detalle.costo_manual} />
         <span className="font-mono text-muted-foreground">APU: {detalle.apu_codigo}</span>
-        <span className="text-muted-foreground truncate max-w-xs">{detalle.apu_nombre}</span>
+        <span className="min-w-0 break-words text-muted-foreground">{detalle.apu_nombre}</span>
       </div>
+
+      {/* La actividad de la licitación: es contra lo que se juzga si el APU
+          asignado sirve, así que va completa y de primeras. Ya viajaba en la
+          respuesta del API; el render la botaba. */}
+      <section>
+        <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+          Actividad de la licitación
+        </h4>
+        <p className="text-xs break-words">{detalle.descripcion}</p>
+      </section>
 
       {/* Explicacion (review/new) */}
       {detalle.explicacion && (
@@ -744,23 +781,29 @@ function DetalleExpandido({
               <TableRow>
                 <TableHead className="text-xs">Código</TableHead>
                 <TableHead className="text-xs">Nombre</TableHead>
-                <TableHead className="text-xs w-14 text-right">Score</TableHead>
-                <TableHead className="text-xs">Motivo</TableHead>
-                <TableHead className="text-xs w-24" />
+                {/* Sin ancho fijo: cada una se achica a su contenido y el
+                    sobrante se lo queda Nombre, que es lo que hay que leer. */}
+                <TableHead className="text-xs text-right">Score</TableHead>
+                <TableHead className="text-xs" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {detalle.candidatos.map((c) => (
-                <TableRow key={c.apu_codigo}>
+                <TableRow key={c.apu_codigo} className="[&>td]:align-top">
                   <TableCell className="text-xs font-mono">{c.apu_codigo}</TableCell>
-                  <TableCell className="text-xs max-w-[200px] truncate">
+                  {/* El motivo va acá abajo y no en su propia columna: con una
+                      columna más, la tabla no cabe en un teléfono y el nombre
+                      —que es lo que hay que leer— se volvía a cortar. */}
+                  <TableCell className="text-xs whitespace-normal break-words">
                     {c.apu_nombre}
+                    {c.motivo && (
+                      <span className="block text-[11px] text-muted-foreground">
+                        {c.motivo}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell className="text-xs text-right font-mono">
                     {(c.score * 100).toFixed(0)}%
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground max-w-[160px] truncate">
-                    {c.motivo}
                   </TableCell>
                   <TableCell className="text-xs">
                     <Button
@@ -847,8 +890,8 @@ function DetalleExpandido({
             </TableHeader>
             <TableBody>
               {detalle.composicion.map((lin, i) => (
-                <TableRow key={i}>
-                  <TableCell className="text-xs max-w-[200px] truncate">
+                <TableRow key={i} className="[&>td]:align-top">
+                  <TableCell className="text-xs min-w-[180px] whitespace-normal break-words">
                     {lin.insumo_nombre}
                   </TableCell>
                   <TableCell className="text-xs">{lin.unidad}</TableCell>

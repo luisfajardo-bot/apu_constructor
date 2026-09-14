@@ -925,3 +925,33 @@ test("una fila confirmada normal sigue mostrando CONFIRM", () => {
   expect(badgeEstado("CONFIRM")).toHaveLength(1);
   expect(badgeEstado("CONTRACTUAL")).toHaveLength(0);
 });
+
+test("al desplegar una fila se ve la descripción completa de la actividad", async () => {
+  const LARGA =
+    "SUMINISTRO E INSTALACION DE TUBERIA PVC SANITARIA DE 6 PULGADAS INCLUYE " +
+    "ACCESORIOS, EXCAVACION, CAMA DE ARENA Y RETIRO DE SOBRANTES A BOTADERO AUTORIZADO";
+  const { default: TablaItems } = await import("./TablaItems");
+  const mod = await import("@/api/corridas");
+  vi.mocked(mod.getItem).mockResolvedValueOnce({
+    seq: 0, descripcion: LARGA, apu_codigo: "111", apu_turno: "DIURNO",
+    apu_nombre: "APU VIEJO", status: "matched", explicacion: "",
+    candidatos: [], composicion: [], costo_unitario: 0, costo_manual: false,
+  });
+  render(
+    <TablaItems
+      corridaId={1}
+      items={[{ ...ITEM, descripcion: LARGA }]}
+      onConfirmado={() => {}}
+    />,
+  );
+
+  // Colapsada: la descripción vive solo en la fila.
+  expect(screen.getAllByText(LARGA)).toHaveLength(1);
+
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await screen.findByText(/APU: 111/);
+
+  // Desplegada: el panel la repite completa, bajo su propio encabezado.
+  expect(screen.getByText(/Actividad de la licitación/i)).toBeTruthy();
+  expect(screen.getAllByText(LARGA)).toHaveLength(2);
+});

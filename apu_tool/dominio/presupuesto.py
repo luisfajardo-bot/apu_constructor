@@ -1,13 +1,26 @@
 ﻿"""
-Lectura del presupuesto oficial por capítulos (hoja FOR 1-PPTO OFICIAL).
+Lectura del Formulario 1 de Presupuesto Oficial del IDU, por capítulos.
 
 El presupuesto está organizado jerárquicamente:
-    Capítulo (con número)  ->  TURNO DIURNO/NOCTURNO  ->  subgrupo  ->  ítems.
+    Capítulo (con número)  ->  TURNO DIURNO/NOCTURNO  ->  subtítulo  ->  actividades.
 
-Se recorre de arriba abajo llevando el estado (capítulo, turno) vigente; cada ítem
-hereda ambos. El precio contractual es el valor unitario BÁSICO (sin AIU), columna [9].
-A diferencia de la licitación plana, cada ítem trae su código IDU (columna [2]), que
-permite armar el APU por código directo.
+Se recorre de arriba abajo llevando el estado (capítulo, turno) vigente; cada actividad
+hereda ambos. Cada una trae además su código IDU, que permite armar el APU por código
+directo, sin fuzzy y sin IA (ver `assemble.py`).
+
+La hoja y las columnas NO están clavadas por índice: la hoja se detecta por nombre
+normalizado (`elegir_hoja`) y las columnas se mapean por su encabezado
+(`encontrar_encabezado`), porque las letras de Excel cambian entre pliegos y los
+encabezados no.
+
+El precio contractual es el **valor unitario CON AIU**, que es el que concilia con el
+`VALOR TOTAL` y con los `Subtotal` del propio Excel; el básico sin AIU viaja aparte en
+`precio_contractual_sin_aiu`.
+
+`leer_formulario_idu` NUNCA levanta por un problema de contenido: los errores
+bloqueantes y las advertencias viajan dentro de `LecturaPresupuesto`. Es deliberado — el
+mismo resultado alimenta la previsualización (que los MUESTRA) y la creación de la
+corrida (que los rechaza con 400).
 """
 from __future__ import annotations
 

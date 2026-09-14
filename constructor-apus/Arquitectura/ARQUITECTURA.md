@@ -78,7 +78,8 @@ intento_plan/
 │   │   └── pg/                    #   backend Postgres (espejo 1:1 de los *_db.py)
 │   │
 │   ├── dominio/                   ── NIVEL 02 · motor (lógica pura)
-│   │   ├── licitacion.py   presupuesto.py   matching.py   cruce.py   compose.py
+│   │   ├── licitacion.py   presupuesto.py   entrada.py   matching.py   cruce.py
+│   │   ├── compose.py
 │   │   ├── composicion.py   validacion_composicion.py   #   contrato + validador del agente de composición
 │   │   ├── privacy.py   ai_assist.py   composicion_agente.py   assemble.py
 │   │   ├── pricing.py   alertas.py   report.py   report_categorizado.py

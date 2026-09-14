@@ -31,6 +31,12 @@ CREATE TABLE IF NOT EXISTS corrida (
   -- DINERO, así que esta columna nunca puede viajar en un payload hacia la IA
   -- (invariante #1). El guardián `privacy.assert_no_money` mira nombres de clave.
   plan_json     TEXT,
+  -- De dónde salió el presupuesto: entidad, formato, hoja, versión del parser, quién
+  -- confirmó la estructura y la conciliación contra el Excel. NULL en toda corrida
+  -- anterior a la ruta IDU: eso es "sin clasificación por capítulo", no un error.
+  -- OJO: lleva la conciliación —o sea DINERO— adentro, así que esta columna nunca
+  -- puede viajar en un payload hacia la IA. Está en privacy._FORBIDDEN_KEYS.
+  origen_json   TEXT,
   intentos      INTEGER NOT NULL DEFAULT 0,
   ultimo_error  TEXT,
   armando_por   TEXT,

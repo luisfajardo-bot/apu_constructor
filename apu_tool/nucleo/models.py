@@ -325,6 +325,11 @@ class CorridaMeta:
     ultimo_error: Optional[str] = None     # por qué se detuvo, en español, para la pantalla
     armando_por: Optional[str] = None      # id de la instancia que la reclamó
     armando_desde: Optional[str] = None    # ISO 8601 del último latido de esa reclama
+    # De dónde salió el presupuesto (entidad, hoja, parser, conciliación). None en toda
+    # corrida anterior a la ruta IDU: la pantalla lo muestra como "sin clasificación por
+    # capítulo", y NO se inventan capítulos retroactivamente. Es DINERO por dentro (la
+    # conciliación): `origen_json` está en privacy._FORBIDDEN_KEYS.
+    origen: Optional[dict] = None
 
 
 @dataclass

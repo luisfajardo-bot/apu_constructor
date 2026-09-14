@@ -252,6 +252,18 @@ class RepositorioCorridas(Protocol):
     def get_plan(self, corrida_id: int) -> Optional[str]:
         """El plan crudo, o None si la corrida no existe o no tiene."""
         ...
+    def set_origen(self, corrida_id: int, origen_json: str, conn=None) -> None:
+        """De dónde salió el presupuesto (entidad, hoja, parser, conciliación).
+
+        Se escribe UNA vez, justo después de crear la corrida, por la misma razón que
+        `set_plan`: no ensucia el INSERT de los dos backends con una columna opcional.
+        """
+        ...
+
+    def get_origen(self, corrida_id: int) -> Optional[str]:
+        """El JSON crudo del origen, o None si la corrida es anterior a la ruta IDU."""
+        ...
+
     def max_seq(self, corrida_id: int) -> int:
         """El `seq` más alto ya armado, o -1 si no hay ninguno. El worker reanuda en
         `max_seq + 1`. Se usa el MÁXIMO y no la cantidad: con una fila borrada en el

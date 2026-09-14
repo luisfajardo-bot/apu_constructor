@@ -32,6 +32,11 @@ CREATE TABLE IF NOT EXISTS corridas.corrida (
     -- armar: el archivo subido no se guarda. OJO: lleva `precio_contractual`, o sea
     -- DINERO; nunca puede viajar en un payload hacia la IA (invariante #1).
     plan_json     TEXT,
+    -- De dónde salió el presupuesto: entidad, formato, hoja, versión del parser, quién
+    -- confirmó la estructura y la conciliación contra el Excel. NULL en toda corrida
+    -- anterior a la ruta IDU. Lleva DINERO adentro (la conciliación): nunca viaja hacia
+    -- la IA; está en privacy._FORBIDDEN_KEYS.
+    origen_json   TEXT,
     intentos      INTEGER NOT NULL DEFAULT 0,
     ultimo_error  TEXT,
     armando_por   TEXT,
@@ -74,6 +79,7 @@ ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS nombre TEXT;
 UPDATE corridas.corrida SET nombre = archivo WHERE nombre IS NULL OR nombre = '';
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS lista_precios_id BIGINT;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS plan_json TEXT;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS origen_json TEXT;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS intentos INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS ultimo_error TEXT;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS armando_por TEXT;

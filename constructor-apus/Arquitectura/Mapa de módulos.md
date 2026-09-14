@@ -68,6 +68,7 @@ flowchart TD
 | `composicion.py` | Contrato de la composición asistida. |
 | `composicion_agente.py` | Orquestador de la composición asistida. |
 | `cruce.py` | Resolución del cruce insumo-de-APU -> insumo-de-catálogo, por código + nombre. |
+| `entrada.py` | Qué lector le toca a cada entidad. El ÚNICO punto de despacho. |
 | `integridad.py` | Chequeo de integridad del vínculo APU -> insumo (que cruza las dos bases). |
 | `licitacion.py` | Lectura de la lista de licitación (entrada) y generación de un ejemplo. |
 | `matching.py` | Matcher determinístico de actividades contra el catálogo de APUs. |

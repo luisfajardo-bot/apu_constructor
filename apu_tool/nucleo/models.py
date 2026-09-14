@@ -163,6 +163,24 @@ class LicitacionItem:
 # ---------------------------------------------------------------------------
 # Resultados del pipeline
 # ---------------------------------------------------------------------------
+class EntidadOrigen(str, Enum):
+    """De dónde salió el presupuesto de una corrida.
+
+    Valor ESTABLE, no texto libre: se guarda en `corrida.origen_json` y decide qué
+    lector se usa (`dominio/entrada.py`). `str, Enum` como MatchStatus, para que
+    sobreviva a `asdict()` y a `json.dumps()` sin conversión.
+
+    Hoy solo IDU tiene lector especializado. Las demás usan el importador genérico a
+    propósito: no se inventan reglas para formatos que nadie midió.
+    """
+    IDU = "IDU"
+    METRO_BOGOTA = "METRO_BOGOTA"
+    INVIAS = "INVIAS"
+    OTRA_PUBLICA = "OTRA_PUBLICA"
+    PRIVADA = "PRIVADA"
+    NO_IDENTIFICADA = "NO_IDENTIFICADA"
+
+
 class MatchStatus(str, Enum):
     AUTO = "auto"          # match determinístico claro
     REVIEW = "review"      # candidato dudoso, requiere confirmación

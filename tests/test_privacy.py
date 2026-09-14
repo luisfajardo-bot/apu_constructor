@@ -2,6 +2,9 @@
 import pytest
 
 from apu_tool.dominio import privacy
+from apu_tool.dominio.privacy import (
+    PrivacyViolation, assert_no_money, licitacion_item_to_dict,
+)
 from apu_tool.nucleo.models import (
     DePricedApu,
     DePricedComponent,
@@ -60,3 +63,47 @@ def test_plan_json_es_dinero_y_no_pasa():
     alguien vuelque la fila entera no salta nada."""
     with pytest.raises(privacy.PrivacyViolation):
         privacy.assert_no_money({"corrida": {"plan_json": "[]"}})
+
+
+# ------------------------------------------------- ruta IDU (Formulario 1)
+@pytest.mark.parametrize("clave", [
+    "precio_contractual_sin_aiu", "contractual_total_sin_aiu", "origen_json",
+    "conciliacion", "total_excel", "subtotales_excel", "unitario_sin_aiu",
+    "unitario_con_aiu", "contractual_con_aiu", "contractual_sin_aiu",
+])
+def test_los_campos_monetarios_de_la_ruta_idu_disparan_la_violacion(clave):
+    with pytest.raises(PrivacyViolation):
+        assert_no_money({"actividad": {clave: 1351}})
+
+
+def test_el_capitulo_si_puede_llegar_a_la_ia():
+    # Texto, no dinero: saber que la actividad es de RED DE ACUEDUCTO es estructura.
+    item = LicitacionItem(
+        item="11.005", descripcion="TUBERÍA PVC", unidad="ML", cantidad=120.0,
+        precio_contractual=95463.0, shift="DIURNO",
+        precio_contractual_sin_aiu=74627.0,
+        capitulo_codigo="11", capitulo_nombre="RED DE ACUEDUCTO",
+        item_pago_original="11.005", fila_origen=1420, codigo_sugerido="3903")
+    d = licitacion_item_to_dict(item)
+    assert d["capitulo_codigo"] == "11"
+    assert d["capitulo_nombre"] == "RED DE ACUEDUCTO"
+    assert_no_money(d)      # no levanta
+
+
+def test_ningun_precio_del_item_cruza_la_frontera():
+    item = LicitacionItem(
+        item="11.005", descripcion="TUBERÍA PVC", unidad="ML", cantidad=120.0,
+        precio_contractual=95463.0, shift="DIURNO",
+        precio_contractual_sin_aiu=74627.0)
+    d = licitacion_item_to_dict(item)
+    assert "precio_contractual" not in d
+    assert "precio_contractual_sin_aiu" not in d
+    # Y tampoco por valor: ninguno de los dos montos aparece en el payload.
+    assert 95463.0 not in d.values()
+    assert 74627.0 not in d.values()
+
+
+def test_el_origen_de_la_corrida_nunca_viaja_entero():
+    # origen_json lleva la conciliación (dinero) adentro: misma razón que plan_json.
+    with pytest.raises(PrivacyViolation):
+        assert_no_money({"corrida": {"origen_json": {"entidad": "IDU"}}})

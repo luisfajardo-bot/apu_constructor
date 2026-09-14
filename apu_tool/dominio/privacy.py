@@ -23,6 +23,16 @@ _FORBIDDEN_KEYS = {
     "costo", "costo_unitario", "costo_total", "valor", "valor_unitario",
     "valor_total", "margen", "price", "cost", "amount", "total",
     "fuente_precio", "costo_manual", "plan_json",
+    # --- ruta IDU (Formulario 1) ------------------------------------------------
+    # Las dos bases del contractual y sus multiplicaciones.
+    "precio_contractual_sin_aiu", "contractual_total_sin_aiu",
+    "contractual_con_aiu", "contractual_sin_aiu",
+    "unitario_sin_aiu", "unitario_con_aiu",
+    # Lo que el Excel del IDU trae y el parser concilia.
+    "total_excel", "subtotales_excel", "conciliacion",
+    # `origen_json` va por la MISMA razón que `plan_json`: lleva la conciliación
+    # —o sea dinero— adentro, así que el objeto entero no puede cruzar la frontera.
+    "origen_json",
 }
 
 
@@ -48,13 +58,22 @@ def depriced_apu_to_dict(apu: DePricedApu) -> dict[str, Any]:
 
 
 def licitacion_item_to_dict(item: LicitacionItem) -> dict[str, Any]:
-    """Versión SIN dinero de un ítem de licitación (se omite precio_contractual)."""
+    """Versión SIN dinero de un ítem de licitación.
+
+    Se arma clave por clave a propósito: un campo nuevo del dataclass NO se cuela solo
+    por existir. Por eso no están `precio_contractual` ni `precio_contractual_sin_aiu`.
+
+    El capítulo sí viaja: es texto y es estructura — saber que una actividad pertenece a
+    RED DE ACUEDUCTO ayuda a componerla, y no dice nada de lo que cuesta.
+    """
     return {
         "item": item.item,
         "descripcion": item.descripcion,
         "unidad": item.unidad,
         "cantidad": round(item.cantidad, 6),
         "shift": item.shift,
+        "capitulo_codigo": item.capitulo_codigo,
+        "capitulo_nombre": item.capitulo_nombre,
     }
 
 

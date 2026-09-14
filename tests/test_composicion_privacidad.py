@@ -29,8 +29,11 @@ def test_el_payload_lleva_exactamente_estas_claves():
     p = privacy.payload_composicion(ITEM, INSUMOS, EJEMPLOS, OBS)
     assert set(p) == {"actividad", "insumos_disponibles", "apus_referencia",
                       "rendimientos_observados"}
+    # `capitulo_codigo`/`capitulo_nombre` entran con la ruta IDU: son TEXTO, no dinero
+    # (saber que la actividad es de RED DE ACUEDUCTO ayuda a componerla). Los dos
+    # precios del Formulario 1 siguen fuera, y `_FORBIDDEN_KEYS` los cubre por nombre.
     assert set(p["actividad"]) == {"item", "descripcion", "unidad", "cantidad",
-                                   "shift"}
+                                   "shift", "capitulo_codigo", "capitulo_nombre"}
     assert set(p["insumos_disponibles"][0]) == {"insumo_codigo", "insumo_nombre",
                                                 "unidad", "grupo"}
     assert set(p["rendimientos_observados"][0]) == {"insumo_codigo", "unidad", "n",

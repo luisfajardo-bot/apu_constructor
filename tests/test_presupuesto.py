@@ -87,3 +87,28 @@ def test_read_presupuesto_ignora_encabezados_y_vacias(tmp_path):
     assert "REDES ELÉCTRICAS EXTERNAS" not in descripciones
     assert "TURNO DIURNO" not in descripciones
     assert "REDES ENERGÍA" not in descripciones
+
+
+from apu_tool.nucleo.models import AssembledApu, MatchStatus
+
+
+def test_licitacion_item_campos_de_capitulo_son_opcionales():
+    # Una corrida vieja se rehidrata sin estos campos: tienen que tener default.
+    plano = LicitacionItem(item="1", descripcion="X", unidad="M2", cantidad=1.0,
+                           precio_contractual=100.0, shift="DIURNO")
+    assert plano.capitulo_codigo == ""
+    assert plano.capitulo_nombre == ""
+    assert plano.item_pago_original == ""
+    assert plano.fila_origen == 0
+    assert plano.precio_contractual_sin_aiu == 0.0
+
+
+def test_contractual_total_sin_aiu_usa_el_redondeo_del_repo():
+    item = LicitacionItem(item="2.001", descripcion="X", unidad="M3", cantidad=30.0,
+                          precio_contractual=7628.0, shift="DIURNO",
+                          precio_contractual_sin_aiu=5963.0)
+    ens = AssembledApu(item=item, apu_codigo="A", apu_nombre="A", unidad="M3",
+                       shift="DIURNO", componentes=[], costo_unitario=0.0,
+                       status=MatchStatus.NEW, confianza=0.0)
+    assert ens.contractual_total == 228840        # 30 * 7628, con AIU
+    assert ens.contractual_total_sin_aiu == 178890  # 30 * 5963, sin AIU

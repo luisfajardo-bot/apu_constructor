@@ -494,8 +494,10 @@ Redondeo: se suman `contractual_total` y `costo_total`, que ya pasaron por
 `completo: false`, y la web muestra el margen marcado como **parcial** cuando
 `completo == false`, no como cifra definitiva.
 
-**Cobertura ponderada por valor, justificada**: el capítulo 2 tiene 52 actividades y dos de
-ellas valen 5.700 millones. Un 96 % de cobertura por conteo puede ser un 40 % por valor.
+**Cobertura ponderada por valor, justificada**: un capítulo puede estar casi entero
+por conteo y a media máquina por plata. Medido en el archivo real: en PAVIMENTOS,
+2 de 42 actividades son el 32 % del capítulo; en RED DE GAS, 2 de 8 son el 57 %.
+Sin esta métrica, «95 % costeado» puede querer decir que falta la mitad del dinero.
 Son dos sumas más dentro de la misma función.
 
 ## 12. Reporte

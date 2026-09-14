@@ -2491,9 +2491,10 @@ def resumen_por_capitulo(apus: list[AssembledApu]) -> list[dict]:
             "margen_pct": ((contractual - sum(a.costo_total for a in filas)) / contractual
                            if contractual else 0.0),
             "cobertura": (len(costeadas) / len(filas)) if filas else 0.0,
-            # Ponderada por valor: un capítulo puede estar al 96 % por conteo y al 40 %
-            # por plata si las dos actividades que faltan son las caras. Medido en el
-            # archivo real: el capítulo 2 tiene 52 actividades y dos valen 5.700 millones.
+            # Ponderada por valor: un capítulo puede estar casi entero por conteo y a
+            # media máquina por plata, si lo que falta son las actividades caras.
+            # Medido en el archivo real: en PAVIMENTOS, 2 de 42 actividades son el 32 %
+            # del capítulo; en RED DE GAS, 2 de 8 son el 57 %.
             "cobertura_valor": (sum(a.contractual_total for a in costeadas) / contractual
                                 if contractual else 0.0),
             "completo": (len(costeadas) == len(filas)

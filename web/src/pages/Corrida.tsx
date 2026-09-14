@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import ResumenCapitulos from "@/components/corrida/ResumenCapitulos";
 import TablaItems from "@/components/corrida/TablaItems";
 import { DialogoAgregarLineas } from "@/components/corrida/DialogoAgregarLineas";
 import {
@@ -437,6 +438,11 @@ export default function Corrida() {
           </button>
         )}
       </div>
+
+      {/* Resumen por capítulo. Solo aparece si la corrida vino de un presupuesto con
+          capítulos (ruta IDU). El backend manda las filas YA sumadas: acá no se suma
+          dinero, se pinta. */}
+      <ResumenCapitulos capitulos={corrida?.capitulos ?? []} />
 
       {/* Dense table. `onComponer` navega a la mesa de composición y le manda la
           descripción como PISTA: antes de que exista una propuesta el expediente

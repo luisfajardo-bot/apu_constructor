@@ -118,6 +118,9 @@ export default function TablaItems({
   // Sin una sola fila revisada la columna Veredicto estaría entera vacía, y una
   // columna vacía igual empuja el scroll horizontal: no se dibuja.
   const hayVeredicto = items.some((it) => it.revision);
+  // Corrida plana: ni columna ni filtro de capítulo. La tabla queda EXACTAMENTE como
+  // estaba, que es lo que mantiene verdes los tests viejos de esta pantalla.
+  const hayCapitulo = items.some((it) => it.capitulo_codigo);
   // Misma razón que `hayVeredicto`: sin una sola fila que ofrezca componer la
   // columna quedaría entera vacía y aun así empujaría el scroll horizontal.
   const hayAcciones = onComponer !== undefined
@@ -353,12 +356,14 @@ export default function TablaItems({
     }
   }
 
-  // 1 chevron + 12 columnas de datos, más Veredicto cuando hay alguno, Acciones
-  // cuando alguna fila ofrece componer, y la de selección cuando está activa. Se
-  // mira `items` (no `visible`): así la cabecera y el colSpan de las filas
-  // expandidas/vacías salen SIEMPRE del mismo dato.
+  // 1 chevron + 12 columnas de datos, más Capítulo cuando la corrida vino de un
+  // presupuesto, Veredicto cuando hay alguno, Acciones cuando alguna fila ofrece
+  // componer, y la de selección cuando está activa. Se mira `items` (no `visible`):
+  // así la cabecera y el colSpan de las filas expandidas/vacías salen SIEMPRE del
+  // mismo dato.
   const TOTAL_COLS =
-    13 + (hayVeredicto ? 1 : 0) + (hayAcciones ? 1 : 0) + (seleccionable ? 1 : 0);
+    13 + (hayCapitulo ? 1 : 0) + (hayVeredicto ? 1 : 0) + (hayAcciones ? 1 : 0)
+    + (seleccionable ? 1 : 0);
 
   return (
     <div className="flex flex-col gap-2">
@@ -412,7 +417,8 @@ export default function TablaItems({
       <Table>
         {control ? (
           <CabeceraFiltros control={control} conSeleccion={seleccionable}
-                           conVeredicto={hayVeredicto} conAcciones={hayAcciones} />
+                           conVeredicto={hayVeredicto} conCapitulo={hayCapitulo}
+                           conAcciones={hayAcciones} />
         ) : (
           <TableHeader>
             <TableRow>
@@ -421,6 +427,7 @@ export default function TablaItems({
               <TableHead className="text-xs w-12">Und</TableHead>
               <TableHead className="text-xs w-20 text-right">Cantidad</TableHead>
               <TableHead className="text-xs w-24">Ítem</TableHead>
+              {hayCapitulo && <TableHead className="text-xs w-32">Capítulo</TableHead>}
               <TableHead className="text-xs w-28">APU</TableHead>
               <TableHead className="text-xs w-20">Estado</TableHead>
               {hayVeredicto && <TableHead className="text-xs w-28">Veredicto</TableHead>}
@@ -484,6 +491,12 @@ export default function TablaItems({
                     {it.cantidad.toLocaleString("es-CO")}
                   </TableCell>
                   <TableCell className="text-xs font-mono">{it.item}</TableCell>
+                  {hayCapitulo && (
+                    <TableCell className="text-[11px]">
+                      {it.capitulo_codigo &&
+                        `${it.capitulo_codigo} · ${it.capitulo_nombre}`}
+                    </TableCell>
+                  )}
                   <TableCell className="text-xs font-mono text-muted-foreground">
                     {it.apu_codigo}
                   </TableCell>

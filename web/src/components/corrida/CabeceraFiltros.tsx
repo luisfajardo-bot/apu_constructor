@@ -18,6 +18,7 @@ const COLS: Col[] = [
   { clave: "unidad", label: "Und", tipo: "select", ancho: "w-12" },
   { clave: "cantidad", label: "Cantidad", tipo: "num", ancho: "w-20", derecha: true },
   { clave: "item", label: "Ítem", tipo: "texto", ancho: "w-24" },
+  { clave: "capitulo", label: "Capítulo", tipo: "texto", ancho: "w-32" },
   { clave: "apu", label: "APU", tipo: "texto", ancho: "w-28" },
   { clave: "status", label: "Estado", tipo: "select", ancho: "w-20" },
   { clave: "veredicto", label: "Veredicto", tipo: "select", ancho: "w-28" },
@@ -54,6 +55,7 @@ export default function CabeceraFiltros({
   control,
   conSeleccion = false,
   conVeredicto = true,
+  conCapitulo = false,
   conAcciones = false,
 }: {
   control: ControlCorridaTabla;
@@ -62,11 +64,15 @@ export default function CabeceraFiltros({
   /** false = la corrida no tiene ni un veredicto: la columna no se dibuja (14
    *  columnas no caben en un portátil, y esta estaría entera vacía). */
   conVeredicto?: boolean;
+  /** false = la corrida no vino de un presupuesto por capítulos: la columna no se
+   *  dibuja, igual que Veredicto. Una corrida plana queda EXACTAMENTE como estaba. */
+  conCapitulo?: boolean;
   /** true = alguna fila ofrece Componer: se reserva la celda de esa columna. No
    *  se filtra ni se ordena por ella (no es un dato de la línea, es un botón). */
   conAcciones?: boolean;
 }) {
-  const cols = conVeredicto ? COLS : COLS.filter((c) => c.clave !== "veredicto");
+  const cols = COLS.filter((c) => (c.clave !== "veredicto" || conVeredicto)
+                                   && (c.clave !== "capitulo" || conCapitulo));
   const flecha = (clave: ClaveColumna) =>
     control.orden?.clave === clave ? (control.orden.dir === "asc" ? "↑" : "↓") : "";
 

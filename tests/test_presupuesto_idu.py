@@ -167,6 +167,20 @@ def test_clasificar_resumen_notas_y_vacias():
     assert _clasificar() == IGNORADA
 
 
+def test_clasificar_resumen_global_no_es_actividad_ni_con_cantidad():
+    # La cantidad vacía NO puede ser la única defensa: una celda mal alineada o una
+    # fórmula residual metería la fila de resumen entre las actividades, en silencio.
+    assert _clasificar(codigo="VALOR PARA OBRAS SIN REDES (INCLUYE A.I.U)",
+                       cantidad=5) == IGNORADA
+    assert _clasificar(codigo="TOTAL OBRAS LICITACIÓN ( A+B+C+D)",
+                       cantidad=1) == IGNORADA
+    assert _clasificar(codigo="VALOR PARA REEMBOLSO DE ENSAYOS DE LABORATORIO",
+                       descripcion="X", cantidad=3) == IGNORADA
+    # Y los códigos IDU de verdad siguen pasando, diurnos y nocturnos.
+    assert _clasificar(codigo="3007", cantidad=1) == ACTIVIDAD
+    assert _clasificar(codigo="10799 N", cantidad=1) == ACTIVIDAD
+
+
 def test_clasificar_no_cuenta_actividad_sin_cantidad_positiva():
     assert _clasificar(codigo="3007", item_pago="1.001", descripcion="X",
                        cantidad=0) == IGNORADA
@@ -181,6 +195,8 @@ def test_clasificar_capitulo_gana_sobre_subtitulo():
     assert _clasificar(item_pago="2", descripcion="PAVIMENTOS") == CAPITULO
     # Sin ítem entero, la misma forma es un subtítulo.
     assert _clasificar(item_pago="", descripcion="PAVIMENTOS") == SUBTITULO
+    # Sin descripción no es capítulo: un capítulo sin nombre no existe.
+    assert _clasificar(item_pago="2", descripcion="") == IGNORADA
 
 
 # ------------------------------------------- detección de hoja y de encabezado
@@ -209,6 +225,21 @@ def test_elegir_hoja_avisa_cuando_hay_varias_candidatas():
     hoja, ambiguas = elegir_hoja(wb, None)
     assert hoja == "PROPUESTA ECONÓMICA"
     assert ambiguas == ["PROPUESTA ECONÓMICA (2)"]
+
+
+def test_elegir_hoja_ordena_por_preferencia_no_por_orden_del_libro():
+    # PROPUESTA ECONÓMICA es donde el IDU pone el presupuesto vigente: gana aunque la
+    # pestaña esté después.
+    wb = _LibroFalso(["FOR 1-PPTO OFICIAL", "PROPUESTA ECONÓMICA"])
+    hoja, ambiguas = elegir_hoja(wb, None)
+    assert hoja == "PROPUESTA ECONÓMICA"
+    assert ambiguas == ["FOR 1-PPTO OFICIAL"]
+
+
+def test_elegir_hoja_entre_iguales_respeta_el_orden_del_libro():
+    # El caso real: dos PROPUESTA ECONÓMICA. El empate lo rompe el orden de pestañas.
+    wb = _LibroFalso(["PROPUESTA ECONÓMICA", "PROPUESTA ECONÓMICA (2)"])
+    assert elegir_hoja(wb, None) == ("PROPUESTA ECONÓMICA", ["PROPUESTA ECONÓMICA (2)"])
 
 
 def test_elegir_hoja_acepta_las_variantes_conocidas():

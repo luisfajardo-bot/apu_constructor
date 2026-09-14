@@ -161,14 +161,24 @@ def clasificar_fila(*, codigo: str, item_pago: str, descripcion: str,
     """Qué es esta fila del Formulario 1. Determinístico, sin IA y sin heurísticas.
 
     El ORDEN importa y es parte del contrato: la primera regla que aplica gana.
-      1. encabezado repetido      -> ENCABEZADO   (la fila 2201 del archivo real)
-      2. todo vacío               -> IGNORADA
-      3. col Nº empieza "subtotal"-> SUBTOTAL
-      4. Nº vacío + ítem entero   -> CAPITULO
-      5. Nº vacío + "TURNO…"      -> TURNO
-      6. Nº vacío + descripción   -> SUBTITULO
-      7. cantidad > 0 + Nº        -> ACTIVIDAD
-      8. resto                    -> IGNORADA    (resumen, notas, firmas, valores globales)
+      1. encabezado repetido              -> ENCABEZADO  (la fila 2201 del archivo real)
+      2. todo vacío                       -> IGNORADA
+      3. col Nº empieza "subtotal"        -> SUBTOTAL
+      4. Nº vacío + descripción + ítem entero -> CAPITULO
+      5. Nº vacío + descripción "TURNO…"  -> TURNO
+      6. Nº vacío + descripción           -> SUBTITULO
+      7. cantidad > 0 + Nº con forma de código -> ACTIVIDAD
+      8. resto                            -> IGNORADA  (resumen, notas, firmas, globales)
+
+    Las reglas 4, 5 y 6 exigen descripción: un capítulo sin nombre no existe, y sin
+    descripción la fila no es ninguna de las tres.
+
+    La regla 7 pide que `Nº` tenga **forma de código IDU** (`_es_codigo_item`) y no
+    solo que no esté vacío. Sin eso, la única defensa contra las filas de resumen
+    global (`VALOR PARA OBRAS SIN REDES (INCLUYE A.I.U)`, `TOTAL OBRAS LICITACIÓN`)
+    sería que su columna CANTIDAD viniera vacía — y el día que una traiga un número
+    por una celda mal alineada o una fórmula residual, se contaría como actividad sin
+    que nada se queje. Es el peor modo de falla de este parser: silencioso.
     """
     if es_encabezado:
         return ENCABEZADO
@@ -185,7 +195,7 @@ def clasificar_fila(*, codigo: str, item_pago: str, descripcion: str,
         if normalizar(desc).startswith("TURNO"):
             return TURNO
         return SUBTITULO
-    if cod and _cantidad_valida(cantidad):
+    if _cantidad_valida(cantidad) and _es_codigo_item(cod):
         return ACTIVIDAD
     return IGNORADA
 
@@ -231,8 +241,20 @@ def elegir_hoja(wb, hoja: Optional[str]) -> tuple[Optional[str], list[str]]:
     """
     if hoja:
         return (hoja if hoja in wb.sheetnames else None), []
-    candidatas = [n for n in wb.sheetnames
-                  if any(f in norm_encabezado(n) for f in _HOJAS_CANDIDATAS)]
+
+    def preferencia(nombre: str) -> int:
+        n = norm_encabezado(nombre)
+        return next((i for i, f in enumerate(_HOJAS_CANDIDATAS) if f in n),
+                    len(_HOJAS_CANDIDATAS))
+
+    # Orden POR PREFERENCIA, no por el orden de las pestañas del libro: si un archivo
+    # trae `FOR 1-PPTO OFICIAL` antes que `PROPUESTA ECONÓMICA`, gana la segunda, que
+    # es donde el IDU pone el presupuesto vigente. `sorted` es estable, así que entre
+    # dos nombres del mismo fragmento sigue mandando el orden del libro (el caso real:
+    # `PROPUESTA ECONÓMICA` antes que `PROPUESTA ECONÓMICA (2)`).
+    candidatas = sorted(
+        (n for n in wb.sheetnames if preferencia(n) < len(_HOJAS_CANDIDATAS)),
+        key=preferencia)
     if not candidatas:
         return None, []
     return candidatas[0], candidatas[1:]

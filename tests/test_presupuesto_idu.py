@@ -185,7 +185,8 @@ def test_clasificar_capitulo_gana_sobre_subtitulo():
 
 # ------------------------------------------- detección de hoja y de encabezado
 from apu_tool.dominio.presupuesto import (  # noqa: E402
-    COLUMNAS_OBLIGATORIAS, elegir_hoja, encontrar_encabezado,
+    COLUMNAS_OBLIGATORIAS, _es_fila_encabezado, elegir_hoja,
+    encontrar_encabezado,
 )
 
 
@@ -273,3 +274,38 @@ def test_encontrar_encabezado_sin_encabezado_devuelve_menos_uno():
     assert idx == -1
     assert mapeo == {}
     assert faltan == sorted(COLUMNAS_OBLIGATORIAS)
+
+
+# ------------------------------------------------- fixture del Formulario 1
+import openpyxl  # noqa: E402
+
+from tests.fixtures_idu import (  # noqa: E402
+    ACTIVIDADES_CAP_1, ACTIVIDADES_CAP_2, escribir_formulario,
+)
+
+
+def test_fixture_conserva_el_formato_del_item_de_pago(tmp_path):
+    # Si el fixture no reprodujera el float CON su formato, el test del cero
+    # significativo estaría probando algo que el archivo real no hace.
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p, read_only=True, data_only=True)
+    ws = wb["PROPUESTA ECONÓMICA"]
+    formatos = {c.value: c.number_format
+                for fila in ws.iter_rows(min_col=4, max_col=4) for c in fila
+                if isinstance(c.value, float)}
+    wb.close()
+    assert formatos[2.01] == "0.000"
+
+
+def test_fixture_reproduce_la_estructura_del_archivo_real(tmp_path):
+    # El encabezado NO está en la fila 1, y hay un segundo encabezado a mitad.
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p, read_only=True, data_only=True)
+    filas = [[c.value for c in f] for f in wb["PROPUESTA ECONÓMICA"].iter_rows()]
+    wb.close()
+    idx, mapeo, faltan = encontrar_encabezado(filas)
+    assert idx == 4                      # 0-based; fila 5 del Excel
+    assert faltan == []
+    assert _es_fila_encabezado(filas[24], mapeo)   # el encabezado repetido
+    n_actividades = len(ACTIVIDADES_CAP_1) + len(ACTIVIDADES_CAP_2)
+    assert n_actividades == 5

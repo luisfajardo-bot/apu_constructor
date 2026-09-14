@@ -314,7 +314,14 @@ class Capitulo:
 
 @dataclass(frozen=True)
 class Advertencia:
-    """Algo que el usuario tiene que mirar, pero que no impide importar."""
+    """Algo que el usuario tiene que mirar, pero que no impide importar.
+
+    OJO (invariante #1): `detalle` es texto libre y a veces lleva MONTOS adentro
+    («El Excel dice 67.153 y el recálculo da 67.154»). `privacy.assert_no_money` mira
+    nombres de clave, no valores, así que este campo pasaría el guardián con el dinero
+    dentro del string. Es la misma trampa que CLAUDE.md marca para las alertas de
+    costeo: una advertencia NUNCA puede entrar a un payload hacia la IA.
+    """
     tipo: str            # de TIPOS_ADVERTENCIA
     fila: int            # 0 = no aplica a una fila puntual
     detalle: str
@@ -323,12 +330,17 @@ class Advertencia:
         return {"tipo": self.tipo, "fila": self.fila, "detalle": self.detalle}
 
 
+# Vocabulario cerrado de advertencias. SOLO las que el parser emite de verdad: un
+# vocabulario que promete tipos que nadie dispara es peor que uno corto, porque el
+# frontend los pinta en su leyenda y el usuario los espera. `item_pago_formato_inusual`
+# y `formula_sin_valor` se cayeron de esta lista por eso — no hay un caso medido en el
+# archivo real que los justifique, y `fila_relevante_ignorada` ya cubre el daño
+# concreto (una fila que parecía actividad y no entró).
 TIPOS_ADVERTENCIA = (
     "hoja_ambigua", "actividad_sin_capitulo", "capitulo_sin_actividades",
     "capitulo_ambiguo", "total_fila_no_concilia", "subtotal_no_concilia",
     "codigo_apu_vacio", "unidad_vacia", "encabezado_repetido",
-    "item_pago_formato_inusual", "formula_sin_valor", "fila_relevante_ignorada",
-    "oferta_diligenciada",
+    "fila_relevante_ignorada", "oferta_diligenciada",
 )
 
 
@@ -414,6 +426,16 @@ class _Recorrido:
             if tipo == ENCABEZADO:
                 self.avisos.append(Advertencia(
                     "encabezado_repetido", n, "Fila de encabezado repetida; se ignoró."))
+            elif tipo == IGNORADA and _es_codigo_item(codigo) and desc:
+                # Tiene código de APU y descripción: parece una actividad de verdad,
+                # pero su cantidad no es un número positivo (texto, cero, vacío, una
+                # fórmula sin valor almacenado). Irse callada sería borrar una actividad
+                # del presupuesto sin que nadie se entere — el modo de falla que este
+                # parser existe para no tener.
+                self.avisos.append(Advertencia(
+                    "fila_relevante_ignorada", n,
+                    f"«{desc[:60]}» trae código {codigo} pero su cantidad no es un "
+                    f"número positivo ({_val(fila, m.get('cantidad'))!r}); no se importó."))
 
     def cerrar(self) -> None:
         """Avisa del último capítulo si se quedó sin actividades."""

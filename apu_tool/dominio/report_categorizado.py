@@ -33,6 +33,70 @@ def agrupar_por_capitulo(apus: list[AssembledApu]) -> dict[str, list[AssembledAp
     return grupos
 
 
+SIN_CAPITULO = "(sin capítulo)"
+
+
+def _costeada(a: AssembledApu) -> bool:
+    """La actividad tiene costo válido.
+
+    MISMA regla que `servicio/corridas.seqs_sin_apu`: con APU, o con un costo declarado
+    a mano POSITIVO. Si las dos divergen, el resumen diría que un capítulo está completo
+    mientras el candado del cuadro lo frena por esa misma fila.
+    """
+    return bool(a.apu_codigo) or a.costo_unitario > 0
+
+
+def resumen_por_capitulo(apus: list[AssembledApu]) -> list[dict]:
+    """Contractual, costo y cobertura por capítulo. LA fuente única de este cálculo.
+
+    La consumen la API (`vista_corrida["capitulos"]`), la web (que solo pinta) y las dos
+    hojas de Excel. Es deliberado: tener la misma suma en tres lados es cómo se llega a
+    tres números distintos para la misma corrida en la misma pantalla.
+
+    Redondeo: suma `contractual_total` y `costo_total`, que YA pasaron por
+    `mul_redondeado`. No redondea dos veces ni vuelve a multiplicar.
+
+    Las actividades sin APU no se esconden: cuentan en `sin_apu`, bajan la cobertura y
+    dejan el capítulo en `completo: false`, que es lo que la web usa para mostrar el
+    margen como parcial en vez de como cifra definitiva.
+    """
+    grupos: dict[str, list[AssembledApu]] = {}
+    nombres: dict[str, str] = {}
+    for a in apus:
+        cod = a.item.capitulo_codigo
+        nombres.setdefault(cod, (a.item.capitulo_nombre or SIN_CAPITULO) if cod
+                           else SIN_CAPITULO)
+        grupos.setdefault(cod, []).append(a)
+
+    salida: list[dict] = []
+    for orden, (cod, filas) in enumerate(grupos.items(), start=1):
+        contractual = sum(a.contractual_total for a in filas)
+        costo = sum(a.costo_total for a in filas)
+        costeadas = [a for a in filas if _costeada(a)]
+        salida.append({
+            "codigo": cod,
+            "nombre": nombres[cod],
+            "orden": orden,
+            "actividades": len(filas),
+            "con_apu": len(costeadas),
+            "sin_apu": len(filas) - len(costeadas),
+            "contractual": contractual,
+            "contractual_sin_aiu": sum(a.contractual_total_sin_aiu for a in filas),
+            "costo": costo,
+            "diferencia": contractual - costo,
+            "margen_pct": ((contractual - costo) / contractual) if contractual else 0.0,
+            "cobertura": (len(costeadas) / len(filas)) if filas else 0.0,
+            # Ponderada por valor: un capítulo puede estar al 96 % por conteo y al 40 %
+            # por plata si las dos actividades que faltan son las caras. Medido en el
+            # archivo real: el capítulo 2 tiene 52 actividades y dos valen 5.700 millones.
+            "cobertura_valor": (sum(a.contractual_total for a in costeadas) / contractual
+                                if contractual else 0.0),
+            "completo": (len(costeadas) == len(filas)
+                         and not any(alertas_costeo(a) for a in filas)),
+        })
+    return salida
+
+
 def _build_resumen_capitulo(ws, grupos: dict[str, list[AssembledApu]]) -> None:
     headers = ["Capítulo", "Total Contractual", "Total Costo",
                "Margen Total", "Margen %"]

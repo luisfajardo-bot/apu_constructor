@@ -465,3 +465,30 @@ def test_read_presupuesto_sigue_funcionando(tmp_path):
                              hoja="PROPUESTA ECONÓMICA")
     assert len(items) == 5
     assert items[0].categoria == "1 · PRELIMINARES"
+
+
+def test_una_fila_que_parece_actividad_no_se_ignora_callada(tmp_path):
+    # Código de APU válido + descripción, pero cantidad no numérica: la fila NO entra,
+    # y eso tiene que quedar dicho. Callarlo seria borrar una actividad del presupuesto.
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    ws = wb["PROPUESTA ECONÓMICA"]
+    ws.cell(row=10, column=9).value = "n/a"        # la cantidad de la primera actividad
+    wb.save(p)
+    lec = leer_formulario_idu(p)
+    avisos = [a for a in lec.advertencias if a.tipo == "fila_relevante_ignorada"]
+    assert len(avisos) == 1
+    assert avisos[0].fila == 10
+    assert "3007" in avisos[0].detalle
+    assert len(lec.items) == 4                     # la fila no se importó
+
+
+def test_el_vocabulario_de_advertencias_solo_promete_lo_que_emite():
+    # Un tipo declarado que nadie dispara es una promesa vacía: el frontend lo pinta en
+    # su leyenda y el usuario lo espera.
+    import re as _re
+    from pathlib import Path
+    from apu_tool.dominio.presupuesto import TIPOS_ADVERTENCIA
+    fuente = Path("apu_tool/dominio/presupuesto.py").read_text(encoding="utf-8")
+    emitidos = set(_re.findall(r'Advertencia\(\s*"([a-z_]+)"', fuente))
+    assert set(TIPOS_ADVERTENCIA) == emitidos

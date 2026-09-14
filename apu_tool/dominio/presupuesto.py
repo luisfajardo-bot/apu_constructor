@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from pathlib import Path
+from typing import Optional
 
 import openpyxl
 
@@ -183,6 +184,90 @@ def clasificar_fila(*, codigo: str, item_pago: str, descripcion: str,
     if cod and _cantidad_valida(cantidad):
         return ACTIVIDAD
     return IGNORADA
+
+
+# Encabezado normalizado -> campo lógico. Se compara por IGUALDAD sobre el nombre
+# normalizado, no por "contiene": `VALOR UNITARIO SIN AIU OFERTADO` y `VALOR UNITARIO
+# BASICO SIN AIU` comparten casi todas las palabras, y un match por subcadena leería la
+# oferta del proponente como si fuera el presupuesto oficial.
+_ENCABEZADOS: dict[str, tuple[str, ...]] = {
+    "codigo":           ("no", "no de apu", "codigo"),
+    "item_pago":        ("item de pago",),
+    "descripcion":      ("descripcion",),
+    "unidad":           ("und", "unidad"),
+    "cantidad":         ("cantidad",),
+    "unitario_sin_aiu": ("valor unitario basico sin aiu",),
+    "unitario_con_aiu": ("valor unitario incluye aiu",),
+    "total_excel":      ("valor total",),
+}
+
+# Sin una de estas no se puede leer el archivo: es error bloqueante, no advertencia.
+# `total_excel` NO está: solo sirve para conciliar, y su ausencia no impide importar.
+COLUMNAS_OBLIGATORIAS = ("codigo", "item_pago", "descripcion", "unidad",
+                         "cantidad", "unitario_sin_aiu", "unitario_con_aiu")
+
+# Fragmentos que identifican la hoja del presupuesto, en orden de preferencia.
+_HOJAS_CANDIDATAS = ("propuesta economica", "ppto oficial", "presupuesto oficial")
+
+# Cuántas filas se miran buscando el encabezado. En el archivo real está en la 10;
+# 40 deja margen de sobra para un membrete más largo sin recorrer el libro entero.
+MAX_FILAS_ENCABEZADO = 40
+
+
+def elegir_hoja(wb, hoja: Optional[str]) -> tuple[Optional[str], list[str]]:
+    """(hoja elegida, otras candidatas). `None` si no hay ninguna compatible.
+
+    Una `hoja` explícita gana sobre la detección, pero solo si existe: pedir una hoja
+    que no está es un error, no una razón para adivinar otra.
+
+    Cuando hay varias candidatas se toma la primera y las demás se devuelven para
+    ADVERTIR cuál se usó. El archivo de referencia trae `PROPUESTA ECONÓMICA` y
+    `PROPUESTA ECONÓMICA (2)`, idénticas valor a valor; elegir en silencio estaría bien
+    hasta el día en que no sean idénticas.
+    """
+    if hoja:
+        return (hoja if hoja in wb.sheetnames else None), []
+    candidatas = [n for n in wb.sheetnames
+                  if any(f in norm_encabezado(n) for f in _HOJAS_CANDIDATAS)]
+    if not candidatas:
+        return None, []
+    return candidatas[0], candidatas[1:]
+
+
+def _es_fila_encabezado(fila: list, mapeo: dict[str, int]) -> bool:
+    """La fila repite el encabezado ya mapeado (≥ 2 columnas coinciden).
+
+    Dos y no una: `DESCRIPCION` suelta aparece como texto de alguna celda, pero que
+    coincidan dos de las columnas mapeadas a la vez solo pasa en un encabezado real.
+    """
+    aciertos = sum(1 for campo, idx in mapeo.items()
+                   if norm_encabezado(_get(fila, idx)) in _ENCABEZADOS[campo])
+    return aciertos >= 2
+
+
+def encontrar_encabezado(filas: list[list]) -> tuple[int, dict[str, int], list[str]]:
+    """(índice 0-based del encabezado, mapeo campo->columna, obligatorias que faltan).
+
+    Devuelve `-1` y un mapeo vacío si no encontró encabezado en las primeras
+    `MAX_FILAS_ENCABEZADO` filas. Nunca levanta: el llamador decide si eso es un error
+    bloqueante (lo es) y con qué mensaje.
+    """
+    for i, fila in enumerate(filas[:MAX_FILAS_ENCABEZADO]):
+        mapeo: dict[str, int] = {}
+        for idx, celda in enumerate(fila):
+            nombre = norm_encabezado(celda)
+            if not nombre:
+                continue
+            for campo, variantes in _ENCABEZADOS.items():
+                if campo not in mapeo and nombre in variantes:
+                    mapeo[campo] = idx
+                    break
+        # Una fila es el encabezado si trae la descripción y algo más: así una fila de
+        # datos con un "UND" suelto no se confunde con el encabezado.
+        if "descripcion" in mapeo and len(mapeo) >= 3:
+            faltan = sorted(c for c in COLUMNAS_OBLIGATORIAS if c not in mapeo)
+            return i, mapeo, faltan
+    return -1, {}, sorted(COLUMNAS_OBLIGATORIAS)
 
 
 def _to_float(v) -> float:

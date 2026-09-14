@@ -181,3 +181,95 @@ def test_clasificar_capitulo_gana_sobre_subtitulo():
     assert _clasificar(item_pago="2", descripcion="PAVIMENTOS") == CAPITULO
     # Sin ítem entero, la misma forma es un subtítulo.
     assert _clasificar(item_pago="", descripcion="PAVIMENTOS") == SUBTITULO
+
+
+# ------------------------------------------- detección de hoja y de encabezado
+from apu_tool.dominio.presupuesto import (  # noqa: E402
+    COLUMNAS_OBLIGATORIAS, elegir_hoja, encontrar_encabezado,
+)
+
+
+class _LibroFalso:
+    """Stand-in de un Workbook: `elegir_hoja` solo necesita `sheetnames`."""
+    def __init__(self, nombres):
+        self.sheetnames = list(nombres)
+
+
+def test_elegir_hoja_encuentra_propuesta_economica():
+    wb = _LibroFalso(["PROPUESTA ECONÓMICA", "INDICAR CÓDIGO DEL ITEM DE PAGO"])
+    hoja, ambiguas = elegir_hoja(wb, None)
+    assert hoja == "PROPUESTA ECONÓMICA"
+    assert ambiguas == []
+
+
+def test_elegir_hoja_avisa_cuando_hay_varias_candidatas():
+    # El archivo real trae dos hojas idénticas: se usa la primera y se avisa.
+    wb = _LibroFalso(["PROPUESTA ECONÓMICA", "PROPUESTA ECONÓMICA (2)", "OTRA"])
+    hoja, ambiguas = elegir_hoja(wb, None)
+    assert hoja == "PROPUESTA ECONÓMICA"
+    assert ambiguas == ["PROPUESTA ECONÓMICA (2)"]
+
+
+def test_elegir_hoja_acepta_las_variantes_conocidas():
+    assert elegir_hoja(_LibroFalso(["FOR 1-PPTO OFICIAL"]), None)[0] == "FOR 1-PPTO OFICIAL"
+    assert elegir_hoja(_LibroFalso(["Presupuesto Oficial"]), None)[0] == "Presupuesto Oficial"
+
+
+def test_elegir_hoja_respeta_la_hoja_explicita():
+    wb = _LibroFalso(["PROPUESTA ECONÓMICA", "HOJA RARA"])
+    assert elegir_hoja(wb, "HOJA RARA")[0] == "HOJA RARA"
+
+
+def test_elegir_hoja_sin_candidata_devuelve_none():
+    hoja, ambiguas = elegir_hoja(_LibroFalso(["Hoja1", "Datos"]), None)
+    assert hoja is None
+    assert ambiguas == []
+
+
+def test_elegir_hoja_explicita_inexistente_devuelve_none():
+    assert elegir_hoja(_LibroFalso(["PROPUESTA ECONÓMICA"]), "NO EXISTE")[0] is None
+
+
+_ENCABEZADO_REAL = [
+    None, None, "Nº", "ITEM DE PAGO", "ESPECIFICACIONES ", None, "DESCRIPCION",
+    "UND.", "CANTIDAD", "VALOR UNITARIO BASICO (SIN A.I.U)",
+    "VALOR UNITARIO (INCLUYE A.I.U)", "VALOR TOTAL                    ",
+    None, None, "VALOR UNITARIO SIN AIU OFERTADO",
+]
+
+
+def test_encontrar_encabezado_mapea_las_columnas_por_nombre():
+    filas = [[None] * 15, [None] * 15, _ENCABEZADO_REAL, [None] * 15]
+    idx, mapeo, faltan = encontrar_encabezado(filas)
+    assert idx == 2                       # 0-based; es la fila 3 del Excel
+    assert faltan == []
+    assert mapeo["codigo"] == 2
+    assert mapeo["item_pago"] == 3
+    assert mapeo["descripcion"] == 6
+    assert mapeo["unidad"] == 7
+    assert mapeo["cantidad"] == 8
+    assert mapeo["unitario_sin_aiu"] == 9
+    assert mapeo["unitario_con_aiu"] == 10
+    assert mapeo["total_excel"] == 11
+
+
+def test_encontrar_encabezado_ignora_las_columnas_de_oferta():
+    # `VALOR UNITARIO SIN AIU OFERTADO` no debe robarle el mapeo a la col J.
+    _idx, mapeo, _faltan = encontrar_encabezado([_ENCABEZADO_REAL])
+    assert mapeo["unitario_sin_aiu"] == 9
+    assert 14 not in mapeo.values()
+
+
+def test_encontrar_encabezado_reporta_las_columnas_que_faltan():
+    fila = [None, None, "Nº", "ITEM DE PAGO", None, None, "DESCRIPCION", None, None]
+    idx, _mapeo, faltan = encontrar_encabezado([fila])
+    assert idx == 0
+    assert "cantidad" in faltan
+    assert "unitario_con_aiu" in faltan
+
+
+def test_encontrar_encabezado_sin_encabezado_devuelve_menos_uno():
+    idx, mapeo, faltan = encontrar_encabezado([[None] * 8, ["a", "b", "c"]])
+    assert idx == -1
+    assert mapeo == {}
+    assert faltan == sorted(COLUMNAS_OBLIGATORIAS)

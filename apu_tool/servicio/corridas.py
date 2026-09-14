@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 import time
 from dataclasses import asdict, replace
 from datetime import datetime
@@ -19,15 +21,19 @@ from weakref import WeakKeyDictionary
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.datos.repositorio import ArmadoDuplicado, CorridaEliminada
+from apu_tool.dominio import entrada
 from apu_tool.dominio.alertas import alertas_costeo
 from apu_tool.dominio.assemble import Assembler, ApuAdvisor
+from apu_tool.dominio.presupuesto import LecturaPresupuesto
 from apu_tool.dominio.pricing import PricingEngine
 from apu_tool.dominio.report import write_report
+from apu_tool.dominio.report_categorizado import resumen_por_capitulo
 from apu_tool.dominio.revision import IANoDisponible, Revisor, revisar
 from apu_tool.nucleo.models import (
     ApuComponent, AssembledApu, CostedComponent, CorridaItemRow, CorridaMeta,
-    LicitacionItem, MatchStatus,
+    EntidadOrigen, LicitacionItem, MatchStatus,
 )
+from apu_tool.nucleo.redondeo import mul_redondeado
 from apu_tool.nucleo.texto import normalizar
 from apu_tool.servicio.auditoria import registrar_auditoria
 
@@ -104,6 +110,136 @@ def _estructura(componentes) -> list[dict]:
             for c in componentes]
 
 
+# Cuántas filas con problema viajan en la previsualización. La previa valida la
+# ESTRUCTURA (14 capítulos, 1939 actividades, conciliación); no reemplaza a la tabla de
+# la corrida. Mandar 1939 filas para que el usuario mire 3 es medio mega por nada.
+MAX_FILAS_SENALADAS = 50
+
+
+def leer_para_corrida(entidad: EntidadOrigen, contenido: bytes,
+                      nombre_archivo: str) -> LecturaPresupuesto:
+    """Bytes subidos -> LecturaPresupuesto, con el lector de esa entidad.
+
+    El archivo se escribe a un temporal porque openpyxl necesita una ruta; se borra
+    siempre. El archivo subido NO se persiste (igual que en el camino de hoy): lo que
+    sobrevive es `plan_json`, que es de donde se reanuda el armado.
+    """
+    sufijo = Path(nombre_archivo or "presupuesto.xlsx").suffix or ".xlsx"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=sufijo) as tmp:
+        tmp.write(contenido)
+        ruta = tmp.name
+    try:
+        return entrada.leer(entidad, ruta)
+    finally:
+        os.unlink(ruta)
+
+
+def previsualizar(entidad: EntidadOrigen, contenido: bytes,
+                  nombre_archivo: str) -> dict:
+    """Qué se detectó en el archivo, SIN escribir una sola fila.
+
+    Es el paso que el usuario aprueba. No hay borrador ni estado temporal en la base: el
+    navegador se queda con el archivo y lo reenvía al aprobar, y el parser es
+    determinístico, así que la segunda lectura da lo mismo. Cancelar no deja nada que
+    limpiar porque nunca hubo nada.
+    """
+    lectura = leer_para_corrida(entidad, contenido, nombre_archivo)
+    capitulos = _capitulos_de_lectura(lectura)
+    return {
+        "entidad": entidad.value,
+        "formato": entrada.formato_de(entidad),
+        "archivo": nombre_archivo,
+        "hoja": lectura.hoja,
+        "fila_encabezado": lectura.fila_encabezado,
+        "parser_version": lectura.parser_version,
+        "capitulos": capitulos,
+        "actividades": len(lectura.items),
+        "filas_ignoradas": lectura.filas_ignoradas,
+        "totales": {
+            "contractual": sum(c["contractual"] for c in capitulos),
+            "contractual_sin_aiu": sum(c["contractual_sin_aiu"] for c in capitulos),
+        },
+        "conciliacion": lectura.conciliacion,
+        "errores": list(lectura.errores),
+        "advertencias": [a.to_dict() for a in lectura.advertencias],
+        "filas_senaladas": [a.to_dict() for a in lectura.advertencias
+                            if a.fila][:MAX_FILAS_SENALADAS],
+        # Lo decide el SERVIDOR; el botón del navegador solo obedece. `POST /corridas`
+        # lo vuelve a evaluar al crear, porque el cliente puede mentir.
+        "puede_aprobar": not lectura.errores and bool(lectura.items),
+        "requiere_confirmacion": entrada.requiere_confirmacion(entidad),
+    }
+
+
+def _capitulos_de_lectura(lectura: LecturaPresupuesto) -> list[dict]:
+    """Capítulos con sus totales contractuales, para la previsualización.
+
+    Acá todavía NO hay costo (nada está armado), así que no se puede usar
+    `resumen_por_capitulo`, que trabaja sobre `AssembledApu`. Lo que sí se comparte es la
+    regla de redondeo: `mul_redondeado`, la misma que usará el armado, para que el total
+    que el usuario aprueba sea exactamente el que después ve en la corrida.
+    """
+    if not lectura.capitulos:
+        # Sin capítulos declarados no hay estructura que revisar: una lista plana no
+        # gana una tabla de un solo grupo "(sin capítulo)", que sería puro ruido. El
+        # grupo huérfano SÍ aparece cuando hay capítulos y alguna actividad quedó antes
+        # del primero — ahí es una anomalía que el usuario tiene que ver.
+        return []
+    por_codigo: dict[str, dict] = {}
+    for cap in lectura.capitulos:
+        por_codigo[cap.codigo] = {**cap.to_dict(), "actividades": 0,
+                                  "contractual": 0, "contractual_sin_aiu": 0}
+    for it in lectura.items:
+        fila = por_codigo.get(it.capitulo_codigo)
+        if fila is None:
+            fila = por_codigo.setdefault(it.capitulo_codigo, {
+                "codigo": it.capitulo_codigo,
+                "nombre": it.capitulo_nombre or "(sin capítulo)",
+                "orden": len(por_codigo) + 1, "fila_origen": 0,
+                "actividades": 0, "contractual": 0, "contractual_sin_aiu": 0})
+        fila["actividades"] += 1
+        fila["contractual"] += mul_redondeado(it.precio_contractual, it.cantidad)
+        fila["contractual_sin_aiu"] += mul_redondeado(
+            it.precio_contractual_sin_aiu, it.cantidad)
+    return list(por_codigo.values())
+
+
+def origen_de(entidad: EntidadOrigen, lectura: LecturaPresupuesto,
+              nombre_archivo: str, confirmada_por: Optional[str]) -> dict:
+    """El registro de importación que se guarda en `corrida.origen_json`.
+
+    Una sola columna y no ocho, como `plan_json`: la migración es una línea por backend.
+    Lleva la conciliación adentro, o sea DINERO, y por eso `origen_json` está en
+    `privacy._FORBIDDEN_KEYS` — este objeto nunca cruza hacia la IA.
+    """
+    return {
+        "entidad": entidad.value,
+        "formato": entrada.formato_de(entidad),
+        "archivo": nombre_archivo,
+        "hoja": lectura.hoja,
+        "fila_encabezado": lectura.fila_encabezado,
+        "parser_version": lectura.parser_version,
+        "importada_en": datetime.now().isoformat(timespec="seconds"),
+        "confirmada_por": confirmada_por or "",
+        "estructura_confirmada": True,
+        "capitulos": len(lectura.capitulos),
+        "actividades": len(lectura.items),
+        "filas_ignoradas": lectura.filas_ignoradas,
+        "advertencias": _contar_advertencias(lectura),
+        "conciliacion": dict(lectura.conciliacion),
+    }
+
+
+def _contar_advertencias(lectura: LecturaPresupuesto) -> dict:
+    """{tipo: cuántas}. El detalle de cada una NO se persiste: la previa ya lo mostró y
+    el usuario ya lo confirmó; lo que importa después es el rastro de que las hubo.
+    Además `Advertencia.detalle` lleva montos en texto libre (ver su docstring)."""
+    conteo: dict[str, int] = {}
+    for a in lectura.advertencias:
+        conteo[a.tipo] = conteo.get(a.tipo, 0) + 1
+    return conteo
+
+
 def nombre_desde_archivo(filename: str) -> str:
     """Nombre por defecto de una corrida: el archivo subido SIN su última extensión.
 
@@ -169,7 +305,8 @@ def crear_corrida_encolada(alm: Almacen, archivo: str, items: list[LicitacionIte
                            turno_def: str, use_ai: Optional[bool],
                            carpeta_id: Optional[int] = None,
                            nombre: Optional[str] = None,
-                           lista_precios_id: Optional[int] = None) -> int:
+                           lista_precios_id: Optional[int] = None,
+                           origen: Optional[dict] = None) -> int:
     """Crea la corrida en 'armando' con su plan guardado y devuelve el id. NO arma:
     de eso se encarga quien llame a `armar_pendientes` — el camino sincrónico de la
     CLI/GUI, o el worker, que la ve porque `estado='armando'` ES la cola.
@@ -191,6 +328,12 @@ def crear_corrida_encolada(alm: Almacen, archivo: str, items: list[LicitacionIte
         raise ArmadoDuplicado(archivo, armado_en_curso(alm, carpeta_id, archivo)) from e
     alm.corridas.set_plan(corrida_id, json.dumps([asdict(i) for i in items],
                                                  ensure_ascii=False))
+    if origen is not None:
+        # Igual que el plan: una escritura aparte en vez de ensuciar el INSERT de
+        # los dos backends. Va DESPUÉS del plan a propósito — si esto falla, la
+        # corrida queda armable; al revés quedaría sellada y sin qué armar.
+        alm.corridas.set_origen(corrida_id,
+                                json.dumps(origen, ensure_ascii=False))
     return corrida_id
 
 
@@ -296,11 +439,13 @@ def construir_corrida(alm: Almacen, archivo: str, items: list[LicitacionItem],
                       turno_def: str, use_ai: Optional[bool],
                       carpeta_id: Optional[int] = None,
                       nombre: Optional[str] = None,
-                      lista_precios_id: Optional[int] = None) -> int:
+                      lista_precios_id: Optional[int] = None,
+                      origen: Optional[dict] = None) -> int:
     """Crea y arma en el acto, sin worker ni cola. Lo usan la CLI, la GUI y los tests:
     ahí no hay proceso de fondo que espere, y las listas son chicas."""
     corrida_id = crear_corrida_encolada(alm, archivo, items, turno_def, use_ai,
-                                        carpeta_id, nombre, lista_precios_id)
+                                        carpeta_id, nombre, lista_precios_id,
+                                        origen)
     t0 = time.monotonic()
     for evento, _payload in armar_pendientes(alm, corrida_id, items, desde_seq=0):
         if evento == "error":
@@ -544,6 +689,13 @@ def _vista_item(ens: AssembledApu, seq: int, status: str,
         "apu_codigo": ens.apu_codigo, "apu_nombre": ens.apu_nombre,
         "status": status, "confianza": round(ens.confianza, 4),
         "precio_contractual": ens.item.precio_contractual,
+        # --- ruta IDU: capítulo y la segunda base del contractual ----------------
+        # Vacíos en una corrida plana; el frontend esconde la columna cuando lo están.
+        "capitulo_codigo": ens.item.capitulo_codigo,
+        "capitulo_nombre": ens.item.capitulo_nombre,
+        "item_pago_original": ens.item.item_pago_original,
+        "precio_contractual_sin_aiu": ens.item.precio_contractual_sin_aiu,
+        "contractual_total_sin_aiu": ens.contractual_total_sin_aiu,
         "costo_unitario": ens.costo_unitario, "margen_unitario": ens.margen_unitario,
         "costo_manual": ens.costo_a_mano,
         "margen_pct": ens.margen_pct, "contractual_total": ens.contractual_total,
@@ -637,6 +789,14 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
         "lista_nombre": _nombre_lista(alm, meta.lista_precios_id),
         "duracion_ms": meta.duracion_ms, "items": items,
         "totales": _totales(ensambles, rows),
+        # Resumen por capítulo, calculado por la ÚNICA función que lo hace
+        # (dominio/report_categorizado.resumen_por_capitulo). El frontend solo pinta:
+        # no suma dinero. `[]` cuando la corrida no tiene capítulos.
+        "capitulos": (resumen_por_capitulo(ensambles)
+                      if any(e.item.capitulo_codigo for e in ensambles) else []),
+        # De dónde salió el presupuesto. None en corridas anteriores a la ruta IDU:
+        # la pantalla lo muestra como "sin clasificación por capítulo".
+        "origen": meta.origen,
         # Cómo va el armado que corre en el servidor (None si ya terminó). La pantalla
         # ya pide esta vista, así que el progreso no necesita endpoint propio.
         "armado": _progreso_armado(alm, meta, len(rows)),

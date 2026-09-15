@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { crearCorrida, crearSample, corridaEnCurso } from "@/api/corridas";
+import { crearCorrida, crearSample, corridaEnCurso, previsualizarCorrida }
+  from "@/api/corridas";
 import { listarCarpetas, crearCarpeta } from "@/api/carpetas";
 import { listarListas } from "@/api/listas";
-import { LISTA_PRINCIPAL_ID, type CarpetaNodo, type ListaPrecios } from "@/lib/tipos";
+import PreviaIdu from "@/components/corrida/PreviaIdu";
+import { ENTIDADES, LISTA_PRINCIPAL_ID, type CarpetaNodo, type Entidad,
+  type ListaPrecios, type PreviaPresupuesto } from "@/lib/tipos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -20,6 +23,14 @@ export default function CorridasInicio() {
   const enVuelo = useRef(false);
   const [nombre, setNombre] = useState("");
   const [nombreTocado, setNombreTocado] = useState(false);
+
+  // La entidad decide qué lector usa el backend y si hay que confirmar la estructura.
+  const [entidad, setEntidad] = useState<Entidad>("NO_IDENTIFICADA");
+  // La previa vive ACÁ, no en el servidor: el archivo sigue en el <input> y se reenvía
+  // al aprobar. Sin borrador que expirar, y sin corrida a medio crear si cierran la
+  // pestaña. Por eso "Cancelar" solo tiene que poner esto en null.
+  const [previa, setPrevia] = useState<PreviaPresupuesto | null>(null);
+  const requiereConfirmacion = entidad === "IDU";
 
   // Carpetas
   const [carpetas, setCarpetas] = useState<CarpetaNodo[]>([]);
@@ -100,6 +111,7 @@ export default function CorridasInicio() {
 
   function handleArchivoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
+    setPrevia(null);   // otro archivo: la previa vieja ya no describe nada
     if (f && !nombreTocado) setNombre(stripExt(f.name));
   }
 
@@ -128,23 +140,62 @@ export default function CorridasInicio() {
     }
   }
 
-  async function handleArmar(e: React.FormEvent) {
-    e.preventDefault();
-    if (carpetaDestino == null) {
-      toast.error("Elige una carpeta");
-      return;
-    }
-    const archivo = fileRef.current?.files?.[0];
-    if (!archivo) {
-      toast.error("Selecciona un archivo .xlsx o .csv");
-      return;
-    }
+  /** El formulario como FormData. Uno solo para previsualizar y para crear: si fueran
+   *  dos, el archivo que se aprueba podría no ser el que se previsualizó. */
+  function armarForm(archivo: File, confirmada: boolean): FormData {
     const form = new FormData();
     form.append("archivo", archivo);
     form.append("carpeta_id", String(carpetaDestino));
     form.append("nombre", nombre.trim());
+    form.append("entidad", entidad);
+    if (confirmada) form.append("confirmada", "true");
     if (listaId !== LISTA_PRINCIPAL_ID) form.append("lista_id", String(listaId));
-    await encolar(() => crearCorrida(form), "Error al crear la corrida");
+    return form;
+  }
+
+  /** El archivo elegido, o null avisando qué falta. Los dos caminos (previsualizar y
+   *  aprobar) validan lo mismo, así que la comprobación vive en un solo lugar. */
+  function archivoElegido(): File | null {
+    if (carpetaDestino == null) {
+      toast.error("Elige una carpeta");
+      return null;
+    }
+    const f = fileRef.current?.files?.[0];
+    if (!f) {
+      toast.error("Selecciona un archivo .xlsx o .csv");
+      return null;
+    }
+    return f;
+  }
+
+  async function handleArmar(e: React.FormEvent) {
+    e.preventDefault();
+    const archivo = archivoElegido();
+    if (!archivo) return;
+    if (!requiereConfirmacion) {
+      await encolar(() => crearCorrida(armarForm(archivo, false)),
+                    "Error al crear la corrida");
+      return;
+    }
+    // Ruta IDU: primero se muestra lo que se detectó. No se crea nada todavía.
+    if (enVuelo.current) return;
+    enVuelo.current = true;
+    setCargando(true);
+    try {
+      setPrevia(await previsualizarCorrida(armarForm(archivo, false)));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo leer el archivo");
+    } finally {
+      enVuelo.current = false;
+      setCargando(false);
+    }
+  }
+
+  async function handleAprobar() {
+    const archivo = archivoElegido();
+    if (!archivo) return;
+    await encolar(() => crearCorrida(armarForm(archivo, true)),
+                  "Error al crear la corrida");
   }
 
   async function handleEjemplo() {
@@ -152,9 +203,35 @@ export default function CorridasInicio() {
   }
 
   return (
-    <div className="max-w-[400px] px-7 py-6">
+    <div className={(previa ? "max-w-[900px]" : "max-w-[400px]") + " px-7 py-6"}>
       <h2 className="mb-4 text-[15px] font-semibold tracking-[-0.01em]">Nueva corrida</h2>
       <form onSubmit={handleArmar} className="flex flex-col gap-3">
+        {/* Entidad: decide el lector del backend. Nativo como los demás selects de esta
+            pantalla — los tests usan fireEvent.change y getByRole("option"), que no
+            funcionan contra el Select de Radix. */}
+        <div className={CLASE_CAMPO}>
+          <label className={CLASE_ETIQUETA} htmlFor="entidad">
+            Entidad o fuente del presupuesto
+          </label>
+          <select
+            id="entidad"
+            value={entidad}
+            onChange={(e) => { setEntidad(e.target.value as Entidad); setPrevia(null); }}
+            disabled={cargando}
+            className={CLASE_SELECT}
+          >
+            {ENTIDADES.map((e) => (
+              <option key={e.valor} value={e.valor}>{e.etiqueta}</option>
+            ))}
+          </select>
+          {requiereConfirmacion && (
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              Se lee el Formulario 1 de Presupuesto Oficial y se confirma la estructura
+              antes de armar.
+            </p>
+          )}
+        </div>
+
         {/* Archivo */}
         <div className={CLASE_CAMPO}>
           <label className={CLASE_ETIQUETA} htmlFor="archivo">
@@ -282,13 +359,25 @@ export default function CorridasInicio() {
               Y ahora el deshabilitado SE VE gris: antes usaba estilo inline y el
               disabled:opacity-50 del primitivo no llegaba a aplicarse. */}
           <Button type="submit" disabled={cargando}>
-            {cargando ? "Armando…" : "Armar"}
+            {cargando
+              ? (requiereConfirmacion ? "Leyendo…" : "Armando…")
+              : (requiereConfirmacion ? "Previsualizar" : "Armar")}
           </Button>
           <Button type="button" variant="outline" disabled={cargando} onClick={handleEjemplo}>
             Usar ejemplo
           </Button>
         </div>
       </form>
+
+      {previa && (
+        <PreviaIdu
+          previa={previa}
+          cargando={cargando}
+          onAprobar={handleAprobar}
+          onCancelar={() => setPrevia(null)}
+          onCambiarArchivo={() => { setPrevia(null); fileRef.current?.click(); }}
+        />
+      )}
     </div>
   );
 }

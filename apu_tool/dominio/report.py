@@ -59,8 +59,10 @@ def _autosize(ws, widths: dict[int, int]) -> None:
 
 def _build_resumen(ws, apus: list[AssembledApu]) -> None:
     headers = ["Ítem", "Descripción", "Und", "Cantidad",
-               "P. Contractual", "Costo Unit.", "Margen Unit.", "Margen %",
-               "Total Contractual", "Total Costo", "Margen Total",
+               "P. Contractual", "P. Contractual sin AIU",
+               "Costo Unit.", "Margen Unit.", "Margen %",
+               "Total Contractual", "Total Contractual sin AIU",
+               "Total Costo", "Margen Total",
                "Estado", "Confianza", "APU base"]
     ws.append(headers)
     _style_header(ws, 1, len(headers))
@@ -69,17 +71,18 @@ def _build_resumen(ws, apus: list[AssembledApu]) -> None:
     for a in apus:
         ws.append([
             a.item.item, a.item.descripcion, a.unidad, a.item.cantidad,
-            a.item.precio_contractual, a.costo_unitario, a.margen_unitario,
-            a.margen_pct, a.contractual_total, a.costo_total, a.margen_total,
+            a.item.precio_contractual, a.item.precio_contractual_sin_aiu,
+            a.costo_unitario, a.margen_unitario, a.margen_pct,
+            a.contractual_total, a.contractual_total_sin_aiu,
+            a.costo_total, a.margen_total,
             _STATUS_LABEL.get(a.status, a.status), round(a.confianza, 2),
             a.apu_codigo or "",
         ])
         r = ws.max_row
-        for col in (4,):
-            ws.cell(row=r, column=col).number_format = _REND
-        for col in (5, 6, 7, 9, 10, 11):
+        ws.cell(row=r, column=4).number_format = _REND
+        for col in (5, 6, 7, 8, 10, 11, 12, 13):
             ws.cell(row=r, column=col).number_format = _MONEY
-        ws.cell(row=r, column=8).number_format = _PCT
+        ws.cell(row=r, column=9).number_format = _PCT
         # Resaltado por prioridad: alerta de costeo > margen negativo > revisar.
         if alertas_costeo(a):
             fill = _ALERT_FILL
@@ -97,13 +100,14 @@ def _build_resumen(ws, apus: list[AssembledApu]) -> None:
 
     # Fila de totales.
     total_contractual = sum(a.contractual_total for a in apus)
+    total_sin_aiu = sum(a.contractual_total_sin_aiu for a in apus)
     total_costo = sum(a.costo_total for a in apus)
     total_margen = total_contractual - total_costo
     ws.append([])
-    ws.append(["", "TOTALES", "", "", "", "", "", "",
-               total_contractual, total_costo, total_margen, "", "", ""])
+    ws.append(["", "TOTALES", "", "", "", "", "", "", "",
+               total_contractual, total_sin_aiu, total_costo, total_margen, "", "", ""])
     r = ws.max_row
-    for col in (9, 10, 11):
+    for col in (10, 11, 12, 13):
         c = ws.cell(row=r, column=col)
         c.number_format = _MONEY
         c.font = Font(bold=True)
@@ -112,13 +116,13 @@ def _build_resumen(ws, apus: list[AssembledApu]) -> None:
     ws.cell(row=r, column=2).font = Font(bold=True)
 
     # Margen % global.
-    ws.append(["", "MARGEN % GLOBAL", "", "", "", "", "", "",
-               "", "", (total_margen / total_contractual) if total_contractual else 0])
-    ws.cell(row=ws.max_row, column=11).number_format = _PCT
+    ws.append(["", "MARGEN % GLOBAL", "", "", "", "", "", "", "",
+               "", "", "", (total_margen / total_contractual) if total_contractual else 0])
+    ws.cell(row=ws.max_row, column=13).number_format = _PCT
     ws.cell(row=ws.max_row, column=2).font = Font(bold=True)
 
-    _autosize(ws, {1: 8, 2: 50, 3: 6, 4: 12, 5: 16, 6: 14, 7: 14, 8: 10,
-                   9: 18, 10: 16, 11: 16, 12: 12, 13: 10, 14: 10})
+    _autosize(ws, {1: 8, 2: 50, 3: 6, 4: 12, 5: 16, 6: 20, 7: 14, 8: 14, 9: 10,
+                   10: 18, 11: 20, 12: 16, 13: 16, 14: 12, 15: 10, 16: 10})
 
 
 def _build_desglose(ws, apus: list[AssembledApu]) -> None:
@@ -179,6 +183,14 @@ def write_report(apus: list[AssembledApu], path: Path | str,
     wb.active.title = "RESUMEN"
     _build_desglose(wb.create_sheet("DESGLOSE"), apus)
     _build_alertas(wb.create_sheet("ALERTAS"), apus)
+    # Solo si la corrida trae capítulos (ruta IDU). Una corrida plana produce el mismo
+    # cuadro de siempre, hoja por hoja: no se le agrega una pestaña vacía.
+    # El import va ADENTRO a propósito: `report_categorizado` importa los estilos de
+    # este módulo, así que a nivel de módulo sería un ciclo.
+    from apu_tool.dominio.report_categorizado import (
+        HOJA_CAPITULOS, escribir_hoja_capitulos, hay_capitulos)
+    if hay_capitulos(apus):
+        escribir_hoja_capitulos(wb.create_sheet(HOJA_CAPITULOS), apus)
     # Metadatos.
     meta = wb.create_sheet("INFO")
     meta.append(["Generado", date.today().isoformat()])

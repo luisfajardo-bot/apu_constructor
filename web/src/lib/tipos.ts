@@ -216,6 +216,15 @@ export interface ItemCuadro {
   costo_manual: boolean;
   // Veredicto de la última revisión con IA, o null si esta fila no se revisó.
   revision: VeredictoIA | null;
+  // --- ruta IDU: vacíos/0 en una corrida plana, y ahí la columna no se muestra ---
+  /** "2" — la referencia estable del capítulo, no su nombre. */
+  capitulo_codigo: string;
+  capitulo_nombre: string;
+  /** El ítem de pago tal como venía en el Formulario 1 ("2,001-N"). */
+  item_pago_original: string;
+  /** Valor unitario básico SIN AIU. `precio_contractual` es el que INCLUYE AIU. */
+  precio_contractual_sin_aiu: number;
+  contractual_total_sin_aiu: number;
 }
 
 /** Una línea tal como la leyó el Excel, antes de armarse. */
@@ -385,6 +394,11 @@ export interface CorridaDetalle {
   ia_disponible: boolean;
   /** Solo con estado 'armando' o 'armado_detenido'; `null` si ya terminó de armarse. */
   armado: ProgresoArmado | null;
+  /** Resumen por capítulo, ya sumado por el backend. `[]` si la corrida no tiene
+   *  capítulos. El frontend NO suma dinero: solo pinta lo que llega. */
+  capitulos: CapituloCorrida[];
+  /** De dónde salió el presupuesto. `null` en corridas anteriores a la ruta IDU. */
+  origen: OrigenCorrida | null;
   /** Solo en la respuesta de `igualarCostoAlContractual`. */
   igualadas?: number[];
   /** Seqs con contractual ≤ 0: no se tocan (regla "nada en $0"). */
@@ -539,4 +553,102 @@ export interface ImportResultado {
   creados: number;
   subapus_marcados?: number;
   errores: { codigo: string; turno?: string; error: string }[];
+}
+
+// ─── Ruta IDU (Formulario 1 de Presupuesto Oficial) ──────────────────────────
+
+/** De dónde salió el presupuesto. Espejo de `EntidadOrigen` del backend: valor
+ *  estable, no texto libre. Solo IDU tiene lector especializado hoy; las demás usan
+ *  el importador genérico a propósito. */
+export const ENTIDADES = [
+  { valor: "NO_IDENTIFICADA", etiqueta: "No identificada" },
+  { valor: "IDU", etiqueta: "IDU" },
+  { valor: "METRO_BOGOTA", etiqueta: "Metro de Bogotá" },
+  { valor: "INVIAS", etiqueta: "INVÍAS" },
+  { valor: "OTRA_PUBLICA", etiqueta: "Otra entidad pública" },
+  { valor: "PRIVADA", etiqueta: "Cliente privado" },
+] as const;
+
+export type Entidad = (typeof ENTIDADES)[number]["valor"];
+
+export interface AdvertenciaPresupuesto {
+  tipo: string;
+  /** Fila del Excel, 1-based. 0 = no aplica a una fila puntual. */
+  fila: number;
+  detalle: string;
+}
+
+export interface CapituloPrevia {
+  codigo: string;
+  nombre: string;
+  orden: number;
+  fila_origen: number;
+  actividades: number;
+  contractual: number;
+  contractual_sin_aiu: number;
+}
+
+/** Lo que se detectó en el archivo, ANTES de crear nada. */
+export interface PreviaPresupuesto {
+  entidad: Entidad;
+  formato: string;
+  archivo: string;
+  hoja: string;
+  fila_encabezado: number;
+  parser_version: string;
+  capitulos: CapituloPrevia[];
+  actividades: number;
+  filas_ignoradas: number;
+  totales: { contractual: number; contractual_sin_aiu: number };
+  conciliacion: {
+    contractual_con_aiu?: number;
+    contractual_sin_aiu?: number;
+    subtotales_excel?: number;
+    diferencia?: number;
+    subtotales_ok?: boolean;
+  };
+  errores: string[];
+  advertencias: AdvertenciaPresupuesto[];
+  /** Hasta 50 advertencias que apuntan a una fila concreta. */
+  filas_senaladas: AdvertenciaPresupuesto[];
+  /** Lo decide el SERVIDOR. El botón solo obedece; `POST /corridas` lo revalida. */
+  puede_aprobar: boolean;
+  requiere_confirmacion: boolean;
+}
+
+/** Una fila del resumen por capítulo de una corrida ya armada. Lo calcula el backend
+ *  (`dominio/report_categorizado.resumen_por_capitulo`): acá NO se suma dinero. */
+export interface CapituloCorrida {
+  codigo: string;
+  nombre: string;
+  orden: number;
+  actividades: number;
+  con_apu: number;
+  sin_apu: number;
+  contractual: number;
+  contractual_sin_aiu: number;
+  costo: number;
+  diferencia: number;
+  margen_pct: number;
+  /** Actividades con costo válido / actividades totales. */
+  cobertura: number;
+  /** Lo mismo, pero ponderado por contractual: un capítulo puede estar al 95 % por
+   *  conteo y a la mitad por plata si lo que falta son las actividades caras. */
+  cobertura_valor: number;
+  /** false = hay actividades sin costear; el margen NO es definitivo. */
+  completo: boolean;
+}
+
+/** Metadatos de importación de la corrida. */
+export interface OrigenCorrida {
+  entidad?: string;
+  formato?: string;
+  archivo?: string;
+  hoja?: string;
+  fila_encabezado?: number;
+  parser_version?: string;
+  importada_en?: string;
+  confirmada_por?: string;
+  capitulos?: number;
+  actividades?: number;
 }

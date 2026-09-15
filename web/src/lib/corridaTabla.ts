@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import type { DictamenIA, ItemCuadro, VeredictoIA } from "@/lib/tipos";
 
 export type ClaveColumna =
-  | "descripcion" | "unidad" | "cantidad" | "item" | "apu" | "status" | "veredicto"
+  | "descripcion" | "unidad" | "cantidad" | "item" | "capitulo" | "apu" | "status"
+  | "veredicto"
   | "precio_contractual" | "costo_unitario"
   | "contractual_total" | "costo_total" | "margen_total" | "margen_pct";
 
@@ -16,6 +17,10 @@ export interface FiltrosColumna {
   unidad: string;
   cantidad: FiltroRango;
   item: string;
+  /** Código y nombre del capítulo en un solo texto: buscar "2" o "PAVIMENTOS"
+   *  encuentra lo mismo. Vacío en una corrida sin capítulos, donde la columna
+   *  ni siquiera se dibuja. */
+  capitulo: string;
   apu: string;
   status: string;
   veredicto: string;
@@ -29,7 +34,7 @@ export interface FiltrosColumna {
 
 export const FILTROS_VACIOS: FiltrosColumna = {
   descripcion: "", unidad: "", cantidad: { min: "", max: "" }, item: "",
-  apu: "", status: "", veredicto: "",
+  capitulo: "", apu: "", status: "", veredicto: "",
   precio_contractual: { min: "", max: "" }, costo_unitario: { min: "", max: "" },
   contractual_total: { min: "", max: "" },
   costo_total: { min: "", max: "" }, margen_total: { min: "", max: "" },
@@ -85,7 +90,8 @@ export function valorVeredicto(it: ItemCuadro): string {
 }
 
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
-const CLAVES_TEXTO: ClaveColumna[] = ["descripcion", "unidad", "item", "apu", "status", "veredicto"];
+const CLAVES_TEXTO: ClaveColumna[] = ["descripcion", "unidad", "item", "capitulo",
+                                      "apu", "status", "veredicto"];
 
 export function normalizar(s: string): string {
   return (s ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
@@ -111,6 +117,9 @@ export function filtrar(items: ItemCuadro[], f: FiltrosColumna, soloRevision: bo
     if (f.unidad && it.unidad !== f.unidad) return false;
     if (!enRango(it.cantidad, f.cantidad)) return false;
     if (!contiene(it.item, f.item)) return false;
+    // Código y nombre juntos, igual que el filtro de APU: el usuario escribe "2" o
+    // "PAVIMENTOS" y encuentra las mismas filas.
+    if (!contiene(`${it.capitulo_codigo} ${it.capitulo_nombre}`, f.capitulo)) return false;
     // "__sin__" es un centinela dentro del filtro de texto de APU, no un estado
     // aparte: el contador rojo de "sin APU" reusa la maquinaria de filtros que ya
     // existe (y el botón "Limpiar" lo apaga como a cualquier otro filtro).
@@ -138,6 +147,7 @@ function valorTexto(it: ItemCuadro, clave: ClaveColumna): string {
     case "descripcion": return it.descripcion;
     case "unidad": return it.unidad;
     case "item": return it.item;
+    case "capitulo": return `${it.capitulo_codigo} ${it.capitulo_nombre}`;
     case "apu": return it.apu_codigo;
     case "status": return it.status;
     case "veredicto": return valorVeredicto(it);

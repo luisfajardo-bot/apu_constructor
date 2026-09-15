@@ -68,11 +68,12 @@ flowchart TD
 | `composicion.py` | Contrato de la composición asistida. |
 | `composicion_agente.py` | Orquestador de la composición asistida. |
 | `cruce.py` | Resolución del cruce insumo-de-APU -> insumo-de-catálogo, por código + nombre. |
+| `entrada.py` | Qué lector le toca a cada entidad. El ÚNICO punto de despacho. |
 | `integridad.py` | Chequeo de integridad del vínculo APU -> insumo (que cruza las dos bases). |
 | `licitacion.py` | Lectura de la lista de licitación (entrada) y generación de un ejemplo. |
 | `matching.py` | Matcher determinístico de actividades contra el catálogo de APUs. |
 | `pipeline.py` | Funciones de alto nivel que orquestan el pipeline completo. |
-| `presupuesto.py` | Lectura del presupuesto oficial por capítulos (hoja FOR 1-PPTO OFICIAL). |
+| `presupuesto.py` | Lectura del Formulario 1 de Presupuesto Oficial del IDU, por capítulos. |
 | `pricing.py` | Motor de precios determinístico. |
 | `privacy.py` | Frontera de privacidad de precios. |
 | `report.py` | Generación del cuadro resumen (salida en Excel). |

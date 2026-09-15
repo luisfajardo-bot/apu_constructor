@@ -141,5 +141,9 @@ def test_generar_cuadro_costea_con_la_lista(alm, np):
     alm.corridas.set_modo(cid, "congelada")
     out = svc.generar_cuadro(alm, cid)
     ws = openpyxl.load_workbook(out)["RESUMEN"]
-    costo_item_2 = ws.cell(row=3, column=6).value   # "Costo Unit." del ítem SIN snapshot
+    # Por NOMBRE de columna y no por posición: la hoja RESUMEN gana columnas cada tanto
+    # (las dos bases del contractual de la ruta IDU corrieron todos los índices), y un
+    # test que lee `column=6` a ciegas se rompe sin que nada esté mal de verdad.
+    enc = [c.value for c in ws[1]]
+    costo_item_2 = ws.cell(row=3, column=enc.index("Costo Unit.") + 1).value
     assert costo_item_2 == 8400

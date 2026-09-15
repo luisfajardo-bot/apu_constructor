@@ -146,11 +146,41 @@ class LicitacionItem:
     shift: str                    # DIURNO / NOCTURNO (del ítem o global)
     categoria: str = ""           # capítulo del presupuesto (vacío en el flujo plano)
     codigo_sugerido: str = ""     # código IDU dado por el presupuesto (armado directo)
+    # --- capítulo del presupuesto (ruta IDU) ---------------------------------
+    # Todos con default: es lo que hace que una corrida encolada ANTES de este deploy
+    # se rehidrate sin explotar (`plan_de` hace LicitacionItem(**d) sobre plan_json).
+    # `categoria` se conserva y se DERIVA de estos dos en el lector, para que
+    # report_categorizado.agrupar_por_capitulo y sus tests sigan funcionando igual.
+    capitulo_codigo: str = ""          # "2" — la referencia estable, no el nombre
+    capitulo_nombre: str = ""          # "PAVIMENTOS"
+    item_pago_original: str = ""       # "2,001-N" tal cual venía, para auditoría
+    fila_origen: int = 0               # fila del Excel de la que salió, 1-based
+    # Valor unitario SIN AIU. Es DINERO: va a privacy._FORBIDDEN_KEYS y NO viaja en
+    # licitacion_item_to_dict. `precio_contractual` sigue siendo el que manda (con AIU).
+    precio_contractual_sin_aiu: float = 0.0
 
 
 # ---------------------------------------------------------------------------
 # Resultados del pipeline
 # ---------------------------------------------------------------------------
+class EntidadOrigen(str, Enum):
+    """De dónde salió el presupuesto de una corrida.
+
+    Valor ESTABLE, no texto libre: se guarda en `corrida.origen_json` y decide qué
+    lector se usa (`dominio/entrada.py`). `str, Enum` como MatchStatus, para que
+    sobreviva a `asdict()` y a `json.dumps()` sin conversión.
+
+    Hoy solo IDU tiene lector especializado. Las demás usan el importador genérico a
+    propósito: no se inventan reglas para formatos que nadie midió.
+    """
+    IDU = "IDU"
+    METRO_BOGOTA = "METRO_BOGOTA"
+    INVIAS = "INVIAS"
+    OTRA_PUBLICA = "OTRA_PUBLICA"
+    PRIVADA = "PRIVADA"
+    NO_IDENTIFICADA = "NO_IDENTIFICADA"
+
+
 class MatchStatus(str, Enum):
     AUTO = "auto"          # match determinístico claro
     REVIEW = "review"      # candidato dudoso, requiere confirmación
@@ -232,6 +262,16 @@ class AssembledApu:
         return mul_redondeado(self.item.precio_contractual, self.item.cantidad)
 
     @property
+    def contractual_total_sin_aiu(self) -> int:
+        """El contractual del ítem sin AIU. Misma regla de redondeo que su gemelo.
+
+        La ruta IDU lee las DOS bases del Formulario 1: `precio_contractual` es el valor
+        unitario CON AIU (el que concilia con el VALOR TOTAL del Excel) y este es el
+        básico sin AIU. 0 en una corrida que no venga del IDU.
+        """
+        return mul_redondeado(self.item.precio_contractual_sin_aiu, self.item.cantidad)
+
+    @property
     def margen_unitario(self) -> float:
         return self.item.precio_contractual - self.costo_unitario
 
@@ -285,6 +325,11 @@ class CorridaMeta:
     ultimo_error: Optional[str] = None     # por qué se detuvo, en español, para la pantalla
     armando_por: Optional[str] = None      # id de la instancia que la reclamó
     armando_desde: Optional[str] = None    # ISO 8601 del último latido de esa reclama
+    # De dónde salió el presupuesto (entidad, hoja, parser, conciliación). None en toda
+    # corrida anterior a la ruta IDU: la pantalla lo muestra como "sin clasificación por
+    # capítulo", y NO se inventan capítulos retroactivamente. Es DINERO por dentro (la
+    # conciliación): `origen_json` está en privacy._FORBIDDEN_KEYS.
+    origen: Optional[dict] = None
 
 
 @dataclass

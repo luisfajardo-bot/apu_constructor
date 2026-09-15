@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 53 planes, 60 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 54 planes, 61 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -34,6 +34,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 53 plane
 | Fecha | Título |
 | --- | --- |
 | 2026-09-14 | [[Specs/2026-09-14-descripciones-corrida-design|Ver completa la descripción de una actividad en la corrida]] |
+| 2026-09-11 | [[Specs/2026-09-11-ruta-idu-formulario-1-design|Ruta IDU — Formulario 1 de Presupuesto Oficial]] |
 | 2026-09-10 | [[Specs/2026-09-10-agente-composicion-design|Agente de composición asistida de APUs — fase 0 + fase 1: el expediente]] |
 | 2026-09-07 | [[Specs/2026-09-07-igualar-costo-contractual-design|Igualar el costo unitario al precio contractual]] |
 | 2026-09-07 | [[Specs/2026-09-07-armado-reanudable-design|Armado reanudable — el armado deja la petición y pasa a ser trabajo del servidor]] |
@@ -98,6 +99,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 53 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-09-11 | [[Planes/2026-09-11-ruta-idu-formulario-1|Ruta IDU — Formulario 1 · Plan de implementación]] |
 | 2026-09-10 | [[Planes/2026-09-10-agente-composicion|Agente de composición asistida de APUs — plan de implementación (fase 0 + fase 1)]] |
 | 2026-09-08 | [[Planes/2026-09-08-armado-reanudable|Armado reanudable — Implementation Plan]] |
 | 2026-09-07 | [[Planes/2026-09-07-igualar-costo-contractual|Igualar el costo unitario al precio contractual — Plan de implementación]] |

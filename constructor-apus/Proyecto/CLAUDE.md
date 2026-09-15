@@ -55,7 +55,9 @@ estructurada: es lo que pide `dominio/ai_assist.py`.
 
 ```
 Excel histórico ──seed──► SQLite/Postgres (precios, apus, corridas, perfiles, auditoría)
-lista licitación ──► encola ──► worker arma (reanudable) ──► confirma usuario ──► motor de precios
+entidad IDU ──► previsualiza (NO persiste) ──► usuario aprueba ──┐
+lista licitación ─────────────────────────────────────────────────┴► encola ──► worker
+   arma (reanudable) ──► confirma usuario ──► motor de precios
                                                           └─► cuadro resumen (Excel)
 corrida armada ──► revisión con IA (sin dinero) ──► propone veredicto ──► confirma usuario
 fila sin APU ──► composición con IA (sin dinero) ──► validación determinística
@@ -100,7 +102,8 @@ matching, modelo de IA, clasificación de precios.
 | Módulo | Responsabilidad |
 |--------|-----------------|
 | `licitacion.py`          | lectura de la lista de entrada + generador de ejemplo |
-| `presupuesto.py`         | lectura del presupuesto oficial por capítulos |
+| `presupuesto.py`         | lectura del Formulario 1 del IDU: capítulos, validación y conciliación |
+| `entrada.py`             | registro entidad → lector de presupuesto (único punto de despacho) |
 | `matching.py`            | matcher determinístico (fuzzy, sin dependencias externas) |
 | `cruce.py`               | cruce insumo-de-APU ↔ insumo-de-catálogo por código+nombre |
 | `compose.py`             | candidatos de insumos para el agente de composición + `rendimientos_observados()` (rango del insumo en la biblioteca) |
@@ -263,6 +266,30 @@ matching, modelo de IA, clasificación de precios.
   carpeta** (`ux_corrida_armando_archivo`, índice único parcial): es la protección del
   doble clic, y es un índice y no un `if` porque las dos peticiones de un doble clic
   llegan con milisegundos de diferencia.
+- **Entidad de origen y capítulos (ruta IDU).** Al crear una corrida se elige la
+  **entidad** (`nucleo/models.py::EntidadOrigen`: IDU, METRO_BOGOTA, INVIAS,
+  OTRA_PUBLICA, PRIVADA, NO_IDENTIFICADA). `dominio/entrada.py` es el **único** punto de
+  despacho —un diccionario `entidad → lector`, no una jerarquía de clases—; hoy solo IDU
+  tiene lector especializado y el resto usa el importador genérico **a propósito**.
+  Con IDU, `POST /api/corridas/previsualizar` lee el Formulario 1, detecta capítulos y
+  actividades y devuelve el resumen **sin escribir nada**; la corrida se crea recién
+  cuando el usuario aprueba, y `POST /api/corridas` exige `confirmada=true` **y relee y
+  revalida el archivo** (el flag es lo que dice el cliente, no una prueba).
+  La procedencia se guarda en **`corrida.origen_json`** (una sola columna, como
+  `plan_json`): entidad, formato, hoja, versión del parser, quién confirmó y la
+  conciliación. `NULL` en toda corrida anterior — eso es "sin clasificación por
+  capítulo", no un error, y **no se inventan capítulos retroactivamente**. Lleva dinero
+  adentro (la conciliación), así que está en `_FORBIDDEN_KEYS` igual que `plan_json`.
+  El capítulo de cada actividad **no tiene tabla**: viaja dentro de `item_json` y
+  `plan_json` (`LicitacionItem.capitulo_codigo` / `capitulo_nombre`), que es donde ya
+  viajaba `categoria`.
+- **Las dos bases del contractual.** En la ruta IDU, `precio_contractual` es el **valor
+  unitario CON AIU** (col K del Formulario 1), que es el que concilia exacto con el
+  `VALOR TOTAL` y con los subtotales del Excel. El básico sin AIU viaja aparte en
+  `precio_contractual_sin_aiu` y se muestra en columna propia, en la web y en el cuadro.
+  Ojo: el costo interno **no lleva AIU**, así que la diferencia contra el contractual
+  incluye el A.I.U. Medido sobre el archivo de referencia (1939 actividades):
+  158.456.072.140 con AIU, 123.871.215.068 sin AIU.
 - **Salidas:** `salidas/` (cuadros) y `ejemplos/` (licitaciones de ejemplo).
 - Fuentes de precio: `PRECIO IDU` se trata como **público**; el resto
   (`COSTO INTERNO`, `COMPRAS…`, etc.) como **interno/confidencial**
@@ -302,6 +329,22 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   (mira las filas que existen, y las que faltan armar no existen), así que el candado
   es `ArmadoIncompleto` y vive en `_exigir_armado_completo`. Sin él, una corrida
   detenida en 290 de 1939 emite un cuadro de 290 líneas que se ve entero.
+- No calcules el resumen por capítulo en dos lados.
+  `dominio/report_categorizado.py::resumen_por_capitulo` es la **ÚNICA** función que
+  suma por capítulo: la consumen la API (`vista_corrida["capitulos"]`), la web (que solo
+  pinta) y las dos hojas de Excel. El frontend no suma dinero.
+- No crees una corrida de la ruta IDU sin `confirmada=true`, y no confíes en ese flag:
+  el endpoint **relee y revalida** el archivo, porque el cliente puede mentir.
+- No le inventes reglas de formato a Metro, INVÍAS ni a las demás entidades. Están en el
+  registro de `dominio/entrada.py` apuntando al importador genérico **a propósito**: no
+  hay un archivo real medido que justifique otra cosa.
+- No metas una `Advertencia` del parser en un payload hacia la IA. Su `detalle` es texto
+  libre y lleva **montos adentro** («El Excel dice 67.153 y el recálculo da 67.154»);
+  `assert_no_money` mira nombres de clave, no valores. Misma trampa que las alertas de
+  costeo.
+- No agregues un tipo a `presupuesto.TIPOS_ADVERTENCIA` que nadie emita: hay un test que
+  compara el vocabulario contra los `Advertencia(...)` que el módulo construye de
+  verdad. Un tipo que nadie dispara es una promesa vacía que el frontend pinta igual.
 - No edites el Excel fuente ni borres `data/`, `salidas/`, `ejemplos/`.
 - No dupliques lógica de orquestación: reúsala desde `pipeline.py`.
 - No hagas que una lista que no sea Principal caiga al precio histórico ni al de

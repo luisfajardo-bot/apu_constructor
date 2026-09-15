@@ -28,6 +28,20 @@ def _load_schema() -> str:
     return SCHEMA_PATH.read_text(encoding="utf-8")
 
 
+def _json_o_none(crudo):
+    """Texto JSON -> dict. None si está vacío o si no parsea.
+
+    Tolerante a propósito: una corrida con basura en la columna no puede impedir que se
+    abra "Mis corridas". El origen es metadato de procedencia, no verdad operativa.
+    """
+    if not crudo:
+        return None
+    try:
+        return json.loads(crudo)
+    except (ValueError, TypeError):
+        return None
+
+
 class CorridasDB:
     """Backend SQLite de corridas. Implementa RepositorioCorridas."""
 
@@ -63,6 +77,8 @@ class CorridasDB:
                 conn.execute("ALTER TABLE corrida ADD COLUMN lista_precios_id INTEGER")
             if "plan_json" not in cols:
                 conn.execute("ALTER TABLE corrida ADD COLUMN plan_json TEXT")
+            if "origen_json" not in cols:
+                conn.execute("ALTER TABLE corrida ADD COLUMN origen_json TEXT")
             if "intentos" not in cols:
                 conn.execute("ALTER TABLE corrida ADD COLUMN intentos INTEGER NOT NULL DEFAULT 0")
             if "ultimo_error" not in cols:
@@ -334,6 +350,26 @@ class CorridasDB:
                              (int(corrida_id),)).fetchone()
         return r["plan_json"] if r else None
 
+    def set_origen(self, corrida_id: int, origen_json: str, conn=None) -> None:
+        """Guarda el origen de importación. Se escribe UNA vez, al crear la corrida.
+
+        Escritura aparte y no dentro del INSERT, por la misma razón que `set_plan`: no
+        ensucia el `crear_corrida` de los dos backends con una columna opcional.
+        """
+        sql = "UPDATE corrida SET origen_json=? WHERE id=?"
+        if conn is not None:
+            conn.execute(sql, (origen_json, int(corrida_id)))
+            return
+        with self.connect() as c:
+            c.execute(sql, (origen_json, int(corrida_id)))
+
+    def get_origen(self, corrida_id: int) -> Optional[str]:
+        """El JSON crudo del origen, o None si la corrida es anterior a la ruta IDU."""
+        with self.connect() as conn:
+            r = conn.execute("SELECT origen_json FROM corrida WHERE id=?",
+                             (int(corrida_id),)).fetchone()
+        return r["origen_json"] if r else None
+
     def max_seq(self, corrida_id: int) -> int:
         with self.connect() as conn:
             r = conn.execute("SELECT MAX(seq) AS m FROM corrida_item WHERE corrida_id=?",
@@ -450,14 +486,16 @@ class CorridasDB:
             intentos=(r["intentos"] if "intentos" in r.keys() else 0) or 0,
             ultimo_error=(r["ultimo_error"] if "ultimo_error" in r.keys() else None),
             armando_por=(r["armando_por"] if "armando_por" in r.keys() else None),
-            armando_desde=(r["armando_desde"] if "armando_desde" in r.keys() else None))
+            armando_desde=(r["armando_desde"] if "armando_desde" in r.keys() else None),
+            origen=_json_o_none(
+                r["origen_json"] if "origen_json" in r.keys() else None))
 
     # Columnas explícitas y NO `SELECT *`: `plan_json` pesa ~400 KB en una corrida de
     # 1900 ítems y este listado trae TODAS las corridas. Con `*`, abrir "Mis corridas"
     # arrastraría decenas de MB que nadie mira.
     _COLS_META = ("id, creada_en, archivo, turno_def, use_ai, estado, cuadro_path, "
                   "duracion_ms, modo, carpeta_id, nombre, lista_precios_id, "
-                  "intentos, ultimo_error, armando_por, armando_desde")
+                  "intentos, ultimo_error, armando_por, armando_desde, origen_json")
 
     def get_corrida(self, corrida_id: int) -> Optional[CorridaMeta]:
         with self.connect() as conn:

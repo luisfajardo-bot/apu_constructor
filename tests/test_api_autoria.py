@@ -65,14 +65,24 @@ def test_import_insumos_endpoint(tmp_path):
     cli, _ = _cli(tmp_path)
     data = _xlsx_insumos()
     pv = cli.post("/api/insumos/importar/preview",
-                  files={"archivo": ("insumos.xlsx", data, _XLSX)})
+                  files={"archivo": ("insumos.xlsx", data, _XLSX)},
+                  data={"fuente_import": "PRECIO IDU"})
     assert pv.status_code == 200
     assert [c["codigo"] for c in pv.json()["crear"]] == ["300"]
     assert [c["codigo"] for c in pv.json()["actualizar"]] == ["100"]   # existía -> actualizar
     ap = cli.post("/api/insumos/importar",
-                  files={"archivo": ("insumos.xlsx", data, _XLSX)})
+                  files={"archivo": ("insumos.xlsx", data, _XLSX)},
+                  data={"fuente_import": "PRECIO IDU"})
     assert ap.status_code == 200
     assert ap.json()["creados"] == 1 and ap.json()["actualizados"] == 1
+
+
+def test_import_insumos_sin_fuente_es_422(tmp_path):
+    """El campo es obligatorio en el contrato HTTP: no hay default silencioso."""
+    cli, _ = _cli(tmp_path)
+    r = cli.post("/api/insumos/importar/preview",
+                 files={"archivo": ("insumos.xlsx", _xlsx_insumos(), _XLSX)})
+    assert r.status_code == 422
 
 
 def _xlsx_apus() -> bytes:

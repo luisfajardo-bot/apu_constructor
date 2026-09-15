@@ -772,6 +772,7 @@ def insumos_cambios(body: CambiosIn, alm: Almacen = Depends(get_almacen),
 
 @router.post("/insumos/importar/preview")
 async def insumos_importar_preview(archivo: UploadFile = File(...),
+                                   fuente_import: str = Form(...),
                                    lista_id: Optional[int] = Form(None),
                                    alm: Almacen = Depends(get_almacen),
                                    _: object = Depends(requiere_rol("editor"))):
@@ -779,7 +780,8 @@ async def insumos_importar_preview(archivo: UploadFile = File(...),
     contenido = await archivo.read()
     try:
         return autoria.preview_importar_insumos(alm, contenido,
-                                                archivo.filename or "insumos.xlsx", lista_id)
+                                                archivo.filename or "insumos.xlsx",
+                                                fuente_import, lista_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except (zipfile.BadZipFile, InvalidFileException):
@@ -788,6 +790,7 @@ async def insumos_importar_preview(archivo: UploadFile = File(...),
 
 @router.post("/insumos/importar")
 async def insumos_importar(archivo: UploadFile = File(...),
+                           fuente_import: str = Form(...),
                            lista_id: Optional[int] = Form(None),
                            alm: Almacen = Depends(get_almacen),
                            actor=Depends(requiere_rol("editor"))):
@@ -795,7 +798,8 @@ async def insumos_importar(archivo: UploadFile = File(...),
     contenido = await archivo.read()
     try:
         return autoria.aplicar_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx",
-                                                actor=actor, lista_id=lista_id)
+                                                fuente_import, actor=actor,
+                                                lista_id=lista_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except (zipfile.BadZipFile, InvalidFileException):

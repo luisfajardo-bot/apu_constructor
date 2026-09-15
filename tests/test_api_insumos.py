@@ -42,6 +42,7 @@ def test_importar_preview(tmp_path):
     ws.append(["CODIGO", "PRECIO", "FUENTE"]); ws.append(["100", 390000, "COMPRAS"])
     buf = io.BytesIO(); wb.save(buf)
     r = cli.post("/api/insumos/importar/preview",
+                 data={"fuente_import": "COMPRAS"},
                  files={"archivo": ("l.xlsx", buf.getvalue(),
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     assert r.status_code == 200

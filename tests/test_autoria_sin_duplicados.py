@@ -151,11 +151,11 @@ def _excel_insumos(filas):
 def test_import_insumos_codigo_tomado_va_a_conflicto(tmp_path):
     alm = _alm(tmp_path)
     contenido = _excel_insumos([["10014", "ESTABILIZACION CON RAJON", "M3", "SUB", 7000, "PRECIO IDU"]])
-    prev = autoria.preview_importar_insumos(alm, contenido, "x.xlsx")
+    prev = autoria.preview_importar_insumos(alm, contenido, "x.xlsx", "PRECIO IDU")
     assert prev["crear"] == []
     assert len(prev["conflicto"]) == 1
     assert "10014" in prev["conflicto"][0]["motivo"]
-    res = autoria.aplicar_importar_insumos(alm, contenido, "x.xlsx")
+    res = autoria.aplicar_importar_insumos(alm, contenido, "x.xlsx", "PRECIO IDU")
     assert res["creados"] == 0 and res["errores"] == []
 
 
@@ -166,9 +166,9 @@ def test_import_insumos_dos_filas_del_mismo_codigo_la_segunda_es_conflicto(tmp_p
     contenido = _excel_insumos([
         ["7777", "GRAVA COMUN", "M3", "MAT", 8000, "PRECIO IDU"],
         ["7777", "OTRA COSA DISTINTA", "M3", "MAT", 9000, "PRECIO IDU"]])
-    prev = autoria.preview_importar_insumos(alm, contenido, "x.xlsx")
+    prev = autoria.preview_importar_insumos(alm, contenido, "x.xlsx", "PRECIO IDU")
     assert len(prev["crear"]) == 1 and len(prev["conflicto"]) == 1
-    res = autoria.aplicar_importar_insumos(alm, contenido, "x.xlsx")
+    res = autoria.aplicar_importar_insumos(alm, contenido, "x.xlsx", "PRECIO IDU")
     assert res["creados"] == 1 and res["errores"] == []
 
 
@@ -177,7 +177,7 @@ def test_import_insumos_el_gemelo_nocturno_del_archivo_si_se_crea(tmp_path):
     contenido = _excel_insumos([
         ["8888", "GRAVA COMUN", "M3", "MAT", 8000, "PRECIO IDU"],
         ["8888 N", "GRAVA COMUN", "M3", "MAT", 9000, "PRECIO IDU"]])
-    prev = autoria.preview_importar_insumos(alm, contenido, "x.xlsx")
+    prev = autoria.preview_importar_insumos(alm, contenido, "x.xlsx", "PRECIO IDU")
     assert len(prev["crear"]) == 2 and prev["conflicto"] == []
 
 

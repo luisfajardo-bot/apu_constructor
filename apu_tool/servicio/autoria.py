@@ -387,6 +387,10 @@ MOTIVO_SIN_PRECIO_EN_LISTA = (
     "El archivo no trae precio para este insumo y todavía no tiene tarifa "
     "en la lista de precios seleccionada.")
 
+# Mensaje del 400 cuando la importación no declara su fuente (ver preview_importar_insumos).
+MSG_FUENTE_OBLIGATORIA = ("La importación debe declarar su fuente de precio "
+                          "(p. ej. PRECIO IDU).")
+
 
 def _cambio_upsert(ins, f: dict) -> Optional[dict]:
     """Arma el cambio propuesto para 'actualizar'.
@@ -404,15 +408,24 @@ def _cambio_upsert(ins, f: dict) -> Optional[dict]:
     if not f["tiene_precio"] and ins.sin_precio:
         return None
     precio_nuevo = f["precio"] if f["tiene_precio"] else ins.precio
-    fuente_nueva = f["fuente"] or ins.fuente_precio
+    # `f["fuente"]` es la fuente declarada por la importación, nunca vacía (la validan
+    # `preview_importar_insumos` y el endpoint). No hay `or ins.fuente_precio`: ese
+    # fallback era el que dejaba un precio nuevo con la etiqueta vieja.
+    fuente_nueva = f["fuente"]
     return {"insumo_id": ins.id, "codigo": ins.codigo, "nombre": ins.nombre,
             "precio_actual": ins.precio, "precio_nuevo": precio_nuevo,
             "fuente_actual": ins.fuente_precio, "fuente_nueva": fuente_nueva,
             "sin_precio_actual": ins.sin_precio}
 
 
-def _filas_insumos(contenido: bytes, nombre_archivo: str) -> list[dict]:
-    """Lee una tabla con columnas codigo, nombre, unidad, grupo, precio, fuente."""
+def _filas_insumos(contenido: bytes, nombre_archivo: str, fuente_import: str) -> list[dict]:
+    """Lee una tabla con columnas codigo, nombre, unidad, grupo, precio.
+
+    `fuente_import` es la fuente que declaró la importación y se estampa en TODAS las
+    filas: es el ÚNICO origen de la etiqueta. Si el archivo trae una columna `fuente`
+    (los archivos viejos y la plantilla anterior la traen), se ignora — antes ganaba
+    el archivo y, cuando venía vacía, se heredaba la etiqueta del insumo, dejando un
+    precio del IDU rotulado COSTO INTERNO."""
     if nombre_archivo.lower().endswith((".xlsx", ".xlsm")):
         wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
         rows = [list(r) for r in wb.active.iter_rows(values_only=True)]
@@ -435,8 +448,7 @@ def _filas_insumos(contenido: bytes, nombre_archivo: str) -> list[dict]:
           "nombre": col("nombre", "descripcion", "name"),
           "unidad": col("unidad", "und", "unit"),
           "grupo": col("grupo", "group"),
-          "precio": col("precio", "valor", "price"),
-          "fuente": col("fuente", "source")}
+          "precio": col("precio", "valor", "price")}
     if ci["codigo"] is None:
         raise ValueError("El archivo debe tener al menos una columna de código.")
 
@@ -452,7 +464,7 @@ def _filas_insumos(contenido: bytes, nombre_archivo: str) -> list[dict]:
                     "grupo": str(g(r, ci["grupo"]) or "").strip(),
                     "precio": _to_float(raw_precio),
                     "tiene_precio": raw_precio not in (None, ""),
-                    "fuente": str(g(r, ci["fuente"]) or "").strip()})
+                    "fuente": fuente_import})
     return out
 
 
@@ -468,16 +480,22 @@ def _upsert_o_invalida(ins, f: dict, actualizar: list, invalida: list) -> None:
 
 
 def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
-                             lista_id: Optional[int] = None) -> dict:
+                             fuente_import: str, lista_id: Optional[int] = None) -> dict:
     """Upsert por fila CONTRA `lista_id` (None = Principal). Con nombre: identidad
     código+nombre (crea o actualiza). Sin nombre: actualiza precio por código (único),
-    o marca ambigua/no encontrada. Lo que crearía un duplicado va a 'conflicto'."""
+    o marca ambigua/no encontrada. Lo que crearía un duplicado va a 'conflicto'.
+
+    `fuente_import` es la fuente declarada: se estampa en todas las filas y decide el
+    candado (ver `_protegida`)."""
+    fuente_import = (fuente_import or "").strip()
+    if not fuente_import:
+        raise ValueError(MSG_FUENTE_OBLIGATORIA)
     crear, actualizar, ambigua, no_encontrada, invalida, conflicto = [], [], [], [], [], []
     # Filas que este mismo archivo ya va a crear, con la forma de
     # `identidades_en_conflicto`: así una fila choca contra las anteriores del archivo
     # con exactamente la misma regla (incluida la excepción del gemelo nocturno).
     reclamadas: list[tuple[str, str, bool]] = []
-    for f in _filas_insumos(contenido, nombre_archivo):
+    for f in _filas_insumos(contenido, nombre_archivo, fuente_import):
         cod, nom = f["codigo"], f["nombre"]
         if not cod:
             invalida.append(f)
@@ -506,8 +524,9 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
 
 
 def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
-                             actor=None, lista_id: Optional[int] = None) -> dict:
-    prev = preview_importar_insumos(alm, contenido, nombre_archivo, lista_id)
+                             fuente_import: str, actor=None,
+                             lista_id: Optional[int] = None) -> dict:
+    prev = preview_importar_insumos(alm, contenido, nombre_archivo, fuente_import, lista_id)
     creados, actualizados, errores = 0, 0, []
     lote = nuevo_lote()
     for f in prev["crear"]:

@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 55 planes, 63 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 56 planes, 63 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -102,6 +102,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 55 plane
 | Fecha | Título |
 | --- | --- |
 | 2026-09-15 | [[Planes/2026-09-15-import-insumos-proteger-internos|Importar insumos sin pisar los precios internos — Plan de implementación]] |
+| 2026-09-15 | [[Planes/2026-09-15-forzar-conflictos-import|Forzar conflictos del import — Plan de implementación]] |
 | 2026-09-11 | [[Planes/2026-09-11-ruta-idu-formulario-1|Ruta IDU — Formulario 1 · Plan de implementación]] |
 | 2026-09-10 | [[Planes/2026-09-10-agente-composicion|Agente de composición asistida de APUs — plan de implementación (fase 0 + fase 1)]] |
 | 2026-09-08 | [[Planes/2026-09-08-armado-reanudable|Armado reanudable — Implementation Plan]] |

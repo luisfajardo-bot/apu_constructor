@@ -61,11 +61,14 @@ def test_import_valor_igual_a_principal_se_escribe_en_np(tmp_path):
 
 # --------------------------------------------------------------------- Hallazgo 3
 def test_import_sin_precio_y_sin_tarifa_en_lista_se_reporta_invalida(tmp_path):
-    """Escenario 1: archivo con columna `fuente` y SIN columna de precio (modo
-    soportado, pinneado para Principal en test_servicio_autoria.py:124-131), contra
-    una lista NP sin tarifa para ese insumo. No debe colarse en 'actualizar' con un
-    precio_nuevo=0.0 fantasma (que luego fallaría con MSG_PRECIO_POSITIVO al
-    aplicar) -> debe reportarse en 'invalida'."""
+    """Escenario 1: archivo SIN columna de precio (modo soportado: la importación
+    solo reetiqueta), contra una lista NP sin tarifa para ese insumo. No hay precio
+    que escribir ni tarifa previa que conservar, así que no debe colarse en
+    'actualizar' con un precio_nuevo=0.0 fantasma (que luego fallaría con
+    MSG_PRECIO_POSITIVO al aplicar) -> debe reportarse en 'invalida'.
+
+    La columna `fuente` del archivo es inerte desde que la importación declara la
+    suya: la etiqueta la fija el 4º argumento, no el Excel."""
     alm, lid = _alm_np(tmp_path)
     contenido = _xlsx([["codigo", "fuente"], ["6140", "NUEVA FUENTE"]])
     prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "NUEVA FUENTE", lista_id=lid)

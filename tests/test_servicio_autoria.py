@@ -156,6 +156,62 @@ def test_fuente_declarada_vacia_se_rechaza(tmp_path):
         autoria.preview_importar_insumos(alm, _xlsx_upsert(), "insumos.xlsx", "   ")
 
 
+def _alm_con_interno(tmp_path):
+    """Base con un insumo de costo interno (el que hay que proteger)."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("500", "MANO DE OBRA OFICIAL", "HR", "MO", 25000, "COSTO INTERNO")])
+    return alm
+
+
+def test_import_publico_no_pisa_un_precio_interno(tmp_path):
+    """El caso del usuario: subir la lista del visor IDU no puede pisar los costos
+    internos de la empresa."""
+    alm = _alm_con_interno(tmp_path)
+    contenido = _xlsx_solo_precio([["100", 1200, ""], ["500", 9, ""]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "idu.xlsx", "PRECIO IDU")
+
+    assert [c["codigo"] for c in prev["actualizar"]] == ["100"]   # el público sí
+    assert len(prev["protegida"]) == 1
+    p = prev["protegida"][0]
+    assert p["codigo"] == "500" and p["fuente_actual"] == "COSTO INTERNO"
+    assert p["precio_actual"] == 25000 and p["precio_archivo"] == 9
+
+
+def test_import_interno_si_pisa_un_precio_interno(tmp_path):
+    """La regla es asimétrica: una tanda interna es curada y deliberada."""
+    alm = _alm_con_interno(tmp_path)
+    contenido = _xlsx_solo_precio([["500", 27000, ""]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "compras.xlsx",
+                                            "COMPRAS ALMACEN 2026")
+    assert prev["protegida"] == []
+    assert prev["actualizar"][0]["precio_nuevo"] == 27000
+
+
+def test_insumo_sin_tarifa_en_la_lista_no_se_protege(tmp_path):
+    """El falso positivo: sin tarifa en la lista consultada, `fuente_precio` es "" por
+    el LEFT JOIN, no porque el precio sea interno. Sin el `not ins.sin_precio`, una
+    importación pública contra una lista de NP quedaría bloqueada entera."""
+    alm = _alm(tmp_path)
+    np = alm.precios.crear_lista("NP Calle 13")
+    contenido = _xlsx_solo_precio([["100", 1200, ""]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "np.xlsx", "PRECIO IDU",
+                                            lista_id=np)
+    assert prev["protegida"] == []
+    assert prev["actualizar"][0]["precio_nuevo"] == 1200
+
+
+def test_import_publico_protege_aunque_el_archivo_no_traiga_precio(tmp_path):
+    """Una fila sin precio le cambiaría SOLO la etiqueta al insumo interno: es el bug
+    de rotulado al revés, y también se protege."""
+    alm = _alm_con_interno(tmp_path)
+    contenido = _xlsx_solo_precio([["500", "", ""]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "idu.xlsx", "PRECIO IDU")
+    assert len(prev["protegida"]) == 1
+    assert prev["protegida"][0]["precio_archivo"] is None
+    assert prev["actualizar"] == [] and prev["invalida"] == []
+
+
 # ---------------------------------------------------------------- import APUs
 def _xlsx_apus() -> bytes:
     wb = openpyxl.Workbook(); ws = wb.active

@@ -85,6 +85,21 @@ def test_import_insumos_sin_fuente_es_422(tmp_path):
     assert r.status_code == 422
 
 
+def test_import_insumos_endpoint_protege_el_interno(tmp_path):
+    """El insumo 100 pasa a costo interno; una importación declarada pública deja de
+    poder pisarlo, y el balde viaja en la respuesta."""
+    cli, alm = _cli(tmp_path)
+    iid = alm.precios.get_candidatos("100")[0].id
+    alm.precios.set_precio_por_id(iid, 1000, "COSTO INTERNO")
+    r = cli.post("/api/insumos/importar/preview",
+                 files={"archivo": ("insumos.xlsx", _xlsx_insumos(), _XLSX)},
+                 data={"fuente_import": "PRECIO IDU"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["actualizar"] == []
+    assert [p["codigo"] for p in body["protegida"]] == ["100"]
+
+
 def _xlsx_apus() -> bytes:
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "APUS"
     ws.append(["ACT","COD IDU","UN","INSUMO","COD","UND","REND","INV","PRECIO","COSTO","TURNO"])

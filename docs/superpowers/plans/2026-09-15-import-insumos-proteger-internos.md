@@ -640,10 +640,51 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ### Task 4: El diálogo declara la fuente
 
 **Files:**
+- Modify: `apu_tool/servicio/autoria.py` (`preview_importar_insumos`: devolver `clasificacion_import`)
 - Modify: `web/src/lib/tipos.ts:432-445`
 - Modify: `web/src/components/insumos/DialogoImportarInsumos.tsx`
 - Modify: `web/src/pages/Insumos.tsx:211-216`
-- Test: `web/src/components/insumos/DialogoImportarInsumos.test.tsx`
+- Test: `tests/test_servicio_autoria.py`, `web/src/components/insumos/DialogoImportarInsumos.test.tsx`
+
+**Agregado después de la revisión de la Task 2 — el hueco de la fuente mal escrita:**
+
+`config.classify_price_source` es *fail-open* para el candado: todo lo que no esté exactamente en `PUBLIC_PRICE_SOURCES` clasifica `interno`, y una importación interna puede pisar lo que sea. Medido sobre el código real:
+
+```
+fuente_import='PRECIO IDU 2026'  ->  actualizar: ['500','600','700']   protegida: []
+fuente_import='PRECIOS IDU'      ->  actualizar: ['500']               protegida: []
+```
+
+Fechar la tanda o escribirla en plural es exactamente lo que hace una persona, y el resultado es el daño que la feature existe para evitar, sin nada que lo delate. **La decisión tomada (el usuario escogió esta opción): hacer visible la clasificación, no adivinarla.** Nada de matching difuso contra `PUBLIC_PRICE_SOURCES` — "PRECIOS IDU" ≈ "PRECIO IDU" sería una fuente nueva de sorpresas. Hacerlo visible, no hacerlo listo.
+
+- [ ] **Step 0: El backend dice cómo clasificó la fuente**
+
+En `apu_tool/servicio/autoria.py`, `preview_importar_insumos` agrega una clave al dict de retorno:
+
+```python
+    return {"crear": crear, "actualizar": actualizar, "ambigua": ambigua,
+            "no_encontrada": no_encontrada, "invalida": invalida, "conflicto": conflicto,
+            "protegida": protegida,
+            # Cómo clasificó el backend la fuente declarada. Se pinta en el diálogo
+            # porque `classify_price_source` es fail-open: "PRECIO IDU 2026" clasifica
+            # INTERNO y el candado no se dispara. Que la persona lo VEA antes de
+            # aplicar es la protección; adivinar la intención sería peor.
+            "clasificacion_import": config.classify_price_source(fuente_import)}
+```
+
+Y una prueba en `tests/test_servicio_autoria.py`:
+
+```python
+def test_preview_dice_como_clasifico_la_fuente(tmp_path):
+    """El candado es fail-open: una fuente pública mal escrita clasifica interna y no
+    protege nada. El diálogo pinta esta clave para que se vea antes de aplicar."""
+    alm = _alm(tmp_path)
+    contenido = _xlsx_solo_precio([["100", 1200, ""]])
+    assert autoria.preview_importar_insumos(
+        alm, contenido, "f.xlsx", "PRECIO IDU")["clasificacion_import"] == "publico"
+    assert autoria.preview_importar_insumos(
+        alm, contenido, "f.xlsx", "PRECIO IDU 2026")["clasificacion_import"] == "interno"
+```
 
 - [ ] **Step 1: Escribir las pruebas que fallan**
 
@@ -703,6 +744,20 @@ it("recalcula el preview si cambia la fuente con un archivo ya elegido", async (
   expect((previewImportarInsumos.mock.calls[1][0] as FormData).get("fuente_import"))
     .toBe("COSTO INTERNO");
 });
+
+it("avisa cuando la fuente declarada clasifica como interna", async () => {
+  // El caso del typo: "PRECIO IDU 2026" clasifica INTERNO y el candado no protege
+  // nada. El aviso es lo único que lo delata antes de aplicar.
+  previewImportarInsumos.mockResolvedValue({
+    crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+    protegida: [], clasificacion_import: "interno",
+  });
+  montar();
+  seleccionarFuente("PRECIO IDU 2026");
+  seleccionarArchivo();
+
+  expect(await screen.findByText(/INTERNA/)).toBeTruthy();
+});
 ```
 
 - [ ] **Step 2: Correr y verificar que fallan**
@@ -735,6 +790,9 @@ export interface ImportInsumosUpsertPreview {
   conflicto?: ImportConflicto[];
   // Filas que una importación pública NO pisa por tener hoy un precio interno.
   protegida?: ImportProtegida[];
+  // Cómo clasificó el backend la fuente declarada. Se pinta para que se vea que
+  // "PRECIO IDU 2026" clasifica interno y por lo tanto NO protege nada.
+  clasificacion_import?: "publico" | "interno";
 }
 
 export interface ImportUpsertResultado {
@@ -863,6 +921,24 @@ En el JSX, arriba del bloque del input de archivo, el campo nuevo (usa `<datalis
         </p>
 ```
 
+Y justo debajo, la clasificación que devolvió el backend (solo hay preview cuando ya se
+eligió archivo, que es el momento anterior a aplicar — que es lo que importa):
+
+```tsx
+        {prev?.clasificacion_import && (
+          <p className={`text-xs font-medium ${
+            prev.clasificacion_import === "publico" ? "text-muted-foreground" : "text-amber-600 dark:text-amber-500"
+          }`}>
+            {prev.clasificacion_import === "publico"
+              ? "Esta importación es PÚBLICA: no puede pisar precios internos."
+              : "Esta importación es INTERNA: puede pisar cualquier precio, incluidos los internos."}
+          </p>
+        )}
+```
+
+El caso interno va resaltado a propósito: es el que puede hacer daño, y es el que se ve
+cuando alguien escribió "PRECIO IDU 2026" creyendo que declaraba algo público.
+
 Y el input de archivo gana el candado:
 
 ```tsx
@@ -978,9 +1054,39 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 6: Verificación final
+### Task 6: Documentar y verificación final
 
-**Files:** ninguno (solo se corre)
+**Files:** `CLAUDE.md`
+
+- [ ] **Step 0: Documentar la regla en `CLAUDE.md`**
+
+`CLAUDE.md` no menciona el importador de insumos en ninguna parte. Esto es una frontera de dinero, con una regla asimétrica y deliberadamente sin escape: exactamente lo que alguien "simplifica" en seis meses. Agregar a la sección **No hacer**:
+
+```markdown
+- No hagas simétrico el candado del importador de insumos ni le agregues una casilla de
+  "forzar". Una importación cuya fuente clasifique como **pública** (`PRECIO IDU`) no
+  pisa un precio **interno**: esas filas van al balde `protegida` del preview y no se
+  escriben (`dominio`… en realidad `servicio/autoria.py::_protegida`). Al revés sí se
+  puede, y es a propósito: una tanda pública es masiva y automática (miles de filas del
+  visor del IDU), una interna es curada. Si hay que cambiar un interno, se edita por
+  insumo, que ya se puede. Ojo con el término `not ins.sin_precio`: sin él, una
+  importación pública contra una lista de NP recién creada queda bloqueada entera,
+  porque sin tarifa en esa lista `fuente_precio` es `""` (LEFT JOIN) y `""` clasifica
+  como interno.
+- No le devuelvas al archivo el mando sobre la etiqueta de fuente en el importador de
+  insumos. La fuente la declara la importación (`fuente_import`, obligatoria en los dos
+  endpoints) y se estampa en TODAS las filas; la columna `fuente` del Excel se ignora.
+  El `fuente_nueva = f["fuente"] or ins.fuente_precio` que había antes dejaba el precio
+  nuevo con la etiqueta vieja: un precio del IDU rotulado `COSTO INTERNO`, tratado como
+  confidencial por `config.classify_price_source` sin que nada lo avisara.
+- No conviertas en "listo" el aviso de clasificación del diálogo de importación.
+  `classify_price_source` es fail-open: `PRECIO IDU 2026` clasifica **interno** y el
+  candado no se dispara. La protección es que el diálogo **muestre** cómo se clasificó
+  la fuente antes de aplicar, no que el sistema adivine que quisiste decir `PRECIO IDU`.
+  Un matching difuso ahí sería una fuente nueva de sorpresas.
+```
+
+Ajustá el texto a lo que quedó realmente implementado (nombres de funciones y de claves), y ponelo en el orden que tenga sentido dentro de la sección.
 
 - [ ] **Step 1: Suite de Python completa**
 
@@ -1006,7 +1112,16 @@ cd web && npm run build
 
 Esperado: build OK. **Es `npm run build` (corre `tsc -b`), no `tsc --noEmit`**: es la lección de la rama de nombre/alias de corridas — `--noEmit` no ve los errores de proyecto compuesto.
 
-- [ ] **Step 4: Reportar**
+- [ ] **Step 4: Commit de la documentación**
+
+```bash
+git add CLAUDE.md
+git commit -m "docs: la regla del candado del importador de insumos
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
+
+- [ ] **Step 5: Reportar**
 
 Reportar las tres salidas (conteos reales, no "pasan todos"). Si algo falla, arreglar antes de dar la tarea por terminada.
 

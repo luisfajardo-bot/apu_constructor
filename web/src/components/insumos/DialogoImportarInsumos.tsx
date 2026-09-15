@@ -168,7 +168,7 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
               ? "Esta importación es PÚBLICA: no puede pisar precios internos."
               : <>Declaraste «{fuentePreviewRef.current}» y el sistema la clasifica como fuente INTERNA:
                   esta importación SÍ pisa los costos internos de la empresa. Si querías cargar la lista
-                  pública del IDU, la fuente debe decir exactamente «<strong>PRECIO IDU</strong>».</>}
+                  pública del IDU, la fuente debe decir «<strong>PRECIO IDU</strong>», sin agregarle nada más.</>}
           </p>
         )}
 

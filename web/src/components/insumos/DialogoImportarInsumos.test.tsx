@@ -201,6 +201,10 @@ describe("DialogoImportarInsumos", () => {
     fireEvent.blur(input);
     fireEvent.click(screen.getByText(/Aplicar/));
 
+    // El blur dispara un segundo correrPreview (recalcula con la fuente nueva); hay
+    // que esperar a que resuelva antes de terminar el test, o su continuación
+    // (setEstado) corre después del test y React se queja de un act() colgado.
+    await waitFor(() => expect(previewImportarInsumos).toHaveBeenCalledTimes(2));
     expect(aplicarImportarInsumos).not.toHaveBeenCalled();
   });
 });

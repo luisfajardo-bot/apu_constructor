@@ -160,18 +160,6 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
           Queda rotulada en todas las filas del archivo. Si declaras una fuente pública
           (PRECIO IDU), los precios internos no se tocan.
         </p>
-        {prev?.clasificacion_import && (
-          <p role="status" className={`text-xs font-medium ${
-            prev.clasificacion_import === "publico" ? "text-muted-foreground" : "text-amber-700 dark:text-amber-400"
-          }`}>
-            {prev.clasificacion_import === "publico"
-              ? "Esta importación es PÚBLICA: no puede pisar precios internos."
-              : <>Declaraste «{fuentePreviewRef.current}» y el sistema la clasifica como fuente INTERNA:
-                  esta importación SÍ pisa los costos internos de la empresa. Si querías cargar la lista
-                  pública del IDU, la fuente debe decir «<strong>PRECIO IDU</strong>», sin agregarle nada más.</>}
-          </p>
-        )}
-
         <div className="flex flex-wrap items-center gap-3">
           <input
             ref={fileRef}
@@ -203,7 +191,10 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
               <Tabla cols={["Código", "Nombre", "Precio actual", "Precio nuevo", "Fuente actual", "Fuente nueva"]}
                      filas={prev.actualizar.map((c) => [c.codigo, c.nombre, cop(c.precio_actual), cop(c.precio_nuevo), c.fuente_actual || "—", c.fuente_nueva])} />
             </Seccion>
-            <Seccion titulo="Protegidas — no se tocan (precio interno)">
+            {/* Ámbar en el título: es la única sección que declara que algo NO se tocó,
+                y sin señal propia se pierde entre las otras seis, que se ven idénticas. */}
+            <Seccion titulo="Protegidas — no se tocan (precio interno)"
+                     className="text-amber-700 dark:text-amber-400">
               <Tabla cols={["Código", "Nombre", "Fuente actual", "Precio actual", "Precio del archivo"]}
                      filas={(prev.protegida ?? []).map((p) => [
                        p.codigo, p.nombre, p.fuente_actual || "(sin fuente)",
@@ -233,23 +224,42 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
           </div>
         )}
 
-        <DialogFooter>
-          <Button size="sm" variant="outline" onClick={() => handleOpenChange(false)} disabled={enAplicando}>
-            Cancelar
-          </Button>
-          <Button size="sm" onClick={aplicar} disabled={!enPreview || nAcciones === 0 || enAplicando || !fuente.trim()}>
-            {enAplicando ? "Aplicando…" : `Aplicar (${nAcciones})`}
-          </Button>
+        {/* El aviso vive ADENTRO del footer, que es `sticky bottom-0`: con un preview de
+            miles de filas la persona scrollea hasta acá para aplicar, y arriba del campo
+            de fuente el aviso ya no se veía justo en el momento de decidir. Es la única
+            protección contra una fuente pública mal escrita ("PRECIO IDU 2026" clasifica
+            interno y el candado no se dispara), así que tiene que estar donde está el botón. */}
+        <DialogFooter className="flex-col items-stretch sm:flex-col sm:items-stretch">
+          {prev?.clasificacion_import && (
+            <p role="status" className={`text-xs font-medium ${
+              prev.clasificacion_import === "publico" ? "text-muted-foreground" : "text-amber-700 dark:text-amber-400"
+            }`}>
+              {prev.clasificacion_import === "publico"
+                ? "Esta importación es PÚBLICA: no puede pisar precios internos."
+                : <>Declaraste «{fuentePreviewRef.current}» y el sistema la clasifica como fuente INTERNA:
+                    esta importación SÍ pisa los costos internos de la empresa. Si querías cargar la lista
+                    pública del IDU, la fuente debe decir «<strong>PRECIO IDU</strong>», sin agregarle nada más.</>}
+            </p>
+          )}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button size="sm" variant="outline" onClick={() => handleOpenChange(false)} disabled={enAplicando}>
+              Cancelar
+            </Button>
+            <Button size="sm" onClick={aplicar} disabled={!enPreview || nAcciones === 0 || enAplicando || !fuente.trim()}>
+              {enAplicando ? "Aplicando…" : `Aplicar (${nAcciones})`}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-function Seccion({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+function Seccion({ titulo, className, children }:
+                 { titulo: string; className?: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-xs font-semibold mb-1">{titulo}</p>
+      <p className={`text-xs font-semibold mb-1 ${className ?? ""}`}>{titulo}</p>
       {children}
     </div>
   );

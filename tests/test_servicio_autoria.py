@@ -227,12 +227,15 @@ def test_import_publico_protege_aunque_el_archivo_no_traiga_precio(tmp_path):
 
 
 def test_fuente_vacia_con_precio_real_tambien_se_protege(tmp_path):
-    """El término más frágil de `_protegida`: una fuente "" con precio real cuenta
-    como interna igual que COSTO INTERNO (no sabemos qué es ese precio). Lo único
-    que separa este caso del de `test_insumo_sin_tarifa_en_la_lista_no_se_protege`
-    (fuente "" que NO se protege) es `sin_precio`, que sale de un LEFT JOIN en los
-    dos backends: un default que lo dejara en True desprotegería esto sin que la
-    suite se diera cuenta."""
+    """Fija que una fuente "" con precio real cuenta como interna igual que COSTO
+    INTERNO (no sabemos qué es ese precio) — NO fija sola el término
+    `not ins.sin_precio` de `_protegida`: acá `ins.sin_precio` ya es False, así que
+    ese término da True esté o no. Lo que sí rompería este caso es reclasificar ""
+    como público, o que el LEFT JOIN de alguno de los dos backends devuelva
+    `sin_precio=True` para un insumo con precio real. La frontera completa la cubren
+    entre esta prueba y su hermana `test_insumo_sin_tarifa_en_la_lista_no_se_protege`,
+    que cubre el otro lado (fuente "" que de verdad no tiene tarifa, y no se
+    protege)."""
     alm = _alm_con_interno(tmp_path)
     contenido = _xlsx_solo_precio([["600", 500, ""]])
     prev = autoria.preview_importar_insumos(alm, contenido, "idu.xlsx", "PRECIO IDU")

@@ -161,12 +161,14 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
           (PRECIO IDU), los precios internos no se tocan.
         </p>
         {prev?.clasificacion_import && (
-          <p className={`text-xs font-medium ${
-            prev.clasificacion_import === "publico" ? "text-muted-foreground" : "text-amber-600 dark:text-amber-500"
+          <p role="status" className={`text-xs font-medium ${
+            prev.clasificacion_import === "publico" ? "text-muted-foreground" : "text-amber-700 dark:text-amber-400"
           }`}>
             {prev.clasificacion_import === "publico"
               ? "Esta importación es PÚBLICA: no puede pisar precios internos."
-              : "Esta importación es INTERNA: puede pisar cualquier precio, incluidos los internos."}
+              : <>Declaraste «{fuentePreviewRef.current}» y el sistema la clasifica como fuente INTERNA:
+                  esta importación SÍ pisa los costos internos de la empresa. Si querías cargar la lista
+                  pública del IDU, la fuente debe decir exactamente «<strong>PRECIO IDU</strong>».</>}
           </p>
         )}
 
@@ -198,8 +200,15 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
                      filas={prev.crear.map((f) => [f.codigo, f.nombre, f.unidad, f.grupo, cop(f.precio), f.fuente])} />
             </Seccion>
             <Seccion titulo="Actualizar precio">
-              <Tabla cols={["Código", "Nombre", "Precio actual", "Precio nuevo", "Fuente nueva"]}
-                     filas={prev.actualizar.map((c) => [c.codigo, c.nombre, cop(c.precio_actual), cop(c.precio_nuevo), c.fuente_nueva])} />
+              <Tabla cols={["Código", "Nombre", "Precio actual", "Precio nuevo", "Fuente actual", "Fuente nueva"]}
+                     filas={prev.actualizar.map((c) => [c.codigo, c.nombre, cop(c.precio_actual), cop(c.precio_nuevo), c.fuente_actual || "—", c.fuente_nueva])} />
+            </Seccion>
+            <Seccion titulo="Protegidas — no se tocan (precio interno)">
+              <Tabla cols={["Código", "Nombre", "Fuente actual", "Precio actual", "Precio del archivo"]}
+                     filas={(prev.protegida ?? []).map((p) => [
+                       p.codigo, p.nombre, p.fuente_actual || "(sin fuente)",
+                       cop(p.precio_actual),
+                       p.precio_archivo === null ? "—" : cop(p.precio_archivo)])} />
             </Seccion>
             <Seccion titulo="Ambiguas (código repetido, sin nombre)">
               <Tabla cols={["Código", "Candidatos"]}
@@ -228,7 +237,7 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
           <Button size="sm" variant="outline" onClick={() => handleOpenChange(false)} disabled={enAplicando}>
             Cancelar
           </Button>
-          <Button size="sm" onClick={aplicar} disabled={!enPreview || nAcciones === 0 || enAplicando}>
+          <Button size="sm" onClick={aplicar} disabled={!enPreview || nAcciones === 0 || enAplicando || !fuente.trim()}>
             {enAplicando ? "Aplicando…" : `Aplicar (${nAcciones})`}
           </Button>
         </DialogFooter>

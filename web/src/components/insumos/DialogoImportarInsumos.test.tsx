@@ -141,4 +141,66 @@ describe("DialogoImportarInsumos", () => {
 
     expect(await screen.findByText(/INTERNA/)).toBeTruthy();
   });
+
+  it("no avisa de nada cuando la fuente declarada clasifica como pública", async () => {
+    // Sin esta prueba, la anterior pasaría igual si el componente pintara "INTERNA"
+    // siempre: hace falta cubrir también la rama pública.
+    previewImportarInsumos.mockResolvedValue({
+      crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+      protegida: [], clasificacion_import: "publico",
+    });
+    montar();
+    seleccionarFuente();
+    seleccionarArchivo();
+
+    await screen.findByText(/PÚBLICA/i);
+    expect(screen.queryByText(/INTERNA/)).toBeNull();
+  });
+
+  it("muestra las filas protegidas y no las cuenta para aplicar", async () => {
+    previewImportarInsumos.mockResolvedValue({
+      crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+      protegida: [{
+        codigo: "500", nombre: "MANO DE OBRA OFICIAL",
+        fuente_actual: "COSTO INTERNO", precio_actual: 25000, precio_archivo: 9,
+      }],
+    });
+    montar();
+    seleccionarFuente();
+    seleccionarArchivo();
+
+    expect(await screen.findByText(/Protegidas/i)).toBeTruthy();
+    expect(screen.getByText("COSTO INTERNO")).toBeTruthy();
+    expect((screen.getByText("Aplicar (0)") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("borrar la fuente deshabilita Aplicar aunque ya haya preview", async () => {
+    montar();
+    seleccionarFuente();
+    seleccionarArchivo();
+    await screen.findByText("Aplicar (1)");
+
+    const input = screen.getByLabelText(/Fuente de esta importación/i);
+    fireEvent.change(input, { target: { value: "" } });
+
+    expect((screen.getByText("Aplicar (1)") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("un click en Aplicar en el mismo tick que el blur de la fuente no aplica con otra fuente", async () => {
+    // El caso delicado: el blur (que recalcula el preview) dispara antes que el
+    // click, así que el botón queda deshabilitado y no se aplica con una fuente
+    // distinta a la que se previsualizó. Es exactamente lo que un refactor rompe
+    // en silencio.
+    montar();
+    seleccionarFuente("PRECIO IDU");
+    seleccionarArchivo();
+    await screen.findByText("Aplicar (1)");
+
+    const input = screen.getByLabelText(/Fuente de esta importación/i);
+    fireEvent.change(input, { target: { value: "COSTO INTERNO" } });
+    fireEvent.blur(input);
+    fireEvent.click(screen.getByText(/Aplicar/));
+
+    expect(aplicarImportarInsumos).not.toHaveBeenCalled();
+  });
 });

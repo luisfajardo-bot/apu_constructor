@@ -500,6 +500,9 @@ def _upsert_o_invalida(ins, f: dict, fuente_import: str,
     El candado va PRIMERO. Hoy los dos casos son excluyentes (`_protegida` exige
     `not ins.sin_precio` y el de abajo exige `ins.sin_precio`), pero el orden queda
     fijado para que mañana no dependa de esa coincidencia.
+
+    Si no protege y `_cambio_upsert` devuelve None, la fila va a `invalida`: no
+    había ni precio en el archivo ni tarifa previa en la lista destino.
     """
     if _protegida(ins, fuente_import):
         protegida.append({"codigo": ins.codigo, "nombre": ins.nombre,
@@ -613,7 +616,13 @@ def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
             actualizados += 1
         except Exception as e:
             errores.append({"codigo": c["codigo"], "error": str(e)})
-    return {"creados": creados, "actualizados": actualizados, "errores": errores}
+    # Las protegidas no se recorren: `preview_importar_insumos` nunca las puso en
+    # 'actualizar'. No dejan auditoría porque no cambió nada; se miran en el preview.
+    # `protegidos` cuenta FILAS del archivo, no insumos distintos — igual que
+    # `creados` y `actualizados`. Dos filas del archivo sobre el mismo insumo interno
+    # suman 2.
+    return {"creados": creados, "actualizados": actualizados,
+            "protegidos": len(prev["protegida"]), "errores": errores}
 
 
 # ---------------------------------------------------------------- import APUs

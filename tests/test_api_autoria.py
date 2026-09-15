@@ -87,7 +87,11 @@ def test_import_insumos_sin_fuente_es_422(tmp_path):
 
 def test_import_insumos_endpoint_protege_el_interno(tmp_path):
     """El insumo 100 pasa a costo interno; una importación declarada pública deja de
-    poder pisarlo, y el balde viaja en la respuesta."""
+    poder pisarlo, y el balde viaja en la respuesta.
+
+    `_xlsx_insumos()` trae columna `nombre`: esta es la prueba que cubre el camino
+    "con nombre" (`_match_identidad`) del candado, así que el archivo debe seguir
+    trayendo esa columna."""
     cli, alm = _cli(tmp_path)
     iid = alm.precios.get_candidatos("100")[0].id
     alm.precios.set_precio_por_id(iid, 1000, "COSTO INTERNO")

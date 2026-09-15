@@ -157,10 +157,13 @@ def test_fuente_declarada_vacia_se_rechaza(tmp_path):
 
 
 def _alm_con_interno(tmp_path):
-    """Base con un insumo de costo interno (el que hay que proteger)."""
+    """Base con un insumo de costo interno (el que hay que proteger) y uno con fuente
+    vacía pero precio real (el otro caso que `_protegida` protege: ver el test
+    `test_fuente_vacia_con_precio_real_tambien_se_protege`)."""
     alm = _alm(tmp_path)
     alm.precios.insert_insumos([
-        Insumo("500", "MANO DE OBRA OFICIAL", "HR", "MO", 25000, "COSTO INTERNO")])
+        Insumo("500", "MANO DE OBRA OFICIAL", "HR", "MO", 25000, "COSTO INTERNO"),
+        Insumo("600", "TRANSPORTE INTERNO", "VJE", "TRA", 15000, "")])
     return alm
 
 
@@ -210,6 +213,40 @@ def test_import_publico_protege_aunque_el_archivo_no_traiga_precio(tmp_path):
     assert len(prev["protegida"]) == 1
     assert prev["protegida"][0]["precio_archivo"] is None
     assert prev["actualizar"] == [] and prev["invalida"] == []
+
+
+def test_fuente_vacia_con_precio_real_tambien_se_protege(tmp_path):
+    """El término más frágil de `_protegida`: una fuente "" con precio real cuenta
+    como interna igual que COSTO INTERNO (no sabemos qué es ese precio). Lo único
+    que separa este caso del de `test_insumo_sin_tarifa_en_la_lista_no_se_protege`
+    (fuente "" que NO se protege) es `sin_precio`, que sale de un LEFT JOIN en los
+    dos backends: un default que lo dejara en True desprotegería esto sin que la
+    suite se diera cuenta."""
+    alm = _alm_con_interno(tmp_path)
+    contenido = _xlsx_solo_precio([["600", 500, ""]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "idu.xlsx", "PRECIO IDU")
+    assert [p["codigo"] for p in prev["protegida"]] == ["600"]
+    assert prev["protegida"][0]["fuente_actual"] == ""
+
+
+def test_aplicar_no_escribe_las_protegidas_y_las_cuenta(tmp_path):
+    alm = _alm_con_interno(tmp_path)
+    contenido = _xlsx_solo_precio([["100", 1200, ""], ["500", 9, ""]])
+    res = autoria.aplicar_importar_insumos(alm, contenido, "idu.xlsx", "PRECIO IDU")
+
+    assert res == {"creados": 0, "actualizados": 1, "protegidos": 1, "errores": []}
+    interno = alm.precios.get_candidatos("500")[0]
+    assert interno.precio == 25000 and interno.fuente_precio == "COSTO INTERNO"
+    assert alm.precios.get_candidatos("100")[0].precio == 1200
+
+
+def test_las_protegidas_no_dejan_auditoria(tmp_path):
+    """No cambió nada: no hay evento que registrar."""
+    alm = _alm_con_interno(tmp_path)
+    autoria.aplicar_importar_insumos(alm, _xlsx_solo_precio([["500", 9, ""]]),
+                                     "idu.xlsx", "PRECIO IDU")
+    _items, total = alm.auditoria.listar(accion="precio.editar")
+    assert total == 0
 
 
 # ---------------------------------------------------------------- import APUs

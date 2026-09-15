@@ -82,16 +82,27 @@ def _xlsx_solo_precio(filas) -> bytes:
 
 def test_upsert_preview_con_nombre(tmp_path):
     alm = _alm(tmp_path)
-    prev = autoria.preview_importar_insumos(alm, _xlsx_upsert(), "insumos.xlsx")
+    prev = autoria.preview_importar_insumos(alm, _xlsx_upsert(), "insumos.xlsx", "PRECIO IDU")
     assert [c["codigo"] for c in prev["crear"]] == ["300"]
     assert [c["codigo"] for c in prev["actualizar"]] == ["100"]
     assert prev["actualizar"][0]["precio_actual"] == 1000 and prev["actualizar"][0]["precio_nuevo"] == 1200
     assert len(prev["invalida"]) == 1
 
 
+def test_preview_dice_como_clasifico_la_fuente(tmp_path):
+    """El candado es fail-open: una fuente pública mal escrita clasifica interna y no
+    protege nada. El diálogo pinta esta clave para que se vea antes de aplicar."""
+    alm = _alm(tmp_path)
+    contenido = _xlsx_solo_precio([["100", 1200, ""]])
+    assert autoria.preview_importar_insumos(
+        alm, contenido, "f.xlsx", "PRECIO IDU")["clasificacion_import"] == "publico"
+    assert autoria.preview_importar_insumos(
+        alm, contenido, "f.xlsx", "PRECIO IDU 2026")["clasificacion_import"] == "interno"
+
+
 def test_upsert_aplicar_crea_y_actualiza(tmp_path):
     alm = _alm(tmp_path)
-    res = autoria.aplicar_importar_insumos(alm, _xlsx_upsert(), "insumos.xlsx")
+    res = autoria.aplicar_importar_insumos(alm, _xlsx_upsert(), "insumos.xlsx", "PRECIO IDU")
     assert res["creados"] == 1 and res["actualizados"] == 1
     assert any(i.codigo == "300" for i in alm.precios.get_candidatos("300"))
     assert alm.precios.get_candidatos("100")[0].precio == 1200   # precio actualizado
@@ -100,7 +111,7 @@ def test_upsert_aplicar_crea_y_actualiza(tmp_path):
 def test_upsert_sin_nombre_codigo_unico_actualiza(tmp_path):
     alm = _alm(tmp_path)
     prev = autoria.preview_importar_insumos(alm, _xlsx_solo_precio([["100", 1500, "COMPRAS"]]),
-                                            "precios.xlsx")
+                                            "precios.xlsx", "COMPRAS")
     assert len(prev["actualizar"]) == 1 and prev["actualizar"][0]["precio_nuevo"] == 1500
     assert prev["crear"] == [] and prev["no_encontrada"] == []
 
@@ -110,7 +121,7 @@ def test_upsert_sin_nombre_codigo_repetido_ambiguo(tmp_path):
     alm.precios.insert_insumos([
         Insumo("100", "CEMENTO BLANCO", "KG", "MAT", 2000, "PRECIO IDU")])
     prev = autoria.preview_importar_insumos(alm, _xlsx_solo_precio([["100", 1500, "X"]]),
-                                            "precios.xlsx")
+                                            "precios.xlsx", "PRECIO IDU")
     assert len(prev["ambigua"]) == 1 and prev["ambigua"][0]["codigo"] == "100"
     assert len(prev["ambigua"][0]["candidatos"]) == 2
 
@@ -118,17 +129,138 @@ def test_upsert_sin_nombre_codigo_repetido_ambiguo(tmp_path):
 def test_upsert_sin_nombre_codigo_inexistente_no_encontrada(tmp_path):
     alm = _alm(tmp_path)
     prev = autoria.preview_importar_insumos(alm, _xlsx_solo_precio([["999", 1500, "X"]]),
-                                            "precios.xlsx")
+                                            "precios.xlsx", "PRECIO IDU")
     assert [n["codigo"] for n in prev["no_encontrada"]] == ["999"]
 
 
 def test_upsert_precio_vacio_en_actualizacion_no_cambia(tmp_path):
     alm = _alm(tmp_path)
-    prev = autoria.preview_importar_insumos(alm, _xlsx_solo_precio([["100", "", "NUEVA FUENTE"]]),
-                                            "precios.xlsx")
+    prev = autoria.preview_importar_insumos(alm, _xlsx_solo_precio([["100", "", "IGNORADA"]]),
+                                            "precios.xlsx", "NUEVA FUENTE")
     c = prev["actualizar"][0]
     assert c["precio_nuevo"] == 1000            # precio actual, no 0
-    assert c["fuente_nueva"] == "NUEVA FUENTE"  # la fuente sí se cambia
+    assert c["fuente_nueva"] == "NUEVA FUENTE"  # la declarada, no la columna del archivo
+
+
+def test_fuente_declarada_gana_sobre_la_columna_del_archivo(tmp_path):
+    """La fuente la declara la importación, no el archivo. Antes, un archivo sin
+    columna `fuente` dejaba el precio nuevo con la etiqueta vieja: un precio del IDU
+    rotulado COSTO INTERNO."""
+    alm = _alm(tmp_path)
+    # El archivo dice "FUENTE DEL ARCHIVO"; la importación declara "COTIZACION 2026".
+    contenido = _xlsx_solo_precio([["100", 1500, "FUENTE DEL ARCHIVO"]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "precios.xlsx",
+                                            "COTIZACION 2026")
+    assert prev["actualizar"][0]["fuente_nueva"] == "COTIZACION 2026"
+
+    # también al crear
+    prev2 = autoria.preview_importar_insumos(alm, _xlsx_upsert(), "insumos.xlsx",
+                                             "COTIZACION 2026")
+    assert prev2["crear"][0]["fuente"] == "COTIZACION 2026"
+
+
+def test_fuente_declarada_vacia_se_rechaza(tmp_path):
+    """Sin declaración no hay importación: un default silencioso es exactamente
+    cómo nació el bug de la etiqueta."""
+    alm = _alm(tmp_path)
+    with pytest.raises(ValueError, match="fuente"):
+        autoria.preview_importar_insumos(alm, _xlsx_upsert(), "insumos.xlsx", "   ")
+
+
+def _alm_con_interno(tmp_path):
+    """Base con un insumo de costo interno (el que hay que proteger) y uno con fuente
+    vacía pero precio real (el otro caso que `_protegida` protege: ver el test
+    `test_fuente_vacia_con_precio_real_tambien_se_protege`)."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("500", "MANO DE OBRA OFICIAL", "HR", "MO", 25000, "COSTO INTERNO"),
+        Insumo("600", "TRANSPORTE INTERNO", "VJE", "TRA", 15000, "")])
+    return alm
+
+
+def test_import_publico_no_pisa_un_precio_interno(tmp_path):
+    """El caso del usuario: subir la lista del visor IDU no puede pisar los costos
+    internos de la empresa."""
+    alm = _alm_con_interno(tmp_path)
+    contenido = _xlsx_solo_precio([["100", 1200, ""], ["500", 9, ""]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "idu.xlsx", "PRECIO IDU")
+
+    assert [c["codigo"] for c in prev["actualizar"]] == ["100"]   # el público sí
+    assert len(prev["protegida"]) == 1
+    p = prev["protegida"][0]
+    assert p["codigo"] == "500" and p["fuente_actual"] == "COSTO INTERNO"
+    assert p["precio_actual"] == 25000 and p["precio_archivo"] == 9
+
+
+def test_import_interno_si_pisa_un_precio_interno(tmp_path):
+    """La regla es asimétrica: una tanda interna es curada y deliberada."""
+    alm = _alm_con_interno(tmp_path)
+    contenido = _xlsx_solo_precio([["500", 27000, ""]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "compras.xlsx",
+                                            "COMPRAS ALMACEN 2026")
+    assert prev["protegida"] == []
+    assert prev["actualizar"][0]["precio_nuevo"] == 27000
+
+
+def test_insumo_sin_tarifa_en_la_lista_no_se_protege(tmp_path):
+    """El falso positivo: sin tarifa en la lista consultada, `fuente_precio` es "" por
+    el LEFT JOIN, no porque el precio sea interno. Sin el `not ins.sin_precio`, una
+    importación pública contra una lista de NP quedaría bloqueada entera."""
+    alm = _alm(tmp_path)
+    np = alm.precios.crear_lista("NP Calle 13")
+    contenido = _xlsx_solo_precio([["100", 1200, ""]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "np.xlsx", "PRECIO IDU",
+                                            lista_id=np)
+    assert prev["protegida"] == []
+    assert prev["actualizar"][0]["precio_nuevo"] == 1200
+
+
+def test_import_publico_protege_aunque_el_archivo_no_traiga_precio(tmp_path):
+    """Una fila sin precio le cambiaría SOLO la etiqueta al insumo interno: es el bug
+    de rotulado al revés, y también se protege."""
+    alm = _alm_con_interno(tmp_path)
+    contenido = _xlsx_solo_precio([["500", "", ""]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "idu.xlsx", "PRECIO IDU")
+    assert len(prev["protegida"]) == 1
+    assert prev["protegida"][0]["precio_archivo"] is None
+    assert prev["actualizar"] == [] and prev["invalida"] == []
+
+
+def test_fuente_vacia_con_precio_real_tambien_se_protege(tmp_path):
+    """Fija que una fuente "" con precio real cuenta como interna igual que COSTO
+    INTERNO (no sabemos qué es ese precio) — NO fija sola el término
+    `not ins.sin_precio` de `_protegida`: acá `ins.sin_precio` ya es False, así que
+    ese término da True esté o no. Lo que sí rompería este caso es reclasificar ""
+    como público, o que el LEFT JOIN de alguno de los dos backends devuelva
+    `sin_precio=True` para un insumo con precio real. La frontera completa la cubren
+    entre esta prueba y su hermana `test_insumo_sin_tarifa_en_la_lista_no_se_protege`,
+    que cubre el otro lado (fuente "" que de verdad no tiene tarifa, y no se
+    protege)."""
+    alm = _alm_con_interno(tmp_path)
+    contenido = _xlsx_solo_precio([["600", 500, ""]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "idu.xlsx", "PRECIO IDU")
+    assert [p["codigo"] for p in prev["protegida"]] == ["600"]
+    assert prev["protegida"][0]["fuente_actual"] == ""
+
+
+def test_aplicar_no_escribe_las_protegidas_y_las_cuenta(tmp_path):
+    alm = _alm_con_interno(tmp_path)
+    contenido = _xlsx_solo_precio([["100", 1200, ""], ["500", 9, ""]])
+    res = autoria.aplicar_importar_insumos(alm, contenido, "idu.xlsx", "PRECIO IDU")
+
+    assert res == {"creados": 0, "actualizados": 1, "protegidos": 1, "errores": []}
+    interno = alm.precios.get_candidatos("500")[0]
+    assert interno.precio == 25000 and interno.fuente_precio == "COSTO INTERNO"
+    assert alm.precios.get_candidatos("100")[0].precio == 1200
+
+
+def test_las_protegidas_no_dejan_auditoria(tmp_path):
+    """No cambió nada: no hay evento que registrar."""
+    alm = _alm_con_interno(tmp_path)
+    autoria.aplicar_importar_insumos(alm, _xlsx_solo_precio([["500", 9, ""]]),
+                                     "idu.xlsx", "PRECIO IDU")
+    _items, total = alm.auditoria.listar(accion="precio.editar")
+    assert total == 0
 
 
 # ---------------------------------------------------------------- import APUs

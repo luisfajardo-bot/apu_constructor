@@ -61,7 +61,7 @@ def test_crear_apu_audita(tmp_path):
 def test_importar_insumos_audita_con_lote_y_origen(tmp_path):
     alm = _alm(tmp_path)
     csv = b"codigo,nombre,unidad,grupo,precio,fuente\n300,GRAVA,M3,MAT,700,PRECIO IDU\n"
-    autoria.aplicar_importar_insumos(alm, csv, "insumos.csv", actor=_actor())
+    autoria.aplicar_importar_insumos(alm, csv, "insumos.csv", "PRECIO IDU", actor=_actor())
     items, total = alm.auditoria.listar(accion="insumo.crear")
     assert total == 1
     assert items[0]["contexto"]["origen"] == "import" and items[0]["contexto"]["lote_id"]

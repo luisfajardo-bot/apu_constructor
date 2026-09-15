@@ -100,7 +100,7 @@ def test_post_insumos_crear_lista_inexistente_400(tmp_path):
 def test_post_insumos_importar_preview_lista_inexistente_400(tmp_path):
     cli, _ = _cli(tmp_path)
     r = cli.post("/api/insumos/importar/preview",
-                 data={"lista_id": "999"},
+                 data={"fuente_import": "PRECIO IDU", "lista_id": "999"},
                  files={"archivo": ("l.xlsx", _xlsx_insumos(), _XLSX)})
     assert r.status_code == 400
 
@@ -108,7 +108,7 @@ def test_post_insumos_importar_preview_lista_inexistente_400(tmp_path):
 def test_post_insumos_importar_lista_inexistente_400(tmp_path):
     cli, _ = _cli(tmp_path)
     r = cli.post("/api/insumos/importar",
-                 data={"lista_id": "999"},
+                 data={"fuente_import": "PRECIO IDU", "lista_id": "999"},
                  files={"archivo": ("l.xlsx", _xlsx_insumos(), _XLSX)})
     assert r.status_code == 400
 

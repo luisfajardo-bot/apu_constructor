@@ -78,7 +78,7 @@ def test_crear_insumo_en_la_lista_np(alm, np):
 def test_import_preview_compara_contra_la_lista(alm, np):
     contenido = _xlsx([["codigo", "nombre", "precio", "fuente"],
                        ["6140", "ACERO 60000 PSI", 4200, "ACTA NP"]])
-    prev = autoria.preview_importar_insumos(alm, contenido, "np.xlsx", lista_id=np)
+    prev = autoria.preview_importar_insumos(alm, contenido, "np.xlsx", "ACTA NP", lista_id=np)
     assert prev["actualizar"][0]["precio_actual"] == 0.0      # sin tarifa aún en NP
     assert prev["actualizar"][0]["precio_nuevo"] == 4200.0
 
@@ -87,7 +87,7 @@ def test_import_aplica_en_la_lista_y_crea_los_nuevos(alm, np):
     contenido = _xlsx([["codigo", "nombre", "precio", "fuente"],
                        ["6140", "ACERO 60000 PSI", 4200, "ACTA NP"],
                        ["NP-INS-1", "GEOTEXTIL NT 2500", 8000, "ACTA NP"]])
-    res = autoria.aplicar_importar_insumos(alm, contenido, "np.xlsx", lista_id=np)
+    res = autoria.aplicar_importar_insumos(alm, contenido, "np.xlsx", "ACTA NP", lista_id=np)
     assert res["creados"] == 1 and res["actualizados"] == 1 and res["errores"] == []
     assert alm.precios.get_candidatos("6140", lista_id=np)[0].precio == 4200.0
     assert alm.precios.get_candidatos("6140")[0].precio == 3500.0
@@ -97,5 +97,5 @@ def test_import_aplica_en_la_lista_y_crea_los_nuevos(alm, np):
 def test_import_rechaza_precio_no_positivo_en_la_lista(alm, np):
     contenido = _xlsx([["codigo", "nombre", "precio", "fuente"],
                        ["NP-INS-2", "MATERIAL DEL CLIENTE", 0, "ACTA NP"]])
-    res = autoria.aplicar_importar_insumos(alm, contenido, "np.xlsx", lista_id=np)
+    res = autoria.aplicar_importar_insumos(alm, contenido, "np.xlsx", "ACTA NP", lista_id=np)
     assert res["creados"] == 0 and len(res["errores"]) == 1

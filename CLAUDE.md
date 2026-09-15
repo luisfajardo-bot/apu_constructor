@@ -292,6 +292,14 @@ matching, modelo de IA, clasificación de precios.
 - Fuentes de precio: `PRECIO IDU` se trata como **público**; el resto
   (`COSTO INTERNO`, `COMPRAS…`, etc.) como **interno/confidencial**
   (`config.PUBLIC_PRICE_SOURCES`).
+- **El importador de insumos protege lo interno de lo público, no al revés.** La
+  importación en lote (`POST /api/insumos/importar[/preview]`) declara su
+  `fuente_import` (obligatoria, se estampa en todas las filas del archivo; la columna
+  `fuente` del Excel se ignora). Si esa fuente clasifica como pública
+  (`config.classify_price_source`), no pisa un insumo que ya tiene precio interno:
+  esas filas quedan en el balde `protegida` del preview y no se escriben
+  (`servicio/autoria.py::_protegida`). Al revés —una importación interna sobre un
+  precio público— sí se aplica, a propósito (ver "No hacer").
 
 ## Pruebas
 
@@ -369,3 +377,27 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   y ampliala con lo que agregó una persona. Un `recuperar` fresco puede devolver menos
   códigos que la generación original (un insumo nuevo desplaza a otro fuera del tope, o
   alguien lo oculta) y dejaría sin autorizar un componente que el modelo propuso bien.
+- No hagas simétrico el candado del importador de insumos ni le agregues una casilla
+  de "forzar". Una importación cuya fuente clasifique como pública (`PRECIO IDU`) no
+  pisa un precio interno: esas filas van al balde `protegida` del preview y no se
+  escriben (`servicio/autoria.py::_protegida`, embudo único en `_upsert_o_invalida`).
+  Al revés sí se puede, y es a propósito: una tanda pública es masiva y automática
+  (miles de filas del visor del IDU), una interna es curada y deliberada. Si hay que
+  cambiar un interno, se edita por insumo, que ya se puede. Ojo con el término
+  `not ins.sin_precio`: sin él, una importación pública contra una lista de NP recién
+  creada queda bloqueada entera, porque sin tarifa en esa lista `fuente_precio` es
+  `""` (LEFT JOIN) y `""` clasifica como interno.
+- No le devuelvas al archivo el mando sobre la etiqueta de fuente. La fuente la
+  declara la importación (`fuente_import`, `Form(...)` obligatorio en
+  `POST /api/insumos/importar/preview` y `/importar`) y se estampa en TODAS las
+  filas (`servicio/autoria.py::_filas_insumos`); la columna `fuente` del Excel se
+  ignora. El `fuente_nueva = f["fuente"] or ins.fuente_precio` que había antes
+  (`_cambio_upsert`) dejaba el precio nuevo con la etiqueta vieja: un precio del IDU
+  rotulado `COSTO INTERNO`, tratado como confidencial por `config.classify_price_source`
+  sin que nada lo avisara.
+- No conviertas en "listo" el aviso de clasificación del diálogo de importación
+  (`DialogoImportarInsumos.tsx`). `classify_price_source` es fail-open: `PRECIO IDU
+  2026` clasifica **interno** y el candado no se dispara. La protección es que el
+  diálogo **muestre** cómo se clasificó la fuente (`clasificacion_import` del preview)
+  antes de aplicar, no que el sistema adivine que quisiste decir `PRECIO IDU`. Un
+  matching difuso ahí sería una fuente nueva de sorpresas.

@@ -387,6 +387,10 @@ MOTIVO_SIN_PRECIO_EN_LISTA = (
     "El archivo no trae precio para este insumo y todavía no tiene tarifa "
     "en la lista de precios seleccionada.")
 
+# Mensaje del 400 cuando la importación no declara su fuente (ver preview_importar_insumos).
+MSG_FUENTE_OBLIGATORIA = ("La importación debe declarar su fuente de precio "
+                          "(p. ej. PRECIO IDU).")
+
 
 def _cambio_upsert(ins, f: dict) -> Optional[dict]:
     """Arma el cambio propuesto para 'actualizar'.
@@ -404,15 +408,24 @@ def _cambio_upsert(ins, f: dict) -> Optional[dict]:
     if not f["tiene_precio"] and ins.sin_precio:
         return None
     precio_nuevo = f["precio"] if f["tiene_precio"] else ins.precio
-    fuente_nueva = f["fuente"] or ins.fuente_precio
+    # `f["fuente"]` es la fuente declarada por la importación, nunca vacía (la validan
+    # `preview_importar_insumos` y el endpoint). No hay `or ins.fuente_precio`: ese
+    # fallback era el que dejaba un precio nuevo con la etiqueta vieja.
+    fuente_nueva = f["fuente"]
     return {"insumo_id": ins.id, "codigo": ins.codigo, "nombre": ins.nombre,
             "precio_actual": ins.precio, "precio_nuevo": precio_nuevo,
             "fuente_actual": ins.fuente_precio, "fuente_nueva": fuente_nueva,
             "sin_precio_actual": ins.sin_precio}
 
 
-def _filas_insumos(contenido: bytes, nombre_archivo: str) -> list[dict]:
-    """Lee una tabla con columnas codigo, nombre, unidad, grupo, precio, fuente."""
+def _filas_insumos(contenido: bytes, nombre_archivo: str, fuente_import: str) -> list[dict]:
+    """Lee una tabla con columnas codigo, nombre, unidad, grupo, precio.
+
+    `fuente_import` es la fuente que declaró la importación y se estampa en TODAS las
+    filas: es el ÚNICO origen de la etiqueta. Si el archivo trae una columna `fuente`
+    (los archivos viejos y la plantilla anterior la traen), se ignora — antes ganaba
+    el archivo y, cuando venía vacía, se heredaba la etiqueta del insumo, dejando un
+    precio del IDU rotulado COSTO INTERNO."""
     if nombre_archivo.lower().endswith((".xlsx", ".xlsm")):
         wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
         rows = [list(r) for r in wb.active.iter_rows(values_only=True)]
@@ -435,8 +448,7 @@ def _filas_insumos(contenido: bytes, nombre_archivo: str) -> list[dict]:
           "nombre": col("nombre", "descripcion", "name"),
           "unidad": col("unidad", "und", "unit"),
           "grupo": col("grupo", "group"),
-          "precio": col("precio", "valor", "price"),
-          "fuente": col("fuente", "source")}
+          "precio": col("precio", "valor", "price")}
     if ci["codigo"] is None:
         raise ValueError("El archivo debe tener al menos una columna de código.")
 
@@ -452,14 +464,52 @@ def _filas_insumos(contenido: bytes, nombre_archivo: str) -> list[dict]:
                     "grupo": str(g(r, ci["grupo"]) or "").strip(),
                     "precio": _to_float(raw_precio),
                     "tiene_precio": raw_precio not in (None, ""),
-                    "fuente": str(g(r, ci["fuente"]) or "").strip()})
+                    "fuente": fuente_import})
     return out
 
 
-def _upsert_o_invalida(ins, f: dict, actualizar: list, invalida: list) -> None:
-    """Aplica `_cambio_upsert` y enruta el resultado: a 'actualizar' si hay un cambio
-    real que proponer, a 'invalida' (con motivo) si no había ni precio en el archivo
-    ni tarifa previa en la lista destino (ver `_cambio_upsert`)."""
+def _protegida(ins, fuente_import: str) -> bool:
+    """Una importación pública no pisa un precio interno.
+
+    La regla es ASIMÉTRICA a propósito: una tanda pública es masiva y automática
+    (miles de filas del visor del IDU) y no puede llevarse por delante un costo
+    interno curado; una tanda interna es deliberada y sí puede pisar lo que sea,
+    incluido "ascender" un insumo que hoy tiene precio IDU a costo interno propio.
+
+    `not ins.sin_precio` evita el falso positivo: sin tarifa en la lista consultada,
+    `fuente_precio` es "" por el LEFT JOIN (ver `Insumo.sin_precio`), no porque el
+    precio sea interno. Sin ese término, una importación pública contra una lista de
+    NP recién creada quedaría bloqueada entera.
+
+    Una fuente vacía CON precio real sí cuenta como interna: no sabemos qué es ese
+    precio, así que la fila queda visible en el balde en vez de pisarse callada.
+    """
+    return (config.classify_price_source(fuente_import) == "publico"
+            and not ins.sin_precio
+            and config.classify_price_source(ins.fuente_precio) == "interno")
+
+
+def _upsert_o_invalida(ins, f: dict, fuente_import: str,
+                       actualizar: list, invalida: list, protegida: list) -> None:
+    """Enruta una fila que hizo match contra un insumo existente.
+
+    Es el ÚNICO embudo de los dos caminos de match (con nombre → identidad
+    código+nombre; sin nombre → código único), así que el candado vive acá y no
+    repetido en cada rama.
+
+    El candado va PRIMERO. Hoy los dos casos son excluyentes (`_protegida` exige
+    `not ins.sin_precio` y el de abajo exige `ins.sin_precio`), pero el orden queda
+    fijado para que mañana no dependa de esa coincidencia.
+
+    Si no protege y `_cambio_upsert` devuelve None, la fila va a `invalida`: no
+    había ni precio en el archivo ni tarifa previa en la lista destino.
+    """
+    if _protegida(ins, fuente_import):
+        protegida.append({"codigo": ins.codigo, "nombre": ins.nombre,
+                          "fuente_actual": ins.fuente_precio,
+                          "precio_actual": ins.precio,
+                          "precio_archivo": f["precio"] if f["tiene_precio"] else None})
+        return
     cambio = _cambio_upsert(ins, f)
     if cambio is not None:
         actualizar.append(cambio)
@@ -468,23 +518,32 @@ def _upsert_o_invalida(ins, f: dict, actualizar: list, invalida: list) -> None:
 
 
 def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
-                             lista_id: Optional[int] = None) -> dict:
+                             fuente_import: str, lista_id: Optional[int] = None) -> dict:
     """Upsert por fila CONTRA `lista_id` (None = Principal). Con nombre: identidad
     código+nombre (crea o actualiza). Sin nombre: actualiza precio por código (único),
-    o marca ambigua/no encontrada. Lo que crearía un duplicado va a 'conflicto'."""
+    o marca ambigua/no encontrada. Lo que crearía un duplicado va a 'conflicto'.
+
+    `fuente_import` es la fuente declarada: se estampa en todas las filas y decide el
+    candado —una tanda pública no pisa un precio interno, y esas filas van a
+    'protegida' en vez de a 'actualizar' (ver `_protegida`)."""
+    fuente_import = (fuente_import or "").strip()
+    if not fuente_import:
+        raise ValueError(MSG_FUENTE_OBLIGATORIA)
     crear, actualizar, ambigua, no_encontrada, invalida, conflicto = [], [], [], [], [], []
+    protegida: list[dict] = []
     # Filas que este mismo archivo ya va a crear, con la forma de
     # `identidades_en_conflicto`: así una fila choca contra las anteriores del archivo
     # con exactamente la misma regla (incluida la excepción del gemelo nocturno).
     reclamadas: list[tuple[str, str, bool]] = []
-    for f in _filas_insumos(contenido, nombre_archivo):
+    for f in _filas_insumos(contenido, nombre_archivo, fuente_import):
         cod, nom = f["codigo"], f["nombre"]
         if not cod:
             invalida.append(f)
         elif nom:
             match = _match_identidad(alm, cod, nom, lista_id)
             if match:
-                _upsert_o_invalida(match, f, actualizar, invalida)
+                _upsert_o_invalida(match, f, fuente_import, actualizar, invalida,
+                                   protegida)
                 continue
             motivo = _conflicto_insumo(alm, cod, nom, extra=reclamadas)
             if motivo:
@@ -495,19 +554,27 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
         else:
             cands = alm.precios.get_candidatos(cod, lista_id=lista_id)
             if len(cands) == 1:
-                _upsert_o_invalida(cands[0], f, actualizar, invalida)
+                _upsert_o_invalida(cands[0], f, fuente_import, actualizar, invalida,
+                                   protegida)
             elif len(cands) > 1:
                 ambigua.append({"codigo": cod,
                                 "candidatos": [{"id": c.id, "nombre": c.nombre} for c in cands]})
             else:
                 no_encontrada.append({"codigo": cod})
     return {"crear": crear, "actualizar": actualizar, "ambigua": ambigua,
-            "no_encontrada": no_encontrada, "invalida": invalida, "conflicto": conflicto}
+            "no_encontrada": no_encontrada, "invalida": invalida, "conflicto": conflicto,
+            "protegida": protegida,
+            # Cómo clasificó el backend la fuente declarada. Se pinta en el diálogo
+            # porque `classify_price_source` es fail-open: "PRECIO IDU 2026" clasifica
+            # INTERNO y el candado no se dispara. Que la persona lo VEA antes de
+            # aplicar es la protección; adivinar la intención sería peor.
+            "clasificacion_import": config.classify_price_source(fuente_import)}
 
 
 def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
-                             actor=None, lista_id: Optional[int] = None) -> dict:
-    prev = preview_importar_insumos(alm, contenido, nombre_archivo, lista_id)
+                             fuente_import: str, actor=None,
+                             lista_id: Optional[int] = None) -> dict:
+    prev = preview_importar_insumos(alm, contenido, nombre_archivo, fuente_import, lista_id)
     creados, actualizados, errores = 0, 0, []
     lote = nuevo_lote()
     for f in prev["crear"]:
@@ -554,7 +621,13 @@ def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
             actualizados += 1
         except Exception as e:
             errores.append({"codigo": c["codigo"], "error": str(e)})
-    return {"creados": creados, "actualizados": actualizados, "errores": errores}
+    # Las protegidas no se recorren: `preview_importar_insumos` nunca las puso en
+    # 'actualizar'. No dejan auditoría porque no cambió nada; se miran en el preview.
+    # `protegidos` cuenta FILAS del archivo, no insumos distintos — igual que
+    # `creados` y `actualizados`. Dos filas del archivo sobre el mismo insumo interno
+    # suman 2.
+    return {"creados": creados, "actualizados": actualizados,
+            "protegidos": len(prev["protegida"]), "errores": errores}
 
 
 # ---------------------------------------------------------------- import APUs

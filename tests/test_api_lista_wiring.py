@@ -105,7 +105,7 @@ def test_post_insumos_importar_preview_calcula_contra_la_lista(tmp_path):
     iid = alm.precios.get_candidatos("100")[0].id
     lid = _con_lista(alm, iid, 5000.0)
     r = cli.post("/api/insumos/importar/preview",
-                 data={"lista_id": str(lid)},
+                 data={"fuente_import": "ACTA NP", "lista_id": str(lid)},
                  files={"archivo": ("l.xlsx", _xlsx_upsert_100(6000.0), _XLSX)})
     assert r.status_code == 200, r.text
     c = r.json()["actualizar"][0]
@@ -140,7 +140,7 @@ def test_post_insumos_importar_escribe_en_la_lista_no_en_principal(tmp_path):
     cli, alm = _cli(tmp_path)
     lid = alm.precios.crear_lista("NP Calle 13")
     r = cli.post("/api/insumos/importar",
-                 data={"lista_id": str(lid)},
+                 data={"fuente_import": "ACTA NP", "lista_id": str(lid)},
                  files={"archivo": ("l.xlsx", _xlsx_upsert_100(6000.0), _XLSX)})
     assert r.status_code == 200, r.text
     assert r.json()["actualizados"] == 1 and r.json()["errores"] == []

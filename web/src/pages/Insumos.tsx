@@ -213,6 +213,7 @@ export default function Insumos() {
             onOpenChange={setImportarOpen}
             listaId={filtros.lista}
             listaNombre={listaActivaNombre}
+            fuentes={fuentes}
             onAplicado={recargar}
           />
 

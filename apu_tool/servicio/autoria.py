@@ -563,7 +563,12 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
                 no_encontrada.append({"codigo": cod})
     return {"crear": crear, "actualizar": actualizar, "ambigua": ambigua,
             "no_encontrada": no_encontrada, "invalida": invalida, "conflicto": conflicto,
-            "protegida": protegida}
+            "protegida": protegida,
+            # Cómo clasificó el backend la fuente declarada. Se pinta en el diálogo
+            # porque `classify_price_source` es fail-open: "PRECIO IDU 2026" clasifica
+            # INTERNO y el candado no se dispara. Que la persona lo VEA antes de
+            # aplicar es la protección; adivinar la intención sería peor.
+            "clasificacion_import": config.classify_price_source(fuente_import)}
 
 
 def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,

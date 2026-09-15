@@ -16,6 +16,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   listaId: number;
   listaNombre: string;
+  fuentes: string[];
   onAplicado: () => void;
 }
 
@@ -25,15 +26,21 @@ type Estado =
   | { fase: "preview"; prev: ImportInsumosUpsertPreview }
   | { fase: "aplicando" };
 
-export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombre, onAplicado }: Props) {
+export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombre, fuentes, onAplicado }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const archivoRef = useRef<File | null>(null);
   const [estado, setEstado] = useState<Estado>({ fase: "idle" });
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [fuente, setFuente] = useState("");
+  // La fuente con la que se corrió el preview vigente: es la que se manda al aplicar,
+  // para que no se pueda aplicar con una declaración distinta a la que se vio.
+  const fuentePreviewRef = useRef("");
 
   function resetear() {
     setEstado({ fase: "idle" });
     setErrorMsg(null);
+    setFuente("");
+    fuentePreviewRef.current = "";
     archivoRef.current = null;
     if (fileRef.current) fileRef.current.value = "";
   }
@@ -43,22 +50,37 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
     onOpenChange(v);
   }
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const archivo = e.target.files?.[0];
-    if (!archivo) return;
-    archivoRef.current = archivo;
+  async function correrPreview(archivo: File, f: string) {
     setErrorMsg(null);
     setEstado({ fase: "cargando" });
     try {
       const form = new FormData();
       form.append("archivo", archivo);
       form.append("lista_id", String(listaId));
+      form.append("fuente_import", f);
       const prev = await previewImportarInsumos(form);
+      fuentePreviewRef.current = f;
       setEstado({ fase: "preview", prev });
     } catch (e: unknown) {
       setErrorMsg(e instanceof Error ? e.message : "Error al procesar el archivo");
       setEstado({ fase: "idle" });
     }
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const archivo = e.target.files?.[0];
+    if (!archivo) return;
+    archivoRef.current = archivo;
+    await correrPreview(archivo, fuente.trim());
+  }
+
+  // El preview depende de la fuente declarada (decide qué queda protegido), así que
+  // cambiarla con un archivo ya elegido obliga a recalcularlo. Va en el blur y no en
+  // cada tecla: es un input de texto con datalist.
+  function handleFuenteBlur() {
+    const f = fuente.trim();
+    if (!f || !archivoRef.current || f === fuentePreviewRef.current) return;
+    void correrPreview(archivoRef.current, f);
   }
 
   async function bajarPlantilla() {
@@ -78,9 +100,12 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
       const form = new FormData();
       form.append("archivo", archivo);
       form.append("lista_id", String(listaId));
+      form.append("fuente_import", fuentePreviewRef.current);
       const res = await aplicarImportarInsumos(form);
       const errCount = res.errores?.length ?? 0;
-      const resumen = `${res.creados} creado(s), ${res.actualizados} actualizado(s)`;
+      const protegidos = res.protegidos ?? 0;
+      const resumen = `${res.creados} creado(s), ${res.actualizados} actualizado(s)` +
+        (protegidos > 0 ? `, ${protegidos} protegido(s)` : "");
       if (errCount === 0) toast.success(resumen);
       else toast.warning(`${resumen}, ${errCount} error(es): ` +
         res.errores.map((er) => `${er.codigo}: ${er.error}`).join("; "));
@@ -112,13 +137,46 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
           Se importará sobre la lista <span className="font-semibold">{listaNombre}</span>.
         </p>
 
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="fuente-import" className="text-xs font-medium">
+            Fuente de esta importación
+          </label>
+          <input
+            id="fuente-import"
+            type="text"
+            list="fuentes-import-list"
+            value={fuente}
+            onChange={(e) => setFuente(e.target.value)}
+            onBlur={handleFuenteBlur}
+            disabled={enAplicando}
+            placeholder="PRECIO IDU"
+            className="h-7 rounded border border-border bg-background px-2 text-xs"
+          />
+          <datalist id="fuentes-import-list">
+            {fuentes.map((f) => <option key={f} value={f} />)}
+          </datalist>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Queda rotulada en todas las filas del archivo. Si declaras una fuente pública
+          (PRECIO IDU), los precios internos no se tocan.
+        </p>
+        {prev?.clasificacion_import && (
+          <p className={`text-xs font-medium ${
+            prev.clasificacion_import === "publico" ? "text-muted-foreground" : "text-amber-600 dark:text-amber-500"
+          }`}>
+            {prev.clasificacion_import === "publico"
+              ? "Esta importación es PÚBLICA: no puede pisar precios internos."
+              : "Esta importación es INTERNA: puede pisar cualquier precio, incluidos los internos."}
+          </p>
+        )}
+
         <div className="flex flex-wrap items-center gap-3">
           <input
             ref={fileRef}
             type="file"
             accept=".xlsx,.xls,.csv"
             onChange={handleFileChange}
-            disabled={estado.fase === "cargando" || enAplicando}
+            disabled={!fuente.trim() || estado.fase === "cargando" || enAplicando}
             className="text-xs file:mr-2 file:rounded file:border file:border-border file:bg-muted file:px-2 file:py-0.5 file:text-xs file:font-medium file:cursor-pointer cursor-pointer disabled:opacity-50"
           />
           {estado.fase === "cargando" && (

@@ -436,11 +436,25 @@ export interface ImportInsumosUpsertPreview {
   no_encontrada: { codigo: string }[];
   invalida: InsumoImportFila[];
   conflicto?: ImportConflicto[];
+  // Filas que una importación pública NO pisa por tener hoy un precio interno.
+  protegida?: ImportProtegida[];
+  // Cómo clasificó el backend la fuente declarada. Se pinta para que se vea que
+  // "PRECIO IDU 2026" clasifica interno y por lo tanto NO protege nada.
+  clasificacion_import?: "publico" | "interno";
+}
+
+export interface ImportProtegida {
+  codigo: string;
+  nombre: string;
+  fuente_actual: string;
+  precio_actual: number;
+  precio_archivo: number | null;
 }
 
 export interface ImportUpsertResultado {
   creados: number;
   actualizados: number;
+  protegidos?: number;
   errores: { codigo: string; error: string }[];
 }
 

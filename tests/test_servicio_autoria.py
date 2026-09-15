@@ -89,6 +89,17 @@ def test_upsert_preview_con_nombre(tmp_path):
     assert len(prev["invalida"]) == 1
 
 
+def test_preview_dice_como_clasifico_la_fuente(tmp_path):
+    """El candado es fail-open: una fuente pública mal escrita clasifica interna y no
+    protege nada. El diálogo pinta esta clave para que se vea antes de aplicar."""
+    alm = _alm(tmp_path)
+    contenido = _xlsx_solo_precio([["100", 1200, ""]])
+    assert autoria.preview_importar_insumos(
+        alm, contenido, "f.xlsx", "PRECIO IDU")["clasificacion_import"] == "publico"
+    assert autoria.preview_importar_insumos(
+        alm, contenido, "f.xlsx", "PRECIO IDU 2026")["clasificacion_import"] == "interno"
+
+
 def test_upsert_aplicar_crea_y_actualiza(tmp_path):
     alm = _alm(tmp_path)
     res = autoria.aplicar_importar_insumos(alm, _xlsx_upsert(), "insumos.xlsx", "PRECIO IDU")

@@ -574,19 +574,26 @@ def _fila_conflicto(cands: list, f: dict, campo: str, motivo: str):
 
 
 def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
-                             fuente_import: str, lista_id: Optional[int] = None) -> dict:
+                             fuente_import: str, lista_id: Optional[int] = None,
+                             forzar_ids: Optional[set[int]] = None) -> dict:
     """Upsert por fila CONTRA `lista_id` (None = Principal). Con nombre: identidad
     código+nombre (crea o actualiza). Sin nombre: actualiza precio por código (único),
     o marca ambigua/no encontrada. Lo que crearía un duplicado va a 'conflicto'.
 
     `fuente_import` es la fuente declarada: se estampa en todas las filas y decide el
     candado —una tanda pública no pisa un precio interno, y esas filas van a
-    'protegida' en vez de a 'actualizar' (ver `_protegida`)."""
+    'protegida' en vez de a 'actualizar' (ver `_protegida`).
+
+    `forzar_ids` son los `insumo_id` que el usuario decidió aplicar igual, de entre los
+    conflictos de código. La fila no se escribe directo: se despacha a
+    `_upsert_o_invalida`, así que forzar resuelve una pregunta de IDENTIDAD y nunca una
+    de PERMISO — el candado de los precios internos sigue mandando."""
     fuente_import = (fuente_import or "").strip()
     if not fuente_import:
         raise ValueError(MSG_FUENTE_OBLIGATORIA)
     crear, actualizar, ambigua, no_encontrada, invalida, conflicto = [], [], [], [], [], []
     protegida: list[dict] = []
+    forzados = set(forzar_ids or ())      # None y [] se tratan igual: no se fuerza nada
     # Filas que este mismo archivo ya va a crear, con la forma de
     # `identidades_en_conflicto`: así una fila choca contra las anteriores del archivo
     # con exactamente la misma regla (incluida la excepción del gemelo nocturno).
@@ -605,8 +612,15 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
             detalle = conflicto_insumo_detalle(alm, cod, nom, extra=reclamadas)
             if detalle:
                 campo, motivo = detalle
-                _ins, fila = _fila_conflicto(cands, f, campo, motivo)
-                conflicto.append(fila)
+                ins, fila = _fila_conflicto(cands, f, campo, motivo)
+                # Forzada: entra por el MISMO embudo que todo lo demás, no por un atajo.
+                # Así hereda el candado, el enrutado a 'invalida' y el guard del $0 sin
+                # una línea de código nueva.
+                if ins is not None and ins.id in forzados:
+                    _upsert_o_invalida(ins, f, fuente_import, actualizar, invalida,
+                                       protegida)
+                else:
+                    conflicto.append(fila)
             else:
                 crear.append(f)
                 reclamadas.append((cod, nom, False))
@@ -636,8 +650,10 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
 
 def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
                              fuente_import: str, actor=None,
-                             lista_id: Optional[int] = None) -> dict:
-    prev = preview_importar_insumos(alm, contenido, nombre_archivo, fuente_import, lista_id)
+                             lista_id: Optional[int] = None,
+                             forzar_ids: Optional[set[int]] = None) -> dict:
+    prev = preview_importar_insumos(alm, contenido, nombre_archivo, fuente_import,
+                                    lista_id, forzar_ids)
     creados, actualizados, errores = 0, 0, []
     lote = nuevo_lote()
     for f in prev["crear"]:

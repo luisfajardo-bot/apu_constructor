@@ -389,6 +389,71 @@ def test_conflicto_de_nombre_no_trae_candidato(tmp_path):
     assert "insumo_id" not in c
 
 
+# ------------------------------------------------------- forzar_ids (Task 2)
+def test_forzar_un_conflicto_actualiza_el_insumo_elegido(tmp_path):
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("900", "CONCRETO 3000 PSI HECHO EN OBRA", "M3", "MAT", 526100, "PRECIO IDU")])
+    iid = alm.precios.get_candidatos("900")[0].id
+    contenido = _xlsx_upsert_filas([["900", "CONCRETO 3000 PSI HECHO EN OVRA", "M3", "MAT", 530000]])
+
+    # sin forzar: queda en conflicto y no se escribe
+    res = autoria.aplicar_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")
+    assert res["creados"] == 0 and res["actualizados"] == 0
+    assert alm.precios.get_candidatos("900")[0].precio == 526100
+
+    # forzando: se actualiza el que se eligió
+    res = autoria.aplicar_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                           forzar_ids={iid})
+    assert res["actualizados"] == 1
+    assert alm.precios.get_candidatos("900")[0].precio == 530000
+    assert alm.precios.get_candidatos("900")[0].nombre == "CONCRETO 3000 PSI HECHO EN OBRA"
+
+
+def test_forzar_no_es_un_permiso_el_candado_sigue(tmp_path):
+    """Forzar resuelve una pregunta de IDENTIDAD, no de PERMISO. Una fila forzada sobre
+    un insumo con precio interno, con importación pública, sigue protegida."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("901", "MANO DE OBRA OFICIAL DE PRIMERA", "HR", "MO", 25000, "COSTO INTERNO")])
+    iid = alm.precios.get_candidatos("901")[0].id
+    contenido = _xlsx_upsert_filas([["901", "MANO DE OBRA OFICIAL DE PRIMER", "HR", "MO", 9]])
+
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                            forzar_ids={iid})
+    assert prev["conflicto"] == []                  # ya no es conflicto: se forzó
+    assert prev["actualizar"] == []                 # pero tampoco se actualiza
+    assert [p["codigo"] for p in prev["protegida"]] == ["901"]
+
+    res = autoria.aplicar_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                           forzar_ids={iid})
+    assert res["protegidos"] == 1 and res["actualizados"] == 0
+    assert alm.precios.get_candidatos("901")[0].precio == 25000
+
+
+def test_forzar_un_id_que_no_resuelve_no_escribe(tmp_path):
+    """El catálogo puede cambiar entre el preview y el aplicar: un id que ya no
+    corresponde deja la fila en conflicto, sin error."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("902", "ARENA DE PENA LAVADA", "M3", "MAT", 50000, "PRECIO IDU")])
+    contenido = _xlsx_upsert_filas([["902", "ARENA DE PENA LAVADA GRUESA", "M3", "MAT", 60000]])
+    res = autoria.aplicar_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                           forzar_ids={999999})
+    assert res["actualizados"] == 0 and res["errores"] == []
+    assert alm.precios.get_candidatos("902")[0].precio == 50000
+
+
+def test_forzar_un_conflicto_de_nombre_no_hace_nada(tmp_path):
+    """Solo se fuerzan conflictos de código (ver spec, fuera de alcance)."""
+    alm = _alm(tmp_path)
+    iid = alm.precios.get_candidatos("100")[0].id      # CEMENTO GRIS, código 100
+    contenido = _xlsx_upsert_filas([["999", "CEMENTO GRIS", "KG", "MAT", 1200]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                            forzar_ids={iid})
+    assert len(prev["conflicto"]) == 1 and prev["actualizar"] == []
+
+
 # ---------------------------------------------------------------- import APUs
 def _xlsx_apus() -> bytes:
     wb = openpyxl.Workbook(); ws = wb.active

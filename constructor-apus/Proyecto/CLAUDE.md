@@ -246,6 +246,20 @@ matching, modelo de IA, clasificación de precios.
   rechaza (regla "nada en $0"), y el candado exige `> 0` y no `is not None` para no depender
   de que su único llamador se porte bien. Endpoint: `POST /api/corridas/{id}/igualar-costo`,
   rol `editor` — más estricto que sus vecinos a propósito, porque declara dinero.
+- **Volver a buscar APU.** El match corre una vez, al armar; los APUs creados después
+  son invisibles para la corrida (costear sí sigue la biblioteca, matchear no). El botón
+  **Volver a buscar APU** (`POST /api/corridas/{id}/rebuscar`, rol `consulta`) re-corre
+  el matcher del armado sobre las filas que NO están `confirmed`, muestra qué cambiaría
+  con costo y margen, y `.../rebuscar/aplicar` escribe solo los `seq` marcados. Usa
+  `Matcher.candidates(..., escaneo_completo=False)`: la vía rápida del índice invertido
+  es **exacta para asignar** —`similarity` es `0.4·secuencia + 0.6·jaccard`, así que un
+  APU sin tokens en común tope en 0,40 y el mínimo para asignar es 0,55—, y baja el costo
+  de 42 ms a 0,2 ms por fila, que es lo que hace que el botón sea síncrono sobre 1939
+  líneas. Aplicar **recalcula la propuesta en el servidor** y saltea lo que cambió desde
+  la previa (mismo candado que `apu_evaluado` en la revisión: el cliente no dicta qué APU
+  se escribe). La fila queda con el status del matcher (`auto`/`review`), **no**
+  `confirmed`: aprobar la asignación no es auditar la fila, y por eso escribe con
+  `actualizar_eleccion` y no con `confirmar_items`, que pisaría la confianza con 1.0.
 - **Armado reanudable.** Las licitaciones reales traen 1000-2000 ítems y el armado
   tarda de 1 a 3 horas; las instancias de Render (plan free) viven 18-30 minutos, así
   que corriendo dentro de la petición HTTP **no terminaba nunca**. Ahora `POST
@@ -403,3 +417,11 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   diálogo **muestre** cómo se clasificó la fuente (`clasificacion_import` del preview)
   antes de aplicar, no que el sistema adivine que quisiste decir `PRECIO IDU`. Un
   matching difuso ahí sería una fuente nueva de sorpresas.
+- No hagas que volver a buscar APU toque una fila `confirmed`, ni le agregues un
+  "forzar". Una persona resolvió esa fila; el re-match no la pisa. Las de `costo_manual`
+  caen ahí solas (`set_costo_manual` las deja `confirmed`), y eso es el candado, no una
+  casualidad: si algún día el costo a mano dejara de confirmar la fila, un re-match se
+  lo llevaría puesto.
+- No refresques candidatos fila por fila. `set_candidatos` es por lote a propósito: crear
+  un APU puede cambiar la lista de cientos de filas, y contra Supabase eso es el N+1 que
+  este repo ya pagó una vez.

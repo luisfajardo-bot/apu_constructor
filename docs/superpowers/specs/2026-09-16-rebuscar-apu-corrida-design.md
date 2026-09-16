@@ -117,19 +117,24 @@ def aplicar_rebusqueda(alm, corrida_id, seqs) -> Optional[dict]
   el APU) se saltan y salen en la respuesta. Es el mismo candado que `apu_evaluado` en la
   revisión: una previa de hace cinco minutos no manda sobre la fila de ahora. De paso, el
   cliente no dicta qué APU se escribe.
-- Reusa `confirmar_items(..., asignaciones=...)` con un parámetro nuevo
-  `estados: Optional[dict[int, str]]` — el status por `seq`, porque en un mismo lote hay
-  filas que entran `auto` y filas que entran `review`. Los seq que no estén ahí siguen
-  quedando `confirmed`, así que ningún llamador de hoy cambia. Un solo recosteo para todo
-  el lote.
+- Escribe con `actualizar_eleccion` directo, **no** con `confirmar_items`. Ese camino pasa
+  por `reassemble_with_choice`, que pisa `confianza` con 1.0 y `explicacion` con
+  "Confirmado por el usuario" — justo lo que no queremos: la fila tiene que quedar con el
+  parecido y el motivo que dio el matcher. El ensamble ya viene costeado del recálculo de
+  la propuesta, así que no hay recosteo extra.
 - Persiste los `candidatos` frescos **solo de las filas cuya lista cambió** y no quedó
   vacía. Una lista fresca vacía no pisa la guardada: sería perder información.
 
 ### `datos/` — método nuevo
 
-`set_candidatos(corrida_id, seq, candidatos)` en `repositorio.py` (Protocol),
-`corridas_db.py` y `pg/corridas_pg.py`. No pasa por `actualizar_eleccion`: esa borra
-`revision_json` y `costo_manual`, y refrescar candidatos no es cambiar el APU elegido.
+`set_candidatos(corrida_id, candidatos: dict[int, list[dict]])` en `repositorio.py`
+(Protocol), `corridas_db.py` y `pg/corridas_pg.py`. No pasa por `actualizar_eleccion`: esa
+borra `revision_json` y `costo_manual`, y refrescar candidatos no es cambiar el APU
+elegido.
+
+Es **por lote** (un dict `seq → candidatos`, `executemany`), calcado de `set_costo_manual`,
+y no fila por fila: crear un APU puede cambiar la lista de cientos de filas, y contra
+Supabase eso serían cientos de round-trips — el N+1 que este repo ya pagó una vez.
 
 ### `servicio/rutas.py` + `esquemas.py`
 

@@ -5,7 +5,6 @@ import pytest
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
-from apu_tool.nucleo.relevancia import similarity
 from apu_tool.servicio import autoria
 
 
@@ -295,7 +294,7 @@ def test_conflicto_de_codigo_trae_el_mejor_candidato(tmp_path):
     assert c["parecido"] > 0.7      # medido: 74.8% contra el PISO, 10.0% contra el CHEVRON
 
 
-def test_premarcado_no_marca_cuando_cambia_un_numero(tmp_path):
+def test_numeros_no_coinciden_cuando_cambia_un_numero(tmp_path):
     """El parecido NO separa "es el mismo" de "es otro": con nombres largos, cambiar un
     dígito puntúa ~89%, igual que una letra distinta. Lo que separa son los números."""
     alm = _alm(tmp_path)
@@ -307,10 +306,10 @@ def test_premarcado_no_marca_cuando_cambia_un_numero(tmp_path):
          "ML", "MAT", 60000]])
     c = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")["conflicto"][0]
     assert c["parecido"] > 0.80          # el parecido solo lo dejaría pasar
-    assert c["premarcar"] is False       # los números lo frenan
+    assert c["numeros_coinciden"] is False       # los números lo delatan
 
 
-def test_premarcado_si_marca_una_letra_distinta(tmp_path):
+def test_numeros_coinciden_con_una_letra_distinta(tmp_path):
     alm = _alm(tmp_path)
     alm.precios.insert_insumos([
         Insumo("900", "CONCRETO 3000 PSI HECHO EN OBRA PARA REDES", "M3", "MAT",
@@ -318,32 +317,66 @@ def test_premarcado_si_marca_una_letra_distinta(tmp_path):
     contenido = _xlsx_upsert_filas([
         ["900", "CONCRETO 3000 PSI HECHO EN OVRA PARA REDES", "M3", "MAT", 530000]])
     c = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")["conflicto"][0]
-    assert c["premarcar"] is True
+    assert c["numeros_coinciden"] is True
 
 
 # Los diez casos con los que se eligió la regla. El parecido SOLO no los separa: "una
 # letra distinta" da 89.0% y "MR-42 vs MR-40" da 88.7%. Lo que los separa son los números.
-# Los dos False del final de la lista de "sí quiere" son falsos negativos aceptados: no
-# vienen marcados, pero el usuario los marca a mano. Ese error cuesta un clic; el
-# contrario cuesta un precio equivocado.
 @pytest.mark.parametrize("esperado,a,b", [
     (True,  "CONCRETO 3000 PSI HECHO EN OBRA PARA REDES", "CONCRETO 3000 PSI HECHO EN OVRA PARA REDES"),
     (True,  "SUBBASE GRANULAR CLASE C PARA VIA", "SUBBASE GRANULAR CLASE C"),
-    (False, "PINTURA ACRILICA BASE AGUA PARA DEMARCACION DE VIAS", "PINTURA ACRILICA BASE AGUA"),
-    (False, "SUMINISTRO E INSTALACION DE TUBERIA PVC SANITARIA 6 PULGADAS", "SUM E INST TUBERIA PVC SANITARIA 6 PULG"),
+    (True,  "PINTURA ACRILICA BASE AGUA PARA DEMARCACION DE VIAS", "PINTURA ACRILICA BASE AGUA"),
+    (True,  "SUMINISTRO E INSTALACION DE TUBERIA PVC SANITARIA 6 PULGADAS", "SUM E INST TUBERIA PVC SANITARIA 6 PULG"),
     (False, "CONCRETO 3000 PSI HECHO EN OBRA PARA REDES", "CONCRETO 2500 PSI HECHO EN OBRA PARA REDES"),
-    (False, "SUMINISTRO Y COLOCACION DE CONCRETO HIDRAULICO MR-42 PARA LOSA DE PAVIMENTO RIGIDO INCLUYE JUNTAS",
-            "SUMINISTRO Y COLOCACION DE CONCRETO HIDRAULICO MR-40 PARA LOSA DE PAVIMENTO RIGIDO INCLUYE JUNTAS"),
-    (False, "TUBERIA PVC SANITARIA DE 6 PULGADAS INCLUYE ACCESORIOS Y MANO DE OBRA",
-            "TUBERIA PVC SANITARIA DE 8 PULGADAS INCLUYE ACCESORIOS Y MANO DE OBRA"),
-    (False, "ACERO DE REFUERZO FY=420 MPA PARA ESTRUCTURAS DE CONCRETO INCLUYE CORTE",
-            "ACERO DE REFUERZO FY=240 MPA PARA ESTRUCTURAS DE CONCRETO INCLUYE CORTE"),
-    (False, "LADRILLO TOLETE COMUN", "LADRILLO TOLETE PRENSADO"),
-    (False, "CHEVRON 90 cm x 40 cm REFLECTIVO", "PISO EN LOSETA PREFABRICADA A-50"),
+    (False, "SUMINISTRO Y COLOCACION DE CONCRETO HIDRAULICO MR-42 PARA LOSA", "SUMINISTRO Y COLOCACION DE CONCRETO HIDRAULICO MR-40 PARA LOSA"),
+    (False, "TUBERIA PVC SANITARIA DE 6 PULGADAS INCLUYE ACCESORIOS", "TUBERIA PVC SANITARIA DE 8 PULGADAS INCLUYE ACCESORIOS"),
+    (False, "ACERO DE REFUERZO FY=420 MPA PARA ESTRUCTURAS", "ACERO DE REFUERZO FY=240 MPA PARA ESTRUCTURAS"),
+    # el orden de los números importa: son dos materiales
+    (False, "BREAKER INDUSTRIAL ABB 3 X 40 AMP", "BREAKER INDUSTRIAL ABB 40 X 3 AMP"),
+    # sin números de ningún lado coinciden trivialmente: por eso `numeros_coinciden` es
+    # una SEÑAL y no un veredicto — acá no separa nada
+    (True,  "LADRILLO TOLETE COMUN", "LADRILLO TOLETE PRENSADO"),
 ])
-def test_regla_de_premarcado(esperado, a, b):
-    """Ningún caso de 'cambió un número' se pre-marca. Es la propiedad que protege plata."""
-    assert autoria._premarcar(a, b, similarity(a, b)) is esperado
+def test_regla_de_los_numeros(esperado, a, b):
+    assert autoria._mismos_numeros(a, b) is esperado
+
+
+def test_conflictos_salen_ordenados_por_parecido(tmp_path):
+    """El orden es lo que reemplaza al premarcado: los typos obvios quedan arriba."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("600", "ARENA DE PENA LAVADA", "M3", "MAT", 50000, "PRECIO IDU"),
+        Insumo("601", "CEMENTO BLANCO TIPO III", "KG", "MAT", 2000, "PRECIO IDU")])
+    contenido = _xlsx_upsert_filas([
+        ["600", "NADA QUE VER CON ARENA", "M3", "MAT", 1],           # parecido bajísimo
+        ["601", "CEMENTO BLANCO TIPO III EXTRA", "KG", "MAT", 2]])   # casi igual
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")
+    parecidos = [c["parecido"] for c in prev["conflicto"]]
+    assert parecidos == sorted(parecidos, reverse=True)
+    assert prev["conflicto"][0]["codigo"] == "601"
+
+
+def test_conflicto_contra_una_fila_del_mismo_archivo_no_trae_candidato(tmp_path):
+    """El choque es contra una fila anterior del MISMO archivo: ese insumo todavía no
+    existe en la base, así que no hay contra qué actualizar y no lleva casilla."""
+    alm = _alm(tmp_path)
+    contenido = _xlsx_upsert_filas([
+        ["7777", "GRAVA COMUN DE RIO", "M3", "MAT", 8000],
+        ["7777", "OTRA COSA DISTINTA", "M3", "MAT", 9000]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")
+    assert len(prev["crear"]) == 1 and len(prev["conflicto"]) == 1
+    assert "insumo_id" not in prev["conflicto"][0]
+
+
+def test_conflicto_sin_tarifa_en_la_lista_no_miente_con_un_cero(tmp_path):
+    """Contra una lista de NP, `precio_actual` es 0.0 por el LEFT JOIN, no porque el
+    precio sea 0. `sin_precio_actual` es lo que deja que el diálogo diga la verdad."""
+    alm = _alm(tmp_path)
+    np = alm.precios.crear_lista("NP Calle 13")
+    contenido = _xlsx_upsert_filas([["100", "CEMENTO GRIZ", "KG", "MAT", 1200]])
+    c = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                         lista_id=np)["conflicto"][0]
+    assert c["precio_actual"] == 0.0 and c["sin_precio_actual"] is True
 
 
 def test_conflicto_de_nombre_no_trae_candidato(tmp_path):

@@ -14,7 +14,6 @@ from __future__ import annotations
 import csv
 import io
 import re
-from collections import Counter
 from dataclasses import replace
 from typing import Optional, Sequence
 
@@ -373,52 +372,43 @@ def borrar_apu(alm: Almacen, codigo: str, shift: str, actor=None) -> dict | None
 
 
 # ------------------------------------------------------------- import insumos
-def _match_identidad(alm: Almacen, codigo: str, nombre: str, lista_id: Optional[int] = None):
-    """Insumo con (codigo, nombre) exactos (nombre normalizado), o None.
-    La identidad es global; el precio devuelto es el de `lista_id` (None = Principal),
-    porque es contra ESE precio que el preview reporta el cambio."""
+def _match_identidad(cands: list, nombre: str):
+    """El insumo de `cands` cuyo nombre normalizado es exactamente `nombre`, o None.
+
+    Recibe los candidatos ya leídos en vez de consultarlos: su único llamador necesita esa
+    misma lista para resolver el mejor candidato del conflicto, y eran dos consultas
+    idénticas por fila."""
     nn = normalizar(nombre)
-    for c in alm.precios.get_candidatos(codigo, lista_id=lista_id):
+    for c in cands:
         if normalizar(c.nombre) == nn:
             return c
     return None
 
 
 def _mismos_numeros(a: str, b: str) -> bool:
-    """True si los dos nombres traen exactamente los mismos números, con las mismas
-    repeticiones.
+    """True si los dos nombres traen los mismos números, EN EL MISMO ORDEN.
 
-    Es lo que separa «una letra distinta» (el mismo insumo) de «MR-42 vs MR-40» (otro
-    material), que el PARECIDO no separa: con nombres largos los dos puntúan ~89%.
-    Medido: `TUBERIA … 6 PULGADAS` vs `8 PULGADAS` da 84%, `ACERO FY=420` vs `FY=240`
-    da 86%, y `OBRA` vs `OVRA` da 89%. Solo los números los distinguen."""
-    return Counter(re.findall(r"\d+", a or "")) == Counter(re.findall(r"\d+", b or ""))
+    Se compara la lista cruda y no `Counter` ni `sorted`, que son insensibles al orden y
+    darían iguales «CABLE 3 X 40 AMP» y «CABLE 40 X 3 AMP» — dos materiales distintos (el
+    catálogo tiene `BREAKER INDUSTRIAL ABB 3 X 40 AMP`).
+
+    Es una SEÑAL que se le muestra a la persona, no una decisión: separa «una letra
+    distinta» de «MR-42 vs MR-40», que el parecido no separa (89.0% vs 88.7%), pero no
+    separa nada cuando ninguno de los dos nombres tiene números."""
+    return re.findall(r"\d+", a or "") == re.findall(r"\d+", b or "")
 
 
-def _mejor_candidato(alm: Almacen, codigo: str, nombre: str,
-                     lista_id: Optional[int] = None):
-    """`(insumo, parecido)` del insumo con ese código cuyo nombre más se parece al del
-    archivo, o `(None, 0.0)` si el código no existe en la base.
+def _mejor_candidato(cands: list, nombre: str):
+    """`(insumo, parecido)` del candidato cuyo nombre más se parece, o `(None, 0.0)`.
 
     Hace falta porque 652 códigos del catálogo están repetidos (1304 insumos) y NO son
     variantes: el código 10000 lo comparten un CHEVRON reflectivo y un PISO EN LOSETA.
     "El código ya existe" no dice cuál."""
-    cands = alm.precios.get_candidatos(codigo, lista_id=lista_id)
     if not cands:
         return None, 0.0
     sim, mejor = max(((similarity(nombre, c.nombre), c) for c in cands),
                      key=lambda par: par[0])
     return mejor, sim
-
-
-def _premarcar(nombre_archivo: str, nombre_base: str, parecido: float) -> bool:
-    """Si el conflicto conviene venir ya marcado en el diálogo.
-
-    Es función con nombre —y no una expresión adentro de `_fila_conflicto`— porque es una
-    decisión de DINERO que toma el servidor: merece estar donde se pueda leer y probar
-    sola (ver `test_regla_de_premarcado`, que la fija contra los diez casos medidos)."""
-    return parecido >= config.UMBRAL_PREMARCA_CONFLICTO and _mismos_numeros(
-        nombre_archivo, nombre_base)
 
 
 # Motivo en español reportado en 'invalida' cuando el archivo no trae precio y el
@@ -557,27 +547,30 @@ def _upsert_o_invalida(ins, f: dict, fuente_import: str,
         invalida.append({**f, "motivo": MOTIVO_SIN_PRECIO_EN_LISTA})
 
 
-def _fila_conflicto(alm: Almacen, f: dict, campo: str, motivo: str,
-                    lista_id: Optional[int]) -> dict:
-    """La entrada del balde `conflicto`.
+def _fila_conflicto(cands: list, f: dict, campo: str, motivo: str):
+    """`(insumo_ofrecido, entrada_del_balde)`. El insumo es None si no hay contra qué
+    actualizar.
 
-    Un conflicto de CÓDIGO trae además el insumo contra el que se ofrece actualizar, su
-    precio y fuente de hoy, el parecido de los nombres, y si conviene pre-marcarlo. Un
-    conflicto de NOMBRE no trae nada de eso: forzarlo reasignaría el precio a un insumo
-    con otro código, y está fuera de alcance (no lleva casilla en el diálogo).
+    Un conflicto de CÓDIGO trae el insumo contra el que se ofrece actualizar, su precio y
+    fuente de hoy, el parecido de los nombres y si los números coinciden. Un conflicto de
+    NOMBRE no trae nada de eso: forzarlo reasignaría el precio a un insumo con otro código,
+    y está fuera de alcance (no lleva casilla en el diálogo).
 
-    `insumo_id` ausente también cuando el choque es contra una fila anterior del MISMO
-    archivo (`reclamadas`): ese insumo todavía no existe, no hay nada que actualizar."""
+    Sin candidato también cuando el choque es contra una fila anterior del MISMO archivo:
+    ese insumo todavía no existe."""
     fila = {**f, "motivo": motivo, "campo": campo}
     if campo != "codigo":
-        return fila
-    ins, sim = _mejor_candidato(alm, f["codigo"], f["nombre"], lista_id)
+        return None, fila
+    ins, sim = _mejor_candidato(cands, f["nombre"])
     if ins is None:
-        return fila
-    return {**fila, "insumo_id": ins.id, "nombre_actual": ins.nombre,
-            "precio_actual": ins.precio, "fuente_actual": ins.fuente_precio,
-            "parecido": round(sim, 3),
-            "premarcar": _premarcar(f["nombre"], ins.nombre, sim)}
+        return None, fila
+    return ins, {**fila, "insumo_id": ins.id, "nombre_actual": ins.nombre,
+                 "precio_actual": ins.precio, "fuente_actual": ins.fuente_precio,
+                 # `precio_actual` es 0.0 por el LEFT JOIN cuando no hay tarifa en la lista
+                 # consultada: sin esta marca el diálogo pintaría un $0 que miente.
+                 "sin_precio_actual": ins.sin_precio,
+                 "parecido": round(sim, 3),
+                 "numeros_coinciden": _mismos_numeros(f["nombre"], ins.nombre)}
 
 
 def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
@@ -603,7 +596,8 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
         if not cod:
             invalida.append(f)
         elif nom:
-            match = _match_identidad(alm, cod, nom, lista_id)
+            cands = alm.precios.get_candidatos(cod, lista_id=lista_id)   # UNA sola vez
+            match = _match_identidad(cands, nom)
             if match:
                 _upsert_o_invalida(match, f, fuente_import, actualizar, invalida,
                                    protegida)
@@ -611,7 +605,8 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
             detalle = conflicto_insumo_detalle(alm, cod, nom, extra=reclamadas)
             if detalle:
                 campo, motivo = detalle
-                conflicto.append(_fila_conflicto(alm, f, campo, motivo, lista_id))
+                _ins, fila = _fila_conflicto(cands, f, campo, motivo)
+                conflicto.append(fila)
             else:
                 crear.append(f)
                 reclamadas.append((cod, nom, False))
@@ -625,6 +620,10 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
                                 "candidatos": [{"id": c.id, "nombre": c.nombre} for c in cands]})
             else:
                 no_encontrada.append({"codigo": cod})
+    # Ordenado por parecido descendente: es lo que reemplaza al premarcado. Los typos
+    # obvios quedan arriba y juntos, y se marcan de corrido en vez de cazarlos entre 200
+    # filas. Los conflictos de nombre no traen `parecido` y caen al final.
+    conflicto.sort(key=lambda c: c.get("parecido", -1.0), reverse=True)
     return {"crear": crear, "actualizar": actualizar, "ambigua": ambigua,
             "no_encontrada": no_encontrada, "invalida": invalida, "conflicto": conflicto,
             "protegida": protegida,

@@ -341,7 +341,16 @@ describe("DialogoImportarInsumos", () => {
       expect(cs.map((c) => c.checked)).toEqual([false, false, true, false]);
     });
 
-    it("el ancla no se mueve: un segundo shift+clic sigue partiendo del mismo punto", async () => {
+    // OJO con el nombre: esta prueba verifica que un segundo shift+clic SUMA y nunca
+    // desmarca. NO verifica dónde quedó el ancla, y no es un descuido: con rangos que
+    // solo suman, la posición del ancla es INOBSERVABLE desde las casillas. El bloque
+    // marcado siempre es contiguo y contiene a los dos anclas posibles (el original y el
+    // de la última fila clickeada), así que extender desde cualquiera de los dos hasta la
+    // fila nueva da la misma unión. Medido: 22.620 secuencias de hasta 4 clics sobre 6
+    // filas, cero diferencias entre mover el ancla y dejarla quieta.
+    // Si alguien viene a "reforzar" esta prueba para que distinga el ancla: no se puede,
+    // salvo que el shift pase a reemplazar la selección en vez de sumarla.
+    it("un segundo shift+clic suma al rango y no desmarca lo anterior", async () => {
       previewImportarInsumos.mockResolvedValue({
         crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
         protegida: [], conflicto: filasConflicto(5), clasificacion_import: "publico",

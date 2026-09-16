@@ -402,9 +402,14 @@ function SeccionConflictos({ conflictos, forzados, onForzadosChange }: {
                       {/* onClick (no onChange) porque el evento `change` de React no
                           expone `shiftKey`; el `onChange` vacío es solo para no romper
                           el input controlado. Mismo patrón que TablaItems. */}
+                      {/* El `preventDefault` SOLO con shift: sin él, el navegador
+                          extiende la selección de texto desde el último clic y deja media
+                          tabla resaltada en azul mientras marcás el rango. Acotado al
+                          shift para no robarle el foco a un clic normal. */}
                       <input type="checkbox" aria-label={`Aplicar igual el ${c.codigo}`}
                              checked={forzados.has(c.insumo_id as number)}
                              onChange={() => {}}
+                             onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
                              onClick={(e) => alternar(i, c.insumo_id as number, e.shiftKey)} />
                     </td>
                     <td className="px-2 py-0.5 align-top break-words">{c.codigo}</td>

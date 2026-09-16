@@ -252,3 +252,60 @@ el conteo del botón Aplicar; y la fila con `numeros_coinciden: false` muestra e
   candidato— y no un veredicto.
 - **Ofrecer solo el mejor candidato** puede esconder que había un segundo razonable. Se
   mitiga mostrando el nombre elegido y su parecido en la fila.
+
+## Addendum (2026-09-16): marcar en lote
+
+**Estado:** aprobado
+
+Tras el smoke con un archivo real, el usuario pidió poder marcar en lote: *"que si le doy
+shift y selecciono hacia abajo se seleccione en batch, cuando son muchas líneas puede ser
+molesto ir uno a uno"*, y también una casilla de marcar todas.
+
+### El patrón se copia, no se inventa
+
+`web/src/components/corrida/TablaItems.tsx` ya resolvió exactamente esto para la tabla de
+corridas (`alternar` en la línea 129, `marcarTodas` en la 147). Se reusa el mismo
+comportamiento para que las dos tablas de la app se manejen igual:
+
+- **Un ancla en un `ref`** con el id de la última fila marcada **sin** Shift. Corridas
+  guarda el `seq` y no el índice porque su tabla se filtra y se reordena; acá se guarda el
+  `insumo_id` por la misma robustez.
+- **Shift+click marca el rango** entre el ancla y la fila clickeada, **sumando** — nunca
+  desmarca — y el **ancla no se mueve**, así que se pueden encadenar varios Shift+click
+  desde el mismo punto. Sin ancla previa, un Shift+click se comporta como un clic normal.
+- **El checkbox usa `onClick` y no `onChange`** (con `onChange={() => {}}` al lado para no
+  romper el input controlado): el evento `change` de React no expone `shiftKey`. Es
+  literalmente cómo está en corridas.
+
+**Por qué anclar por `insumo_id` es seguro acá:** dentro de esa tabla los ids son únicos,
+porque si dos filas del archivo apuntan al mismo insumo **ninguna de las dos lleva
+casilla** (ver el arreglo del doble forzado). Sin esa garantía, el ancla sería ambigua.
+
+### Marcar todas, y el conteo del riesgo
+
+Una casilla en el encabezado marca y desmarca todas las filas de la tabla, igual que
+`marcarTodas` en corridas. Marcar todas **también marca las filas con el aviso de números**
+— el rótulo no miente.
+
+Lo que lo hace aceptable es que el riesgo queda a la vista: junto al conteo se dice cuántas
+de las marcadas traen el aviso. Con el orden por parecido descendente, **la fila más
+peligrosa suele quedar primera**: en el smoke real, un `TRANSFORMADOR … 75 KVA` contra el
+`45 KVA` del catálogo (que vale $28.577.850) puntuó 91.4%, más alto que el typo genuino.
+
+Es la misma política que el resto de la feature: **el sistema muestra, la persona decide**.
+Un "marcar todas" que silenciosamente saltara las filas con aviso sería el premarcado
+entrando por otra puerta — el sistema volviendo a decidir cuáles son seguras — y eso ya se
+descartó con evidencia medida.
+
+### Alcance
+
+Solo `web/src/components/insumos/DialogoImportarInsumos.tsx` y su archivo de pruebas. Sin
+backend: la selección es y sigue siendo estado del cliente que solo viaja al aplicar.
+
+### Pruebas
+
+1. Shift+click marca el rango entre el ancla y la fila clickeada.
+2. Un Shift+click **sin ancla previa** se comporta como un clic normal (marca una sola).
+3. Dos Shift+click seguidos siguen midiendo desde el ancla original (el ancla no se mueve).
+4. La casilla del encabezado marca todas y, al volver a hacer clic, las desmarca.
+5. El conteo dice cuántas de las marcadas traen `numeros_coinciden: false`.

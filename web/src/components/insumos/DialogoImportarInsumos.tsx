@@ -326,7 +326,12 @@ function SeccionConflictos({ conflictos, forzados, onToggle }: {
           </p>
         )}
         {porCodigo.length === 0 ? <p className="text-xs text-muted-foreground">Ninguno</p> : (
-          <div className="overflow-x-hidden overflow-y-auto max-h-52 border rounded">
+          // Más alta que las otras tablas (`max-h-52`) a propósito: es la única en la que
+          // la persona TRABAJA — las demás solo se leen. Y con nombres de licitación
+          // reales, que pasan de 100 caracteres, cada fila ocupa 3-4 renglones: medido en
+          // navegador, con 208px se veían 2 filas de 28, y la premisa de la feature es
+          // marcar varias de corrido.
+          <div className="overflow-x-hidden overflow-y-auto max-h-96 border rounded">
             <table className="w-full text-xs border-collapse">
               <thead className="sticky top-0 bg-muted/80 backdrop-blur z-10">
                 <tr>

@@ -71,7 +71,7 @@ class Matcher:
                 scored.append((score, idx, codigo, nombre))
         return self._top(scored, top_n)
 
-    def candidates(self, descripcion: str, shift: str, top_n: int = 5,
+    def candidates(self, descripcion: str, shift: str, top_n: int = 5, *,
                    escaneo_completo: bool = True) -> list[MatchCandidate]:
         pool = self._by_shift.get(shift)
         postings = self._postings_by_shift.get(shift)
@@ -131,7 +131,11 @@ class Matcher:
         # similitud de caracteres) -> escaneo completo exacto para no perderlo.
         return self._full_scan(descripcion, pool, top_n)
 
-    def match(self, item: LicitacionItem, escaneo_completo: bool = True) -> MatchResult:
+    # `escaneo_completo` es keyword-only (el `*`) a propósito: un `match(item, False)`
+    # posicional tomaría la vía rápida en silencio, sin que el nombre del argumento se
+    # vea en el sitio de llamada. Este módulo decide qué APU costea cada actividad.
+    def match(self, item: LicitacionItem, *,
+              escaneo_completo: bool = True) -> MatchResult:
         cands = self.candidates(item.descripcion, item.shift,
                                 escaneo_completo=escaneo_completo)
         if not cands:

@@ -293,4 +293,108 @@ describe("DialogoImportarInsumos", () => {
     expect(await screen.findByText(/Ese nombre ya lo usa/i)).toBeTruthy();
     expect(screen.queryByLabelText(/aplicar igual/i)).toBeNull();
   });
+
+  describe("marcar en lote (shift+clic y marcar todas)", () => {
+    function filasConflicto(n: number) {
+      return Array.from({ length: n }, (_, i) => ({
+        ...CONFLICTO_CODIGO,
+        codigo: String(900 + i),
+        insumo_id: 42 + i,
+      }));
+    }
+
+    function casillas() {
+      return screen.getAllByLabelText(/aplicar igual el/i) as HTMLInputElement[];
+    }
+
+    it("shift+clic marca el rango entre el ancla y la fila clickeada", async () => {
+      previewImportarInsumos.mockResolvedValue({
+        crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+        protegida: [], conflicto: filasConflicto(5), clasificacion_import: "publico",
+      });
+      montar();
+      seleccionarFuente();
+      seleccionarArchivo();
+      await screen.findByText(/5 fila/);
+
+      const cs = casillas();
+      fireEvent.click(cs[0]);
+      fireEvent.click(cs[3], { shiftKey: true });
+
+      expect(cs.map((c) => c.checked)).toEqual([true, true, true, true, false]);
+      expect(screen.getByText("Aplicar (4)")).toBeTruthy();
+    });
+
+    it("shift+clic sin ancla previa marca solo esa fila", async () => {
+      previewImportarInsumos.mockResolvedValue({
+        crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+        protegida: [], conflicto: filasConflicto(4), clasificacion_import: "publico",
+      });
+      montar();
+      seleccionarFuente();
+      seleccionarArchivo();
+      await screen.findByText(/4 fila/);
+
+      const cs = casillas();
+      fireEvent.click(cs[2], { shiftKey: true });
+
+      expect(cs.map((c) => c.checked)).toEqual([false, false, true, false]);
+    });
+
+    it("el ancla no se mueve: un segundo shift+clic sigue partiendo del mismo punto", async () => {
+      previewImportarInsumos.mockResolvedValue({
+        crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+        protegida: [], conflicto: filasConflicto(5), clasificacion_import: "publico",
+      });
+      montar();
+      seleccionarFuente();
+      seleccionarArchivo();
+      await screen.findByText(/5 fila/);
+
+      const cs = casillas();
+      fireEvent.click(cs[0]);
+      fireEvent.click(cs[3], { shiftKey: true });
+      fireEvent.click(cs[1], { shiftKey: true }); // rango 0→1: suma, no desmarca 2 ni 3
+
+      expect(cs.map((c) => c.checked)).toEqual([true, true, true, true, false]);
+    });
+
+    it("marcar todas marca todas las filas, y otro clic las desmarca", async () => {
+      previewImportarInsumos.mockResolvedValue({
+        crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+        protegida: [], conflicto: filasConflicto(3), clasificacion_import: "publico",
+      });
+      montar();
+      seleccionarFuente();
+      seleccionarArchivo();
+      await screen.findByText(/3 fila/);
+
+      const marcarTodas = await screen.findByLabelText(/marcar todos los conflictos/i);
+      fireEvent.click(marcarTodas);
+      expect(casillas().map((c) => c.checked)).toEqual([true, true, true]);
+
+      fireEvent.click(marcarTodas);
+      expect(casillas().map((c) => c.checked)).toEqual([false, false, false]);
+    });
+
+    it("muestra cuántas marcadas traen aviso de números al marcar todas", async () => {
+      previewImportarInsumos.mockResolvedValue({
+        crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+        protegida: [],
+        conflicto: [
+          { ...CONFLICTO_CODIGO, insumo_id: 42, numeros_coinciden: false },
+          { ...CONFLICTO_CODIGO, insumo_id: 43, codigo: "901", numeros_coinciden: true },
+        ],
+        clasificacion_import: "publico",
+      });
+      montar();
+      seleccionarFuente();
+      seleccionarArchivo();
+
+      const marcarTodas = await screen.findByLabelText(/marcar todos los conflictos/i);
+      fireEvent.click(marcarTodas);
+
+      expect(await screen.findByText(/1 con aviso de números/i)).toBeTruthy();
+    });
+  });
 });

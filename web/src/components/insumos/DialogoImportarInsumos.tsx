@@ -220,11 +220,7 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
               <Tabla cols={["Código"]} filas={prev.no_encontrada.map((n) => [n.codigo])} />
             </Seccion>
             <SeccionConflictos conflictos={prev.conflicto ?? []} forzados={forzados}
-                               onToggle={(id) => setForzados((s) => {
-                                 const n = new Set(s);
-                                 if (n.has(id)) n.delete(id); else n.add(id);
-                                 return n;
-                               })} />
+                               onForzadosChange={setForzados} />
             <Seccion titulo="Inválidas">
               <Tabla cols={["Código", "Nombre", "Motivo"]}
                      filas={prev.invalida.map((f) => [
@@ -303,13 +299,61 @@ function Tabla({ cols, filas }: { cols: string[]; filas: (string | number)[][] }
   );
 }
 
-function SeccionConflictos({ conflictos, forzados, onToggle }: {
+function SeccionConflictos({ conflictos, forzados, onForzadosChange }: {
   conflictos: ImportConflicto[];
   forzados: Set<number>;
-  onToggle: (id: number) => void;
+  // Se pasa el setter tal cual (acepta un updater `(prev) => next`, igual que
+  // `setMarcadas` en TablaItems): así el rango y el "marcar todas" se calculan acá
+  // mismo, donde ya está `porCodigo`, sin duplicar ese filtro en el padre.
+  onForzadosChange: (updater: (prev: Set<number>) => Set<number>) => void;
 }) {
   const porCodigo = conflictos.filter((c) => c.insumo_id !== undefined);
   const porNombre = conflictos.filter((c) => c.insumo_id === undefined);
+
+  // Ancla del último clic SIN Shift, por `insumo_id` (no por índice): sigue apuntando
+  // a la fila correcta aunque la tabla se recalculara. Es seguro anclar por
+  // `insumo_id` porque dentro de esta tabla son únicos — si dos filas del archivo
+  // apuntaran al mismo insumo, NINGUNA de las dos trae casilla (quedan en
+  // "Ambiguas"), así que nunca hay dos filas con el mismo `insumo_id` acá.
+  const anclaRef = useRef<number | null>(null);
+
+  function alternar(idx: number, insumoId: number, conShift: boolean) {
+    const desde = anclaRef.current === null
+      ? -1
+      : porCodigo.findIndex((c) => c.insumo_id === anclaRef.current);
+    if (conShift && desde >= 0) {
+      const [a, b] = desde <= idx ? [desde, idx] : [idx, desde];
+      const rango = porCodigo.slice(a, b + 1).map((c) => c.insumo_id as number);
+      onForzadosChange((prev) => new Set([...prev, ...rango]));
+      return;                                  // el ancla del rango no se mueve
+    }
+    anclaRef.current = insumoId;
+    onForzadosChange((prev) => {
+      const s = new Set(prev);
+      if (s.has(insumoId)) s.delete(insumoId); else s.add(insumoId);
+      return s;
+    });
+  }
+
+  function marcarTodas(marcar: boolean) {
+    anclaRef.current = null;
+    onForzadosChange((prev) => {
+      const s = new Set(prev);
+      for (const c of porCodigo) {
+        const id = c.insumo_id as number;
+        if (marcar) s.add(id); else s.delete(id);
+      }
+      return s;
+    });
+  }
+
+  const marcadasAqui = porCodigo.filter((c) => forzados.has(c.insumo_id as number)).length;
+  // Marcar todas SÍ marca las filas con aviso de números — el rótulo no miente. Lo
+  // que hace aceptable ese riesgo es que se vea: por eso el conteo de abajo separa
+  // cuántas de las marcadas lo traen, en vez de saltárselas en silencio (eso sería
+  // el premarcado entrando por otra puerta).
+  const conAviso = porCodigo.filter((c) =>
+    forzados.has(c.insumo_id as number) && c.numeros_coinciden === false).length;
 
   return (
     <>
@@ -322,7 +366,12 @@ function SeccionConflictos({ conflictos, forzados, onToggle }: {
           // (más parecido primero) es lo que hace que marcarlas no sea una cacería.
           <p className="text-xs text-muted-foreground mb-1">
             {porCodigo.length} fila(s), de más parecida a menos. Marca las que sean el
-            mismo insumo.
+            mismo insumo. Shift+clic marca en rango.
+            {conAviso > 0 && (
+              <span className="text-amber-700 dark:text-amber-400">
+                {" "}Marcadas: {marcadasAqui} — {conAviso} con aviso de números.
+              </span>
+            )}
           </p>
         )}
         {porCodigo.length === 0 ? <p className="text-xs text-muted-foreground">Ninguno</p> : (
@@ -335,7 +384,13 @@ function SeccionConflictos({ conflictos, forzados, onToggle }: {
             <table className="w-full text-xs border-collapse">
               <thead className="sticky top-0 bg-muted/80 backdrop-blur z-10">
                 <tr>
-                  {["", "Código", "Nombre en el archivo", "Nombre en tu base", "Parecido", "Precio actual", "Precio nuevo"].map((c, i) => (
+                  <th className="px-2 py-1 text-left font-medium text-muted-foreground border-b align-bottom">
+                    <input type="checkbox" className="cursor-pointer"
+                           aria-label="Marcar todos los conflictos de código"
+                           checked={porCodigo.length > 0 && marcadasAqui === porCodigo.length}
+                           onChange={(e) => marcarTodas(e.target.checked)} />
+                  </th>
+                  {["Código", "Nombre en el archivo", "Nombre en tu base", "Parecido", "Precio actual", "Precio nuevo"].map((c, i) => (
                     <th key={i} className="px-2 py-1 text-left font-medium text-muted-foreground border-b align-bottom">{c}</th>
                   ))}
                 </tr>
@@ -344,9 +399,13 @@ function SeccionConflictos({ conflictos, forzados, onToggle }: {
                 {porCodigo.map((c, i) => (
                   <tr key={i} className="hover:bg-muted/40 even:bg-muted/10">
                     <td className="px-2 py-0.5 align-top">
+                      {/* onClick (no onChange) porque el evento `change` de React no
+                          expone `shiftKey`; el `onChange` vacío es solo para no romper
+                          el input controlado. Mismo patrón que TablaItems. */}
                       <input type="checkbox" aria-label={`Aplicar igual el ${c.codigo}`}
                              checked={forzados.has(c.insumo_id as number)}
-                             onChange={() => onToggle(c.insumo_id as number)} />
+                             onChange={() => {}}
+                             onClick={(e) => alternar(i, c.insumo_id as number, e.shiftKey)} />
                     </td>
                     <td className="px-2 py-0.5 align-top break-words">{c.codigo}</td>
                     <td className="px-2 py-0.5 align-top break-words">{c.nombre}</td>

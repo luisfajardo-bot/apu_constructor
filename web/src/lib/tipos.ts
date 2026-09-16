@@ -403,6 +403,35 @@ export interface CorridaDetalle {
   igualadas?: number[];
   /** Seqs con contractual ≤ 0: no se tocan (regla "nada en $0"). */
   rechazadas?: number[];
+  /** Solo en la respuesta de aplicar una re-búsqueda. */
+  rebusqueda?: { aplicadas: number[]; salteadas: number[] };
+}
+
+/** Una línea de la vista previa de "volver a buscar APU". El costo y el margen
+ *  vienen calculados del backend: el frontend no suma plata. */
+export interface PropuestaRebusqueda {
+  seq: number;
+  item: string;
+  descripcion: string;
+  unidad: string;
+  cantidad: number;
+  apu_actual: { codigo: string; nombre: string } | null;
+  apu_propuesto: { codigo: string; nombre: string; turno: string };
+  score: number;
+  status: string;
+  explicacion: string;
+  precio_contractual: number;
+  costo_unitario: number;
+  margen_unitario: number;
+  margen_pct: number;
+  /** Hoy está en $0: se marca sola en la previa. Lo decide el backend. */
+  sin_apu: boolean;
+}
+
+export interface RebusquedaPrevia {
+  corrida_id: number;
+  escaneadas: number;
+  propuestas: PropuestaRebusqueda[];
 }
 
 export interface ListaInsumos {

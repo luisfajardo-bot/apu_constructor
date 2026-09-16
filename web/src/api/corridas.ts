@@ -10,6 +10,7 @@ import type {
   PreviaPresupuesto,
   PreviewLineas,
   ProgresoRevision,
+  RebusquedaPrevia,
   ResumenRevision,
   VeredictoIA,
 } from "@/lib/tipos";
@@ -123,6 +124,21 @@ export function aplicarSugerencias(
     seqs: [],
     asignaciones,
   });
+}
+
+/** Qué cambiaría si se volviera a matchear la corrida contra la biblioteca de hoy.
+ *  NO escribe: propone. */
+export function rebuscarApus(id: number): Promise<RebusquedaPrevia> {
+  return apiPost<RebusquedaPrevia>(`/corridas/${id}/rebuscar`, {});
+}
+
+/** Aplica la re-búsqueda a las líneas marcadas, en un solo recosteo. El servidor
+ *  recalcula la propuesta: las que ya no estén vigentes vuelven en `salteadas`. */
+export function aplicarRebusqueda(
+  id: number,
+  seqs: number[],
+): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/rebuscar/aplicar`, { seqs });
 }
 
 /** Qué se agregaría con este Excel (y qué ya está en la corrida). No escribe. */

@@ -111,3 +111,95 @@ def test_rebuscar_bloqueado_si_el_plan_esta_a_medias(tmp_path):
 
 def test_rebuscar_corrida_inexistente(tmp_path):
     assert corridas.rebuscar(_almacen(tmp_path), 999) is None
+
+
+def test_aplicar_asigna_solo_los_seq_marcados(tmp_path):
+    alm = _almacen(tmp_path)
+    cid = corridas.construir_corrida(
+        alm, "lic.xlsx",
+        [_item("Pantalla acustica modular en aluminio", "1"),
+         _item("Barrera vegetal perimetral en guadua", "2")],
+        "DIURNO", use_ai=False)
+    _agregar_apu(alm, "A9", "Pantalla acustica modular en aluminio")
+    _agregar_apu(alm, "A8", "Barrera vegetal perimetral en guadua", rendimiento=3.0)
+
+    vista = corridas.aplicar_rebusqueda(alm, cid, [0])
+    filas = {f["seq"]: f for f in vista["items"]}
+    assert filas[0]["apu_codigo"] == "A9"
+    assert filas[0]["costo_unitario"] == 2.0 * 350000.0   # recosteada
+    assert filas[1]["apu_codigo"] is None                 # no se marcó: intacta
+    assert vista["rebusqueda"]["aplicadas"] == [0]
+    assert vista["rebusqueda"]["salteadas"] == []
+
+
+def test_aplicar_conserva_el_nivel_de_parecido_no_confirma(tmp_path):
+    """Aprobar la asignación no es auditar la fila: un match dudoso entra `review`
+    y sigue contando en «por revisar»."""
+    alm = _almacen(tmp_path)
+    cid = corridas.construir_corrida(
+        alm, "lic.xlsx", [_item("Pantalla acustica modular en aluminio")],
+        "DIURNO", use_ai=False)
+    _agregar_apu(alm, "A9", "Pantalla acustica modular en aluminio")
+    corridas.aplicar_rebusqueda(alm, cid, [0])
+    fila = alm.corridas.get_items(cid)[0]
+    assert fila.status == "auto"            # 100% de parecido, no "confirmed"
+    assert fila.confianza == 1.0
+    assert "Coincidencia directa" in fila.explicacion
+
+
+def test_aplicar_saltea_lo_que_cambio_desde_la_previa(tmp_path):
+    """La previa de hace cinco minutos no manda sobre la fila de ahora: el servidor
+    recalcula y solo aplica lo que sigue vigente."""
+    alm = _almacen(tmp_path)
+    cid = corridas.construir_corrida(
+        alm, "lic.xlsx", [_item("Pantalla acustica modular en aluminio")],
+        "DIURNO", use_ai=False)
+    _agregar_apu(alm, "A9", "Pantalla acustica modular en aluminio")
+    corridas.rebuscar(alm, cid)                     # el usuario ve la propuesta…
+    corridas.confirmar_item(alm, cid, 0, apu_codigo="A1")   # …y otro confirma la fila
+    vista = corridas.aplicar_rebusqueda(alm, cid, [0])
+    assert vista["items"][0]["apu_codigo"] == "A1"          # no la pisó
+    assert vista["rebusqueda"]["aplicadas"] == []
+    assert vista["rebusqueda"]["salteadas"] == [0]
+
+
+def test_aplicar_refresca_los_candidatos_de_las_escaneadas(tmp_path):
+    alm = _almacen(tmp_path)
+    cid = corridas.construir_corrida(
+        alm, "lic.xlsx", [_item("Pantalla acustica modular en aluminio")],
+        "DIURNO", use_ai=False)
+    # Ojo: el armado NO deja la lista vacía (`_full_scan` guarda todo lo que puntúe
+    # > 0), así que la fila nace con un candidato basura. Lo que se prueba es que
+    # después del aplicar la lista es la de hoy, con el APU nuevo adentro.
+    assert "A9" not in [c["apu_codigo"]
+                        for c in alm.corridas.get_items(cid)[0].candidatos]
+    _agregar_apu(alm, "A9", "Pantalla acustica modular en aluminio")
+    corridas.aplicar_rebusqueda(alm, cid, [])       # sin marcar nada
+    fila = alm.corridas.get_items(cid)[0]
+    assert fila.apu_codigo is None                  # no se asignó nada
+    assert [c["apu_codigo"] for c in fila.candidatos] == ["A9"]
+
+
+def test_aplicar_no_pisa_los_candidatos_con_una_lista_vacia(tmp_path):
+    """Una lista fresca vacía es «no encontré nada», no «olvidá lo que sabías»."""
+    alm = _almacen(tmp_path)
+    cid = corridas.construir_corrida(alm, "lic.xlsx", [_item("Concreto clase D")],
+                                     "DIURNO", use_ai=False)
+    alm.corridas.set_candidatos(cid, {0: [{"apu_codigo": "A1", "apu_nombre": "x",
+                                           "score": 0.9, "motivo": ""}]})
+    alm.apus.borrar_apu("A1", "DIURNO")
+    corridas.aplicar_rebusqueda(alm, cid, [])
+    assert alm.corridas.get_items(cid)[0].candidatos[0]["apu_codigo"] == "A1"
+
+
+def test_aplicar_bloqueado_si_congelada(tmp_path):
+    alm = _almacen(tmp_path)
+    cid = corridas.construir_corrida(alm, "lic.xlsx", [_item("Concreto clase D")],
+                                     "DIURNO", use_ai=False)
+    corridas.congelar(alm, cid)
+    with pytest.raises(corridas.CorridaCongelada):
+        corridas.aplicar_rebusqueda(alm, cid, [0])
+
+
+def test_aplicar_corrida_inexistente(tmp_path):
+    assert corridas.aplicar_rebusqueda(_almacen(tmp_path), 999, [0]) is None

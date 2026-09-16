@@ -1123,6 +1123,52 @@ def rebuscar(alm: Almacen, corrida_id: int) -> Optional[dict]:
     }
 
 
+def aplicar_rebusqueda(alm: Almacen, corrida_id: int,
+                       seqs: Iterable[int]) -> Optional[dict]:
+    """Aplica la re-búsqueda a los `seqs` marcados. Devuelve la vista de la corrida
+    con `rebusqueda: {aplicadas, salteadas}`, o None si la corrida no existe.
+
+    RECALCULA la propuesta acá adentro en vez de creerle al cliente: entre que se
+    mostró la previa y se apretó Aplicar pueden haber pasado minutos y otro usuario
+    puede haber reasignado la fila. Los seq cuya propuesta ya no está vigente se
+    saltean y se informan. Es el mismo candado que `apu_evaluado` en la revisión.
+
+    Escribe con `actualizar_eleccion` y NO con `confirmar_items`: ese camino pasa por
+    `reassemble_with_choice`, que pisa `confianza` con 1.0 y `explicacion` con
+    "Confirmado por el usuario". La fila tiene que quedar con el parecido y el motivo
+    que dio el matcher, para que una asignación dudosa siga contando en «por revisar».
+    """
+    meta = _exigir_rebuscable(alm, corrida_id)
+    if meta is None:
+        return None
+    rows = alm.corridas.get_items(corrida_id)
+    propuestas, candidatos, _escaneadas = _propuestas_rebusqueda(alm, meta, rows)
+    vigentes = {r.seq: (r, e) for r, e in propuestas}
+    aplicadas, salteadas = [], []
+    for seq in dict.fromkeys(seqs):          # sin repetidos, en el orden que llegaron
+        par = vigentes.get(seq)
+        if par is None:
+            salteadas.append(seq)
+            continue
+        _row, ens = par
+        alm.corridas.actualizar_eleccion(
+            corrida_id, seq, status=ens.status.value, apu_codigo=ens.apu_codigo,
+            apu_nombre=ens.apu_nombre, unidad=ens.unidad, shift=ens.shift,
+            origen=ens.origen, confianza=ens.confianza, explicacion=ens.explicacion,
+            componentes=_estructura(ens.componentes))
+        aplicadas.append(seq)
+    # Candidatos frescos: solo donde la lista cambió de verdad y no quedó vacía. Una
+    # lista vacía es "no encontré nada", no "olvidá lo que sabías".
+    previos = {r.seq: r.candidatos for r in rows}
+    cambiados = {seq: c for seq, c in candidatos.items()
+                 if c and c != previos.get(seq)}
+    if cambiados:
+        alm.corridas.set_candidatos(corrida_id, cambiados)
+    vista = vista_corrida(alm, corrida_id)
+    vista["rebusqueda"] = {"aplicadas": aplicadas, "salteadas": salteadas}
+    return vista
+
+
 def igualar_costo_al_contractual(alm: Almacen, corrida_id: int, seqs: Iterable[int],
                                  actor=None) -> Optional[dict]:
     """Copia el precio contractual de cada fila marcada como su costo unitario.

@@ -1069,7 +1069,23 @@ describe("DialogoRebuscar", () => {
       .toBe(false);
   });
 
-  it("aplica solo los seq marcados", () => {
+  it("aplica solo los seq marcados, no todas las propuestas", () => {
+    const onAplicar = vi.fn();
+    render(<DialogoRebuscar abierto previa={previa([
+      propuesta(),
+      propuesta({ seq: 1, sin_apu: false,
+                  apu_actual: { codigo: "A1", nombre: "OTRO APU" } }),
+    ])} aplicando={false} onAplicar={onAplicar} onCerrar={vi.fn()} />);
+    // Sin tocar nada: viene marcada SOLO la que está sin APU. Es a propósito que no
+    // se marque la segunda antes de aplicar — si el componente mandara todas las
+    // propuestas en vez de las marcadas, acá saldría [0, 1] y el test lo cazaría.
+    // Con las dos marcadas, los dos comportamientos dan el mismo resultado y el test
+    // no probaría nada.
+    fireEvent.click(screen.getByRole("button", { name: /Aplicar 1 cambio/ }));
+    expect(onAplicar).toHaveBeenCalledWith([0]);
+  });
+
+  it("marcar a mano una fila que ya tiene APU la suma", () => {
     const onAplicar = vi.fn();
     render(<DialogoRebuscar abierto previa={previa([
       propuesta(),
@@ -1077,7 +1093,7 @@ describe("DialogoRebuscar", () => {
                   apu_actual: { codigo: "A1", nombre: "OTRO APU" } }),
     ])} aplicando={false} onAplicar={onAplicar} onCerrar={vi.fn()} />);
     fireEvent.click(screen.getByLabelText("Marcar línea 2"));
-    fireEvent.click(screen.getByRole("button", { name: /Aplicar 2/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Aplicar 2 cambios/ }));
     expect(onAplicar).toHaveBeenCalledWith([0, 1]);
   });
 

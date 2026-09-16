@@ -227,6 +227,18 @@ class RepositorioCorridas(Protocol):
         mano: el veredicto hablaba del APU anterior, y el costo a mano ya no manda
         porque la fila volvió a tener una composición real."""
         ...
+    def set_candidatos(self, corrida_id: int,
+                       candidatos: dict[int, list[dict]]) -> None:
+        """Refresca la lista de candidatos de varias filas, {seq: candidatos}.
+
+        NO toca el APU elegido, ni el veredicto, ni el costo puesto a mano: refrescar
+        candidatos no es cambiar de APU, y por eso no pasa por `actualizar_eleccion`,
+        que borra los dos.
+
+        Es por lote (no fila por fila) por la misma razón que `set_costo_manual`: crear
+        un APU puede cambiar la lista de cientos de filas, y contra Postgres eso serían
+        cientos de round-trips. Un dict vacío no escribe nada."""
+        ...
     def set_cuadro(self, corrida_id: int, path: str) -> None: ...
     def set_estado(self, corrida_id: int, estado: str) -> None: ...
     def set_duracion(self, corrida_id: int, duracion_ms: int) -> None: ...

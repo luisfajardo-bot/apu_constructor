@@ -264,6 +264,18 @@ class CorridasDB:
                  explicacion, json.dumps(componentes, ensure_ascii=False),
                  corrida_id, seq))
 
+    def set_candidatos(self, corrida_id: int,
+                       candidatos: dict[int, list[dict]]) -> None:
+        """Ver el contrato en repositorio.py."""
+        if not candidatos:
+            return
+        filas = [(json.dumps(c, ensure_ascii=False), int(corrida_id), int(s))
+                 for s, c in candidatos.items()]
+        with self.connect() as conn:
+            conn.executemany(
+                "UPDATE corrida_item SET candidatos_json=? "
+                "WHERE corrida_id=? AND seq=?", filas)
+
     def set_cuadro(self, corrida_id: int, path: str) -> None:
         with self.connect() as conn:
             conn.execute("UPDATE corrida SET cuadro_path=? WHERE id=?", (path, corrida_id))

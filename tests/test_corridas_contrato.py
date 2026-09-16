@@ -724,3 +724,45 @@ def test_reclamar_no_devuelve_una_corrida_que_perdio_en_el_ultimo_instante(repo)
 
     m = repo.get_corrida(cid)
     assert (m.armando_por, m.intentos) == ("B", 1)   # A no dejó rastro
+
+
+def test_set_candidatos_refresca_por_lote(repo):
+    """Varias filas en UNA llamada, y las no pedidas intactas."""
+    cid = _corrida_con(repo, _item(0, 1000.0), _item(1, 2000.0), _item(2, 3000.0))
+    frescos = [{"apu_codigo": "A9", "apu_nombre": "APU NUEVO", "score": 0.7,
+                "motivo": ""}]
+    repo.set_candidatos(cid, {0: frescos, 2: frescos})
+    filas = {r.seq: r for r in repo.get_items(cid)}
+    assert filas[0].candidatos == frescos
+    assert filas[2].candidatos == frescos
+    assert filas[1].candidatos == []          # no se pidió: intacta
+
+
+def test_set_candidatos_no_toca_el_apu_ni_el_veredicto_ni_el_costo_a_mano(repo):
+    """Refrescar candidatos NO es cambiar de APU: por eso no pasa por
+    `actualizar_eleccion`, que borra el veredicto y el costo puesto a mano."""
+    cid = _corrida_con(repo, _item(0, 1000.0))
+    repo.actualizar_eleccion(cid, 0, status="confirmed", apu_codigo="A1",
+                             apu_nombre="APU UNO", unidad="M3", shift="DIURNO",
+                             origen="historico", confianza=1.0, explicacion="ok",
+                             componentes=[])
+    # El orden importa: `set_costo_manual` BORRA el veredicto (poner el costo a mano
+    # es un confirm), así que el veredicto se pone después, o este test probaría que
+    # `set_candidatos` no borró algo que ya no estaba.
+    repo.set_costo_manual(cid, {0: 5000.0})
+    repo.set_revision(cid, 0, {"veredicto": "ok", "apu_evaluado": "A1"})
+    repo.set_candidatos(cid, {0: [{"apu_codigo": "A2", "apu_nombre": "OTRO",
+                                   "score": 0.6, "motivo": ""}]})
+    fila = repo.get_items(cid)[0]
+    assert fila.candidatos[0]["apu_codigo"] == "A2"
+    assert fila.apu_codigo == "A1"
+    assert fila.status == "confirmed"
+    assert fila.revision is not None
+    assert fila.costo_manual == 5000.0
+
+
+def test_set_candidatos_vacio_no_escribe(repo):
+    """Igual que `set_costo_manual`: un lote vacío es una no-operación, no un error."""
+    cid = _corrida_con(repo, _item(0, 1000.0))
+    repo.set_candidatos(cid, {})
+    assert repo.get_items(cid)[0].candidatos == []

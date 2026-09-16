@@ -179,6 +179,18 @@ class CorridasPg:
                  explicacion, json.dumps(componentes, ensure_ascii=False),
                  corrida_id, seq))
 
+    def set_candidatos(self, corrida_id: int,
+                       candidatos: dict[int, list[dict]]) -> None:
+        """Ver el contrato en repositorio.py."""
+        if not candidatos:
+            return
+        filas = [(json.dumps(c, ensure_ascii=False), int(corrida_id), int(s))
+                 for s, c in candidatos.items()]
+        with self.cx.connection() as c, c.cursor() as cur:
+            cur.executemany(
+                "UPDATE corridas.corrida_item SET candidatos_json=%s "
+                "WHERE corrida_id=%s AND seq=%s", filas)
+
     def set_cuadro(self, corrida_id: int, path: str) -> None:
         with self.cx.connection() as conn:
             conn.execute("UPDATE corridas.corrida SET cuadro_path=%s WHERE id=%s",

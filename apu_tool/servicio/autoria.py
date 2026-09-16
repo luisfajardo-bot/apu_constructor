@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import csv
 import io
+import re
+from collections import Counter
 from dataclasses import replace
 from typing import Optional, Sequence
 
@@ -22,6 +24,7 @@ from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.datos.seed import _read_apus
 from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
+from apu_tool.nucleo.relevancia import similarity
 from apu_tool.nucleo.texto import normalizar
 from apu_tool.servicio.auditoria import nuevo_lote, registrar_auditoria
 from apu_tool.servicio.insumos import _insumo_out, _norm_h, _to_float, MSG_PRECIO_POSITIVO
@@ -381,6 +384,43 @@ def _match_identidad(alm: Almacen, codigo: str, nombre: str, lista_id: Optional[
     return None
 
 
+def _mismos_numeros(a: str, b: str) -> bool:
+    """True si los dos nombres traen exactamente los mismos números, con las mismas
+    repeticiones.
+
+    Es lo que separa «una letra distinta» (el mismo insumo) de «MR-42 vs MR-40» (otro
+    material), que el PARECIDO no separa: con nombres largos los dos puntúan ~89%.
+    Medido: `TUBERIA … 6 PULGADAS` vs `8 PULGADAS` da 84%, `ACERO FY=420` vs `FY=240`
+    da 86%, y `OBRA` vs `OVRA` da 89%. Solo los números los distinguen."""
+    return Counter(re.findall(r"\d+", a or "")) == Counter(re.findall(r"\d+", b or ""))
+
+
+def _mejor_candidato(alm: Almacen, codigo: str, nombre: str,
+                     lista_id: Optional[int] = None):
+    """`(insumo, parecido)` del insumo con ese código cuyo nombre más se parece al del
+    archivo, o `(None, 0.0)` si el código no existe en la base.
+
+    Hace falta porque 652 códigos del catálogo están repetidos (1304 insumos) y NO son
+    variantes: el código 10000 lo comparten un CHEVRON reflectivo y un PISO EN LOSETA.
+    "El código ya existe" no dice cuál."""
+    cands = alm.precios.get_candidatos(codigo, lista_id=lista_id)
+    if not cands:
+        return None, 0.0
+    sim, mejor = max(((similarity(nombre, c.nombre), c) for c in cands),
+                     key=lambda par: par[0])
+    return mejor, sim
+
+
+def _premarcar(nombre_archivo: str, nombre_base: str, parecido: float) -> bool:
+    """Si el conflicto conviene venir ya marcado en el diálogo.
+
+    Es función con nombre —y no una expresión adentro de `_fila_conflicto`— porque es una
+    decisión de DINERO que toma el servidor: merece estar donde se pueda leer y probar
+    sola (ver `test_regla_de_premarcado`, que la fija contra los diez casos medidos)."""
+    return parecido >= config.UMBRAL_PREMARCA_CONFLICTO and _mismos_numeros(
+        nombre_archivo, nombre_base)
+
+
 # Motivo en español reportado en 'invalida' cuando el archivo no trae precio y el
 # insumo tampoco tiene tarifa en la lista destino (ver _cambio_upsert).
 MOTIVO_SIN_PRECIO_EN_LISTA = (
@@ -517,6 +557,29 @@ def _upsert_o_invalida(ins, f: dict, fuente_import: str,
         invalida.append({**f, "motivo": MOTIVO_SIN_PRECIO_EN_LISTA})
 
 
+def _fila_conflicto(alm: Almacen, f: dict, campo: str, motivo: str,
+                    lista_id: Optional[int]) -> dict:
+    """La entrada del balde `conflicto`.
+
+    Un conflicto de CÓDIGO trae además el insumo contra el que se ofrece actualizar, su
+    precio y fuente de hoy, el parecido de los nombres, y si conviene pre-marcarlo. Un
+    conflicto de NOMBRE no trae nada de eso: forzarlo reasignaría el precio a un insumo
+    con otro código, y está fuera de alcance (no lleva casilla en el diálogo).
+
+    `insumo_id` ausente también cuando el choque es contra una fila anterior del MISMO
+    archivo (`reclamadas`): ese insumo todavía no existe, no hay nada que actualizar."""
+    fila = {**f, "motivo": motivo, "campo": campo}
+    if campo != "codigo":
+        return fila
+    ins, sim = _mejor_candidato(alm, f["codigo"], f["nombre"], lista_id)
+    if ins is None:
+        return fila
+    return {**fila, "insumo_id": ins.id, "nombre_actual": ins.nombre,
+            "precio_actual": ins.precio, "fuente_actual": ins.fuente_precio,
+            "parecido": round(sim, 3),
+            "premarcar": _premarcar(f["nombre"], ins.nombre, sim)}
+
+
 def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str,
                              fuente_import: str, lista_id: Optional[int] = None) -> dict:
     """Upsert por fila CONTRA `lista_id` (None = Principal). Con nombre: identidad
@@ -545,9 +608,10 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
                 _upsert_o_invalida(match, f, fuente_import, actualizar, invalida,
                                    protegida)
                 continue
-            motivo = _conflicto_insumo(alm, cod, nom, extra=reclamadas)
-            if motivo:
-                conflicto.append({**f, "motivo": motivo})
+            detalle = conflicto_insumo_detalle(alm, cod, nom, extra=reclamadas)
+            if detalle:
+                campo, motivo = detalle
+                conflicto.append(_fila_conflicto(alm, f, campo, motivo, lista_id))
             else:
                 crear.append(f)
                 reclamadas.append((cod, nom, False))

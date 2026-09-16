@@ -73,6 +73,12 @@ ARMADO_MAX_INTENTOS = 3
 CRUCE_UMBRAL = 0.60   # similitud mínima de nombre para aceptar un cruce aproximado
 CRUCE_MARGEN = 0.10   # ventaja mínima del mejor candidato sobre el segundo
 
+# Parecido mínimo para PRE-MARCAR un conflicto de código en el import de insumos.
+# Solo pre-marca: el usuario decide, y lo que se aplica es lo que él manda.
+# Medido sobre nombres del estilo del catálogo: con 0.80 y el guard de los números,
+# ninguno de los seis casos de "cambió un dígito" se pre-marca.
+UMBRAL_PREMARCA_CONFLICTO = 0.80
+
 # Umbrales de la composición asistida (dominio/validacion_composicion.py).
 # Techo absurdo por componente: atrapa un rendimiento con la coma corrida (0,5 -> 500)
 # sin bloquear un consumo grande legítimo (arena en m3 por m3 de mampostería).

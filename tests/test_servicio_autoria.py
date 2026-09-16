@@ -5,6 +5,7 @@ import pytest
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
+from apu_tool.nucleo.relevancia import similarity
 from apu_tool.servicio import autoria
 
 
@@ -75,6 +76,15 @@ def _xlsx_solo_precio(filas) -> bytes:
     """Archivo estilo lista de precios: codigo, precio (sin nombre)."""
     wb = openpyxl.Workbook(); ws = wb.active
     ws.append(["codigo", "precio", "fuente"])
+    for f in filas:
+        ws.append(f)
+    buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
+
+
+def _xlsx_upsert_filas(filas) -> bytes:
+    """Excel con las columnas del importador y las filas que se le pasen."""
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["codigo", "nombre", "unidad", "grupo", "precio"])
     for f in filas:
         ws.append(f)
     buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
@@ -261,6 +271,89 @@ def test_las_protegidas_no_dejan_auditoria(tmp_path):
                                      "idu.xlsx", "PRECIO IDU")
     _items, total = alm.auditoria.listar(accion="precio.editar")
     assert total == 0
+
+
+def test_conflicto_de_codigo_trae_el_mejor_candidato(tmp_path):
+    """Con 652 códigos repetidos en el catálogo real, "el código ya existe" no dice
+    cuál insumo es. El conflicto tiene que nombrar contra cuál se ofrece actualizar."""
+    alm = _alm(tmp_path)
+    # dos insumos con el MISMO código y nombres muy distintos
+    alm.precios.insert_insumos([
+        Insumo("700", "CHEVRON 90 CM X 40 CM REFLECTIVO", "UN", "SEN", 330498, "PRECIO IDU"),
+        Insumo("700", "PISO EN LOSETA PREFABRICADA A-50", "M2", "PAV", 135101, "PRECIO IDU")])
+    # OJO con el nombre del archivo: `normalizar` convierte "A-50" en "A 50", así que un
+    # nombre que solo cambie el guion haría MATCH de identidad y nunca llegaría a
+    # conflicto. La diferencia tiene que ser una letra de verdad (LOSETA -> LOZETA).
+    contenido = _xlsx_upsert_filas([["700", "PISO EN LOZETA PREFABRICADA A-50", "M2", "PAV", 140000]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")
+
+    assert len(prev["conflicto"]) == 1
+    c = prev["conflicto"][0]
+    assert c["campo"] == "codigo"
+    assert c["nombre_actual"] == "PISO EN LOSETA PREFABRICADA A-50"   # el parecido, no el CHEVRON
+    assert c["precio_actual"] == 135101
+    assert c["parecido"] > 0.7      # medido: 74.8% contra el PISO, 10.0% contra el CHEVRON
+
+
+def test_premarcado_no_marca_cuando_cambia_un_numero(tmp_path):
+    """El parecido NO separa "es el mismo" de "es otro": con nombres largos, cambiar un
+    dígito puntúa ~89%, igual que una letra distinta. Lo que separa son los números."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("800", "TUBERIA PVC SANITARIA DE 6 PULGADAS INCLUYE ACCESORIOS Y MANO DE OBRA",
+               "ML", "MAT", 50000, "PRECIO IDU")])
+    contenido = _xlsx_upsert_filas([
+        ["800", "TUBERIA PVC SANITARIA DE 8 PULGADAS INCLUYE ACCESORIOS Y MANO DE OBRA",
+         "ML", "MAT", 60000]])
+    c = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")["conflicto"][0]
+    assert c["parecido"] > 0.80          # el parecido solo lo dejaría pasar
+    assert c["premarcar"] is False       # los números lo frenan
+
+
+def test_premarcado_si_marca_una_letra_distinta(tmp_path):
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("900", "CONCRETO 3000 PSI HECHO EN OBRA PARA REDES", "M3", "MAT",
+               526100, "PRECIO IDU")])
+    contenido = _xlsx_upsert_filas([
+        ["900", "CONCRETO 3000 PSI HECHO EN OVRA PARA REDES", "M3", "MAT", 530000]])
+    c = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")["conflicto"][0]
+    assert c["premarcar"] is True
+
+
+# Los diez casos con los que se eligió la regla. El parecido SOLO no los separa: "una
+# letra distinta" da 89.0% y "MR-42 vs MR-40" da 88.7%. Lo que los separa son los números.
+# Los dos False del final de la lista de "sí quiere" son falsos negativos aceptados: no
+# vienen marcados, pero el usuario los marca a mano. Ese error cuesta un clic; el
+# contrario cuesta un precio equivocado.
+@pytest.mark.parametrize("esperado,a,b", [
+    (True,  "CONCRETO 3000 PSI HECHO EN OBRA PARA REDES", "CONCRETO 3000 PSI HECHO EN OVRA PARA REDES"),
+    (True,  "SUBBASE GRANULAR CLASE C PARA VIA", "SUBBASE GRANULAR CLASE C"),
+    (False, "PINTURA ACRILICA BASE AGUA PARA DEMARCACION DE VIAS", "PINTURA ACRILICA BASE AGUA"),
+    (False, "SUMINISTRO E INSTALACION DE TUBERIA PVC SANITARIA 6 PULGADAS", "SUM E INST TUBERIA PVC SANITARIA 6 PULG"),
+    (False, "CONCRETO 3000 PSI HECHO EN OBRA PARA REDES", "CONCRETO 2500 PSI HECHO EN OBRA PARA REDES"),
+    (False, "SUMINISTRO Y COLOCACION DE CONCRETO HIDRAULICO MR-42 PARA LOSA DE PAVIMENTO RIGIDO INCLUYE JUNTAS",
+            "SUMINISTRO Y COLOCACION DE CONCRETO HIDRAULICO MR-40 PARA LOSA DE PAVIMENTO RIGIDO INCLUYE JUNTAS"),
+    (False, "TUBERIA PVC SANITARIA DE 6 PULGADAS INCLUYE ACCESORIOS Y MANO DE OBRA",
+            "TUBERIA PVC SANITARIA DE 8 PULGADAS INCLUYE ACCESORIOS Y MANO DE OBRA"),
+    (False, "ACERO DE REFUERZO FY=420 MPA PARA ESTRUCTURAS DE CONCRETO INCLUYE CORTE",
+            "ACERO DE REFUERZO FY=240 MPA PARA ESTRUCTURAS DE CONCRETO INCLUYE CORTE"),
+    (False, "LADRILLO TOLETE COMUN", "LADRILLO TOLETE PRENSADO"),
+    (False, "CHEVRON 90 cm x 40 cm REFLECTIVO", "PISO EN LOSETA PREFABRICADA A-50"),
+])
+def test_regla_de_premarcado(esperado, a, b):
+    """Ningún caso de 'cambió un número' se pre-marca. Es la propiedad que protege plata."""
+    assert autoria._premarcar(a, b, similarity(a, b)) is esperado
+
+
+def test_conflicto_de_nombre_no_trae_candidato(tmp_path):
+    """El nombre ya existe bajo OTRO código: forzar ahí reasignaría el precio a un
+    insumo con código distinto, y está fuera de alcance. Sin casilla."""
+    alm = _alm(tmp_path)
+    contenido = _xlsx_upsert_filas([["999", "CEMENTO GRIS", "KG", "MAT", 1200]])
+    c = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")["conflicto"][0]
+    assert c["campo"] == "nombre"
+    assert "insumo_id" not in c
 
 
 # ---------------------------------------------------------------- import APUs

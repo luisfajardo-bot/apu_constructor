@@ -427,6 +427,22 @@ export interface ImportConflicto {
   nombre: string;
   turno?: string;   // solo en el import de APUs
   motivo: string;
+  // Solo en los conflictos de CÓDIGO del import de insumos: el insumo contra el que se
+  // ofrece actualizar, para poder aplicarlo igual desde el preview.
+  campo?: "codigo" | "nombre";
+  insumo_id?: number;
+  nombre_actual?: string;
+  precio_actual?: number;
+  fuente_actual?: string;
+  parecido?: number;
+  // El precio que trae el archivo para esa fila. El backend arma la entrada con
+  // `{**f, ...}`, así que los campos de la fila parseada viajan también.
+  precio?: number;
+  // Señal, NO decisión: los números del nombre del archivo y del de la base coinciden.
+  // Se pinta como aviso en la fila; ninguna casilla viene marcada por el servidor.
+  numeros_coinciden?: boolean;
+  // `precio_actual` es 0.0 por el LEFT JOIN cuando no hay tarifa en la lista consultada.
+  sin_precio_actual?: boolean;
 }
 
 export interface ImportInsumosUpsertPreview {

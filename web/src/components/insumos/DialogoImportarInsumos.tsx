@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import type { ImportInsumosUpsertPreview } from "@/lib/tipos";
+import type { ImportInsumosUpsertPreview, ImportConflicto } from "@/lib/tipos";
 import {
   previewImportarInsumos, aplicarImportarInsumos, descargarPlantillaInsumos,
 } from "@/api/insumos";
@@ -35,6 +35,9 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
   // La fuente con la que se corrió el preview vigente: es la que se manda al aplicar,
   // para que no se pueda aplicar con una declaración distinta a la que se vio.
   const fuentePreviewRef = useRef("");
+  // Los insumo_id de los conflictos que el usuario decidió aplicar igual. Es estado del
+  // cliente: marcar NO re-dispara el preview, solo viaja al aplicar.
+  const [forzados, setForzados] = useState<Set<number>>(new Set());
 
   function resetear() {
     setEstado({ fase: "idle" });
@@ -42,6 +45,7 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
     setFuente("");
     fuentePreviewRef.current = "";
     archivoRef.current = null;
+    setForzados(new Set());
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -60,6 +64,10 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
       form.append("fuente_import", f);
       const prev = await previewImportarInsumos(form);
       fuentePreviewRef.current = f;
+      // Ninguna casilla arranca marcada: el servidor NO decide qué se aplica. Medida
+      // contra el catálogo real, cualquier regla de pre-marcado marcaba materiales
+      // distintos (`CLASE A` vs `CLASE B` al 93.8%). La comodidad la da el orden.
+      setForzados(new Set());
       setEstado({ fase: "preview", prev });
     } catch (e: unknown) {
       setErrorMsg(e instanceof Error ? e.message : "Error al procesar el archivo");
@@ -101,6 +109,7 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
       form.append("archivo", archivo);
       form.append("lista_id", String(listaId));
       form.append("fuente_import", fuentePreviewRef.current);
+      forzados.forEach((id) => form.append("forzar_ids", String(id)));
       const res = await aplicarImportarInsumos(form);
       const errCount = res.errores?.length ?? 0;
       const protegidos = res.protegidos ?? 0;
@@ -120,7 +129,7 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
   const enPreview = estado.fase === "preview";
   const enAplicando = estado.fase === "aplicando";
   const prev = enPreview ? estado.prev : null;
-  const nAcciones = prev ? prev.crear.length + prev.actualizar.length : 0;
+  const nAcciones = prev ? prev.crear.length + prev.actualizar.length + forzados.size : 0;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -208,11 +217,12 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
             <Seccion titulo="No encontradas (sin nombre, código inexistente)">
               <Tabla cols={["Código"]} filas={prev.no_encontrada.map((n) => [n.codigo])} />
             </Seccion>
-            <Seccion titulo="En conflicto (no se crean)">
-              <Tabla cols={["Código", "Nombre", "Motivo"]}
-                     filas={(prev.conflicto ?? []).map((c) => [
-                       c.codigo || "—", c.nombre || "—", c.motivo])} />
-            </Seccion>
+            <SeccionConflictos conflictos={prev.conflicto ?? []} forzados={forzados}
+                               onToggle={(id) => setForzados((s) => {
+                                 const n = new Set(s);
+                                 if (n.has(id)) n.delete(id); else n.add(id);
+                                 return n;
+                               })} />
             <Seccion titulo="Inválidas">
               <Tabla cols={["Código", "Nombre", "Motivo"]}
                      filas={prev.invalida.map((f) => [
@@ -288,5 +298,75 @@ function Tabla({ cols, filas }: { cols: string[]; filas: (string | number)[][] }
         </tbody>
       </table>
     </div>
+  );
+}
+
+function SeccionConflictos({ conflictos, forzados, onToggle }: {
+  conflictos: ImportConflicto[];
+  forzados: Set<number>;
+  onToggle: (id: number) => void;
+}) {
+  const porCodigo = conflictos.filter((c) => c.insumo_id !== undefined);
+  const porNombre = conflictos.filter((c) => c.insumo_id === undefined);
+
+  return (
+    <>
+      <div>
+        <p className="text-xs font-semibold mb-1">
+          El código ya existe con otro nombre — marca los que sean el mismo insumo
+        </p>
+        {porCodigo.length > 0 && (
+          // Ninguna viene marcada a propósito: el servidor no decide plata. El orden
+          // (más parecido primero) es lo que hace que marcarlas no sea una cacería.
+          <p className="text-xs text-muted-foreground mb-1">
+            {porCodigo.length} fila(s), de más parecida a menos. Marca las que sean el
+            mismo insumo.
+          </p>
+        )}
+        {porCodigo.length === 0 ? <p className="text-xs text-muted-foreground">Ninguno</p> : (
+          <div className="overflow-x-hidden overflow-y-auto max-h-52 border rounded">
+            <table className="w-full text-xs border-collapse">
+              <thead className="sticky top-0 bg-muted/80 backdrop-blur z-10">
+                <tr>
+                  {["", "Código", "Nombre en el archivo", "Nombre en tu base", "Parecido", "Precio actual", "Precio nuevo"].map((c, i) => (
+                    <th key={i} className="px-2 py-1 text-left font-medium text-muted-foreground border-b align-bottom">{c}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {porCodigo.map((c) => (
+                  <tr key={c.insumo_id} className="hover:bg-muted/40 even:bg-muted/10">
+                    <td className="px-2 py-0.5 align-top">
+                      <input type="checkbox" aria-label={`Aplicar igual el ${c.codigo}`}
+                             checked={forzados.has(c.insumo_id as number)}
+                             onChange={() => onToggle(c.insumo_id as number)} />
+                    </td>
+                    <td className="px-2 py-0.5 align-top break-words">{c.codigo}</td>
+                    <td className="px-2 py-0.5 align-top break-words">{c.nombre}</td>
+                    <td className="px-2 py-0.5 align-top break-words">{c.nombre_actual}</td>
+                    <td className="px-2 py-0.5 align-top">
+                      {Math.round((c.parecido ?? 0) * 100)}%
+                      {c.numeros_coinciden === false && (
+                        <span className="block text-amber-700 dark:text-amber-400">
+                          los números no coinciden
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-2 py-0.5 align-top">
+                      {c.sin_precio_actual ? "sin tarifa" : cop(c.precio_actual ?? 0)}
+                    </td>
+                    <td className="px-2 py-0.5 align-top">{cop(c.precio ?? 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      <Seccion titulo="En conflicto (no se crean)">
+        <Tabla cols={["Código", "Nombre", "Motivo"]}
+               filas={porNombre.map((c) => [c.codigo || "—", c.nombre || "—", c.motivo])} />
+      </Seccion>
+    </>
   );
 }

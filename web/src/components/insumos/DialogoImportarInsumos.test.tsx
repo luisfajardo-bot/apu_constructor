@@ -207,4 +207,90 @@ describe("DialogoImportarInsumos", () => {
     await waitFor(() => expect(previewImportarInsumos).toHaveBeenCalledTimes(2));
     expect(aplicarImportarInsumos).not.toHaveBeenCalled();
   });
+
+  const CONFLICTO_CODIGO = {
+    codigo: "900", nombre: "CONCRETO 3000 PSI HECHO EN OVRA",
+    motivo: "El código 900 ya lo usa el insumo «CONCRETO 3000 PSI HECHO EN OBRA».",
+    campo: "codigo" as const, insumo_id: 42,
+    nombre_actual: "CONCRETO 3000 PSI HECHO EN OBRA",
+    precio_actual: 526100, fuente_actual: "PRECIO IDU", precio: 530000,
+    parecido: 0.89, numeros_coinciden: true, sin_precio_actual: false,
+  };
+
+  it("ninguna casilla arranca marcada", async () => {
+    previewImportarInsumos.mockResolvedValue({
+      crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+      protegida: [], conflicto: [CONFLICTO_CODIGO], clasificacion_import: "publico",
+    });
+    montar();
+    seleccionarFuente();
+    seleccionarArchivo();
+
+    const casilla = await screen.findByLabelText(/aplicar igual el 900/i) as HTMLInputElement;
+    expect(casilla.checked).toBe(false);
+    expect((screen.getByText("Aplicar (0)") as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(casilla);
+    expect(screen.getByText("Aplicar (1)")).toBeTruthy();
+  });
+
+  it("avisa en la fila cuando los números no coinciden", async () => {
+    previewImportarInsumos.mockResolvedValue({
+      crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+      protegida: [], clasificacion_import: "publico",
+      conflicto: [{ ...CONFLICTO_CODIGO, numeros_coinciden: false }],
+    });
+    montar();
+    seleccionarFuente();
+    seleccionarArchivo();
+
+    expect(await screen.findByText(/los números no coinciden/i)).toBeTruthy();
+  });
+
+  it("manda en forzar_ids solo las casillas marcadas", async () => {
+    previewImportarInsumos.mockResolvedValue({
+      crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+      protegida: [], conflicto: [CONFLICTO_CODIGO], clasificacion_import: "publico",
+    });
+    montar();
+    seleccionarFuente();
+    seleccionarArchivo();
+    fireEvent.click(await screen.findByLabelText(/aplicar igual el 900/i));
+    fireEvent.click(screen.getByText("Aplicar (1)"));
+
+    await waitFor(() => expect(aplicarImportarInsumos).toHaveBeenCalled());
+    const form = aplicarImportarInsumos.mock.calls[0][0] as FormData;
+    expect(form.getAll("forzar_ids")).toEqual(["42"]);
+  });
+
+  it("marcar y desmarcar mueve el conteo", async () => {
+    previewImportarInsumos.mockResolvedValue({
+      crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+      protegida: [], conflicto: [CONFLICTO_CODIGO], clasificacion_import: "publico",
+    });
+    montar();
+    seleccionarFuente();
+    seleccionarArchivo();
+    const casilla = await screen.findByLabelText(/aplicar igual el 900/i);
+    fireEvent.click(casilla);
+    expect(screen.getByText("Aplicar (1)")).toBeTruthy();
+
+    fireEvent.click(casilla);
+    expect((screen.getByText("Aplicar (0)") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("un conflicto de nombre no trae casilla", async () => {
+    previewImportarInsumos.mockResolvedValue({
+      crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+      protegida: [], clasificacion_import: "publico",
+      conflicto: [{ codigo: "999", nombre: "CEMENTO GRIS", campo: "nombre" as const,
+                    motivo: "Ese nombre ya lo usa el insumo 100." }],
+    });
+    montar();
+    seleccionarFuente();
+    seleccionarArchivo();
+
+    expect(await screen.findByText(/Ese nombre ya lo usa/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/aplicar igual/i)).toBeNull();
+  });
 });

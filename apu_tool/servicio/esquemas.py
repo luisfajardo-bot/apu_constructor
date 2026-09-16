@@ -55,6 +55,11 @@ class IgualarCostoIn(BaseModel):
     seqs: list[int]
 
 
+class RebuscarAplicarIn(BaseModel):
+    """Los seq que el usuario marcó en la vista previa de volver a buscar APU."""
+    seqs: list[int]
+
+
 class CambioIn(BaseModel):
     insumo_id: int
     precio: float

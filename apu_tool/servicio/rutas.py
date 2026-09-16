@@ -43,8 +43,8 @@ from pydantic import BaseModel
 from apu_tool.servicio.esquemas import (
     AgregarLineasIn, ApuEditIn, ApuNuevoIn, BorrarLineasIn, CambiosIn, ConfirmarIn,
     ComposicionAprobarIn, ComposicionEditarIn, ComposicionRechazarIn,
-    ConfirmarLoteIn, EstadoIn, IgualarCostoIn, InsumoNuevoIn, ListaPreciosIn, RolIn,
-    StatusOut, UsuarioInvitarIn)
+    ConfirmarLoteIn, EstadoIn, IgualarCostoIn, InsumoNuevoIn, ListaPreciosIn,
+    RebuscarAplicarIn, RolIn, StatusOut, UsuarioInvitarIn)
 
 
 class CarpetaIn(BaseModel):
@@ -431,6 +431,43 @@ def confirmar_lote(cid: int, body: ConfirmarLoteIn,
     except svc.CorridaCongelada:
         raise HTTPException(status_code=409,
                             detail="La corrida está congelada; actívala para modificar.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return v
+
+
+@router.post("/corridas/{cid}/rebuscar")
+def rebuscar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
+                     _: object = Depends(requiere_rol("consulta"))):
+    """Qué cambiaría si se volviera a matchear la corrida contra la biblioteca de hoy.
+    NO escribe: propone. Rol `consulta`, el mismo que `confirmar-lote`, porque es la
+    misma operación (asignar un APU que ya existe); no declara dinero de la nada como
+    `igualar-costo`."""
+    try:
+        v = svc.rebuscar(alm, cid)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para volver "
+                                   "a buscar APU.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return v
+
+
+@router.post("/corridas/{cid}/rebuscar/aplicar")
+def rebuscar_aplicar(cid: int, body: RebuscarAplicarIn,
+                     alm: Almacen = Depends(get_almacen),
+                     _: object = Depends(requiere_rol("consulta"))):
+    try:
+        v = svc.aplicar_rebusqueda(alm, cid, body.seqs)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para volver "
+                                   "a buscar APU.")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if v is None:

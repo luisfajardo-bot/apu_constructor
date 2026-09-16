@@ -113,8 +113,10 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
       const res = await aplicarImportarInsumos(form);
       const errCount = res.errores?.length ?? 0;
       const protegidos = res.protegidos ?? 0;
+      const invalidos = res.invalidos ?? 0;
       const resumen = `${res.creados} creado(s), ${res.actualizados} actualizado(s)` +
-        (protegidos > 0 ? `, ${protegidos} protegido(s)` : "");
+        (protegidos > 0 ? `, ${protegidos} protegido(s)` : "") +
+        (invalidos > 0 ? `, ${invalidos} sin precio (no se aplicaron)` : "");
       if (errCount === 0) toast.success(resumen);
       else toast.warning(`${resumen}, ${errCount} error(es): ` +
         res.errores.map((er) => `${er.codigo}: ${er.error}`).join("; "));
@@ -334,8 +336,8 @@ function SeccionConflictos({ conflictos, forzados, onToggle }: {
                 </tr>
               </thead>
               <tbody>
-                {porCodigo.map((c) => (
-                  <tr key={c.insumo_id} className="hover:bg-muted/40 even:bg-muted/10">
+                {porCodigo.map((c, i) => (
+                  <tr key={i} className="hover:bg-muted/40 even:bg-muted/10">
                     <td className="px-2 py-0.5 align-top">
                       <input type="checkbox" aria-label={`Aplicar igual el ${c.codigo}`}
                              checked={forzados.has(c.insumo_id as number)}

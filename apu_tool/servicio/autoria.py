@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+from collections import Counter
 from dataclasses import replace
 from typing import Optional, Sequence
 
@@ -421,6 +422,20 @@ MOTIVO_SIN_PRECIO_EN_LISTA = (
 MSG_FUENTE_OBLIGATORIA = ("La importación debe declarar su fuente de precio "
                           "(p. ej. PRECIO IDU).")
 
+# Dos o más filas del archivo resuelven al MISMO insumo de la base. No se puede saber
+# cuál de ellas es la buena, y forzar aplicaría todas con una sola casilla —ganando la
+# última, que no es la que la persona miró—. Misma política que el balde `ambigua`:
+# cuando no se puede saber, no se adivina.
+MOTIVO_VARIAS_FILAS_MISMO_INSUMO = (
+    "Varias filas del archivo apuntan a este mismo insumo. Deja una sola y vuelve a "
+    "subir el archivo.")
+
+# Los campos que solo lleva un conflicto de código con candidato resuelto. Quitarlos
+# deja la fila con la forma de un conflicto de nombre: sin casilla en el diálogo.
+_CAMPOS_CANDIDATO = frozenset(("insumo_id", "nombre_actual", "precio_actual",
+                               "fuente_actual", "sin_precio_actual", "parecido",
+                               "numeros_coinciden"))
+
 
 def _cambio_upsert(ins, f: dict) -> Optional[dict]:
     """Arma el cambio propuesto para 'actualizar'.
@@ -598,6 +613,10 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
     # `identidades_en_conflicto`: así una fila choca contra las anteriores del archivo
     # con exactamente la misma regla (incluida la excepción del gemelo nocturno).
     reclamadas: list[tuple[str, str, bool]] = []
+    # Conflictos de código: se acumulan y se resuelven DESPUÉS del bucle, porque dos
+    # filas del archivo pueden resolver al MISMO insumo y eso solo se sabe al terminar
+    # de leerlo (ver el bloque después del `for`).
+    pendientes: list[tuple] = []
     for f in _filas_insumos(contenido, nombre_archivo, fuente_import):
         cod, nom = f["codigo"], f["nombre"]
         if not cod:
@@ -612,15 +631,9 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
             detalle = conflicto_insumo_detalle(alm, cod, nom, extra=reclamadas)
             if detalle:
                 campo, motivo = detalle
-                ins, fila = _fila_conflicto(cands, f, campo, motivo)
-                # Forzada: entra por el MISMO embudo que todo lo demás, no por un atajo.
-                # Así hereda el candado, el enrutado a 'invalida' y el guard del $0 sin
-                # una línea de código nueva.
-                if ins is not None and ins.id in forzados:
-                    _upsert_o_invalida(ins, f, fuente_import, actualizar, invalida,
-                                       protegida)
-                else:
-                    conflicto.append(fila)
+                # No se decide acá: dos filas del archivo pueden resolver al MISMO
+                # insumo, y eso solo se sabe al terminar de leerlo (ver abajo).
+                pendientes.append(_fila_conflicto(cands, f, campo, motivo) + (f,))
             else:
                 crear.append(f)
                 reclamadas.append((cod, nom, False))
@@ -634,6 +647,23 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
                                 "candidatos": [{"id": c.id, "nombre": c.nombre} for c in cands]})
             else:
                 no_encontrada.append({"codigo": cod})
+    # Dos o más filas del archivo pueden resolver al MISMO insumo (652 códigos del
+    # catálogo están repetidos). Ahí no se puede saber cuál es la buena, y como
+    # `forzar_ids` identifica por insumo, UNA casilla forzaría TODAS — ganando la última,
+    # que no es la que la persona miró. Se les quita el candidato: sin casilla, con el
+    # motivo explicándolo. Misma política que el balde `ambigua`.
+    veces = Counter(ins.id for ins, _fila, _f in pendientes if ins is not None)
+    for ins, fila, f in pendientes:
+        if ins is not None and veces[ins.id] > 1:
+            conflicto.append({k: v for k, v in fila.items() if k not in _CAMPOS_CANDIDATO}
+                             | {"motivo": MOTIVO_VARIAS_FILAS_MISMO_INSUMO})
+        elif ins is not None and ins.id in forzados:
+            # Forzada: entra por el MISMO embudo que todo lo demás, no por un atajo. Así
+            # hereda el candado, el enrutado a 'invalida' y el guard del $0 sin una línea
+            # de código nueva.
+            _upsert_o_invalida(ins, f, fuente_import, actualizar, invalida, protegida)
+        else:
+            conflicto.append(fila)
     # Ordenado por parecido descendente: es lo que reemplaza al premarcado. Los typos
     # obvios quedan arriba y juntos, y se marcan de corrido en vez de cazarlos entre 200
     # filas. Los conflictos de nombre no traen `parecido` y caen al final.
@@ -705,8 +735,14 @@ def aplicar_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
     # `protegidos` cuenta FILAS del archivo, no insumos distintos — igual que
     # `creados` y `actualizados`. Dos filas del archivo sobre el mismo insumo interno
     # suman 2.
+    # `invalidos` cuenta las filas que el preview descartó (ni precio en el archivo ni
+    # tarifa en la lista destino). Sin este contador desaparecían sin rastro: no están en
+    # `creados`, ni en `actualizados`, ni en `protegidos`, ni en `errores`. Importa sobre
+    # todo con las filas FORZADAS, porque el preview que vio la persona se calculó sin
+    # `forzar_ids` y no podía saber que esa fila iba a terminar acá.
     return {"creados": creados, "actualizados": actualizados,
-            "protegidos": len(prev["protegida"]), "errores": errores}
+            "protegidos": len(prev["protegida"]), "invalidos": len(prev["invalida"]),
+            "errores": errores}
 
 
 # ---------------------------------------------------------------- import APUs

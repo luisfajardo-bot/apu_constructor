@@ -471,6 +471,9 @@ export interface ImportUpsertResultado {
   creados: number;
   actualizados: number;
   protegidos?: number;
+  // Filas que `preview_importar_insumos` descartó (ni precio en el archivo ni tarifa
+  // en la lista destino): no se escriben y sin esto desaparecían sin contar en nada.
+  invalidos?: number;
   errores: { codigo: string; error: string }[];
 }
 

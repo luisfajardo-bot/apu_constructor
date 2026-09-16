@@ -80,6 +80,15 @@ def _xlsx_solo_precio(filas) -> bytes:
     buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
 
 
+def _xlsx_upsert_filas(filas) -> bytes:
+    """Excel con las columnas del importador y las filas que se le pasen."""
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["codigo", "nombre", "unidad", "grupo", "precio"])
+    for f in filas:
+        ws.append(f)
+    buf = io.BytesIO(); wb.save(buf); return buf.getvalue()
+
+
 def test_upsert_preview_con_nombre(tmp_path):
     alm = _alm(tmp_path)
     prev = autoria.preview_importar_insumos(alm, _xlsx_upsert(), "insumos.xlsx", "PRECIO IDU")
@@ -248,7 +257,7 @@ def test_aplicar_no_escribe_las_protegidas_y_las_cuenta(tmp_path):
     contenido = _xlsx_solo_precio([["100", 1200, ""], ["500", 9, ""]])
     res = autoria.aplicar_importar_insumos(alm, contenido, "idu.xlsx", "PRECIO IDU")
 
-    assert res == {"creados": 0, "actualizados": 1, "protegidos": 1, "errores": []}
+    assert res == {"creados": 0, "actualizados": 1, "protegidos": 1, "invalidos": 0, "errores": []}
     interno = alm.precios.get_candidatos("500")[0]
     assert interno.precio == 25000 and interno.fuente_precio == "COSTO INTERNO"
     assert alm.precios.get_candidatos("100")[0].precio == 1200
@@ -261,6 +270,245 @@ def test_las_protegidas_no_dejan_auditoria(tmp_path):
                                      "idu.xlsx", "PRECIO IDU")
     _items, total = alm.auditoria.listar(accion="precio.editar")
     assert total == 0
+
+
+def test_conflicto_de_codigo_trae_el_mejor_candidato(tmp_path):
+    """Con 652 códigos repetidos en el catálogo real, "el código ya existe" no dice
+    cuál insumo es. El conflicto tiene que nombrar contra cuál se ofrece actualizar."""
+    alm = _alm(tmp_path)
+    # dos insumos con el MISMO código y nombres muy distintos
+    alm.precios.insert_insumos([
+        Insumo("700", "CHEVRON 90 CM X 40 CM REFLECTIVO", "UN", "SEN", 330498, "PRECIO IDU"),
+        Insumo("700", "PISO EN LOSETA PREFABRICADA A-50", "M2", "PAV", 135101, "PRECIO IDU")])
+    # OJO con el nombre del archivo: `normalizar` convierte "A-50" en "A 50", así que un
+    # nombre que solo cambie el guion haría MATCH de identidad y nunca llegaría a
+    # conflicto. La diferencia tiene que ser una letra de verdad (LOSETA -> LOZETA).
+    contenido = _xlsx_upsert_filas([["700", "PISO EN LOZETA PREFABRICADA A-50", "M2", "PAV", 140000]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")
+
+    assert len(prev["conflicto"]) == 1
+    c = prev["conflicto"][0]
+    assert c["campo"] == "codigo"
+    assert c["nombre_actual"] == "PISO EN LOSETA PREFABRICADA A-50"   # el parecido, no el CHEVRON
+    assert c["precio_actual"] == 135101
+    assert c["parecido"] > 0.7      # medido: 74.8% contra el PISO, 10.0% contra el CHEVRON
+
+
+def test_numeros_no_coinciden_cuando_cambia_un_numero(tmp_path):
+    """El parecido NO separa "es el mismo" de "es otro": con nombres largos, cambiar un
+    dígito puntúa ~89%, igual que una letra distinta. Lo que separa son los números."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("800", "TUBERIA PVC SANITARIA DE 6 PULGADAS INCLUYE ACCESORIOS Y MANO DE OBRA",
+               "ML", "MAT", 50000, "PRECIO IDU")])
+    contenido = _xlsx_upsert_filas([
+        ["800", "TUBERIA PVC SANITARIA DE 8 PULGADAS INCLUYE ACCESORIOS Y MANO DE OBRA",
+         "ML", "MAT", 60000]])
+    c = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")["conflicto"][0]
+    assert c["parecido"] > 0.80          # el parecido solo lo dejaría pasar
+    assert c["numeros_coinciden"] is False       # los números lo delatan
+
+
+def test_numeros_coinciden_con_una_letra_distinta(tmp_path):
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("900", "CONCRETO 3000 PSI HECHO EN OBRA PARA REDES", "M3", "MAT",
+               526100, "PRECIO IDU")])
+    contenido = _xlsx_upsert_filas([
+        ["900", "CONCRETO 3000 PSI HECHO EN OVRA PARA REDES", "M3", "MAT", 530000]])
+    c = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")["conflicto"][0]
+    assert c["numeros_coinciden"] is True
+
+
+# Los diez casos con los que se eligió la regla. El parecido SOLO no los separa: "una
+# letra distinta" da 89.0% y "MR-42 vs MR-40" da 88.7%. Lo que los separa son los números.
+@pytest.mark.parametrize("esperado,a,b", [
+    (True,  "CONCRETO 3000 PSI HECHO EN OBRA PARA REDES", "CONCRETO 3000 PSI HECHO EN OVRA PARA REDES"),
+    (True,  "SUBBASE GRANULAR CLASE C PARA VIA", "SUBBASE GRANULAR CLASE C"),
+    (True,  "PINTURA ACRILICA BASE AGUA PARA DEMARCACION DE VIAS", "PINTURA ACRILICA BASE AGUA"),
+    (True,  "SUMINISTRO E INSTALACION DE TUBERIA PVC SANITARIA 6 PULGADAS", "SUM E INST TUBERIA PVC SANITARIA 6 PULG"),
+    (False, "CONCRETO 3000 PSI HECHO EN OBRA PARA REDES", "CONCRETO 2500 PSI HECHO EN OBRA PARA REDES"),
+    (False, "SUMINISTRO Y COLOCACION DE CONCRETO HIDRAULICO MR-42 PARA LOSA", "SUMINISTRO Y COLOCACION DE CONCRETO HIDRAULICO MR-40 PARA LOSA"),
+    (False, "TUBERIA PVC SANITARIA DE 6 PULGADAS INCLUYE ACCESORIOS", "TUBERIA PVC SANITARIA DE 8 PULGADAS INCLUYE ACCESORIOS"),
+    (False, "ACERO DE REFUERZO FY=420 MPA PARA ESTRUCTURAS", "ACERO DE REFUERZO FY=240 MPA PARA ESTRUCTURAS"),
+    # el orden de los números importa: son dos materiales
+    (False, "BREAKER INDUSTRIAL ABB 3 X 40 AMP", "BREAKER INDUSTRIAL ABB 40 X 3 AMP"),
+    # sin números de ningún lado coinciden trivialmente: por eso `numeros_coinciden` es
+    # una SEÑAL y no un veredicto — acá no separa nada
+    (True,  "LADRILLO TOLETE COMUN", "LADRILLO TOLETE PRENSADO"),
+])
+def test_regla_de_los_numeros(esperado, a, b):
+    assert autoria._mismos_numeros(a, b) is esperado
+
+
+def test_conflictos_salen_ordenados_por_parecido(tmp_path):
+    """El orden es lo que reemplaza al premarcado: los typos obvios quedan arriba."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("600", "ARENA DE PENA LAVADA", "M3", "MAT", 50000, "PRECIO IDU"),
+        Insumo("601", "CEMENTO BLANCO TIPO III", "KG", "MAT", 2000, "PRECIO IDU")])
+    contenido = _xlsx_upsert_filas([
+        ["600", "NADA QUE VER CON ARENA", "M3", "MAT", 1],           # parecido bajísimo
+        ["601", "CEMENTO BLANCO TIPO III EXTRA", "KG", "MAT", 2]])   # casi igual
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")
+    parecidos = [c["parecido"] for c in prev["conflicto"]]
+    assert parecidos == sorted(parecidos, reverse=True)
+    assert prev["conflicto"][0]["codigo"] == "601"
+
+
+def test_conflicto_contra_una_fila_del_mismo_archivo_no_trae_candidato(tmp_path):
+    """El choque es contra una fila anterior del MISMO archivo: ese insumo todavía no
+    existe en la base, así que no hay contra qué actualizar y no lleva casilla."""
+    alm = _alm(tmp_path)
+    contenido = _xlsx_upsert_filas([
+        ["7777", "GRAVA COMUN DE RIO", "M3", "MAT", 8000],
+        ["7777", "OTRA COSA DISTINTA", "M3", "MAT", 9000]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")
+    assert len(prev["crear"]) == 1 and len(prev["conflicto"]) == 1
+    assert "insumo_id" not in prev["conflicto"][0]
+
+
+def test_conflicto_sin_tarifa_en_la_lista_no_miente_con_un_cero(tmp_path):
+    """Contra una lista de NP, `precio_actual` es 0.0 por el LEFT JOIN, no porque el
+    precio sea 0. `sin_precio_actual` es lo que deja que el diálogo diga la verdad."""
+    alm = _alm(tmp_path)
+    np = alm.precios.crear_lista("NP Calle 13")
+    contenido = _xlsx_upsert_filas([["100", "CEMENTO GRIZ", "KG", "MAT", 1200]])
+    c = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                         lista_id=np)["conflicto"][0]
+    assert c["precio_actual"] == 0.0 and c["sin_precio_actual"] is True
+
+
+def test_conflicto_de_nombre_no_trae_candidato(tmp_path):
+    """El nombre ya existe bajo OTRO código: forzar ahí reasignaría el precio a un
+    insumo con código distinto, y está fuera de alcance. Sin casilla."""
+    alm = _alm(tmp_path)
+    contenido = _xlsx_upsert_filas([["999", "CEMENTO GRIS", "KG", "MAT", 1200]])
+    c = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")["conflicto"][0]
+    assert c["campo"] == "nombre"
+    assert "insumo_id" not in c
+
+
+# ------------------------------------------------------- forzar_ids (Task 2)
+def test_forzar_un_conflicto_actualiza_el_insumo_elegido(tmp_path):
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("900", "CONCRETO 3000 PSI HECHO EN OBRA", "M3", "MAT", 526100, "PRECIO IDU")])
+    iid = alm.precios.get_candidatos("900")[0].id
+    contenido = _xlsx_upsert_filas([["900", "CONCRETO 3000 PSI HECHO EN OVRA", "M3", "MAT", 530000]])
+
+    # sin forzar: queda en conflicto y no se escribe
+    res = autoria.aplicar_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")
+    assert res["creados"] == 0 and res["actualizados"] == 0
+    assert alm.precios.get_candidatos("900")[0].precio == 526100
+
+    # forzando: se actualiza el que se eligió
+    res = autoria.aplicar_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                           forzar_ids={iid})
+    assert res["actualizados"] == 1
+    assert alm.precios.get_candidatos("900")[0].precio == 530000
+    assert alm.precios.get_candidatos("900")[0].nombre == "CONCRETO 3000 PSI HECHO EN OBRA"
+
+
+def test_forzar_no_es_un_permiso_el_candado_sigue(tmp_path):
+    """Forzar resuelve una pregunta de IDENTIDAD, no de PERMISO. Una fila forzada sobre
+    un insumo con precio interno, con importación pública, sigue protegida."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("901", "MANO DE OBRA OFICIAL DE PRIMERA", "HR", "MO", 25000, "COSTO INTERNO")])
+    iid = alm.precios.get_candidatos("901")[0].id
+    contenido = _xlsx_upsert_filas([["901", "MANO DE OBRA OFICIAL DE PRIMER", "HR", "MO", 9]])
+
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                            forzar_ids={iid})
+    assert prev["conflicto"] == []                  # ya no es conflicto: se forzó
+    assert prev["actualizar"] == []                 # pero tampoco se actualiza
+    assert [p["codigo"] for p in prev["protegida"]] == ["901"]
+
+    res = autoria.aplicar_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                           forzar_ids={iid})
+    assert res["protegidos"] == 1 and res["actualizados"] == 0
+    assert alm.precios.get_candidatos("901")[0].precio == 25000
+
+
+def test_forzar_un_id_que_no_resuelve_no_escribe(tmp_path):
+    """El catálogo puede cambiar entre el preview y el aplicar: un id que ya no
+    corresponde deja la fila en conflicto, sin error."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("902", "ARENA DE PENA LAVADA", "M3", "MAT", 50000, "PRECIO IDU")])
+    contenido = _xlsx_upsert_filas([["902", "ARENA DE PENA LAVADA GRUESA", "M3", "MAT", 60000]])
+    res = autoria.aplicar_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                           forzar_ids={999999})
+    assert res["actualizados"] == 0 and res["errores"] == []
+    assert alm.precios.get_candidatos("902")[0].precio == 50000
+
+
+def test_forzar_un_conflicto_de_nombre_no_hace_nada(tmp_path):
+    """Solo se fuerzan conflictos de código (ver spec, fuera de alcance)."""
+    alm = _alm(tmp_path)
+    iid = alm.precios.get_candidatos("100")[0].id      # CEMENTO GRIS, código 100
+    contenido = _xlsx_upsert_filas([["999", "CEMENTO GRIS", "KG", "MAT", 1200]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                            forzar_ids={iid})
+    assert len(prev["conflicto"]) == 1 and prev["actualizar"] == []
+
+
+def test_dos_filas_al_mismo_insumo_no_se_pueden_forzar(tmp_path):
+    """Dos filas del archivo que resuelven al MISMO insumo: no se puede saber cuál es.
+    Forzar aplicaría las dos con una sola casilla, y ganaría la última — un precio que
+    la persona no miró. Ninguna lleva candidato; se arregla el archivo."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("500", "CONCRETO 3000 PSI HECHO EN OBRA", "M3", "MAT", 100000, "PRECIO IDU")])
+    iid = alm.precios.get_candidatos("500")[0].id
+    contenido = _xlsx_upsert_filas([
+        ["500", "CONCRETO 3000 PSI HECHO EN OVRA", "M3", "MAT", 200000],
+        ["500", "CONCRETO 3000 PSI HECHO EN OBRAA", "M3", "MAT", 300000]])
+
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")
+    assert len(prev["conflicto"]) == 2
+    # ninguna lleva candidato -> el diálogo no les pinta casilla
+    assert all("insumo_id" not in c for c in prev["conflicto"])
+    assert all(autoria.MOTIVO_VARIAS_FILAS_MISMO_INSUMO in c["motivo"]
+               for c in prev["conflicto"])
+
+    # y forzar ese id no escribe nada
+    res = autoria.aplicar_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                           forzar_ids={iid})
+    assert res["actualizados"] == 0
+    assert alm.precios.get_candidatos("500")[0].precio == 100000
+
+
+def test_una_sola_fila_al_mismo_insumo_si_se_puede_forzar(tmp_path):
+    """El caso normal no se rompe con el arreglo de arriba."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("501", "ARENA DE PENA LAVADA", "M3", "MAT", 50000, "PRECIO IDU")])
+    iid = alm.precios.get_candidatos("501")[0].id
+    contenido = _xlsx_upsert_filas([["501", "ARENA DE PENA LABADA", "M3", "MAT", 60000]])
+
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")
+    assert prev["conflicto"][0]["insumo_id"] == iid
+
+    res = autoria.aplicar_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                           forzar_ids={iid})
+    assert res["actualizados"] == 1
+    assert alm.precios.get_candidatos("501")[0].precio == 60000
+
+
+def test_aplicar_reporta_las_invalidas(tmp_path):
+    """Una fila que cae en `invalida` no se escribe y hoy no aparece en NINGÚN contador
+    del resultado: desaparece sin rastro. El preview la muestra, pero una fila FORZADA
+    puede caer ahí sin que el preview lo supiera (se calculó sin `forzar_ids`)."""
+    alm = _alm(tmp_path)
+    np = alm.precios.crear_lista("NP Calle 13")
+    # archivo con fuente pero SIN precio, contra una lista sin tarifa para ese insumo
+    contenido = _xlsx_upsert_filas([["100", "CEMENTO GRIS", "KG", "MAT", None]])
+    res = autoria.aplicar_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                           lista_id=np)
+    assert res["invalidos"] == 1
+    assert res["actualizados"] == 0
 
 
 # ---------------------------------------------------------------- import APUs

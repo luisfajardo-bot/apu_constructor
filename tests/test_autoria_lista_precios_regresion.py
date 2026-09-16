@@ -53,7 +53,7 @@ def test_import_valor_igual_a_principal_se_escribe_en_np(tmp_path):
     contenido = _xlsx([["codigo", "nombre", "precio"],
                        ["6140", "ACERO 60000 PSI", 3500.0]])   # mismo precio que Principal
     res = autoria.aplicar_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU", lista_id=lid)
-    assert res == {"creados": 0, "actualizados": 1, "protegidos": 0, "errores": []}
+    assert res == {"creados": 0, "actualizados": 1, "protegidos": 0, "invalidos": 0, "errores": []}
     ins_np = alm.precios.get_candidatos("6140", lista_id=lid)[0]
     assert ins_np.precio == 3500.0 and ins_np.sin_precio is False
     assert alm.precios.get_candidatos("6140")[0].precio == 3500.0   # Principal, sin tocar
@@ -76,7 +76,7 @@ def test_import_sin_precio_y_sin_tarifa_en_lista_se_reporta_invalida(tmp_path):
     assert len(prev["invalida"]) == 1 and prev["invalida"][0]["codigo"] == "6140"
 
     res = autoria.aplicar_importar_insumos(alm, contenido, "f.xlsx", "NUEVA FUENTE", lista_id=lid)
-    assert res == {"creados": 0, "actualizados": 0, "protegidos": 0, "errores": []}
+    assert res == {"creados": 0, "actualizados": 0, "protegidos": 0, "invalidos": 1, "errores": []}
 
 
 def test_import_precio_cero_sin_tarifa_en_lista_falla_no_se_traga(tmp_path):

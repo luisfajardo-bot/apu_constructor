@@ -54,19 +54,46 @@ nombres del estilo del catálogo real:
 son— cambiar un solo dígito puntúa tan alto como el typo que sí se quiere aceptar. Un
 umbral del 80% premarcaría tomar el precio de la tubería de 8" para la de 6".
 
-**El patrón que sí separa:** en todos los casos peligrosos **cambió un número**; en todos
-los buenos los números son idénticos. La regla `parecido ≥ 80% Y mismos números` da, sobre
-esos diez casos:
+**El patrón que parecía separarlos:** en todos esos casos peligrosos **cambió un número**;
+en los buenos los números son idénticos. La regla `parecido ≥ 80% Y mismos números` daba
+0 falsos positivos **sobre esos diez casos**.
 
-- **0 falsos positivos** — ninguno de los seis peligrosos se premarca.
-- 2 falsos negativos — "abreviado" y "faltan 2 palabras" quedan sin marcar, con su casilla
-  disponible. Ese error cuesta un clic; el otro cuesta un precio equivocado.
+### Por qué el premarcado se descartó
 
-Esa asimetría es la que corresponde a una frontera de dinero.
+**Esos diez casos eran sintéticos y estaban sesgados.** Medida la misma regla contra el
+catálogo real (8157 insumos), premarcaría **2602 pares de materiales distintos**:
+
+| Parecido | Par real del catálogo | Diferencia de plata |
+|---|---|---|
+| **98.9%** | `TARIFA MES … (NO INCLUYE FACTOR DE PRESTACIONES)` vs `(INCLUYE FACTOR …)` | 50-60% |
+| **96.7%** | una actividad diurna vs la misma con `HORARIO NOCTURNO` | el turno es parte de la identidad |
+| **93.8%** | `SUBBASE GRANULAR CLASE B` [4160] vs `CLASE A` [4161] | otro material |
+| 88.3% | `TARIFA JORNAL … SECRETARIA` vs `TARIFA HORA …` | factor ~8 |
+
+El `NO` del primero es *stopword* en `relevancia._STOPWORDS`: el scorer ni lo ve.
+
+**El atenuante, y por qué no alcanza:** `_mejor_candidato` solo compara insumos con el
+**mismo código**, y dentro de un mismo código el catálogo no pasa de **49.8%** — medido
+sobre todos los pares. O sea que con los datos de hoy la regla no se equivoca ni una vez.
+
+Pero los gemelos peligrosos tienen **códigos consecutivos**: `4159/4160/4161` son SUBBASE
+CLASE C/B/A. Basta un dígito mal en la columna `codigo` del archivo para caer en el gemelo,
+y la fila vendría premarcada al 93.8%. **La premisa de esta feature es que el archivo trae
+errores de dedo**, así que un código mal tecleado no es un supuesto rebuscado: es el mismo
+supuesto que justifica la feature.
+
+### Lo que se hace en vez de premarcar
+
+Ninguna casilla viene marcada. La comodidad que el premarcado iba a dar —no cazar 15 filas
+entre 200— la da el **orden**: la lista sale ordenada por parecido de mayor a menor, así
+que los typos obvios quedan juntos arriba y se marcan de corrido.
+
+Los números siguen siendo la señal más útil, pero se **muestran** en vez de aplicarse: una
+fila cuyos números no coincidan se marca visualmente («los números no coinciden»). Es
+información para la persona que decide, no una decisión tomada por el servidor.
 
 ## Alcance
 
-- `apu_tool/config.py` — el umbral del premarcado.
 - `apu_tool/servicio/autoria.py` — resolver el candidato, enriquecer el balde `conflicto`,
   y desviar las filas forzadas al embudo.
 - `apu_tool/servicio/rutas.py` — `forzar_ids` en los dos endpoints de import.
@@ -99,7 +126,8 @@ que tienen ese código (`alm.precios.get_candidatos(cod, lista_id)`) y se elige 
 {**f, "motivo": motivo,
  "insumo_id": ins.id, "nombre_actual": ins.nombre,
  "precio_actual": ins.precio, "fuente_actual": ins.fuente_precio,
- "parecido": round(sim, 3), "premarcar": bool(...)}
+ "parecido": round(sim, 3), "numeros_coinciden": bool(...),
+ "sin_precio_actual": ins.sin_precio, "oculto": ...}
 ```
 
 Los conflictos por **nombre** siguen como están hoy (sin esos campos): el frontend les
@@ -109,23 +137,30 @@ pinta la fila sin casilla.
 `_conflicto_insumo`, para distinguir el campo. Las dos ya existen y son públicas; no hay
 regla nueva ni duplicada.
 
-### 2. El premarcado
+### 2. El orden y la señal de los números
+
+El balde `conflicto` sale **ordenado por parecido, de mayor a menor**. Ese orden es la
+comodidad: los typos obvios quedan arriba y juntos, y se marcan de corrido sin cazarlos
+entre 200 filas. Ordena el backend, no el frontend — en este repo el frontend solo pinta.
+
+Cada conflicto de código lleva además:
 
 ```python
 def _mismos_numeros(a: str, b: str) -> bool:
-    """Los dos nombres traen exactamente los mismos números, con las mismas repeticiones.
+    """Los dos nombres traen los mismos números, en el mismo orden.
 
-    Es lo que separa «una letra distinta» (el mismo insumo) de «MR-42 vs MR-40» (otro
-    material), que el parecido NO separa: con nombres largos los dos puntúan ~89%."""
-    return Counter(re.findall(r"\d+", a or "")) == Counter(re.findall(r"\d+", b or ""))
+    Comparar las listas crudas y no `Counter` ni `sorted`: los dos son insensibles al
+    orden, así que darían iguales «CABLE 3 X 40 AMP» y «CABLE 40 X 3 AMP», que son dos
+    materiales distintos (el catálogo tiene `BREAKER INDUSTRIAL ABB 3 X 40 AMP`)."""
+    return re.findall(r"\d+", a or "") == re.findall(r"\d+", b or "")
 ```
 
-`premarcar = parecido >= config.UMBRAL_PREMARCA_CONFLICTO and _mismos_numeros(...)`, con
-`UMBRAL_PREMARCA_CONFLICTO = 0.80` en `config.py` junto a los otros umbrales de matching.
+y el resultado viaja como `numeros_coinciden`. La fila donde da `False` se marca visualmente
+en el diálogo. **Es una señal, no una decisión**: ninguna casilla viene marcada, el
+servidor no decide nada, y lo que se aplica es exactamente lo que el usuario mandó en
+`forzar_ids`.
 
-El premarcado es **una sugerencia del servidor**: lo que se aplica es lo que el usuario
-manda en `forzar_ids`, no lo que el servidor calculó. Si el frontend desmarca una fila
-premarcada, esa fila no viaja.
+No hay umbral ni constante de configuración: sin premarcado, no hay nada que umbralar.
 
 ### 3. La decisión viaja por id
 
@@ -177,8 +212,10 @@ La sección "En conflicto" pasa a mostrar, para los conflictos de código:
 
 | ☐ | Código | Nombre en el archivo | Nombre en tu base | Parecido | Precio actual → nuevo |
 
-Encima de la tabla, el conteo explícito: *"18 de 43 vienen marcadas (parecido ≥80% y
-mismos números)"*. El premarcado tiene que ser algo que se ve, no un default invisible.
+Las filas salen **ordenadas por parecido, de mayor a menor**: los typos obvios quedan
+arriba y juntos. Ninguna casilla viene marcada. La fila cuyos `numeros_coinciden` sea
+`False` lleva un aviso visible («los números no coinciden»), que es la señal más útil que
+tenemos y por eso se muestra en vez de aplicarse.
 
 Los conflictos por nombre se siguen listando abajo, con su motivo y sin casilla.
 
@@ -192,21 +229,26 @@ viaja al aplicar. (El preview sí se re-dispara al cambiar la fuente, que es lo 
 1. Forzar un conflicto de código actualiza el precio del insumo elegido.
 2. **Una fila forzada sobre un insumo con precio interno, con importación pública, sigue
    en `protegida`.** Es la prueba que fija que forzar no es un permiso.
-3. El premarcado es `False` en los seis casos de número distinto y `True` en la letra y la
-   palabra faltante (tabla de arriba, como casos parametrizados).
+3. `numeros_coinciden` es `False` cuando cambia un número y `True` cuando solo cambian
+   letras, incluidos los casos donde el orden difiere (`3 X 40` vs `40 X 3`).
 4. Con varios insumos del mismo código, se ofrece el de mayor parecido.
 5. Un `forzar_ids` con un id que no resuelve deja la fila en `conflicto` y no escribe.
 6. Un conflicto por **nombre** no trae `insumo_id` ni casilla, y forzarlo no hace nada.
 
-En el frontend: la casilla premarcada viaja en `forzar_ids`; desmarcarla la saca; y el
-conteo del botón Aplicar sube al marcar.
+7. El balde `conflicto` sale ordenado por `parecido` descendente.
+
+En el frontend: ninguna casilla arranca marcada; marcar una la mete en `forzar_ids` y sube
+el conteo del botón Aplicar; y la fila con `numeros_coinciden: false` muestra el aviso.
 
 ## Riesgos
 
-- **El premarcado es una decisión de dinero tomada por el servidor.** Se mitiga con la
-  regla de los números (0 falsos positivos en los diez casos medidos) y con el conteo
-  visible. No se mitiga del todo: un nombre sin números que difiera en algo importante y
-  pase el 80% se premarcaría. El caso medido más cercano (`LADRILLO TOLETE COMUN` vs
-  `PRENSADO`) da 60.2%, bien por debajo.
+- **El usuario marca mirando el parecido y el aviso de números, y puede equivocarse.**
+  No hay forma de evitarlo sin que el sistema decida, que es justo lo que se descartó. Se
+  mitiga con el orden (lo dudoso queda abajo), con el aviso de números, y con que el
+  candado de los precios internos siga mandando sobre una fila forzada.
+- **El parecido puede ser alto entre materiales distintos.** Medido sobre el catálogo:
+  `(NO INCLUYE FACTOR)` vs `(INCLUYE FACTOR)` da 98.9% y `CLASE A` vs `CLASE B` da 93.8%.
+  Por eso el número que se muestra es un dato más de la fila —junto al nombre completo del
+  candidato— y no un veredicto.
 - **Ofrecer solo el mejor candidato** puede esconder que había un segundo razonable. Se
   mitiga mostrando el nombre elegido y su parecido en la fila.

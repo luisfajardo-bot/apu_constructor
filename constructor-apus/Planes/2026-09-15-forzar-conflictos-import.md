@@ -6,7 +6,7 @@
 
 **Goal:** Poder decidir fila por fila que una importación actualice el precio de un insumo que ya existe, cuando el código coincide pero el nombre difiere por un typo.
 
-**Architecture:** El preview resuelve, para cada conflicto de código, cuál de los insumos con ese código más se parece al nombre del archivo, y lo devuelve con su parecido y una sugerencia de premarcado. El usuario marca casillas; los `insumo_id` marcados viajan como `forzar_ids` al aplicar. Una fila forzada **no se escribe directo**: se despacha a `_upsert_o_invalida`, el mismo embudo de siempre, así que hereda el candado de los precios internos, el guard del $0 y la fuente declarada sin código nuevo.
+**Architecture:** El preview resuelve, para cada conflicto de código, cuál de los insumos con ese código más se parece al nombre del archivo, y lo devuelve con su parecido. La lista sale ordenada por parecido, ninguna casilla viene marcada, y los numeros se muestran como senal. El usuario marca casillas; los `insumo_id` marcados viajan como `forzar_ids` al aplicar. Una fila forzada **no se escribe directo**: se despacha a `_upsert_o_invalida`, el mismo embudo de siempre, así que hereda el candado de los precios internos, el guard del $0 y la fuente declarada sin código nuevo.
 
 **Tech Stack:** Python 3 + FastAPI (backend, sin dependencias nuevas — `re` y `collections` son stdlib), React + TypeScript + vitest, pytest.
 
@@ -18,8 +18,7 @@
 
 | Archivo | Responsabilidad en este cambio |
 |---|---|
-| `apu_tool/config.py` | El umbral del premarcado, junto a `CRUCE_UMBRAL` (línea 73). |
-| `apu_tool/servicio/autoria.py` | Resolver el candidato, el premarcado, y desviar la fila forzada al embudo. Único archivo con lógica nueva. |
+| `apu_tool/servicio/autoria.py` | Resolver el candidato, ordenar el balde, y desviar la fila forzada al embudo. Único archivo con lógica nueva. |
 | `apu_tool/servicio/rutas.py` | `forzar_ids` en los dos endpoints de import de insumos. |
 | `web/src/lib/tipos.ts` | Campos nuevos de `ImportConflicto`. |
 | `web/src/components/insumos/DialogoImportarInsumos.tsx` | La tabla con casillas y el envío de `forzar_ids`. |
@@ -314,6 +313,238 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ---
 
+### Task 1b: Sacar el premarcado (corrección tras la revisión)
+
+**Por qué:** la revisión de la Task 1 midió la regla de premarcado contra el catálogo real (8157 insumos) y encontró que premarcaría **2602 pares de materiales distintos**: `(NO INCLUYE FACTOR DE PRESTACIONES)` vs `(INCLUYE FACTOR …)` al **98.9%** (el `NO` es stopword del scorer), diurno vs `HORARIO NOCTURNO` al 96.7%, y `SUBBASE CLASE B` [4160] vs `CLASE A` [4161] al **93.8%** — con códigos **consecutivos**. Como la premisa de la feature es que el archivo trae errores de dedo, un dígito mal en la columna `codigo` cae justo en el gemelo y la fila vendría premarcada. **El usuario decidió sacar el premarcado**: la comodidad la da el orden, y los números se muestran en vez de aplicarse.
+
+Trae además tres hallazgos de esa misma revisión.
+
+**Files:**
+- Modify: `apu_tool/config.py` (quitar la constante)
+- Modify: `apu_tool/servicio/autoria.py`
+- Test: `tests/test_servicio_autoria.py`
+
+- [ ] **Step 1: Ajustar las pruebas (siguen siendo el contrato)**
+
+En `tests/test_servicio_autoria.py`:
+
+- `test_premarcado_no_marca_cuando_cambia_un_numero` → renombrar a `test_numeros_no_coinciden_cuando_cambia_un_numero`, assert final `assert c["numeros_coinciden"] is False`.
+- `test_premarcado_si_marca_una_letra_distinta` → renombrar a `test_numeros_coinciden_con_una_letra_distinta`, assert `c["numeros_coinciden"] is True`.
+- `test_regla_de_premarcado` → renombrar a `test_regla_de_los_numeros`, cuerpo `assert autoria._mismos_numeros(a, b) is esperado`. **Los `esperado` cambian**: ahora solo se pregunta por los números, no por el parecido.
+
+```python
+@pytest.mark.parametrize("esperado,a,b", [
+    (True,  "CONCRETO 3000 PSI HECHO EN OBRA PARA REDES", "CONCRETO 3000 PSI HECHO EN OVRA PARA REDES"),
+    (True,  "SUBBASE GRANULAR CLASE C PARA VIA", "SUBBASE GRANULAR CLASE C"),
+    (True,  "PINTURA ACRILICA BASE AGUA PARA DEMARCACION DE VIAS", "PINTURA ACRILICA BASE AGUA"),
+    (True,  "SUMINISTRO E INSTALACION DE TUBERIA PVC SANITARIA 6 PULGADAS", "SUM E INST TUBERIA PVC SANITARIA 6 PULG"),
+    (False, "CONCRETO 3000 PSI HECHO EN OBRA PARA REDES", "CONCRETO 2500 PSI HECHO EN OBRA PARA REDES"),
+    (False, "SUMINISTRO Y COLOCACION DE CONCRETO HIDRAULICO MR-42 PARA LOSA", "SUMINISTRO Y COLOCACION DE CONCRETO HIDRAULICO MR-40 PARA LOSA"),
+    (False, "TUBERIA PVC SANITARIA DE 6 PULGADAS INCLUYE ACCESORIOS", "TUBERIA PVC SANITARIA DE 8 PULGADAS INCLUYE ACCESORIOS"),
+    (False, "ACERO DE REFUERZO FY=420 MPA PARA ESTRUCTURAS", "ACERO DE REFUERZO FY=240 MPA PARA ESTRUCTURAS"),
+    # el orden de los números importa: son dos materiales
+    (False, "BREAKER INDUSTRIAL ABB 3 X 40 AMP", "BREAKER INDUSTRIAL ABB 40 X 3 AMP"),
+    # sin números de ningún lado coinciden trivialmente: por eso `numeros_coinciden` es
+    # una SEÑAL y no un veredicto — acá no separa nada
+    (True,  "LADRILLO TOLETE COMUN", "LADRILLO TOLETE PRENSADO"),
+])
+def test_regla_de_los_numeros(esperado, a, b):
+    assert autoria._mismos_numeros(a, b) is esperado
+```
+
+Y tres pruebas nuevas:
+
+```python
+def test_conflictos_salen_ordenados_por_parecido(tmp_path):
+    """El orden es lo que reemplaza al premarcado: los typos obvios quedan arriba."""
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("600", "ARENA DE PENA LAVADA", "M3", "MAT", 50000, "PRECIO IDU"),
+        Insumo("601", "CEMENTO BLANCO TIPO III", "KG", "MAT", 2000, "PRECIO IDU")])
+    contenido = _xlsx_upsert_filas([
+        ["600", "NADA QUE VER CON ARENA", "M3", "MAT", 1],           # parecido bajísimo
+        ["601", "CEMENTO BLANCO TIPO III EXTRA", "KG", "MAT", 2]])   # casi igual
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")
+    parecidos = [c["parecido"] for c in prev["conflicto"]]
+    assert parecidos == sorted(parecidos, reverse=True)
+    assert prev["conflicto"][0]["codigo"] == "601"
+
+
+def test_conflicto_contra_una_fila_del_mismo_archivo_no_trae_candidato(tmp_path):
+    """El choque es contra una fila anterior del MISMO archivo: ese insumo todavía no
+    existe en la base, así que no hay contra qué actualizar y no lleva casilla."""
+    alm = _alm(tmp_path)
+    contenido = _xlsx_upsert_filas([
+        ["7777", "GRAVA COMUN DE RIO", "M3", "MAT", 8000],
+        ["7777", "OTRA COSA DISTINTA", "M3", "MAT", 9000]])
+    prev = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU")
+    assert len(prev["crear"]) == 1 and len(prev["conflicto"]) == 1
+    assert "insumo_id" not in prev["conflicto"][0]
+
+
+def test_conflicto_sin_tarifa_en_la_lista_no_miente_con_un_cero(tmp_path):
+    """Contra una lista de NP, `precio_actual` es 0.0 por el LEFT JOIN, no porque el
+    precio sea 0. `sin_precio_actual` es lo que deja que el diálogo diga la verdad."""
+    alm = _alm(tmp_path)
+    np = alm.precios.crear_lista("NP Calle 13")
+    contenido = _xlsx_upsert_filas([["100", "CEMENTO GRIZ", "KG", "MAT", 1200]])
+    c = autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU",
+                                         lista_id=np)["conflicto"][0]
+    assert c["precio_actual"] == 0.0 and c["sin_precio_actual"] is True
+```
+
+- [ ] **Step 2: Correr y verificar que fallan**
+
+```bash
+python -m pytest tests/test_servicio_autoria.py -k "numeros or ordenados or mismo_archivo or no_miente" -v
+```
+
+- [ ] **Step 3: Quitar la constante de config**
+
+Borrar `UMBRAL_PREMARCA_CONFLICTO` y su comentario de `apu_tool/config.py`: sin premarcado no hay nada que umbralar.
+
+- [ ] **Step 4: Borrar `_premarcar` y arreglar `_mismos_numeros`**
+
+Borrar la función `_premarcar` entera. Y `_mismos_numeros` pasa a comparar las listas crudas:
+
+```python
+def _mismos_numeros(a: str, b: str) -> bool:
+    """True si los dos nombres traen los mismos números, EN EL MISMO ORDEN.
+
+    Se compara la lista cruda y no `Counter` ni `sorted`, que son insensibles al orden y
+    darían iguales «CABLE 3 X 40 AMP» y «CABLE 40 X 3 AMP» — dos materiales distintos (el
+    catálogo tiene `BREAKER INDUSTRIAL ABB 3 X 40 AMP`).
+
+    Es una SEÑAL que se le muestra a la persona, no una decisión: separa «una letra
+    distinta» de «MR-42 vs MR-40», que el parecido no separa (89.0% vs 88.7%), pero no
+    separa nada cuando ninguno de los dos nombres tiene números."""
+    return re.findall(r"\d+", a or "") == re.findall(r"\d+", b or "")
+```
+
+Con eso, `Counter` deja de usarse: quitar el import si no quedó otro uso.
+
+- [ ] **Step 5: Una sola consulta, y devolver el candidato**
+
+Hoy la rama "con nombre" consulta `get_candidatos` **dos veces con los mismos argumentos**: una dentro de `_match_identidad` y otra dentro de `_mejor_candidato`. Y la Task 2 iba a pedir una tercera. `_match_identidad` tiene **un solo llamador** (verificado), así que las dos pasan a ser funciones puras sobre la lista ya leída:
+
+```python
+def _match_identidad(cands: list, nombre: str):
+    """El insumo de `cands` cuyo nombre normalizado es exactamente `nombre`, o None.
+
+    Recibe los candidatos ya leídos en vez de consultarlos: su único llamador necesita esa
+    misma lista para resolver el mejor candidato del conflicto, y eran dos consultas
+    idénticas por fila."""
+    nn = normalizar(nombre)
+    for c in cands:
+        if normalizar(c.nombre) == nn:
+            return c
+    return None
+
+
+def _mejor_candidato(cands: list, nombre: str):
+    """`(insumo, parecido)` del candidato cuyo nombre más se parece, o `(None, 0.0)`.
+
+    Hace falta porque 652 códigos del catálogo están repetidos (1304 insumos) y NO son
+    variantes: el código 10000 lo comparten un CHEVRON reflectivo y un PISO EN LOSETA.
+    "El código ya existe" no dice cuál."""
+    if not cands:
+        return None, 0.0
+    sim, mejor = max(((similarity(nombre, c.nombre), c) for c in cands),
+                     key=lambda par: par[0])
+    return mejor, sim
+```
+
+El `key=lambda par: par[0]` no es decorativo: sin él, dos candidatos empatados hacen que `max` compare los `Insumo` entre sí y reviente con `TypeError`.
+
+`_fila_conflicto` pasa a recibir los candidatos y a devolver **`(ins, fila)`**, para que la Task 2 no tenga que volver a resolverlo:
+
+```python
+def _fila_conflicto(cands: list, f: dict, campo: str, motivo: str):
+    """`(insumo_ofrecido, entrada_del_balde)`. El insumo es None si no hay contra qué
+    actualizar.
+
+    Un conflicto de CÓDIGO trae el insumo contra el que se ofrece actualizar, su precio y
+    fuente de hoy, el parecido de los nombres y si los números coinciden. Un conflicto de
+    NOMBRE no trae nada de eso: forzarlo reasignaría el precio a un insumo con otro código,
+    y está fuera de alcance (no lleva casilla en el diálogo).
+
+    Sin candidato también cuando el choque es contra una fila anterior del MISMO archivo:
+    ese insumo todavía no existe."""
+    fila = {**f, "motivo": motivo, "campo": campo}
+    if campo != "codigo":
+        return None, fila
+    ins, sim = _mejor_candidato(cands, f["nombre"])
+    if ins is None:
+        return None, fila
+    return ins, {**fila, "insumo_id": ins.id, "nombre_actual": ins.nombre,
+                 "precio_actual": ins.precio, "fuente_actual": ins.fuente_precio,
+                 # `precio_actual` es 0.0 por el LEFT JOIN cuando no hay tarifa en la lista
+                 # consultada: sin esta marca el diálogo pintaría un $0 que miente.
+                 "sin_precio_actual": ins.sin_precio,
+                 "parecido": round(sim, 3),
+                 "numeros_coinciden": _mismos_numeros(f["nombre"], ins.nombre)}
+```
+
+- [ ] **Step 6: La rama "con nombre" y el orden**
+
+En `preview_importar_insumos`, la rama "con nombre" queda:
+
+```python
+        elif nom:
+            cands = alm.precios.get_candidatos(cod, lista_id=lista_id)   # UNA sola vez
+            match = _match_identidad(cands, nom)
+            if match:
+                _upsert_o_invalida(match, f, fuente_import, actualizar, invalida,
+                                   protegida)
+                continue
+            detalle = conflicto_insumo_detalle(alm, cod, nom, extra=reclamadas)
+            if detalle:
+                campo, motivo = detalle
+                _ins, fila = _fila_conflicto(cands, f, campo, motivo)
+                conflicto.append(fila)
+            else:
+                crear.append(f)
+                reclamadas.append((cod, nom, False))
+```
+
+Y antes del `return`, ordenar el balde:
+
+```python
+    # Ordenado por parecido descendente: es lo que reemplaza al premarcado. Los typos
+    # obvios quedan arriba y juntos, y se marcan de corrido en vez de cazarlos entre 200
+    # filas. Los conflictos de nombre no traen `parecido` y caen al final.
+    conflicto.sort(key=lambda c: c.get("parecido", -1.0), reverse=True)
+```
+
+- [ ] **Step 7: Correr las pruebas**
+
+```bash
+python -m pytest tests/test_servicio_autoria.py -q
+python -m pytest tests/test_servicio_autoria.py tests/test_autoria_sin_duplicados.py tests/test_autoria_lista_precios_regresion.py tests/test_servicio_insumos_lista.py tests/test_api_autoria.py -q
+```
+
+Esperado: todo verde. **NO corras la suite completa** (~4 min, el watchdog mata al agente).
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add apu_tool/config.py apu_tool/servicio/autoria.py tests/test_servicio_autoria.py
+git commit -m "fix(import): sacar el premarcado, ordenar por parecido
+
+Medida contra el catalogo real, la regla premarcaba 2602 pares de
+materiales distintos: '(NO INCLUYE FACTOR)' vs '(INCLUYE FACTOR)' al
+98.9% y SUBBASE CLASE B [4160] vs CLASE A [4161] al 93.8%, con codigos
+consecutivos. Un digito mal en la columna codigo caia en el gemelo.
+
+Ninguna casilla viene marcada: la comodidad la da el orden y los numeros
+se muestran (numeros_coinciden) en vez de aplicarse. Ademas, una sola
+consulta de candidatos por fila en vez de dos.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 2: La fila forzada entra por el embudo
 
 **Files:**
@@ -435,21 +666,20 @@ pasa a:
             detalle = conflicto_insumo_detalle(alm, cod, nom, extra=reclamadas)
             if detalle:
                 campo, motivo = detalle
-                fila = _fila_conflicto(alm, f, campo, motivo, lista_id)
+                ins, fila = _fila_conflicto(cands, f, campo, motivo)
                 # Forzada: entra por el MISMO embudo que todo lo demás, no por un atajo.
                 # Así hereda el candado, el enrutado a 'invalida' y el guard del $0 sin
                 # una línea de código nueva.
-                if fila.get("insumo_id") in forzados:
-                    ins, _sim = _mejor_candidato(alm, cod, nom, lista_id)
+                if ins is not None and ins.id in forzados:
                     _upsert_o_invalida(ins, f, fuente_import, actualizar, invalida,
                                        protegida)
                 else:
                     conflicto.append(fila)
 ```
 
-`fila.get("insumo_id")` devuelve `None` para los conflictos de nombre y para los choques
-contra el propio archivo, y `None not in forzados` porque `forzados` solo tiene enteros:
-esos casos nunca se fuerzan, sin un `if` extra.
+`_fila_conflicto` devuelve `ins = None` para los conflictos de nombre y para los
+choques contra el propio archivo, asi que esos casos nunca se fuerzan. El candidato
+viene ya resuelto de la Task 1b: no hay una segunda consulta.
 
 - [ ] **Step 4: Pasarlo desde el aplicar**
 
@@ -617,10 +847,10 @@ const CONFLICTO_CODIGO = {
   campo: "codigo" as const, insumo_id: 42,
   nombre_actual: "CONCRETO 3000 PSI HECHO EN OBRA",
   precio_actual: 526100, fuente_actual: "PRECIO IDU",
-  parecido: 0.89, premarcar: true,
+  parecido: 0.89, numeros_coinciden: true, sin_precio_actual: false,
 };
 
-it("pre-marca los conflictos que el backend sugiere y los cuenta", async () => {
+it("ninguna casilla arranca marcada", async () => {
   previewImportarInsumos.mockResolvedValue({
     crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
     protegida: [], conflicto: [CONFLICTO_CODIGO], clasificacion_import: "publico",
@@ -630,8 +860,24 @@ it("pre-marca los conflictos que el backend sugiere y los cuenta", async () => {
   seleccionarArchivo();
 
   const casilla = await screen.findByLabelText(/aplicar igual el 900/i) as HTMLInputElement;
-  expect(casilla.checked).toBe(true);
+  expect(casilla.checked).toBe(false);
+  expect((screen.getByText("Aplicar (0)") as HTMLButtonElement).disabled).toBe(true);
+
+  fireEvent.click(casilla);
   expect(screen.getByText("Aplicar (1)")).toBeTruthy();
+});
+
+it("avisa en la fila cuando los números no coinciden", async () => {
+  previewImportarInsumos.mockResolvedValue({
+    crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
+    protegida: [], clasificacion_import: "publico",
+    conflicto: [{ ...CONFLICTO_CODIGO, numeros_coinciden: false }],
+  });
+  montar();
+  seleccionarFuente();
+  seleccionarArchivo();
+
+  expect(await screen.findByText(/los números no coinciden/i)).toBeTruthy();
 });
 
 it("manda en forzar_ids solo las casillas marcadas", async () => {
@@ -642,14 +888,15 @@ it("manda en forzar_ids solo las casillas marcadas", async () => {
   montar();
   seleccionarFuente();
   seleccionarArchivo();
-  fireEvent.click(await screen.findByText("Aplicar (1)"));
+  fireEvent.click(await screen.findByLabelText(/aplicar igual el 900/i));
+  fireEvent.click(screen.getByText("Aplicar (1)"));
 
   await waitFor(() => expect(aplicarImportarInsumos).toHaveBeenCalled());
   const form = aplicarImportarInsumos.mock.calls[0][0] as FormData;
   expect(form.getAll("forzar_ids")).toEqual(["42"]);
 });
 
-it("desmarcar saca la fila de forzar_ids y del conteo", async () => {
+it("marcar y desmarcar mueve el conteo", async () => {
   previewImportarInsumos.mockResolvedValue({
     crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
     protegida: [], conflicto: [CONFLICTO_CODIGO], clasificacion_import: "publico",
@@ -657,10 +904,12 @@ it("desmarcar saca la fila de forzar_ids y del conteo", async () => {
   montar();
   seleccionarFuente();
   seleccionarArchivo();
-  fireEvent.click(await screen.findByLabelText(/aplicar igual el 900/i));
+  const casilla = await screen.findByLabelText(/aplicar igual el 900/i);
+  fireEvent.click(casilla);
+  expect(screen.getByText("Aplicar (1)")).toBeTruthy();
 
-  const boton = screen.getByText("Aplicar (0)") as HTMLButtonElement;
-  expect(boton.disabled).toBe(true);
+  fireEvent.click(casilla);
+  expect((screen.getByText("Aplicar (0)") as HTMLButtonElement).disabled).toBe(true);
 });
 
 it("un conflicto de nombre no trae casilla", async () => {
@@ -705,7 +954,11 @@ export interface ImportConflicto {
   precio_actual?: number;
   fuente_actual?: string;
   parecido?: number;
-  premarcar?: boolean;
+  // Señal, NO decisión: los números del nombre del archivo y del de la base coinciden.
+  // Se pinta como aviso en la fila; ninguna casilla viene marcada por el servidor.
+  numeros_coinciden?: boolean;
+  // `precio_actual` es 0.0 por el LEFT JOIN cuando no hay tarifa en la lista consultada.
+  sin_precio_actual?: boolean;
 }
 ```
 
@@ -724,9 +977,10 @@ En `correrPreview`, al recibir el preview, sembrar con lo que el backend sugiri�
 ```tsx
       const prev = await previewImportarInsumos(form);
       fuentePreviewRef.current = f;
-      setForzados(new Set((prev.conflicto ?? [])
-        .filter((c) => c.premarcar && c.insumo_id !== undefined)
-        .map((c) => c.insumo_id as number)));
+      // Ninguna casilla arranca marcada: el servidor NO decide qué se aplica. Medida
+      // contra el catálogo real, cualquier regla de pre-marcado marcaba materiales
+      // distintos (`CLASE A` vs `CLASE B` al 93.8%). La comodidad la da el orden.
+      setForzados(new Set());
       setEstado({ fase: "preview", prev });
 ```
 
@@ -773,7 +1027,7 @@ function SeccionConflictos({ conflictos, forzados, onToggle }: {
 }) {
   const porCodigo = conflictos.filter((c) => c.insumo_id !== undefined);
   const porNombre = conflictos.filter((c) => c.insumo_id === undefined);
-  const premarcados = porCodigo.filter((c) => c.premarcar).length;
+
   return (
     <>
       <div>
@@ -781,11 +1035,11 @@ function SeccionConflictos({ conflictos, forzados, onToggle }: {
           El código ya existe con otro nombre — marca los que sean el mismo insumo
         </p>
         {porCodigo.length > 0 && (
-          // El pre-marcado es una decisión de dinero que toma el servidor: que se VEA
-          // cuántas vienen marcadas y con qué regla, en vez de ser un default invisible.
+          // Ninguna viene marcada a propósito: el servidor no decide plata. El orden
+          // (más parecido primero) es lo que hace que marcarlas no sea una cacería.
           <p className="text-xs text-muted-foreground mb-1">
-            {premarcados} de {porCodigo.length} vienen marcadas (parecido ≥80% y los
-            mismos números). Revisa las demás.
+            {porCodigo.length} fila(s), de más parecida a menos. Marca las que sean el
+            mismo insumo.
           </p>
         )}
         {porCodigo.length === 0 ? <p className="text-xs text-muted-foreground">Ninguno</p> : (
@@ -809,8 +1063,17 @@ function SeccionConflictos({ conflictos, forzados, onToggle }: {
                     <td className="px-2 py-0.5 align-top break-words">{c.codigo}</td>
                     <td className="px-2 py-0.5 align-top break-words">{c.nombre}</td>
                     <td className="px-2 py-0.5 align-top break-words">{c.nombre_actual}</td>
-                    <td className="px-2 py-0.5 align-top">{Math.round((c.parecido ?? 0) * 100)}%</td>
-                    <td className="px-2 py-0.5 align-top">{cop(c.precio_actual ?? 0)}</td>
+                    <td className="px-2 py-0.5 align-top">
+                      {Math.round((c.parecido ?? 0) * 100)}%
+                      {c.numeros_coinciden === false && (
+                        <span className="block text-amber-700 dark:text-amber-400">
+                          los números no coinciden
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-2 py-0.5 align-top">
+                      {c.sin_precio_actual ? "sin tarifa" : cop(c.precio_actual ?? 0)}
+                    </td>
                     <td className="px-2 py-0.5 align-top">{cop(c.precio ?? 0)}</td>
                   </tr>
                 ))}
@@ -838,7 +1101,7 @@ el precio que trae el archivo: viene en la entrada del conflicto porque el backe
 cd web && npx vitest run src/components/insumos/DialogoImportarInsumos.test.tsx
 ```
 
-Esperado: 15 passed (las 11 de antes + 4 nuevas).
+Esperado: 16 passed (las 11 de antes + 5 nuevas).
 
 Después, la suite completa y el build:
 
@@ -913,7 +1176,8 @@ y también en el entorno de Usuario y Máquina de Windows): con ella, la app esc
 Supabase de producción. Y **respaldar `data/precios.db`** antes de aplicar nada.
 
 Qué mirar: que la tabla de 7 columnas se lea con nombres largos reales; que las casillas
-premarcadas se vean; que el conteo del botón suba y baje al marcar; que el diálogo no se
+filas salgan ordenadas de más parecida a menos y que el aviso de números se lea; que el
+conteo del botón suba y baje al marcar; que el diálogo no se
 cierre solo; y que después de aplicar, el insumo forzado tenga el precio nuevo y el nombre
 viejo.
 

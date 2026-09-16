@@ -104,6 +104,30 @@ def test_import_insumos_endpoint_protege_el_interno(tmp_path):
     assert [p["codigo"] for p in body["protegida"]] == ["100"]
 
 
+def test_import_insumos_endpoint_forzar_ids(tmp_path):
+    """El id marcado viaja como campo repetido del form y la fila se aplica."""
+    cli, alm = _cli(tmp_path)
+    iid = alm.precios.get_candidatos("100")[0].id      # CEMENTO GRIS, 1000, PRECIO IDU
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["codigo", "nombre", "precio"])
+    ws.append(["100", "CEMENTO GRIZ", 1500])           # typo -> conflicto de código
+    buf = io.BytesIO(); wb.save(buf); data = buf.getvalue()
+
+    sin = cli.post("/api/insumos/importar/preview",
+                   files={"archivo": ("f.xlsx", data, _XLSX)},
+                   data={"fuente_import": "PRECIO IDU"})
+    assert sin.status_code == 200, sin.text
+    assert len(sin.json()["conflicto"]) == 1
+    assert sin.json()["conflicto"][0]["insumo_id"] == iid
+
+    con = cli.post("/api/insumos/importar",
+                   files={"archivo": ("f.xlsx", data, _XLSX)},
+                   data={"fuente_import": "PRECIO IDU", "forzar_ids": str(iid)})
+    assert con.status_code == 200, con.text
+    assert con.json()["actualizados"] == 1
+    assert alm.precios.get_candidatos("100")[0].precio == 1500
+
+
 def _xlsx_apus() -> bytes:
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "APUS"
     ws.append(["ACT","COD IDU","UN","INSUMO","COD","UND","REND","INV","PRECIO","COSTO","TURNO"])

@@ -5,16 +5,20 @@ import { Button } from "@/components/ui/button";
 import ResumenCapitulos from "@/components/corrida/ResumenCapitulos";
 import TablaItems from "@/components/corrida/TablaItems";
 import { DialogoAgregarLineas } from "@/components/corrida/DialogoAgregarLineas";
+import DialogoRebuscar from "@/components/corrida/DialogoRebuscar";
 import {
   getCorrida, descargarCuadro, congelarCorrida, activarCorrida,
   revisarCorridaStream, aplicarSugerencias, reanudarArmado,
+  rebuscarApus, aplicarRebusqueda,
 } from "@/api/corridas";
 import { cop, pct } from "@/lib/moneda";
 import { fmtDuracion } from "@/lib/tiempo";
 import { useCorridaTabla, SIN_APU } from "@/lib/corridaTabla";
 import { useAuth } from "@/lib/auth";
 import { puede } from "@/components/rutas";
-import type { AsignacionIA, CorridaDetalle, ItemCuadro, Totales } from "@/lib/tipos";
+import type {
+  AsignacionIA, CorridaDetalle, ItemCuadro, RebusquedaPrevia, Totales,
+} from "@/lib/tipos";
 
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
 
@@ -65,6 +69,10 @@ export default function Corrida() {
   >(null);
   const [aplicando, setAplicando] = useState(false);
   const [reanudando, setReanudando] = useState(false);
+  // Previa de "volver a buscar APU": null = no hay diálogo abierto.
+  const [previaRebusqueda, setPreviaRebusqueda] = useState<RebusquedaPrevia | null>(null);
+  const [rebuscando, setRebuscando] = useState(false);
+  const [aplicandoRebusqueda, setAplicandoRebusqueda] = useState(false);
   // Bumpearlo relanza el efecto de carga —y con él la cadena del poll, que se corta
   // sola cuando la corrida deja de estar 'armando'. Es lo que hace que reanudar
   // vuelva a mostrar el progreso sin recargar la página a mano.
@@ -273,6 +281,43 @@ export default function Corrida() {
     }
   }
 
+  /** Pide la previa: qué cambiaría si se rematchea contra la biblioteca de hoy. */
+  async function volverABuscar() {
+    setRebuscando(true);
+    try {
+      const previa = await rebuscarApus(corridaId);
+      if (montado.current) setPreviaRebusqueda(previa);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo volver a buscar.");
+    } finally {
+      if (montado.current) setRebuscando(false);
+    }
+  }
+
+  /** Aplica solo las líneas marcadas en el diálogo; pinta con lo que devuelve el
+   *  servidor (ya recosteado), sin volver a pedir la corrida. */
+  async function aplicarRebusquedaMarcada(seqs: number[]) {
+    setAplicandoRebusqueda(true);
+    try {
+      const actualizada = await aplicarRebusqueda(corridaId, seqs);
+      if (montado.current) setCorrida(actualizada);
+      setPreviaRebusqueda(null);
+      const n = actualizada.rebusqueda?.aplicadas.length ?? 0;
+      toast.success(n === 1 ? "1 línea reasignada" : `${n} líneas reasignadas`);
+      const salteadas = actualizada.rebusqueda?.salteadas ?? [];
+      if (salteadas.length > 0) {
+        toast.warning(
+          `${salteadas.length} línea(s) cambiaron mientras mirabas la propuesta y se `
+          + "saltearon. Volvé a buscar para verlas de nuevo.",
+        );
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo aplicar.");
+    } finally {
+      if (montado.current) setAplicandoRebusqueda(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4" style={{ padding: "16px 20px" }}>
       {/* Header row */}
@@ -320,6 +365,14 @@ export default function Corrida() {
               {revision
                 ? "Revisando…"
                 : `Revisar ${nFilas} ${nFilas === 1 ? "línea" : "líneas"} con IA`}
+            </Button>
+          )}
+          {puedeEditar && !esActivar && data.estado !== "armando" && (
+            <Button size="sm" variant="outline" disabled={rebuscando}
+              title="Vuelve a buscar APU para las líneas que no confirmaste, contra la
+                     biblioteca de hoy. Te muestra qué cambiaría antes de aplicar."
+              onClick={volverABuscar}>
+              {rebuscando ? "Buscando…" : "Volver a buscar APU"}
             </Button>
           )}
           {puedeEditar && !esActivar && sugerencias.length > 0 && (
@@ -469,6 +522,16 @@ export default function Corrida() {
           corridaId={corridaId}
           onOpenChange={(v) => { if (!v) setAgregando(false); }}
           onAgregado={(c) => { setCorrida(c); setAgregando(false); }}
+        />
+      )}
+
+      {previaRebusqueda && (
+        <DialogoRebuscar
+          abierto
+          previa={previaRebusqueda}
+          aplicando={aplicandoRebusqueda}
+          onAplicar={aplicarRebusquedaMarcada}
+          onCerrar={() => setPreviaRebusqueda(null)}
         />
       )}
     </div>

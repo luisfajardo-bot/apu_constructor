@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
+import { toast } from "sonner";      // el mock de abajo; sirve para afirmar sobre él
 
 vi.mock("react-router-dom", () => ({
   useParams: () => ({ id: "1" }),
@@ -112,4 +113,36 @@ test("sin rol editor el botón no está", async () => {
   render(<Corrida />);
   await screen.findByText("Pantalla acustica");
   expect(screen.queryByRole("button", { name: /Volver a buscar APU/ })).toBeNull();
+});
+
+test("si aplicar falla lo dice y deja el diálogo abierto para reintentar", async () => {
+  aplicarRebusqueda.mockRejectedValueOnce(new Error("La corrida está congelada."));
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Pantalla acustica");
+  fireEvent.click(screen.getByRole("button", { name: /Volver a buscar APU/ }));
+  await screen.findByText(/A9/);
+
+  fireEvent.click(screen.getByRole("button", { name: /Aplicar 1 cambio/ }));
+
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith("La corrida está congelada."));
+  // La previa NO se cierra: el usuario puede reintentar sin volver a buscar, y el
+  // botón tiene que quedar habilitado de nuevo (el `finally` limpia el flag).
+  expect(screen.getByRole("button", { name: /Aplicar 1 cambio/ })).toBeTruthy();
+});
+
+test("avisa cuando el servidor salteó líneas que cambiaron", async () => {
+  aplicarRebusqueda.mockResolvedValueOnce({
+    ...APLICADA(), rebusqueda: { aplicadas: [], salteadas: [0] },
+  });
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Pantalla acustica");
+  fireEvent.click(screen.getByRole("button", { name: /Volver a buscar APU/ }));
+  await screen.findByText(/A9/);
+
+  fireEvent.click(screen.getByRole("button", { name: /Aplicar 1 cambio/ }));
+
+  await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(
+    expect.stringContaining("1 línea cambió mientras mirabas la propuesta")));
 });

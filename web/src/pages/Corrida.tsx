@@ -283,6 +283,7 @@ export default function Corrida() {
 
   /** Pide la previa: qué cambiaría si se rematchea contra la biblioteca de hoy. */
   async function volverABuscar() {
+    if (rebuscando) return;          // cinturón contra el doble clic, igual que `revisar`
     setRebuscando(true);
     try {
       const previa = await rebuscarApus(corridaId);
@@ -297,22 +298,29 @@ export default function Corrida() {
   /** Aplica solo las líneas marcadas en el diálogo; pinta con lo que devuelve el
    *  servidor (ya recosteado), sin volver a pedir la corrida. */
   async function aplicarRebusquedaMarcada(seqs: number[]) {
+    if (aplicandoRebusqueda) return;   // cinturón contra el doble clic
     setAplicandoRebusqueda(true);
     try {
       const actualizada = await aplicarRebusqueda(corridaId, seqs);
-      if (montado.current) setCorrida(actualizada);
-      setPreviaRebusqueda(null);
+      if (montado.current) {
+        setCorrida(actualizada);
+        setPreviaRebusqueda(null);
+      }
       const n = actualizada.rebusqueda?.aplicadas.length ?? 0;
       toast.success(n === 1 ? "1 línea reasignada" : `${n} líneas reasignadas`);
       const salteadas = actualizada.rebusqueda?.salteadas ?? [];
       if (salteadas.length > 0) {
         toast.warning(
-          `${salteadas.length} línea(s) cambiaron mientras mirabas la propuesta y se `
-          + "saltearon. Volvé a buscar para verlas de nuevo.",
+          (salteadas.length === 1
+            ? "1 línea cambió mientras mirabas la propuesta y se omitió. "
+            : `${salteadas.length} líneas cambiaron mientras mirabas la propuesta `
+              + "y se omitieron. ")
+          + "Vuelve a buscar para verlas de nuevo.",
         );
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "No se pudo aplicar.");
+      toast.error(e instanceof Error ? e.message
+                                     : "No se pudo aplicar la re-búsqueda.");
     } finally {
       if (montado.current) setAplicandoRebusqueda(false);
     }

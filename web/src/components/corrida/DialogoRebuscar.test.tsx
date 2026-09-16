@@ -72,6 +72,32 @@ describe("DialogoRebuscar", () => {
     expect(onAplicar).toHaveBeenCalledWith([0, 1]);
   });
 
+  it("shift+clic marca el rango desde el ancla", () => {
+    const onAplicar = vi.fn();
+    // Cuatro filas, ninguna sin APU: arranca todo desmarcado, así el rango se ve solo.
+    const conApu = (seq: number) => propuesta({
+      seq, sin_apu: false, apu_actual: { codigo: `A${seq}`, nombre: "VIEJO" },
+    });
+    render(<DialogoRebuscar abierto
+      previa={previa([conApu(0), conApu(1), conApu(2), conApu(3)])}
+      aplicando={false} onAplicar={onAplicar} onCerrar={vi.fn()} />);
+
+    fireEvent.click(screen.getByLabelText("Marcar línea 2"));                    // ancla
+    fireEvent.click(screen.getByLabelText("Marcar línea 4"), { shiftKey: true }); // rango
+
+    fireEvent.click(screen.getByRole("button", { name: /Aplicar 3 cambios/ }));
+    expect(onAplicar).toHaveBeenCalledWith([1, 2, 3]);
+  });
+
+  it("el botón Cerrar no responde mientras se está aplicando", () => {
+    const onCerrar = vi.fn();
+    render(<DialogoRebuscar abierto previa={previa([propuesta()])}
+      aplicando onAplicar={vi.fn()} onCerrar={onCerrar} />);
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    // Cerrar no cancela el POST en vuelo: dejarlo apretable engaña al usuario.
+    expect(onCerrar).not.toHaveBeenCalled();
+  });
+
   it("sin propuestas lo dice y no ofrece aplicar", () => {
     render(<DialogoRebuscar abierto previa={previa([])} aplicando={false}
                             onAplicar={vi.fn()} onCerrar={vi.fn()} />);

@@ -67,6 +67,7 @@ export default function DialogoRebuscar({
           {ps.length} de {previa.escaneadas}{" "}
           {previa.escaneadas === 1 ? "línea revisada" : "líneas revisadas"} cambiarían
           de APU. Las confirmadas no se tocan.
+          {ps.length > 1 && " Shift+clic marca en rango."}
         </p>
 
         {ps.length === 0 ? (
@@ -140,7 +141,11 @@ export default function DialogoRebuscar({
         )}
 
         <div className="flex justify-end gap-2 pt-2">
-          <Button size="sm" variant="outline" onClick={onCerrar}>Cerrar</Button>
+          {/* Deshabilitado mientras aplica, igual que el diálogo de importar: cerrar
+              no cancela el POST en vuelo, así que el cuadro se actualizaría y saldría
+              un toast después de que el usuario creyó haber cancelado. */}
+          <Button size="sm" variant="outline" disabled={aplicando}
+            onClick={onCerrar}>Cerrar</Button>
           {ps.length > 0 && (
             <Button size="sm" disabled={marcadas.size === 0 || aplicando}
               onClick={() => onAplicar([...marcadas].sort((a, b) => a - b))}>

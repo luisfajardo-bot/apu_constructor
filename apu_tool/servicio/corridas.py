@@ -24,6 +24,7 @@ from apu_tool.datos.repositorio import ArmadoDuplicado, CorridaEliminada
 from apu_tool.dominio import entrada
 from apu_tool.dominio.alertas import alertas_costeo
 from apu_tool.dominio.assemble import Assembler, ApuAdvisor
+from apu_tool.dominio.matching import Matcher
 from apu_tool.dominio.presupuesto import LecturaPresupuesto
 from apu_tool.dominio.pricing import PricingEngine
 from apu_tool.dominio.report import write_report
@@ -1004,6 +1005,122 @@ def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
     devuelve None cuando ese seq no existe en la corrida (además de cuando la
     corrida no existe), así que el 404 del endpoint sale gratis del lote."""
     return confirmar_items(alm, corrida_id, [seq], apu_codigo, shift or None)
+
+
+def _propuestas_rebusqueda(alm: Almacen, meta, rows):
+    """Re-corre el matcher del armado sobre las filas NO confirmadas y devuelve
+    `(propuestas, candidatos_frescos, escaneadas)`.
+
+    `propuestas` es [(fila, ensamble propuesto ya costeado)]: solo las filas cuyo APU
+    cambiaría. `candidatos_frescos` es {seq: [candidato…]} de TODAS las escaneadas (lo
+    usa `aplicar_rebusqueda` para refrescar la lista que se ve al desplegar una fila).
+
+    Es el camino ÚNICO: `rebuscar` lo muestra y `aplicar_rebusqueda` lo recalcula y
+    escribe, así que la previa y lo que se aplica no se pueden separar con el tiempo.
+
+    Dos fases a propósito. La primera solo matchea (0.2 ms por fila con
+    `escaneo_completo=False`); la segunda costea, que es lo caro, y corre solo sobre
+    las pocas filas que cambiarían. Costear las 1939 sería el armado otra vez.
+    """
+    indice = alm.apus.apu_index()
+    matcher = Matcher(indice)
+    codigos = {c for c, _n, _s in indice}
+    assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False),
+                          lista_id=meta.lista_precios_id)
+
+    # Fase 1: matchear y pre-filtrar por (código, turno). El turno definitivo lo
+    # decide `_build` (puede caer a otro si el APU no existe en el del ítem), así que
+    # esta comparación es solo un tamiz: el filtro de verdad va después de costear.
+    pendientes = []
+    candidatos: dict[int, list[dict]] = {}
+    escaneadas = 0
+    for r in rows:
+        if r.status == MatchStatus.CONFIRMED.value:
+            continue          # lo resolvió una persona; el re-match no lo pisa
+        escaneadas += 1
+        result = matcher.match(r.item, escaneo_completo=False)
+        candidatos[r.seq] = [{"apu_codigo": c.apu_codigo, "apu_nombre": c.apu_nombre,
+                              "score": c.score, "motivo": c.motivo}
+                             for c in result.candidatos]
+        # Misma regla que `assemble_item`: el código del presupuesto manda sobre el
+        # matcher. Una sola regla, no dos que se puedan separar.
+        if r.item.codigo_sugerido and r.item.codigo_sugerido in codigos:
+            propuesto = r.item.codigo_sugerido
+        elif result.status == MatchStatus.AUTO and result.elegido:
+            propuesto = result.elegido.apu_codigo
+        elif result.status == MatchStatus.REVIEW and result.candidatos:
+            propuesto = result.candidatos[0].apu_codigo
+        else:
+            continue          # nada asignable: la fila se queda como está
+        if (propuesto, r.item.shift) == (r.apu_codigo, r.shift):
+            continue
+        pendientes.append((r, result, propuesto))
+
+    # Fase 2: costear solo las candidatas, con el motor compartido y precarga en lote
+    # (el patrón que bajó 540 round-trips a 2 al abrir una corrida).
+    assembler.pricing.precargar((cod, r.item.shift) for r, _res, cod in pendientes)
+    propuestas = []
+    for r, result, _cod in pendientes:
+        ens = assembler.assemble_item(r.item, result)
+        if (ens.apu_codigo, ens.shift) == (r.apu_codigo, r.shift):
+            continue          # el turno cayó al mismo lugar: no cambia nada
+        if not ens.apu_codigo:
+            continue          # `assemble_item` no encontró nada: no se propone vacío
+        propuestas.append((r, ens))
+    return propuestas, candidatos, escaneadas
+
+
+def _vista_propuesta(row: CorridaItemRow, ens: AssembledApu) -> dict:
+    """Una línea de la vista previa. El costo y el margen los calcula el backend:
+    el frontend no suma plata."""
+    return {
+        "seq": row.seq, "item": row.item.item, "descripcion": row.item.descripcion,
+        "unidad": ens.unidad, "cantidad": row.item.cantidad,
+        "apu_actual": ({"codigo": row.apu_codigo, "nombre": row.apu_nombre}
+                       if row.apu_codigo else None),
+        "apu_propuesto": {"codigo": ens.apu_codigo, "nombre": ens.apu_nombre,
+                          "turno": ens.shift},
+        "score": round(ens.confianza, 4), "status": ens.status.value,
+        "explicacion": ens.explicacion,
+        "precio_contractual": row.item.precio_contractual,
+        "costo_unitario": ens.costo_unitario,
+        "margen_unitario": ens.margen_unitario, "margen_pct": ens.margen_pct,
+        # Se marcan solas en la previa: están en $0 y traban el cuadro, así que
+        # cualquier APU es mejor que nada. Lo decide el backend, no el frontend.
+        "sin_apu": row.apu_codigo is None,
+    }
+
+
+def _exigir_rebuscable(alm: Almacen, corrida_id: int):
+    """Los candados compartidos por `rebuscar` y `aplicar_rebusqueda`. Devuelve la
+    meta, o None si la corrida no existe."""
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    if meta.modo == "congelada":
+        raise CorridaCongelada(corrida_id)
+    if _plan_a_medias(meta):
+        # Mientras el armador no termine, el espacio de seq es suyo y las filas que
+        # faltan no existen: re-buscar ahora mira media corrida.
+        raise ValueError(_MSG_PLAN_A_MEDIAS.format(accion="volver a buscar APU de"))
+    return meta
+
+
+def rebuscar(alm: Almacen, corrida_id: int) -> Optional[dict]:
+    """Qué cambiaría si se volviera a matchear la corrida contra la biblioteca de hoy.
+
+    NO escribe nada: propone. Devuelve None si la corrida no existe.
+    """
+    meta = _exigir_rebuscable(alm, corrida_id)
+    if meta is None:
+        return None
+    rows = alm.corridas.get_items(corrida_id)
+    propuestas, _candidatos, escaneadas = _propuestas_rebusqueda(alm, meta, rows)
+    return {
+        "corrida_id": corrida_id,
+        "escaneadas": escaneadas,
+        "propuestas": [_vista_propuesta(r, e) for r, e in propuestas],
+    }
 
 
 def igualar_costo_al_contractual(alm: Almacen, corrida_id: int, seqs: Iterable[int],

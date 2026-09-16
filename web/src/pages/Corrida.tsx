@@ -369,8 +369,8 @@ export default function Corrida() {
           )}
           {puedeEditar && !esActivar && data.estado !== "armando" && (
             <Button size="sm" variant="outline" disabled={rebuscando}
-              title="Vuelve a buscar APU para las líneas que no confirmaste, contra la
-                     biblioteca de hoy. Te muestra qué cambiaría antes de aplicar."
+              title={"Vuelve a buscar APU para las líneas que no confirmaste, contra "
+                + "la biblioteca de hoy. Te muestra qué cambiaría antes de aplicar."}
               onClick={volverABuscar}>
               {rebuscando ? "Buscando…" : "Volver a buscar APU"}
             </Button>

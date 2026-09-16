@@ -344,10 +344,16 @@ def test_rebuscar_no_escribe_nada(tmp_path):
         alm, "lic.xlsx", [_item("Pantalla acustica modular en aluminio")],
         "DIURNO", use_ai=False)
     _agregar_apu(alm, "A9", "Pantalla acustica modular en aluminio")
+    # Los candidatos de ANTES, no una lista vacía: el armado nunca deja la lista
+    # vacía — `_full_scan` guarda todo lo que puntúe > 0, y `SequenceMatcher` da > 0
+    # para casi cualquier par de textos. La fila nace con un candidato basura de 0,09.
+    # Lo que se prueba acá es que la previa no los TOCA: refrescarlos es del aplicar.
+    antes = alm.corridas.get_items(cid)[0].candidatos
     corridas.rebuscar(alm, cid)
     fila = alm.corridas.get_items(cid)[0]
     assert fila.apu_codigo is None                   # la previa propone, no aplica
-    assert fila.candidatos == []
+    assert fila.candidatos == antes
+    assert "A9" not in [c["apu_codigo"] for c in fila.candidatos]
 
 
 def test_rebuscar_no_toca_las_confirmadas(tmp_path):
@@ -608,7 +614,11 @@ def test_aplicar_refresca_los_candidatos_de_las_escaneadas(tmp_path):
     cid = corridas.construir_corrida(
         alm, "lic.xlsx", [_item("Pantalla acustica modular en aluminio")],
         "DIURNO", use_ai=False)
-    assert alm.corridas.get_items(cid)[0].candidatos == []
+    # Ojo: el armado NO deja la lista vacía (`_full_scan` guarda todo lo que puntúe
+    # > 0), así que la fila nace con un candidato basura. Lo que se prueba es que
+    # después del aplicar la lista es la de hoy, con el APU nuevo adentro.
+    assert "A9" not in [c["apu_codigo"]
+                        for c in alm.corridas.get_items(cid)[0].candidatos]
     _agregar_apu(alm, "A9", "Pantalla acustica modular en aluminio")
     corridas.aplicar_rebusqueda(alm, cid, [])       # sin marcar nada
     fila = alm.corridas.get_items(cid)[0]

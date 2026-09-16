@@ -174,8 +174,11 @@ def test_set_candidatos_no_toca_el_apu_ni_el_veredicto_ni_el_costo_a_mano(repo):
                              apu_nombre="APU UNO", unidad="M3", shift="DIURNO",
                              origen="historico", confianza=1.0, explicacion="ok",
                              componentes=[])
-    repo.set_revision(cid, 0, {"veredicto": "ok", "apu_evaluado": "A1"})
+    # El orden importa: `set_costo_manual` BORRA el veredicto (poner el costo a mano
+    # es un confirm), así que el veredicto se pone después, o este test probaría que
+    # `set_candidatos` no borró algo que ya no estaba.
     repo.set_costo_manual(cid, {0: 5000.0})
+    repo.set_revision(cid, 0, {"veredicto": "ok", "apu_evaluado": "A1"})
     repo.set_candidatos(cid, {0: [{"apu_codigo": "A2", "apu_nombre": "OTRO",
                                    "score": 0.6, "motivo": ""}]})
     fila = repo.get_items(cid)[0]

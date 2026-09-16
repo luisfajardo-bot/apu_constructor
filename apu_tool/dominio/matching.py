@@ -71,8 +71,8 @@ class Matcher:
                 scored.append((score, idx, codigo, nombre))
         return self._top(scored, top_n)
 
-    def candidates(self, descripcion: str, shift: str, top_n: int = 5
-                   ) -> list[MatchCandidate]:
+    def candidates(self, descripcion: str, shift: str, top_n: int = 5,
+                   escaneo_completo: bool = True) -> list[MatchCandidate]:
         pool = self._by_shift.get(shift)
         postings = self._postings_by_shift.get(shift)
         if not pool:
@@ -114,12 +114,26 @@ class Matcher:
         # mejor global (un APU sin tokens comunes tiene jaccard 0 -> score ≤ 0.4 < 0.55).
         if best >= config.MATCH_REVIEW:
             return self._top(scored, top_n)
+        if not escaneo_completo:
+            # Vía rápida a secas: la usa el re-match de una corrida
+            # (`servicio/corridas.py::rebuscar`), que recorre miles de filas de una.
+            # Las ASIGNACIONES salen idénticas por la misma garantía de arriba; lo que
+            # no aparece es la cola de candidatos de relleno (score < 0.4), que no se
+            # puede asignar ni con permiso. 0.2 ms por fila en vez de 42.
+            #
+            # ponytail: techo conocido — `similarity` devuelve 1.0 por atajo cuando los
+            # textos normalizados son idénticos, SIN mirar tokens. Una descripción cuyo
+            # set de tokens quede vacío (`_tokens` filtra) y que además coincida exacto
+            # con el nombre de un APU no la vería esta vía. No hay ningún caso así en la
+            # biblioteca de hoy; si aparece, se llama con `escaneo_completo=True`.
+            return self._top(scored, top_n)
         # Débil/novedoso: el mejor global podría ser un APU sin tokens comunes (alta
         # similitud de caracteres) -> escaneo completo exacto para no perderlo.
         return self._full_scan(descripcion, pool, top_n)
 
-    def match(self, item: LicitacionItem) -> MatchResult:
-        cands = self.candidates(item.descripcion, item.shift)
+    def match(self, item: LicitacionItem, escaneo_completo: bool = True) -> MatchResult:
+        cands = self.candidates(item.descripcion, item.shift,
+                                escaneo_completo=escaneo_completo)
         if not cands:
             return MatchResult(item=item, status=MatchStatus.NEW, candidatos=[],
                                explicacion="Sin candidatos en el histórico.")

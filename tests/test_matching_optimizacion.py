@@ -126,3 +126,35 @@ def test_matcher_incluye_caso_auto_review_y_new():
                               cantidad=1.0, precio_contractual=1.0, shift=shift)
         estados.add(matcher.match(item).status)
     assert {MatchStatus.AUTO, MatchStatus.REVIEW, MatchStatus.NEW} <= estados
+
+
+def test_via_rapida_no_cambia_ninguna_asignacion():
+    """GATE de `servicio/corridas.py::rebuscar`: saltarse el `_full_scan` de respaldo
+    no puede cambiar el estado ni el APU elegido de NINGUNA consulta.
+
+    Es exacto por construcción, no por suerte: `similarity` es
+    0.4*secuencia + 0.6*jaccard, así que un APU sin ningún token en común tiene
+    jaccard 0 y su score no pasa de 0.4 — debajo del 0.55 de MATCH_REVIEW. Todo lo
+    que se puede asignar comparte tokens, y eso ya lo encuentra el índice invertido.
+    Lo único que la vía rápida no trae es la cola de candidatos de relleno.
+    """
+    matcher = Matcher([(c, n, s) for (c, n, s) in _APUS])
+    diffs = []
+    for descripcion, shift in _queries():
+        item = LicitacionItem(item="1", descripcion=descripcion, unidad="UN",
+                              cantidad=1.0, precio_contractual=1.0, shift=shift)
+        completo = matcher.match(item)
+        rapido = matcher.match(item, escaneo_completo=False)
+        esperado = (completo.status,
+                    completo.elegido.apu_codigo if completo.elegido else None)
+        got = (rapido.status, rapido.elegido.apu_codigo if rapido.elegido else None)
+        if got != esperado:
+            diffs.append((descripcion, shift, esperado, got))
+        # Donde hay algo asignable, el mejor candidato también tiene que ser el mismo:
+        # es la base con la que `assemble_item` arma una fila `review`.
+        if completo.candidatos and completo.candidatos[0].score >= config.MATCH_REVIEW:
+            mejor_rapido = rapido.candidatos[0].apu_codigo if rapido.candidatos else None
+            if mejor_rapido != completo.candidatos[0].apu_codigo:
+                diffs.append((descripcion, shift,
+                              completo.candidatos[0].apu_codigo, mejor_rapido))
+    assert not diffs, f"La vía rápida divergió en {len(diffs)}: {diffs[:5]}"

@@ -203,3 +203,19 @@ def test_aplicar_bloqueado_si_congelada(tmp_path):
 
 def test_aplicar_corrida_inexistente(tmp_path):
     assert corridas.aplicar_rebusqueda(_almacen(tmp_path), 999, [0]) is None
+
+
+def test_rebuscar_no_toca_una_fila_con_costo_puesto_a_mano(tmp_path):
+    """El costo a mano es una decisión de negocio ("armarle el APU no paga"). Queda
+    a salvo porque `set_costo_manual` deja la fila `confirmed` y el re-match salta
+    las confirmadas — este test es el candado de esa cadena."""
+    alm = _almacen(tmp_path)
+    cid = corridas.construir_corrida(
+        alm, "lic.xlsx", [_item("Pantalla acustica modular en aluminio")],
+        "DIURNO", use_ai=False)
+    corridas.igualar_costo_al_contractual(alm, cid, [0])
+    _agregar_apu(alm, "A9", "Pantalla acustica modular en aluminio")
+    previa = corridas.rebuscar(alm, cid)
+    assert previa["escaneadas"] == 0
+    assert previa["propuestas"] == []
+    assert alm.corridas.get_items(cid)[0].costo_manual == 900000.0

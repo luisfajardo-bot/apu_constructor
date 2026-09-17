@@ -1007,7 +1007,7 @@ def confirmar_item(alm: Almacen, corrida_id: int, seq: int, apu_codigo: str,
     return confirmar_items(alm, corrida_id, [seq], apu_codigo, shift or None)
 
 
-def _propuestas_rebusqueda(alm: Almacen, meta, rows):
+def _propuestas_rebusqueda(alm: Almacen, meta, rows, solo_seqs=None):
     """Re-corre el matcher del armado sobre las filas NO confirmadas y devuelve
     `(propuestas, candidatos_frescos, escaneadas)`.
 
@@ -1021,10 +1021,20 @@ def _propuestas_rebusqueda(alm: Almacen, meta, rows):
     Dos fases a propósito. La primera solo matchea (0.2 ms por fila con
     `escaneo_completo=False`); la segunda costea, que es lo caro, y corre solo sobre
     las pocas filas que cambiarían. Costear las 1939 sería el armado otra vez.
+
+    `solo_seqs`: si se pasa, recorta lo que se COSTEA (Fase 2) a esos seq. La Fase 1
+    corre igual sobre toda la corrida —los candidatos frescos son de todas las filas
+    escaneadas, y hay un test que lo exige—; lo que se recorta es solo el costeo, que
+    es la parte cara. `aplicar_rebusqueda` lo usa para no pagar el costeo de las
+    candidatas que el usuario no marcó; `rebuscar` no lo pasa, porque la previa tiene
+    que mostrar todo.
     """
     indice = alm.apus.apu_index()
     matcher = Matcher(indice)
     codigos = {c for c, _n, _s in indice}
+    # Pares (código, turno) que existen HOY en la biblioteca. Sirve para el tamiz de
+    # Fase 1 (Arreglo 1) y para acertarle al turno del precargado (Arreglo 2).
+    pares = {(c, s) for c, _n, s in indice}
     assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False),
                           lista_id=meta.lista_precios_id)
 
@@ -1052,13 +1062,36 @@ def _propuestas_rebusqueda(alm: Almacen, meta, rows):
             propuesto = result.candidatos[0].apu_codigo
         else:
             continue          # nada asignable: la fila se queda como está
-        if (propuesto, r.item.shift) == (r.apu_codigo, r.shift):
+        # "Es lo mismo" solo si el par que la fila tiene hoy TODAVÍA existe en la
+        # biblioteca. Si alguien borró justo esa variante de turno, el par ya no está
+        # en `pares` y "es lo mismo" es mentira: `_build` va a caer al turno gemelo, así
+        # que la fila tiene que llegar a la Fase 2, que decide con el resultado real
+        # ya costeado (Arreglo 1).
+        if ((propuesto, r.item.shift) == (r.apu_codigo, r.shift)
+                and (r.apu_codigo, r.shift) in pares):
             continue
         pendientes.append((r, result, propuesto))
 
+    if solo_seqs is not None:
+        marcados = set(solo_seqs)
+        pendientes = [t for t in pendientes if t[0].seq in marcados]
+
+    def _turno_probable(cod: str, pedido: str) -> str:
+        """El turno con el que `_build` va a costear: el pedido si existe, si no el
+        gemelo. Solo para acertarle al precargado — si erra, el costeo igual sale
+        bien (`precargar` es fail-safe), solo se paga una consulta de más."""
+        if (cod, pedido) in pares:
+            return pedido
+        return next((s for c, _n, s in indice if c == cod), pedido)
+
     # Fase 2: costear solo las candidatas, con el motor compartido y precarga en lote
     # (el patrón que bajó 540 round-trips a 2 al abrir una corrida).
-    assembler.pricing.precargar((cod, r.item.shift) for r, _res, cod in pendientes)
+    # ponytail: `_build` llama `alm.apus.get_apu(...)` UNA VEZ POR FILA y eso no lo
+    # cubre ningún precargado, así que aplicar cientos de filas de una paga cientos de
+    # round-trips. La salida, si algún día molesta, es batchear `get_apu` en el
+    # `Assembler`, no acá.
+    assembler.pricing.precargar((cod, _turno_probable(cod, r.item.shift))
+                                for r, _res, cod in pendientes)
     propuestas = []
     for r, result, _cod in pendientes:
         ens = assembler.assemble_item(r.item, result)
@@ -1141,8 +1174,10 @@ def aplicar_rebusqueda(alm: Almacen, corrida_id: int,
     meta = _exigir_rebuscable(alm, corrida_id)
     if meta is None:
         return None
+    seqs = list(seqs)   # Iterable: se usa acá abajo Y en `_propuestas_rebusqueda`
     rows = alm.corridas.get_items(corrida_id)
-    propuestas, candidatos, _escaneadas = _propuestas_rebusqueda(alm, meta, rows)
+    propuestas, candidatos, _escaneadas = _propuestas_rebusqueda(
+        alm, meta, rows, solo_seqs=seqs)
     vigentes = {r.seq: (r, e) for r, e in propuestas}
     aplicadas, salteadas = [], []
     for seq in dict.fromkeys(seqs):          # sin repetidos, en el orden que llegaron

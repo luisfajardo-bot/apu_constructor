@@ -109,6 +109,19 @@ def test_pg_sin_composicion_la_vigente_es_none(repo_pg):
     assert repo_pg.historial(cid, 99) == []
 
 
+def test_pg_estados_vigentes_devuelve_la_version_mas_alta_de_cada_seq(repo_pg):
+    cid = _cid(repo_pg)
+    repo_pg.agregar(fila(corrida_id=cid, seq=7, version=1, estado="propuesta"))
+    repo_pg.agregar(fila(corrida_id=cid, seq=7, version=2, estado="aprobada"))
+    repo_pg.agregar(fila(corrida_id=cid, seq=8, version=1, estado="editada"))
+    assert repo_pg.estados_vigentes(cid) == {7: "aprobada", 8: "editada"}
+
+
+def test_pg_estados_vigentes_sin_ninguno_da_vacio(repo_pg):
+    cid = _cid(repo_pg)
+    assert repo_pg.estados_vigentes(cid) == {}
+
+
 def test_pg_los_campos_opcionales_aceptan_none(repo_pg):
     cid = _cid(repo_pg)
     repo_pg.agregar(fila(corrida_id=cid, ficha=None, propuesta=None, validacion=None,

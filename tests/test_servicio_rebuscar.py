@@ -3,7 +3,9 @@
 import pytest
 
 from apu_tool.datos.almacen import Almacen
-from apu_tool.nucleo.models import Apu, ApuComponent, Insumo, LicitacionItem
+from apu_tool.nucleo.models import (
+    Apu, ApuComponent, ComposicionRow, Insumo, LicitacionItem,
+)
 from apu_tool.servicio import corridas
 
 
@@ -31,6 +33,19 @@ def _item(desc, n="1"):
                           precio_contractual=900000.0, shift="DIURNO")
 
 
+def _componer(alm, cid, seq, estado, version=1):
+    """Escribe una versión del expediente de composición, mínima, solo para
+    ejercitar el estado. Sigue el mismo patrón que tests/test_api_composicion.py."""
+    alm.composiciones.agregar(ComposicionRow(
+        id=None, corrida_id=cid, seq=seq, version=version, estado=estado,
+        actividad={"item": "1", "descripcion": "x", "unidad": "M3",
+                   "cantidad": 10.0, "shift": "DIURNO"},
+        ficha=None, propuesta=None, validacion=None, confianza=None,
+        confianza_motivos=None, antecedentes=None, modelo=None,
+        prompt_version=None, apu_codigo=None, apu_turno=None,
+        autor="t@test.co", creada_en="2026-09-10T10:00:00", motivo=None))
+
+
 def test_rebuscar_encuentra_un_apu_creado_despues_del_armado(tmp_path):
     alm = _almacen(tmp_path)
     cid = corridas.construir_corrida(
@@ -47,10 +62,52 @@ def test_rebuscar_encuentra_un_apu_creado_despues_del_armado(tmp_path):
     assert p["seq"] == 0
     assert p["apu_actual"] is None
     assert p["apu_propuesto"]["codigo"] == "A9"
-    assert p["sin_apu"] is True                      # el frontend la marca por defecto
+    assert p["marcar_por_defecto"] is True            # el frontend la marca por defecto
+    assert p["composicion_pendiente"] is False
     assert p["status"] == "auto"
     assert p["costo_unitario"] == 2.0 * 350000.0     # ya viene costeada
     assert p["margen_unitario"] == 900000.0 - 700000.0
+
+
+def test_rebuscar_no_marca_por_defecto_una_fila_con_composicion_en_curso(tmp_path):
+    """Aplicar dejaría huérfano el expediente: la fila pasaría a tener APU y el
+    botón Componer desaparece de la tabla. La decisión es del backend."""
+    alm = _almacen(tmp_path)
+    cid = corridas.construir_corrida(
+        alm, "lic.xlsx", [_item("Pantalla acustica modular en aluminio")],
+        "DIURNO", use_ai=False)
+    _agregar_apu(alm, "A9", "Pantalla acustica modular en aluminio")
+    _componer(alm, cid, 0, "propuesta")
+    previa = corridas.rebuscar(alm, cid)
+    p = previa["propuestas"][0]
+    assert p["marcar_por_defecto"] is False
+    assert p["composicion_pendiente"] is True
+
+
+@pytest.mark.parametrize("estado", ["aprobada", "rechazada"])
+def test_rebuscar_marca_por_defecto_si_el_expediente_ya_se_resolvio(tmp_path, estado):
+    alm = _almacen(tmp_path)
+    cid = corridas.construir_corrida(
+        alm, "lic.xlsx", [_item("Pantalla acustica modular en aluminio")],
+        "DIURNO", use_ai=False)
+    _agregar_apu(alm, "A9", "Pantalla acustica modular en aluminio")
+    _componer(alm, cid, 0, estado)
+    previa = corridas.rebuscar(alm, cid)
+    p = previa["propuestas"][0]
+    assert p["marcar_por_defecto"] is True
+    assert p["composicion_pendiente"] is False
+
+
+def test_rebuscar_marca_por_defecto_sin_expediente_de_composicion(tmp_path):
+    alm = _almacen(tmp_path)
+    cid = corridas.construir_corrida(
+        alm, "lic.xlsx", [_item("Pantalla acustica modular en aluminio")],
+        "DIURNO", use_ai=False)
+    _agregar_apu(alm, "A9", "Pantalla acustica modular en aluminio")
+    previa = corridas.rebuscar(alm, cid)
+    p = previa["propuestas"][0]
+    assert p["marcar_por_defecto"] is True
+    assert p["composicion_pendiente"] is False
 
 
 def test_rebuscar_no_escribe_nada(tmp_path):

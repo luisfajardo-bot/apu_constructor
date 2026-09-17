@@ -20,12 +20,14 @@ export default function DialogoRebuscar({
 }: Props) {
   const ps = previa.propuestas;
   // Vienen marcadas las que hoy están sin APU: están en $0 y traban el cuadro, así que
-  // cualquier APU es mejor que nada. Quién es cuál lo dice el backend (`sin_apu`), no
-  // una regla repetida acá.
+  // cualquier APU es mejor que nada. Salvo que tengan una composición a medias — ahí
+  // aplicar dejaría un borrador huérfano. Quién es cuál lo dice el backend
+  // (`marcar_por_defecto`), no una regla repetida acá.
   const [marcadas, setMarcadas] = useState<Set<number>>(new Set());
   useEffect(() => {
-    setMarcadas(new Set(ps.filter((p) => p.sin_apu).map((p) => p.seq)));
+    setMarcadas(new Set(ps.filter((p) => p.marcar_por_defecto).map((p) => p.seq)));
   }, [previa]);                                   // eslint-disable-line react-hooks/exhaustive-deps
+  const conComposicionPendiente = ps.filter((p) => p.composicion_pendiente).length;
 
   // Ancla del último clic SIN Shift, por `seq` (único en la corrida), igual que el
   // diálogo de conflictos del import.
@@ -68,6 +70,9 @@ export default function DialogoRebuscar({
           {previa.escaneadas === 1 ? "línea revisada" : "líneas revisadas"} cambiarían
           de APU. Las confirmadas no se tocan.
           {ps.length > 1 && " Shift+clic marca en rango."}
+          {conComposicionPendiente > 0 && (
+            ` ${conComposicionPendiente} con composición a medias no vienen marcadas.`
+          )}
         </p>
 
         {ps.length === 0 ? (
@@ -113,6 +118,15 @@ export default function DialogoRebuscar({
                       {p.apu_actual
                         ? <span>{p.apu_actual.codigo} — {p.apu_actual.nombre}</span>
                         : <span className="text-amber-700 font-semibold">— sin APU</span>}
+                      {p.composicion_pendiente && (
+                        <span className="ml-1 rounded-full bg-amber-100 px-1.5
+                                         text-[10px] font-semibold text-amber-800"
+                          title="Esta fila tiene una composición sin aprobar. Si le
+                                 asignas un APU, el botón Componer desaparece de la
+                                 tabla y el borrador queda fuera de alcance.">
+                          composición a medias
+                        </span>
+                      )}
                     </td>
                     <td className={td}>
                       {p.apu_propuesto.codigo} — {p.apu_propuesto.nombre}

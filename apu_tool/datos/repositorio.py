@@ -457,3 +457,12 @@ class RepositorioComposiciones(Protocol):
     def historial(self, corrida_id: int, seq: int) -> list[ComposicionRow]:
         """Todas las versiones, de la más vieja a la más nueva."""
         ...
+
+    def estados_vigentes(self, corrida_id: int) -> dict[int, str]:
+        """`{seq: estado}` de la versión VIGENTE (la de mayor `version`) de cada fila
+        de la corrida que tenga expediente. Las filas sin expediente no aparecen.
+
+        En lote y no fila por fila: una corrida tiene miles de líneas y preguntar de a
+        una sería el N+1 de siempre. Devuelve el estado crudo; qué estados cuentan como
+        "en curso" lo decide quien llama, no el repositorio."""
+        ...

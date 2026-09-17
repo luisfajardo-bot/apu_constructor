@@ -39,7 +39,7 @@ const PREVIA = {
     apu_propuesto: { codigo: "A9", nombre: "PANTALLA ACUSTICA", turno: "DIURNO" },
     score: 0.98, status: "auto", explicacion: "Coincidencia directa (98%).",
     precio_contractual: 900000, costo_unitario: 700000, margen_unitario: 200000,
-    margen_pct: 22.2, sin_apu: true,
+    margen_pct: 22.2, marcar_por_defecto: true, composicion_pendiente: false,
   }],
 };
 

@@ -74,6 +74,23 @@ def test_el_historial_viene_en_orden(alm):
         "propuesta", "editada", "aprobada"]
 
 
+def test_estados_vigentes_devuelve_la_version_mas_alta_de_cada_seq(alm):
+    alm.composiciones.agregar(fila(seq=7, version=1, estado="propuesta"))
+    alm.composiciones.agregar(fila(seq=7, version=2, estado="aprobada"))
+    alm.composiciones.agregar(fila(seq=8, version=1, estado="editada"))
+    assert alm.composiciones.estados_vigentes(1) == {7: "aprobada", 8: "editada"}
+
+
+def test_estados_vigentes_ignora_filas_sin_expediente_y_de_otra_corrida(alm):
+    alm.composiciones.agregar(fila(corrida_id=1, seq=7))
+    alm.composiciones.agregar(fila(corrida_id=2, seq=9, estado="rechazada"))
+    assert alm.composiciones.estados_vigentes(1) == {7: "propuesta"}
+
+
+def test_estados_vigentes_sin_ninguno_da_vacio(alm):
+    assert alm.composiciones.estados_vigentes(1) == {}
+
+
 def test_repetir_una_version_choca(alm):
     """La protección del doble clic es el índice único, no un if."""
     alm.composiciones.agregar(fila(version=1))

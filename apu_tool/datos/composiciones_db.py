@@ -118,3 +118,14 @@ class ComposicionesDB:
                 "SELECT * FROM composicion WHERE corrida_id=? AND seq=? "
                 "ORDER BY version", (int(corrida_id), int(seq))).fetchall()
         return [_fila(r) for r in rows]
+
+    def estados_vigentes(self, corrida_id: int) -> dict[int, str]:
+        """Ver el contrato en repositorio.py."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT c.seq, c.estado FROM composicion c "
+                "WHERE c.corrida_id=? AND c.version = ("
+                "  SELECT MAX(c2.version) FROM composicion c2 "
+                "  WHERE c2.corrida_id=c.corrida_id AND c2.seq=c.seq)",
+                (int(corrida_id),)).fetchall()
+        return {int(r["seq"]): r["estado"] for r in rows}

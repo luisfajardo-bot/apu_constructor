@@ -1103,7 +1103,15 @@ def _propuestas_rebusqueda(alm: Almacen, meta, rows, solo_seqs=None):
     return propuestas, candidatos, escaneadas
 
 
-def _vista_propuesta(row: CorridaItemRow, ens: AssembledApu) -> dict:
+# Estados de un expediente de composición que significan "hay trabajo humano vivo
+# acá". `aprobada` ya se convirtió en APU y `rechazada` se descartó a propósito;
+# `error` es una generación que reventó, no un borrador. Salen de
+# `dominio/composicion.py::ESTADOS`.
+COMPOSICION_EN_CURSO = ("generando", "propuesta", "editada")
+
+
+def _vista_propuesta(row: CorridaItemRow, ens: AssembledApu,
+                     con_composicion: set[int]) -> dict:
     """Una línea de la vista previa. El costo y el margen los calcula el backend:
     el frontend no suma plata."""
     return {
@@ -1118,9 +1126,12 @@ def _vista_propuesta(row: CorridaItemRow, ens: AssembledApu) -> dict:
         "precio_contractual": row.item.precio_contractual,
         "costo_unitario": ens.costo_unitario,
         "margen_unitario": ens.margen_unitario, "margen_pct": ens.margen_pct,
-        # Se marcan solas en la previa: están en $0 y traban el cuadro, así que
-        # cualquier APU es mejor que nada. Lo decide el backend, no el frontend.
-        "sin_apu": row.apu_codigo is None,
+        # La previa marca sola las filas que están en $0... salvo que tengan una
+        # composición a medias: ahí hay trabajo humano que aplicar dejaría huérfano
+        # (la fila pasa a tener APU y el botón "Componer" desaparece de la tabla).
+        # La decisión la toma el backend, el frontend solo obedece el booleano.
+        "marcar_por_defecto": row.apu_codigo is None and row.seq not in con_composicion,
+        "composicion_pendiente": row.seq in con_composicion,
     }
 
 
@@ -1149,10 +1160,13 @@ def rebuscar(alm: Almacen, corrida_id: int) -> Optional[dict]:
         return None
     rows = alm.corridas.get_items(corrida_id)
     propuestas, _candidatos, escaneadas = _propuestas_rebusqueda(alm, meta, rows)
+    con_composicion = {seq for seq, estado
+                       in alm.composiciones.estados_vigentes(corrida_id).items()
+                       if estado in COMPOSICION_EN_CURSO}
     return {
         "corrida_id": corrida_id,
         "escaneadas": escaneadas,
-        "propuestas": [_vista_propuesta(r, e) for r, e in propuestas],
+        "propuestas": [_vista_propuesta(r, e, con_composicion) for r, e in propuestas],
     }
 
 

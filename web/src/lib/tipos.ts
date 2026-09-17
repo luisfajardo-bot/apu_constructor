@@ -424,8 +424,11 @@ export interface PropuestaRebusqueda {
   costo_unitario: number;
   margen_unitario: number;
   margen_pct: number;
-  /** Hoy está en $0: se marca sola en la previa. Lo decide el backend. */
-  sin_apu: boolean;
+  /** Si se marca sola en la previa. Lo decide el backend: hoy está en $0, salvo que
+   *  tenga una composición a medias (ahí aplicar dejaría el borrador huérfano). */
+  marcar_por_defecto: boolean;
+  /** Esta fila tiene un expediente de composición sin aprobar ni rechazar. */
+  composicion_pendiente: boolean;
 }
 
 export interface RebusquedaPrevia {

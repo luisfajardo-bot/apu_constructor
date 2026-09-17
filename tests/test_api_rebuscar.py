@@ -40,7 +40,7 @@ def test_rebuscar_devuelve_la_previa_sin_escribir(tmp_path):
     cuerpo = r.json()
     assert cuerpo["escaneadas"] == 1
     assert cuerpo["propuestas"][0]["apu_propuesto"]["codigo"] == "A9"
-    assert cuerpo["propuestas"][0]["sin_apu"] is True
+    assert cuerpo["propuestas"][0]["marcar_por_defecto"] is True
     assert alm.corridas.get_items(cid)[0].apu_codigo is None      # no escribió
 
 

@@ -439,8 +439,8 @@ def confirmar_lote(cid: int, body: ConfirmarLoteIn,
 
 
 @router.post("/corridas/{cid}/rebuscar")
-def rebuscar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
-                     _: object = Depends(requiere_rol("consulta"))):
+def rebuscar(cid: int, alm: Almacen = Depends(get_almacen),
+             _: object = Depends(requiere_rol("consulta"))):
     """Qué cambiaría si se volviera a matchear la corrida contra la biblioteca de hoy.
     NO escribe: propone. Rol `consulta`, el mismo que `confirmar-lote`, porque es la
     misma operación (asignar un APU que ya existe); no declara dinero de la nada como

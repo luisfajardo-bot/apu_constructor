@@ -48,7 +48,7 @@ usuario marque.
 | Exhaustividad | vía rápida, síncrono (<1 s) | Ver "La optimización que hace esto síncrono". |
 | Previa | muestra costo y margen que quedarían | Se decide viendo la plata. Para una fila en $0 es la diferencia entre "te propongo un APU" y "te propongo $847.320/m³". |
 | Estado al aplicar | conserva su nivel (`auto` / `review`) | El usuario aprobó la asignación, no la auditoría: un 62% sigue apareciendo en "Solo revisión" y la fila queda disponible para un próximo re-buscar. |
-| Marcado por defecto | solo las filas que hoy están sin APU | Están en $0 y traban el cuadro: cualquier APU es mejor que nada. Las que ya tienen APU vienen desmarcadas, con su antes → después a la vista. |
+| Marcado por defecto | solo las filas que hoy están sin APU **y sin composición en curso** | Están en $0 y traban el cuadro: cualquier APU es mejor que nada. Las que ya tienen APU vienen desmarcadas, con su antes → después a la vista. Excepción agregada después de la revisión final: una fila con un expediente de composición sin aprobar tampoco se marca sola, porque asignarle un APU esconde el botón "Componer" y deja el borrador humano fuera de alcance. |
 | Candidatos | se refrescan, y se persisten solo donde cambiaron | Así un APU nuevo aparece en "Elegir" aunque se quede por debajo del 0,55 y no se asigne solo. |
 | Rol | `consulta` | El mismo que `confirmar-lote`, que es literalmente esta operación (asignar un APU existente a N filas). No es `igualar-costo`, que declara un monto de la nada. |
 

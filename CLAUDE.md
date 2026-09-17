@@ -258,6 +258,12 @@ matching, modelo de IA, clasificación de precios.
   se escribe). La fila queda con el status del matcher (`auto`/`review`), **no**
   `confirmed`: aprobar la asignación no es auditar la fila, y por eso escribe con
   `actualizar_eleccion` y no con `confirmar_items`, que pisaría la confianza con 1.0.
+  En la previa vienen **marcadas solas** las filas en $0 (`marcar_por_defecto`, lo decide
+  el backend), **menos** las que tienen un expediente de composición en curso
+  (`COMPOSICION_EN_CURSO`): asignarles un APU hace desaparecer el botón "Componer" de la
+  tabla y deja el borrador humano fuera de alcance, así que esas se marcan a mano y el
+  diálogo lo avisa. Quién las tiene sale de `composiciones.estados_vigentes(corrida_id)`,
+  en lote y no fila por fila.
 - **Armado reanudable.** Las licitaciones reales traen 1000-2000 ítems y el armado
   tarda de 1 a 3 horas; las instancias de Render (plan free) viven 18-30 minutos, así
   que corriendo dentro de la petición HTTP **no terminaba nunca**. Ahora `POST
@@ -422,4 +428,13 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   lo llevaría puesto.
 - No refresques candidatos fila por fila. `set_candidatos` es por lote a propósito: crear
   un APU puede cambiar la lista de cientos de filas, y contra Supabase eso es el N+1 que
-  este repo ya pagó una vez.
+  este repo ya pagó una vez. Lo mismo con `composiciones.estados_vigentes`.
+- No hagas que la previa de volver a buscar marque sola una fila con composición en curso.
+  El expediente no se borra (es append-only), pero apenas la fila tiene `apu_codigo` el
+  botón "Componer" desaparece de la tabla (`TablaItems.tsx`) y el borrador queda
+  inalcanzable salvo por URL. El candado es contra el gesto masivo ("marcar todas"), no
+  contra la decisión: marcarla a mano y aplicar sigue funcionando, a propósito.
+- No pongas texto de usuario en un atributo JSX partido en dos líneas
+  (`title="...\n   ...")`. El salto y la indentación del código entran al tooltip tal
+  cual. Va como expresión: `title={"..." + "..."}`. Ya pasó dos veces en esta misma
+  feature.

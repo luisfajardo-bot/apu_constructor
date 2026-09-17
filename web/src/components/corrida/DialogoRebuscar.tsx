@@ -121,9 +121,9 @@ export default function DialogoRebuscar({
                       {p.composicion_pendiente && (
                         <span className="ml-1 rounded-full bg-amber-100 px-1.5
                                          text-[10px] font-semibold text-amber-800"
-                          title="Esta fila tiene una composición sin aprobar. Si le
-                                 asignas un APU, el botón Componer desaparece de la
-                                 tabla y el borrador queda fuera de alcance.">
+                          title={"Esta fila tiene una composición sin aprobar. Si le "
+                            + "asignas un APU, el botón Componer desaparece de la tabla "
+                            + "y el borrador queda fuera de alcance."}>
                           composición a medias
                         </span>
                       )}

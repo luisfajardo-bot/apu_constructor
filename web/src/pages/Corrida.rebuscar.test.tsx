@@ -22,8 +22,9 @@ function fila(p: Record<string, unknown>) {
 }
 
 let modo = "activa";
+let estado = "en_revision";
 const CORRIDA = () => ({
-  id: 1, archivo: "obra.xlsx", estado: "en_revision", modo, duracion_ms: 1000,
+  id: 1, archivo: "obra.xlsx", estado, modo, duracion_ms: 1000,
   ia_disponible: true, armado: null,
   items: [fila({ seq: 0, descripcion: "Pantalla acustica" })],
   totales: { contractual: 900000, costo: 0, margen: 900000, margen_pct: 1,
@@ -68,7 +69,9 @@ vi.mock("@/api/autoria", () => ({
   listarApus: vi.fn(async () => ({ items: [], total: 0, limit: 15, offset: 0 })),
 }));
 
-beforeEach(() => { rol = "editor"; modo = "activa"; vi.clearAllMocks(); });
+beforeEach(() => {
+  rol = "editor"; modo = "activa"; estado = "en_revision"; vi.clearAllMocks();
+});
 
 test("el botón pide la previa y abre el diálogo con las propuestas", async () => {
   const { default: Corrida } = await import("./Corrida");
@@ -109,6 +112,17 @@ test("en una corrida congelada el botón no está", async () => {
 
 test("sin rol editor el botón no está", async () => {
   rol = "consulta";
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Pantalla acustica");
+  expect(screen.queryByRole("button", { name: /Volver a buscar APU/ })).toBeNull();
+});
+
+test("con el armado a medias el botón no está", async () => {
+  // El backend lo rechaza con un 400 mientras el plan no termine: ofrecer un botón
+  // que solo sabe fallar es peor que no ofrecerlo. `armado_detenido` cuenta igual
+  // que `armando` — es el estado en el que quedó un armado que se rindió.
+  estado = "armado_detenido";
   const { default: Corrida } = await import("./Corrida");
   render(<Corrida />);
   await screen.findByText("Pantalla acustica");

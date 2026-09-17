@@ -192,6 +192,9 @@ export default function Corrida() {
   const bloqueado = nSinApu > 0;
   const esActivar = data.modo === "congelada";
   const puedeEditar = puede(perfil?.rol, "editor");
+  // Espejo de `ARMANDO_O_A_MEDIAS` del backend: mientras el plan no termine de
+  // armarse, las líneas que faltan no existen y el espacio de seq es del armador.
+  const planAMedias = data.estado === "armando" || data.estado === "armado_detenido";
   const nFilas = data.items.length;
 
   // La IA propone; aplicar lo decide el usuario. Se mira el DICTAMEN (nunca "hay
@@ -375,7 +378,10 @@ export default function Corrida() {
                 : `Revisar ${nFilas} ${nFilas === 1 ? "línea" : "líneas"} con IA`}
             </Button>
           )}
-          {puedeEditar && !esActivar && data.estado !== "armando" && (
+          {/* Fuera también en `armado_detenido`: mientras el plan esté a medias el
+              espacio de seq es del armador y el backend lo rechaza con un 400. Mejor
+              no ofrecer un botón que solo sabe fallar. */}
+          {puedeEditar && !esActivar && !planAMedias && (
             <Button size="sm" variant="outline" disabled={rebuscando}
               title={"Vuelve a buscar APU para las líneas que no confirmaste, contra "
                 + "la biblioteca de hoy. Te muestra qué cambiaría antes de aplicar."}

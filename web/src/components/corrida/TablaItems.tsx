@@ -13,15 +13,14 @@ import EstadoBadge from "@/components/corrida/EstadoBadge";
 import SubApuBadge from "@/components/SubApuBadge";
 import BuscadorApu from "@/components/corrida/BuscadorApu";
 import CabeceraFiltros from "@/components/corrida/CabeceraFiltros";
-import { DialogoAgregarApu } from "@/components/autoria/DialogoAgregarApu";
+import DialogoArmarApu from "@/components/corrida/DialogoArmarApu";
 import { cop, pct } from "@/lib/moneda";
 import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
 import {
   getItem, confirmar, confirmarLote, borrarLineas, aplicarSugerencias,
   igualarCostoAlContractual,
 } from "@/api/corridas";
-import { getApuDetalle } from "@/api/autoria";
-import type { ItemCuadro, DetalleItem, CorridaDetalle, ApuDetalle } from "@/lib/tipos";
+import type { ItemCuadro, DetalleItem, CorridaDetalle } from "@/lib/tipos";
 import { VEREDICTO_UI, etiquetaVeredicto, tituloVeredicto } from "@/lib/corridaTabla";
 import type { ControlCorridaTabla } from "@/lib/corridaTabla";
 
@@ -79,18 +78,9 @@ export default function TablaItems({
   const [expandido, setExpandido] = useState<Record<number, EstadoExpansion | undefined>>({});
   const [confirmando, setConfirmando] = useState<string | null>(null);
   const [errorConfirm, setErrorConfirm] = useState<Record<number, string>>({});
-  // Duplicar el APU de un ítem: se lee el APU real de la biblioteca (la composición
-  // del ítem es la costeada y no trae las marcas de sub-APU).
-  const [duplicar, setDuplicar] = useState<{ seq: number; origen: ApuDetalle } | null>(null);
-  // `seq` cuyo fetch de "abrir duplicar" está en vuelo, para deshabilitar SU botón.
-  // Es un escalar: solo frena el doble click en la MISMA fila. Para la carrera
-  // entre filas distintas (pedir duplicar en A y luego en B antes de que A
-  // resuelva) hace falta saber cuál fue el ÚLTIMO pedido, y eso no puede vivir
-  // en el estado: la closure async de `abrirDuplicar` vería el valor viejo (ya
-  // pasó con `codigoTocado` en este mismo archivo/feature). Por eso el pedido
-  // más reciente vive en un ref.
-  const [cargandoDuplicar, setCargandoDuplicar] = useState<number | null>(null);
-  const ultimoPedidoDuplicarRef = useRef<number | null>(null);
+  // Armar un APU parado en una fila. Guarda el detalle completo porque el diálogo
+  // precarga el alta con la descripción, la unidad y el código del presupuesto.
+  const [armar, setArmar] = useState<{ seq: number; detalle: DetalleItem } | null>(null);
   // Selección para las acciones en lote. Guarda seqs, no índices: la tabla se
   // reordena y se filtra, y un índice dejaría de apuntar a la misma fila.
   const [marcadas, setMarcadas] = useState<Set<number>>(new Set());
@@ -326,28 +316,10 @@ export default function TablaItems({
     }
   }
 
-  async function abrirDuplicar(seq: number, codigo: string, turno: string) {
-    ultimoPedidoDuplicarRef.current = seq;
-    setCargandoDuplicar(seq);
-    try {
-      const origen = await getApuDetalle(codigo, turno);
-      // Si mientras esperábamos el usuario pidió duplicar otra fila, este
-      // resultado ya quedó superado: no lo mostramos (ganaría el pedido viejo).
-      if (ultimoPedidoDuplicarRef.current !== seq) return;
-      setDuplicar({ seq, origen });
-    } catch {
-      if (ultimoPedidoDuplicarRef.current !== seq) return;
-      toast.error("No se pudo leer el APU de origen.");
-    } finally {
-      setCargandoDuplicar(null);
-    }
-  }
-
   async function duplicado(seq: number, codigo: string, turno: string) {
-    setDuplicar(null);
-    // El APU YA está creado. El diálogo ya confirmó la creación con su propio
-    // toast; si la reasignación falla, hay que decirlo (no alcanza con el
-    // silencio, que sugeriría que no pasó nada).
+    // El APU YA está creado (y el llamador ya cerró el diálogo). El diálogo ya
+    // confirmó la creación con su propio toast; si la reasignación falla, hay que
+    // decirlo (no alcanza con el silencio, que sugeriría que no pasó nada).
     const ok = await handleConfirmar(seq, codigo, turno);
     if (!ok) {
       toast.error(
@@ -602,9 +574,8 @@ export default function TablaItems({
                           errorConfirm={errorConfirm[it.seq]}
                           onConfirmar={handleConfirmar}
                           readOnly={readOnly}
-                          puedeDuplicar={puedeEditar && !readOnly}
-                          duplicarCargando={cargandoDuplicar === it.seq}
-                          onDuplicar={abrirDuplicar}
+                          puedeArmar={puedeEditar && !readOnly}
+                          onArmar={(seq, det) => setArmar({ seq, detalle: det })}
                         />
                       )}
                       </div>
@@ -659,14 +630,13 @@ export default function TablaItems({
         </div>
       )}
 
-      {duplicar && (
-        <DialogoAgregarApu
-          key={`dup-${duplicar.origen.codigo}@@${duplicar.origen.turno}@@${duplicar.seq}`}
-          open
-          onOpenChange={(v) => { if (!v) setDuplicar(null); }}
-          onCreado={(codigo, turno) => duplicado(duplicar.seq, codigo, turno)}
-          modo="duplicar"
-          inicial={duplicar.origen}
+      {armar && (
+        <DialogoArmarApu
+          key={`armar-${armar.seq}`}
+          abierto
+          detalle={armar.detalle}
+          onCerrar={() => setArmar(null)}
+          onCreado={(codigo, turno) => { setArmar(null); duplicado(armar.seq, codigo, turno); }}
         />
       )}
 
@@ -738,10 +708,8 @@ interface DetalleExpandidoProps {
   errorConfirm: string | undefined;
   onConfirmar: (seq: number, apuCodigo: string, shift?: string) => void;
   readOnly: boolean;
-  puedeDuplicar: boolean;
-  /** El fetch de "abrir duplicar" de ESTE ítem está en vuelo: deshabilita su botón. */
-  duplicarCargando: boolean;
-  onDuplicar: (seq: number, codigo: string, turno: string) => void;
+  puedeArmar: boolean;
+  onArmar: (seq: number, detalle: DetalleItem) => void;
 }
 
 function DetalleExpandido({
@@ -751,9 +719,8 @@ function DetalleExpandido({
   errorConfirm,
   onConfirmar,
   readOnly,
-  puedeDuplicar,
-  duplicarCargando,
-  onDuplicar,
+  puedeArmar,
+  onArmar,
 }: DetalleExpandidoProps) {
   const esRevisable = REVISABLE.has(detalle.status);
 
@@ -852,15 +819,18 @@ function DetalleExpandido({
             disabled={confirmando !== null || readOnly}
             onElegir={(apu) => onConfirmar(seq, apu.codigo, apu.turno)}
           />
-          {puedeDuplicar && detalle.apu_codigo && (
+          {/* Siempre, tenga APU o no: la fila SIN APU es justo la que más lo necesita,
+              y antes era la única que no tenía botón. El diálogo decide desde dónde
+              partir (duplicar el asignado, partir de otro, o desde cero). */}
+          {puedeArmar && (
             <div className="mt-2">
               <Button
                 size="xs"
                 variant="outline"
-                disabled={confirmando !== null || duplicarCargando}
-                onClick={() => onDuplicar(seq, detalle.apu_codigo, detalle.apu_turno)}
+                disabled={confirmando !== null}
+                onClick={() => onArmar(seq, detalle)}
               >
-                {duplicarCargando ? "Abriendo…" : "Duplicar este APU y usarlo aquí"}
+                Armar APU
               </Button>
             </div>
           )}

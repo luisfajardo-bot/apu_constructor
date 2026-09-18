@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import TablaItems from "./TablaItems";
 import { useCorridaTabla } from "@/lib/corridaTabla";
@@ -6,7 +6,7 @@ import { useCorridaTabla } from "@/lib/corridaTabla";
 vi.mock("@/api/corridas", () => ({
   getItem: vi.fn(async () => ({
     seq: 0, descripcion: "Concreto", apu_codigo: "111", apu_turno: "DIURNO",
-    apu_nombre: "APU VIEJO",
+    apu_nombre: "APU VIEJO", codigo_sugerido: "", unidad: "M3",
     status: "matched", explicacion: "", candidatos: [], composicion: [], costo_unitario: 0,
     costo_manual: false,
   })),
@@ -344,55 +344,14 @@ test("muestra el unitario contractual y el costo unitario en la fila", async () 
   expect(screen.getByText("$567")).toBeTruthy();
 });
 
-test("con rol editor, el ítem ofrece duplicar el APU y usarlo aquí", async () => {
-  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} puedeEditar />);
-  fireEvent.click(screen.getByLabelText("Expandir fila"));
-  expect(
-    await screen.findByRole("button", { name: /Duplicar este APU/i }),
-  ).toBeTruthy();
-});
-
-test("sin rol editor no ofrece duplicar", async () => {
-  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} />);
-  fireEvent.click(screen.getByLabelText("Expandir fila"));
-  await screen.findByText(/Cambiar APU/i);
-  expect(screen.queryByRole("button", { name: /Duplicar este APU/i })).toBeNull();
-});
-
-test("no ofrece duplicar cuando el ítem no tiene APU asignado", async () => {
-  const { getItem } = await import("@/api/corridas");
-  vi.mocked(getItem).mockResolvedValueOnce({
-    seq: 0, descripcion: "Concreto", apu_codigo: "", apu_turno: "DIURNO",
-    apu_nombre: "", status: "matched", explicacion: "", candidatos: [], composicion: [],
-    costo_unitario: 0,
-  });
-  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} puedeEditar />);
-  fireEvent.click(screen.getByLabelText("Expandir fila"));
-  await screen.findByText(/Cambiar APU/i);
-  expect(screen.queryByRole("button", { name: /Duplicar este APU/i })).toBeNull();
-});
-
-test("en corrida congelada no ofrece duplicar", async () => {
-  render(
-    <TablaItems
-      corridaId={1}
-      items={[ITEM]}
-      onConfirmado={() => {}}
-      puedeEditar
-      readOnly
-    />,
-  );
-  fireEvent.click(screen.getByLabelText("Expandir fila"));
-  expect(screen.queryByRole("button", { name: /Duplicar este APU/i })).toBeNull();
-});
-
 test("al crear la copia, el ítem queda reasignado al APU nuevo (sin toast de éxito duplicado)", async () => {
   const { confirmar } = await import("@/api/corridas");
   const { toast } = await import("sonner");
   vi.mocked(toast.success).mockClear();
   render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} puedeEditar />);
   fireEvent.click(screen.getByLabelText("Expandir fila"));
-  fireEvent.click(await screen.findByRole("button", { name: /Duplicar este APU/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /Armar APU/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Duplicar el APU asignado/ }));
   // el diálogo abre precargado desde la biblioteca
   fireEvent.change(await screen.findByDisplayValue("MEZCLA MD12"), {
     target: { value: "MEZCLA MD13" },
@@ -418,7 +377,8 @@ test("si el APU se crea pero la reasignación falla, el toast lo dice (no sugier
   vi.mocked(toast.error).mockClear();
   render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} puedeEditar />);
   fireEvent.click(screen.getByLabelText("Expandir fila"));
-  fireEvent.click(await screen.findByRole("button", { name: /Duplicar este APU/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /Armar APU/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Duplicar el APU asignado/ }));
   fireEvent.change(await screen.findByDisplayValue("MEZCLA MD12"), {
     target: { value: "MEZCLA MD13" },
   });
@@ -456,74 +416,6 @@ test("regresión: con puedeEditar={false}, 'Confirmar APU actual' sigue visible 
   const boton = await screen.findByRole("button", { name: /Confirmar APU actual/i });
   fireEvent.click(boton);
   await waitFor(() => expect(confirmar).toHaveBeenCalledWith(1, 0, "111", undefined));
-});
-
-test("duplicar en dos filas distintas: gana el pedido más reciente, no el que resuelve último", async () => {
-  const { getItem } = await import("@/api/corridas");
-  const { getApuDetalle } = await import("@/api/autoria");
-
-  // Dos filas con orígenes distinguibles (código y nombre) para poder afirmar
-  // cuál quedó mostrado en el diálogo.
-  vi.mocked(getItem)
-    .mockImplementationOnce(async () => ({
-      seq: 0, descripcion: "Item A", apu_codigo: "3454", apu_turno: "DIURNO",
-      apu_nombre: "MEZCLA MD12", status: "matched", explicacion: "",
-      candidatos: [], composicion: [], costo_unitario: 0,
-    }))
-    .mockImplementationOnce(async () => ({
-      seq: 1, descripcion: "Item B", apu_codigo: "7788", apu_turno: "DIURNO",
-      apu_nombre: "BASE GRANULAR", status: "matched", explicacion: "",
-      candidatos: [], composicion: [], costo_unitario: 0,
-    }));
-
-  // Diferidos: controlamos a mano el orden de resolución (al revés del orden
-  // de los clicks) para reproducir la carrera del hallazgo.
-  let resolverA: ((v: unknown) => void) | null = null;
-  let resolverB: ((v: unknown) => void) | null = null;
-  vi.mocked(getApuDetalle)
-    .mockImplementationOnce(() => new Promise((res) => { resolverA = res as (v: unknown) => void; }))
-    .mockImplementationOnce(() => new Promise((res) => { resolverB = res as (v: unknown) => void; }));
-
-  const items = [
-    { ...ITEM, seq: 0, apu_codigo: "3454" },
-    { ...ITEM, seq: 1, apu_codigo: "7788" },
-  ];
-  render(<TablaItems corridaId={1} items={items} onConfirmado={() => {}} puedeEditar />);
-
-  const chevrones = screen.getAllByLabelText("Expandir fila");
-  fireEvent.click(chevrones[0]);
-  fireEvent.click(chevrones[1]);
-
-  await waitFor(() =>
-    expect(screen.getAllByRole("button", { name: /Duplicar este APU/i })).toHaveLength(2),
-  );
-  const botones = screen.getAllByRole("button", { name: /Duplicar este APU/i });
-  fireEvent.click(botones[0]); // pide duplicar A (seq 0) primero
-  fireEvent.click(botones[1]); // pide duplicar B (seq 1) después — este es el pedido vigente
-
-  // Resuelve al revés de los clicks: A (el pedido viejo) llega DESPUÉS que B.
-  // `waitFor` daría un falso positivo aquí (ver DialogoAgregarApu.test.tsx): el
-  // primer chequeo sin lanzar corta antes de que el setState de la promesa
-  // termine de propagar. Por eso se resuelve y se drena la cola de microtasks
-  // dentro de `act`, y se afirma después con un `expect` plano.
-  await act(async () => {
-    resolverB!({
-      codigo: "7788", turno: "DIURNO", nombre: "BASE GRANULAR", unidad: "M3",
-      grupo: "PAV", costo_unitario: 100000, composicion: [],
-    });
-    await new Promise((r) => setTimeout(r, 0));
-  });
-  await act(async () => {
-    resolverA!({
-      codigo: "3454", turno: "DIURNO", nombre: "MEZCLA MD12", unidad: "M3",
-      grupo: "PAV", costo_unitario: 480000, composicion: [],
-    });
-    await new Promise((r) => setTimeout(r, 0));
-  });
-
-  // Gana el pedido más reciente (B), aunque el de A haya resuelto después.
-  expect(screen.getByText(/Duplicar APU 7788/)).toBeTruthy();
-  expect(screen.queryByText(/Duplicar APU 3454/)).toBeNull();
 });
 
 test("borra las líneas marcadas después de confirmar", async () => {
@@ -954,4 +846,60 @@ test("al desplegar una fila se ve la descripción completa de la actividad", asy
   // Desplegada: el panel la repite completa, bajo su propio encabezado.
   expect(screen.getByText(/Actividad de la licitación/i)).toBeTruthy();
   expect(screen.getAllByText(LARGA)).toHaveLength(2);
+});
+
+// ─── Armar APU (reemplaza a Duplicar) ────────────────────────────────────────
+
+test("el botón Armar APU aparece en una fila CON APU, y ya no el de duplicar", async () => {
+  const { default: TablaItems } = await import("./TablaItems");
+  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}}
+                     puedeEditar />);
+
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await screen.findByText(/APU: 111/);          // el detalle ya cargó
+
+  expect(screen.getByRole("button", { name: /Armar APU/ })).toBeTruthy();
+  // El botón viejo era condicional y con otro texto: ya no existe.
+  expect(screen.queryByRole("button", { name: /Duplicar este APU y usarlo aquí/ }))
+    .toBeNull();
+});
+
+test("el botón Armar APU aparece también en una fila SIN APU", async () => {
+  // Es el caso que antes NO tenía botón: sin APU no había nada que duplicar.
+  const { getItem } = await import("@/api/corridas");
+  vi.mocked(getItem).mockResolvedValueOnce({
+    seq: 0, descripcion: "Concreto", apu_codigo: "", apu_turno: "DIURNO",
+    apu_nombre: "(sin base — armar manual)", codigo_sugerido: "9001", unidad: "M3",
+    status: "new", explicacion: "", candidatos: [], composicion: [],
+    costo_unitario: 0, costo_manual: false,
+  });
+  const { default: TablaItems } = await import("./TablaItems");
+  render(<TablaItems corridaId={1} onConfirmado={() => {}} puedeEditar
+                     items={[{ ...ITEM, apu_codigo: null, status: "new" }]} />);
+
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+
+  expect(await screen.findByRole("button", { name: /Armar APU/ })).toBeTruthy();
+});
+
+test("sin rol editor el botón Armar APU no aparece", async () => {
+  const { default: TablaItems } = await import("./TablaItems");
+  // `puedeEditar` es false por defecto en el componente.
+  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} />);
+
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await screen.findByText(/APU: 111/);
+
+  expect(screen.queryByRole("button", { name: /Armar APU/ })).toBeNull();
+});
+
+test("con la corrida congelada el botón Armar APU no aparece", async () => {
+  const { default: TablaItems } = await import("./TablaItems");
+  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}}
+                     puedeEditar readOnly />);
+
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await screen.findByText(/APU: 111/);
+
+  expect(screen.queryByRole("button", { name: /Armar APU/ })).toBeNull();
 });

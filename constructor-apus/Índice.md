@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 57 planes, 64 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 57 planes, 65 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -33,6 +33,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 57 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-09-18 | [[Specs/2026-09-18-armar-apu-desde-corrida-design|Armar APU desde una fila de la corrida]] |
 | 2026-09-16 | [[Specs/2026-09-16-rebuscar-apu-corrida-design|Volver a buscar APU en una corrida activa]] |
 | 2026-09-15 | [[Specs/2026-09-15-import-insumos-proteger-internos-design|Importar insumos sin pisar los precios internos]] |
 | 2026-09-15 | [[Specs/2026-09-15-forzar-conflictos-import-design|Decidir fila por fila qué conflictos del import se aplican igual]] |

@@ -480,3 +480,21 @@ def test_detalle_item_sin_codigo_del_presupuesto_devuelve_vacio(tmp_path):
     det = corridas.detalle_item(alm, cid, 0)
     assert det["codigo_sugerido"] == ""
     assert det["unidad"] == "M3"
+
+
+def test_detalle_item_manda_la_unidad_del_item_no_la_del_apu(tmp_path):
+    """La unidad es la de la ACTIVIDAD, no la del APU asignado.
+
+    Este test existe porque los dos de arriba no lo distinguen: ahí el ítem y el APU
+    son los dos "M3", así que devolver cualquiera de las dos pasaría. Acá la actividad
+    pide M2 y el APU que el matcher le asigna es M3, y solo una de las dos respuestas
+    es la correcta: "Armar APU" precarga un APU NUEVO para esta actividad, así que
+    manda la unidad que pide la licitación.
+    """
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M2",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    cid = corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False)
+    fila = alm.corridas.get_items(cid)[0]
+    assert fila.apu_codigo == "A1" and fila.unidad == "M3"   # el APU asignado es M3
+    assert corridas.detalle_item(alm, cid, 0)["unidad"] == "M2"   # la actividad pide M2

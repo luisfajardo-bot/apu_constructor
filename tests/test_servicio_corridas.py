@@ -456,3 +456,27 @@ def test_construir_corrida_guarda_carpeta(tmp_path):
     fila = next(f for f in corridas.listar_corridas(alm) if f["id"] == cid)
     assert fila["carpeta_id"] == carp["id"]
     assert corridas.vista_corrida(alm, cid)["carpeta_id"] == carp["id"]
+
+
+def test_detalle_item_trae_el_codigo_del_presupuesto_y_la_unidad(tmp_path):
+    """Los necesita "Armar APU" para precargar el alta desde la fila: el código que
+    pedía el presupuesto es justo el que debería llevar el APU nuevo."""
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO",
+                            codigo_sugerido="9001")]
+    cid = corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False)
+    det = corridas.detalle_item(alm, cid, 0)
+    assert det["codigo_sugerido"] == "9001"
+    assert det["unidad"] == "M3"
+
+
+def test_detalle_item_sin_codigo_del_presupuesto_devuelve_vacio(tmp_path):
+    """Una corrida plana (sin ruta IDU) no trae código: tiene que ser "" y no reventar."""
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    cid = corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False)
+    det = corridas.detalle_item(alm, cid, 0)
+    assert det["codigo_sugerido"] == ""
+    assert det["unidad"] == "M3"

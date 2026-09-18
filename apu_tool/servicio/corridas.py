@@ -836,6 +836,12 @@ def detalle_item(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
         # turno del APU asignado: lo necesita "duplicar este APU y usarlo aquí"
         # para leer el APU de origen de la biblioteca (la identidad es código+turno).
         "apu_turno": row.shift,
+        # El código que pedía el presupuesto (ruta IDU) y la unidad del ítem: los usa
+        # "Armar APU" para precargar el alta desde la fila. Si ese APU existiera en la
+        # biblioteca el armado ya lo habría asignado, así que cuando la fila no lo tiene,
+        # este es el código que el APU nuevo debería llevar. "" en una corrida plana.
+        "codigo_sugerido": row.item.codigo_sugerido,
+        "unidad": row.unidad or row.item.unidad,
         "status": row.status, "explicacion": row.explicacion,
         "candidatos": row.candidatos,
         "composicion": [{

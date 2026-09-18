@@ -283,6 +283,10 @@ export interface DetalleItem {
   apu_codigo: string;
   apu_turno: string;
   apu_nombre: string;
+  /** Código IDU que pedía el presupuesto (ruta IDU); "" en una corrida plana. */
+  codigo_sugerido: string;
+  /** Unidad del ítem de licitación. */
+  unidad: string;
   status: string;
   explicacion: string;
   candidatos: Candidato[];

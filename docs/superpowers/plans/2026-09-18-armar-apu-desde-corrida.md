@@ -78,8 +78,12 @@ la línea `"apu_turno": row.shift,` y su comentario:
         # "Armar APU" para precargar el alta desde la fila. Si ese APU existiera en la
         # biblioteca el armado ya lo habría asignado, así que cuando la fila no lo tiene,
         # este es el código que el APU nuevo debería llevar. "" en una corrida plana.
+        #
+        # La unidad es la del ÍTEM, no `row.unidad`: esa es la del APU asignado (la pone
+        # `_build` en assemble.py), y un APU nuevo se arma para la ACTIVIDAD. Si la fila
+        # trae un APU en M2 y la licitación pide M3, el que manda es M3.
         "codigo_sugerido": row.item.codigo_sugerido,
-        "unidad": row.unidad or row.item.unidad,
+        "unidad": row.item.unidad,
 ```
 
 - [ ] **Step 4: Correr los tests**

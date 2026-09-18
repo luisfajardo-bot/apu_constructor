@@ -118,19 +118,21 @@ automáticos —, pero decilo acá abajo.
 
 ---
 
-## Resultados
+## Resultados — 2026-09-18
 
-_(completar mientras se corre)_
+Corrido por Luis Fajardo contra el servidor local (`127.0.0.1:8010`; el 8000 estaba
+tomado por Docker Desktop). Assets verificados contra `web/dist` antes de empezar, así
+que no se probó código viejo.
 
 | Bloque | Resultado |
 |---|---|
-| 1. Preparar la corrida | |
-| 2. APU desde la pestaña APUs | |
-| 3. Duplicar desde la corrida | |
-| 4. Lo que jsdom no ve | |
-| 5. Los candados | |
-| 6. Composición a medias | |
+| 1. Preparar la corrida | OK |
+| 2. APU desde la pestaña APUs | OK |
+| 3. Duplicar desde la corrida | OK |
+| 4. Lo que jsdom no ve | OK |
+| 5. Los candados | OK |
+| 6. Composición a medias | No corrido: sin `ANTHROPIC_API_KEY` en la terminal del servidor. Cubierto por tests automáticos (servicio + diálogo). |
 
-**Problemas encontrados:**
+**Problemas encontrados:** ninguno.
 
-**Veredicto:** ☐ listo para mergear · ☐ hay que arreglar
+**Veredicto:** ☑ listo para mergear · ☐ hay que arreglar

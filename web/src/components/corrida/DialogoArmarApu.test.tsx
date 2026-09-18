@@ -34,7 +34,14 @@ function detalle(over: Partial<DetalleItem> = {}): DetalleItem {
   return {
     seq: 3, descripcion: "PANTALLA ACUSTICA MODULAR", apu_codigo: "", apu_turno: "DIURNO",
     apu_nombre: "", codigo_sugerido: "", unidad: "M2", status: "new", explicacion: "",
-    candidatos: [], composicion: [], costo_unitario: 0, costo_manual: false, ...over,
+    candidatos: [],
+    // NO vacía a propósito: "desde cero" tiene que mandar `[]`, no la composición de
+    // la fila. Con el fixture en [] los dos comportamientos daban el mismo resultado
+    // y el test no probaba nada.
+    composicion: [{ insumo_codigo: "100", insumo_nombre: "Cemento", unidad: "KG",
+                    rendimiento: 1, precio_unitario: 500, fuente_precio: "COSTO INTERNO",
+                    costo: 500, calidad_cruce: "exacto" }],
+    costo_unitario: 0, costo_manual: false, ...over,
   };
 }
 

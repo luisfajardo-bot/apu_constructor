@@ -99,19 +99,24 @@ cualquier corrida tuya con filas en $0.
 
 ---
 
-## Resultados
+## Resultados — 2026-09-20
 
-_(completar mientras se corre)_
+Corrido por Luis Fajardo contra el servidor local (`127.0.0.1:8010`), con el bundle
+`index-xDvl9Eks.js` recién compilado desde la rama (verificado antes de empezar, para no
+probar código viejo).
+
+Sus palabras: **"parece que está bien"**. No hay detalle bloque por bloque, así que queda
+registrado así y no como una revisión exhaustiva de los seis.
 
 | Bloque | Resultado |
 |---|---|
-| 1. Fila SIN APU (el caso nuevo) | |
-| 2. Fila con APU (el camino de siempre) | |
-| 3. Partir de otro APU | |
-| 4. Lo que jsdom no ve | |
-| 5. Los candados | |
-| 6. Que no se rompió lo de al lado | |
+| 1. Fila SIN APU (el caso nuevo) | OK |
+| 2. Fila con APU (el camino de siempre) | OK |
+| 3. Partir de otro APU | OK |
+| 4. Lo que jsdom no ve | OK |
+| 5. Los candados | OK |
+| 6. Que no se rompió lo de al lado | OK |
 
-**Problemas encontrados:**
+**Problemas encontrados:** ninguno reportado.
 
-**Veredicto:** ☐ listo para mergear · ☐ hay que arreglar
+**Veredicto:** ☑ listo para mergear · ☐ hay que arreglar

@@ -115,7 +115,10 @@ export default function DialogoArmarApu({ abierto, detalle, onCerrar, onCreado }
         </div>
 
         <div className="flex justify-end pt-2">
-          <Button size="sm" variant="outline" onClick={onCerrar}>Cancelar</Button>
+          {/* Deshabilitado mientras lee el APU de origen: cancelar no cancela el GET,
+              y el `setPartida` tardío caería sobre un componente ya desmontado. */}
+          <Button size="sm" variant="outline" disabled={cargando}
+            onClick={onCerrar}>Cancelar</Button>
         </div>
       </DialogContent>
     </Dialog>

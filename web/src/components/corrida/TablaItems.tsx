@@ -30,7 +30,7 @@ interface TablaItemsProps {
   onConfirmado: (corridaActualizada: CorridaDetalle) => void;
   readOnly?: boolean;
   control?: ControlCorridaTabla;
-  /** Rol editor: habilita crear un APU nuevo (duplicar) desde la corrida. */
+  /** Rol editor: habilita "Armar APU" desde una fila de la corrida. */
   puedeEditar?: boolean;
   /** Abre la mesa de composición de esa línea. Es una prop y no un <Link> ni un
    *  useNavigate acá adentro: esta tabla se monta SIN Router en sus tests, y
@@ -80,6 +80,12 @@ export default function TablaItems({
   const [errorConfirm, setErrorConfirm] = useState<Record<number, string>>({});
   // Armar un APU parado en una fila. Guarda el detalle completo porque el diálogo
   // precarga el alta con la descripción, la unidad y el código del presupuesto.
+  //
+  // UN SOLO diálogo montado a la vez, y es modal: no se puede pedir "Armar APU" en
+  // otra fila mientras hay uno abierto. Por eso acá no hay ningún ref para saber cuál
+  // fue el pedido más reciente — antes sí hacía falta, cuando el fetch del APU de
+  // origen vivía en este archivo y dos filas podían pisarse. Si algún día el diálogo
+  // deja de ser modal, ese problema vuelve y esto deja de alcanzar.
   const [armar, setArmar] = useState<{ seq: number; detalle: DetalleItem } | null>(null);
   // Selección para las acciones en lote. Guarda seqs, no índices: la tabla se
   // reordena y se filtra, y un índice dejaría de apuntar a la misma fila.
@@ -103,7 +109,7 @@ export default function TablaItems({
   // La selección solo existe con `control` (no en el armado en vivo, cuya tabla
   // viene del stream) y con la corrida activa.
   const seleccionable = control !== undefined && !readOnly;
-  // Mismo permiso que duplicar: rol editor y corrida no congelada.
+  // Mismo permiso que "Armar APU": rol editor y corrida no congelada.
   const puedeAplicarIA = puedeEditar && !readOnly;
   // Sin una sola fila revisada la columna Veredicto estaría entera vacía, y una
   // columna vacía igual empuja el scroll horizontal: no se dibuja.
@@ -316,14 +322,17 @@ export default function TablaItems({
     }
   }
 
-  async function duplicado(seq: number, codigo: string, turno: string) {
+  /** Asigna a la fila un APU recién creado. Se llama desde los TRES caminos de
+   *  "Armar APU" —duplicar el asignado, partir de otro, o desde cero—, así que no se
+   *  llama `duplicado`: dos de los tres no duplican nada. */
+  async function apuCreado(seq: number, codigo: string, turno: string) {
     // El APU YA está creado (y el llamador ya cerró el diálogo). El diálogo ya
     // confirmó la creación con su propio toast; si la reasignación falla, hay que
     // decirlo (no alcanza con el silencio, que sugeriría que no pasó nada).
     const ok = await handleConfirmar(seq, codigo, turno);
     if (!ok) {
       toast.error(
-        `APU ${codigo} creado; no se pudo asignar al ítem — asignalo con Cambiar APU.`,
+        `APU ${codigo} creado; no se pudo asignar al ítem — asígnalo con Cambiar APU.`,
       );
     }
   }
@@ -636,7 +645,7 @@ export default function TablaItems({
           abierto
           detalle={armar.detalle}
           onCerrar={() => setArmar(null)}
-          onCreado={(codigo, turno) => { setArmar(null); duplicado(armar.seq, codigo, turno); }}
+          onCreado={(codigo, turno) => { setArmar(null); apuCreado(armar.seq, codigo, turno); }}
         />
       )}
 

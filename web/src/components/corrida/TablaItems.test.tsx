@@ -388,7 +388,7 @@ test("si el APU se crea pero la reasignación falla, el toast lo dice (no sugier
   // reportar el error como si nada se hubiera creado.
   await waitFor(() =>
     expect(toast.error).toHaveBeenCalledWith(
-      "APU 3454-2 creado; no se pudo asignar al ítem — asignalo con Cambiar APU.",
+      "APU 3454-2 creado; no se pudo asignar al ítem — asígnalo con Cambiar APU.",
     ));
   expect(toast.success).not.toHaveBeenCalledWith(
     expect.stringContaining("asignado al ítem"),

@@ -127,12 +127,17 @@ export function DialogoAgregarApu({
   const [grupos, setGrupos] = useState<string[]>([]);
   const [conflicto, setConflicto] = useState<ConflictoAlta | null>(null);
 
-  // Precarga la cabecera y la composición desde `inicial`. Hoy la usan editar y
-  // duplicar, que traen un APU de la biblioteca. `crear` con `inicial` ya no tiene
-  // llamador: era el viejo diálogo de composición, y la mesa que lo reemplazó
-  // (`pages/Composicion.tsx`) NO reusa este alta a propósito — obligaría a editar
-  // los componentes dos veces, y por eso tiene su propio diálogo de identidad. El
-  // modo sigue soportado igual; sin `inicial` no hace nada.
+  // Precarga la cabecera y la composición desde `inicial`. La usan los tres modos:
+  // `editar` y `duplicar` traen un APU de la biblioteca, y `crear` lo usa desde
+  // `components/corrida/DialogoArmarApu.tsx` ("Armar APU → Desde cero"), que fabrica
+  // un `inicial` con los datos de la actividad y `composicion: []` para que el alta
+  // abra con el nombre, la unidad y el código del presupuesto puestos, y una fila en
+  // blanco. **No borres el camino `crear` + `inicial` por parecer código muerto:**
+  // ese llamador existe y hay un test acá abajo que lo cubre ("modo crear con inicial
+  // precarga la cabecera y abre con una fila en blanco"). La mesa de composición
+  // (`pages/Composicion.tsx`) sigue sin reusar este alta a propósito: obligaría a
+  // editar los componentes dos veces, por eso tiene su propio diálogo de identidad.
+  // Sin `inicial`, no hace nada.
   useEffect(() => {
     if (!open || !inicial) return;
     const duplicando = modo === "duplicar";

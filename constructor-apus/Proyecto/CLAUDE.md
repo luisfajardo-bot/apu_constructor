@@ -266,6 +266,16 @@ matching, modelo de IA, clasificación de precios.
   tabla y deja el borrador humano fuera de alcance, así que esas se marcan a mano y el
   diálogo lo avisa. Quién las tiene sale de `composiciones.estados_vigentes(corrida_id)`,
   en lote y no fila por fila.
+- **Armar APU desde una fila.** El botón **Armar APU** del panel de una fila sale
+  siempre (rol editor, corrida no congelada) y ofrece tres puntos de partida: duplicar el
+  APU asignado, partir de otro que busques, o desde cero con el nombre, la unidad y el
+  `codigo_sugerido` de la actividad ya puestos. Antes solo existía "Duplicar este APU y
+  usarlo aquí", que exigía que la fila YA tuviera APU — o sea que faltaba justo en la
+  fila que más lo necesita. Lo nuevo es `components/corrida/DialogoArmarApu.tsx`, que
+  solo elige el punto de partida: el alta sigue siendo `DialogoAgregarApu` (822 líneas,
+  tres consumidores), cuyos modos `crear` y `duplicar` con `inicial` ya hacían lo que
+  hacía falta y solo les faltaba llamador. Al crear, el APU queda asignado a la fila y la
+  fila `confirmed`, igual que duplicar.
 - **Armado reanudable.** Las licitaciones reales traen 1000-2000 ítems y el armado
   tarda de 1 a 3 horas; las instancias de Render (plan free) viven 18-30 minutos, así
   que corriendo dentro de la petición HTTP **no terminaba nunca**. Ahora `POST

@@ -114,6 +114,29 @@ export function igualarCostoAlContractual(
   return apiPost<CorridaDetalle>(`/corridas/${id}/igualar-costo`, { seqs });
 }
 
+/** Iguala al contractual las líneas en $0 cuyo TOTAL contractual no pase el umbral.
+ *  `seqs` son las que el usuario dejó marcadas en la previa; el servidor recalcula
+ *  la candidatura y devuelve en `salteadas` las que ya no correspondían. */
+export function igualarPorUmbral(
+  id: number,
+  umbral: number,
+  seqs: number[],
+): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/igualar-umbral`, {
+    umbral_contractual: umbral,
+    seqs,
+  });
+}
+
+/** Borra el costo puesto a mano de las líneas marcadas: vuelven al costeo normal.
+ *  Es el reverso de `igualarCostoAlContractual` y de `igualarPorUmbral`. */
+export function quitarCostoManual(
+  id: number,
+  seqs: number[],
+): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/quitar-costo-manual`, { seqs });
+}
+
 /** Aplica N sugerencias de la IA en un solo recosteo: un APU (y turno) distinto
  *  por fila. Devuelve la corrida recosteada (misma forma que `confirmar`). */
 export function aplicarSugerencias(

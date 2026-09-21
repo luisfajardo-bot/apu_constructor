@@ -429,6 +429,11 @@ export interface CorridaDetalle {
   rechazadas?: number[];
   /** Solo en la respuesta de aplicar una re-búsqueda. */
   rebusqueda?: { aplicadas: number[]; salteadas: number[] };
+  /** Solo al igualar por umbral: los seq pedidos que ya no eran candidatos (les
+   *  asignaron un APU, o cambiaron, entre la previa y el aplicar). */
+  salteadas?: number[];
+  /** Solo en la respuesta de `quitarCostoManual`. */
+  quitadas?: number[];
 }
 
 /** Una línea de la vista previa de "volver a buscar APU". El costo y el margen

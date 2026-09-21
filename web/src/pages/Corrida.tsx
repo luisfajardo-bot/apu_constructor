@@ -6,10 +6,11 @@ import ResumenCapitulos from "@/components/corrida/ResumenCapitulos";
 import TablaItems from "@/components/corrida/TablaItems";
 import { DialogoAgregarLineas } from "@/components/corrida/DialogoAgregarLineas";
 import DialogoRebuscar from "@/components/corrida/DialogoRebuscar";
+import DialogoUmbralCosto from "@/components/corrida/DialogoUmbralCosto";
 import {
   getCorrida, descargarCuadro, congelarCorrida, activarCorrida,
   revisarCorridaStream, aplicarSugerencias, reanudarArmado,
-  rebuscarApus, aplicarRebusqueda,
+  rebuscarApus, aplicarRebusqueda, igualarPorUmbral,
 } from "@/api/corridas";
 import type { TransporteCorrida } from "@/lib/tipos";
 import { cop, pct } from "@/lib/moneda";
@@ -87,6 +88,8 @@ export default function Corrida() {
   const [previaRebusqueda, setPreviaRebusqueda] = useState<RebusquedaPrevia | null>(null);
   const [rebuscando, setRebuscando] = useState(false);
   const [aplicandoRebusqueda, setAplicandoRebusqueda] = useState(false);
+  const [umbralAbierto, setUmbralAbierto] = useState(false);
+  const [aplicandoUmbral, setAplicandoUmbral] = useState(false);
   // Bumpearlo relanza el efecto de carga —y con él la cadena del poll, que se corta
   // sola cuando la corrida deja de estar 'armando'. Es lo que hace que reanudar
   // vuelva a mostrar el progreso sin recargar la página a mano.
@@ -343,6 +346,35 @@ export default function Corrida() {
     }
   }
 
+  /** Aplica el umbral sobre las líneas marcadas en el diálogo; pinta con lo que
+   *  devuelve el servidor (ya recosteado), sin volver a pedir la corrida. */
+  async function aplicarUmbral(umbral: number, seqs: number[]) {
+    if (aplicandoUmbral) return;      // cinturón contra el doble clic
+    setAplicandoUmbral(true);
+    try {
+      const actualizada = await igualarPorUmbral(corridaId, umbral, seqs);
+      if (montado.current) {
+        setCorrida(actualizada);
+        setUmbralAbierto(false);
+      }
+      const n = actualizada.igualadas?.length ?? 0;
+      toast.success(n === 1
+        ? "1 línea igualada al contractual"
+        : `${n} líneas igualadas al contractual`);
+      const salteadas = actualizada.salteadas ?? [];
+      if (salteadas.length > 0) {
+        // Nada silencioso: si no se tocó una fila, se dice por qué.
+        toast.warning(
+          `${salteadas.length} sin tocar: cambiaron desde que abriste el diálogo `
+          + "(ya tienen APU o costo).");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo igualar por umbral.");
+    } finally {
+      if (montado.current) setAplicandoUmbral(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4" style={{ padding: "16px 20px" }}>
       {/* Header row */}
@@ -421,6 +453,15 @@ export default function Corrida() {
                 + "la biblioteca de hoy. Te muestra qué cambiaría antes de aplicar."}
               onClick={volverABuscar}>
               {rebuscando ? "Buscando…" : "Volver a buscar APU"}
+            </Button>
+          )}
+          {puedeEditar && !esActivar && !planAMedias && (
+            <Button size="sm" variant="outline"
+              title={"Iguala al contractual las actividades en $0 cuyo total "
+                + "contractual no pase el umbral que pongas. Para priorizar: lo "
+                + "chico se iguala, lo grande lo armás vos."}
+              onClick={() => setUmbralAbierto(true)}>
+              Igualar bajo umbral…
             </Button>
           )}
           {puedeEditar && !esActivar && sugerencias.length > 0 && (
@@ -581,6 +622,16 @@ export default function Corrida() {
           aplicando={aplicandoRebusqueda}
           onAplicar={aplicarRebusquedaMarcada}
           onCerrar={() => setPreviaRebusqueda(null)}
+        />
+      )}
+
+      {umbralAbierto && (
+        <DialogoUmbralCosto
+          abierto
+          items={data.items}
+          aplicando={aplicandoUmbral}
+          onAplicar={aplicarUmbral}
+          onCerrar={() => setUmbralAbierto(false)}
         />
       )}
     </div>

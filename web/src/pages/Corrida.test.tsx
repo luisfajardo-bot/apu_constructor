@@ -46,6 +46,7 @@ vi.mock("@/api/corridas", () => ({
   revisarCorridaStream: vi.fn(async () => RESUMEN),
   aplicarSugerencias: vi.fn(async () => CORRIDA),
   reanudarArmado: vi.fn(async () => CORRIDA),
+  igualarPorUmbral: vi.fn(async () => CORRIDA),
 }));
 // TablaItems importa BuscadorApu -> @/api/autoria -> @/api/client -> @/lib/supabase,
 // que crea el cliente de Supabase al cargar el módulo (falla sin envs en test). Se
@@ -285,6 +286,16 @@ test("con la corrida congelada no se puede revisar", async () => {
   const b = boton(/revisar .* con IA/i);
   expect(b.disabled).toBe(true);
   expect(b.getAttribute("title")).toMatch(/congelada/i);
+});
+
+test("el botón de umbral no aparece con la corrida congelada", async () => {
+  const { getCorrida } = await import("@/api/corridas");
+  vi.mocked(getCorrida).mockResolvedValueOnce({ ...CORRIDA, modo: "congelada" });
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+
+  expect(screen.queryByText(/Igualar bajo umbral/i)).toBeNull();
 });
 
 test("sin rol de editor el botón de revisar no aparece", async () => {

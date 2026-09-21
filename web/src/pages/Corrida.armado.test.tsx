@@ -41,6 +41,7 @@ vi.mock("@/api/corridas", () => ({
   revisarCorridaStream: vi.fn(),
   aplicarSugerencias: vi.fn(),
   reanudarArmado: vi.fn(async () => ({})),
+  igualarPorUmbral: vi.fn(),
 }));
 
 import Corrida from "./Corrida";
@@ -119,6 +120,16 @@ test("terminada de armar, no queda ningún cartel de progreso", async () => {
 
   expect(screen.queryByText(/Armando:/)).toBeNull();
   expect(screen.queryByText(/En espera/)).toBeNull();
+});
+
+test("con el plan a medias no aparece el botón de umbral", async () => {
+  // Mientras el armado no termine las filas que faltan NO EXISTEN, así que un
+  // porcentaje sobre "todas las líneas" mentiría. Mismo candado que "Volver a
+  // buscar APU".
+  vi.mocked(getCorrida).mockResolvedValue(armando({ hechos: 1 }) as never);
+  await montar();
+
+  expect(screen.queryByText(/Igualar bajo umbral/i)).toBeNull();
 });
 
 // ─── Poll ────────────────────────────────────────────────────────────────────

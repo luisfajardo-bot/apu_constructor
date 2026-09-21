@@ -64,6 +64,7 @@ vi.mock("@/api/corridas", () => ({
   reanudarArmado: vi.fn(),
   rebuscarApus: (...a: unknown[]) => rebuscarApus(...(a as [])),
   aplicarRebusqueda: (...a: unknown[]) => aplicarRebusqueda(...(a as [])),
+  igualarPorUmbral: vi.fn(async () => CORRIDA()),
 }));
 vi.mock("@/api/autoria", () => ({
   listarApus: vi.fn(async () => ({ items: [], total: 0, limit: 15, offset: 0 })),

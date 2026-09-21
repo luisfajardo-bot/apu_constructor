@@ -49,13 +49,16 @@ test("el contractual de la corrida suma TODAS las filas, no solo las candidatas"
   expect(p.contractualCorrida).toBe(9100);
 });
 
+// Conteos DISTINTOS a propósito: con 1 y 1, intercambiar `sinApu` por `conApu` no
+// movería ninguna aserción y el test no vería el bug que existe para atajar.
 test("desglose de las que se igualan: con APU y sin APU", () => {
   const items = [
     item({ seq: 0, contractual_total: 100 }),
-    item({ seq: 1, contractual_total: 100, apu_codigo: "A1" }),
+    item({ seq: 1, contractual_total: 100 }),
+    item({ seq: 2, contractual_total: 100, apu_codigo: "A1" }),
   ];
   const p = previaUmbral(items, 500);
-  expect(p.sinApu).toBe(1);
+  expect(p.sinApu).toBe(2);
   expect(p.conApu).toBe(1);
 });
 

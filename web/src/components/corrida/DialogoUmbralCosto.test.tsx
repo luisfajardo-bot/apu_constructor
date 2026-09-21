@@ -91,14 +91,17 @@ describe("DialogoUmbralCosto", () => {
     expect(aplicar.disabled).toBe(true);
   });
 
+  // Conteos DISTINTOS a propósito: con 1 y 1, intercambiar `sinApu` por `conApu` en
+  // el JSX no cambiaría el texto y el test no vería el bug que existe para atajar.
   it("el desglose distingue las que ya tienen APU de las que no", () => {
     render(<DialogoUmbralCosto abierto aplicando={false} onAplicar={vi.fn()}
                                onCerrar={vi.fn()}
                                items={[item({ seq: 0, contractual_total: 100 }),
-                                       item({ seq: 1, contractual_total: 100,
+                                       item({ seq: 1, contractual_total: 100 }),
+                                       item({ seq: 2, contractual_total: 100,
                                               apu_codigo: "A1", apu_nombre: "UN APU" })]} />);
     fireEvent.change(screen.getByLabelText("Umbral de total contractual"),
                      { target: { value: "500" } });
-    expect(screen.getByText(/1 sin APU · 1 con APU pero sin precios/)).toBeTruthy();
+    expect(screen.getByText(/2 sin APU · 1 con APU pero sin precios/)).toBeTruthy();
   });
 });

@@ -766,3 +766,41 @@ def test_set_candidatos_vacio_no_escribe(repo):
     cid = _corrida_con(repo, _item(0, 1000.0))
     repo.set_candidatos(cid, {})
     assert repo.get_items(cid)[0].candidatos == []
+
+
+def test_limpiar_costo_manual_devuelve_la_fila_al_costeo(repo):
+    """El reverso de set_costo_manual. Sin APU, la fila vuelve a `new`: es
+    exactamente lo que era antes (así la deja `assemble.py` cuando no hay match)."""
+    cid = _corrida_con(repo, _item(0, 1500.0), _item(1, 900.0))
+    repo.set_costo_manual(cid, {0: 1500.0, 1: 900.0})
+    repo.limpiar_costo_manual(cid, [0])
+    filas = {r.seq: r for r in repo.get_items(cid)}
+    assert filas[0].costo_manual is None
+    assert filas[0].status == "new"
+    assert filas[1].costo_manual == 900.0      # la que no se pidió no se toca
+    assert filas[1].status == "confirmed"
+
+
+def test_limpiar_costo_manual_con_apu_deja_la_fila_en_review(repo):
+    """Con APU no se puede volver a `new` (la fila SÍ tiene match). No guardamos el
+    status previo, y `review` —«mírala»— es la verdad honesta en vez de adivinar."""
+    cid = _corrida_con(repo, _item(0, 1500.0))
+    repo.actualizar_eleccion(
+        cid, 0, status="auto", apu_codigo="100", apu_nombre="EXCAVACION",
+        unidad="M3", shift="DIURNO", origen="historico", confianza=1.0,
+        explicacion="", componentes=[])
+    repo.set_costo_manual(cid, {0: 1500.0})
+    repo.limpiar_costo_manual(cid, [0])
+    fila = repo.get_items(cid)[0]
+    assert fila.costo_manual is None
+    assert fila.status == "review"
+
+
+def test_limpiar_costo_manual_vacio_no_escribe(repo):
+    """Sin esto el test no podría fallar: hay que dejar algo que borrar."""
+    cid = _corrida_con(repo, _item(0, 1500.0))
+    repo.set_costo_manual(cid, {0: 1500.0})
+    repo.limpiar_costo_manual(cid, [])
+    fila = repo.get_items(cid)[0]
+    assert fila.costo_manual == 1500.0
+    assert fila.status == "confirmed"

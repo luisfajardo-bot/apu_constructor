@@ -267,6 +267,20 @@ class RepositorioCorridas(Protocol):
         que lo borra `actualizar_eleccion`. Y `actualizar_eleccion` a su vez BORRA
         `costo_manual`: si la fila cambia de APU, manda el APU."""
         ...
+    def limpiar_costo_manual(self, corrida_id: int, seqs: list[int], conn=None) -> None:
+        """Borra el costo puesto a mano y devuelve la fila al costeo normal.
+
+        Es el reverso de `set_costo_manual`, y va por lote por la misma razón: el
+        umbral puede tocar cientos de filas de una. Una lista vacía no escribe nada.
+
+        El status vuelve a `new` si la fila no tiene APU (que es exactamente lo que
+        era: así la deja `assemble.py` cuando no hay match) y a `review` si lo tiene.
+        No guardamos el status previo y no hace falta adivinarlo: `review` —«mírala»—
+        es la verdad honesta para una fila que sí tiene match.
+
+        NO toca `revision_json`: `set_costo_manual` ya lo había borrado y no hay
+        veredicto que restaurar."""
+        ...
     def set_plan(self, corrida_id: int, plan_json: str, conn=None) -> None:
         """Guarda las líneas ya interpretadas del Excel. Única fuente de qué falta
         armar: el archivo subido no se persiste."""

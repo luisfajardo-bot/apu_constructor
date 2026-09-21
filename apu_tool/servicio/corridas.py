@@ -1397,6 +1397,44 @@ def igualar_costo_al_contractual(alm: Almacen, corrida_id: int, seqs: Iterable[i
     return vista
 
 
+def quitar_costo_manual(alm: Almacen, corrida_id: int, seqs: Iterable[int],
+                        actor=None) -> Optional[dict]:
+    """Borra el costo puesto a mano de las filas marcadas y las devuelve al costeo.
+
+    Es el reverso de `igualar_costo_al_contractual`, y existe porque el umbral puede
+    tocar cientos de filas de un clic: sin vuelta atrás, un techo mal puesto se
+    arregla fila por fila armando APUs que justamente no querías armar.
+
+    Pedir el borrado de una fila que no tiene costo a mano no es un error: es un
+    no-op y no se audita. Devuelve la vista de la corrida con `quitadas`, o None si
+    la corrida no existe. Lanza CorridaCongelada si está congelada.
+    """
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    if meta.modo == "congelada":
+        raise CorridaCongelada(corrida_id)
+    pedidos = {int(s) for s in seqs}
+    filas = [r for r in alm.corridas.get_items(corrida_id)
+             if r.seq in pedidos and r.costo_manual is not None]
+    if filas:
+        with alm.transaccion("corridas") as conn:
+            alm.corridas.limpiar_costo_manual(
+                corrida_id, [r.seq for r in filas], conn=conn)
+            registrar_auditoria(
+                alm, conn, actor, "corrida.quitar_costo_manual", "corrida", corrida_id,
+                antes={"lineas": [{"seq": r.seq, "costo_manual": r.costo_manual}
+                                  for r in filas]},
+                despues={"lineas": [{"seq": r.seq, "costo_manual": None}
+                                    for r in filas]})
+        if meta.estado == "finalizada":
+            alm.corridas.set_estado(corrida_id, "en_revision")   # el cuadro ya no dice la verdad
+    vista = vista_corrida(alm, corrida_id)
+    if vista is not None:
+        vista["quitadas"] = sorted(r.seq for r in filas)
+    return vista
+
+
 def revisar_corrida_stream(alm: Almacen, corrida_id: int):
     """Revisa una corrida ya armada. Devuelve None si la corrida no existe; el
     generador de eventos SSE si sí.

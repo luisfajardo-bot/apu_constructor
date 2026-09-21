@@ -161,3 +161,54 @@ def test_seq_ajeno_se_saltea(alm):
     cid = _corrida(alm, contractual=1000.0)
     v = svc.igualar_costo_al_contractual(alm, cid, [0, 77])
     assert v["igualadas"] == [0]
+
+
+def test_quitar_costo_manual_devuelve_la_fila_al_costeo(alm):
+    """Con APU, la fila vuelve a costear desde su composición ($40.000 del APU 100)."""
+    cid = _corrida(alm, contractual=92106000.0, apu="100")
+    alm.corridas.set_costo_manual(cid, {0: 92106000.0})
+    v = svc.quitar_costo_manual(alm, cid, [0])
+    assert v["quitadas"] == [0]
+    fila = v["items"][0]
+    assert fila["costo_manual"] is False
+    assert fila["costo_unitario"] == 40000.0
+    assert fila["status"] == "review"
+
+
+def test_quitar_costo_manual_sin_apu_vuelve_a_trabar_el_cuadro(alm):
+    """El candado tiene que volver a cerrarse: la fila está otra vez en $0 sin APU."""
+    cid = _corrida(alm, contractual=1000.0)
+    svc.igualar_costo_al_contractual(alm, cid, [0])
+    assert svc.seqs_sin_apu(alm.corridas.get_items(cid)) == []
+    svc.quitar_costo_manual(alm, cid, [0])
+    filas = alm.corridas.get_items(cid)
+    assert filas[0].status == "new"
+    assert svc.seqs_sin_apu(filas) == [0]
+
+
+def test_quitar_costo_manual_sin_costo_a_mano_es_no_op(alm):
+    """Pedir el borrado de una fila que no lo tiene no es un error."""
+    cid = _corrida(alm, contractual=1000.0, apu="100")
+    v = svc.quitar_costo_manual(alm, cid, [0])
+    assert v["quitadas"] == []
+    assert v["items"][0]["costo_unitario"] == 40000.0
+
+
+def test_quitar_costo_manual_congelada_no_se_toca(alm):
+    cid = _corrida(alm, contractual=1000.0)
+    alm.corridas.set_costo_manual(cid, {0: 1000.0})
+    alm.corridas.set_modo(cid, "congelada")
+    with pytest.raises(svc.CorridaCongelada):
+        svc.quitar_costo_manual(alm, cid, [0])
+
+
+def test_quitar_costo_manual_corrida_inexistente_devuelve_none(alm):
+    assert svc.quitar_costo_manual(alm, 9999, [0]) is None
+
+
+def test_quitar_costo_manual_finalizada_vuelve_a_revision(alm):
+    """El cuadro emitido ya no dice la verdad."""
+    cid = _corrida(alm, contractual=1000.0, estado="finalizada")
+    alm.corridas.set_costo_manual(cid, {0: 1000.0})
+    svc.quitar_costo_manual(alm, cid, [0])
+    assert alm.corridas.get_corrida(cid).estado == "en_revision"

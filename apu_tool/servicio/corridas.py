@@ -1443,6 +1443,11 @@ def igualar_por_umbral(alm: Almacen, corrida_id: int, umbral: float,
     Devuelve la vista con `igualadas`, `rechazadas` y `salteadas`, o None si la
     corrida no existe. Lanza CorridaCongelada si está congelada y ValueError si el
     umbral no es un monto positivo.
+
+    Ojo con `rechazadas`: por ESTE camino viene siempre vacía. La trae el camino de
+    escritura compartido (para el contractual ≤ 0), pero `_candidata_umbral` ya
+    descartó esas filas hacia `salteadas` antes de llegar ahí. Quien consuma la
+    respuesta tiene que mirar `salteadas`, no `rechazadas`.
     """
     meta = alm.corridas.get_corrida(corrida_id)
     if meta is None:

@@ -13,7 +13,9 @@ export function esCandidata(it: ItemCuadro): boolean {
 export interface PreviaUmbral {
   /** En $0 y pagables: el universo sobre el que actúa el techo. */
   candidatas: ItemCuadro[];
-  /** Candidatas bajo el techo, por `contractual_total` de mayor a menor. */
+  /** Candidatas bajo el techo, por `contractual_total` de mayor a menor. Es una
+   *  PROPUESTA todavía no aplicada — en la respuesta del backend `igualadas` significa
+   *  otra cosa: las filas que YA se escribieron. */
   igualadas: ItemCuadro[];
   /** Candidatas por encima del techo: las que hay que armar de verdad. */
   restantes: ItemCuadro[];

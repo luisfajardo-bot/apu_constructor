@@ -27,15 +27,11 @@ export default function DialogoUmbralCosto({
   const umbral = Number(texto);
   const p = useMemo(() => previaUmbral(items, umbral), [items, umbral]);
 
-  // Las marcas se DERIVAN del umbral y se rehacen cuando cambia: la lista es otra, y
-  // conservar destildes de una lista anterior sería adivinar. `destildadas` guarda
-  // solo lo que el usuario sacó a mano de la lista de hoy.
+  // Las marcas se DERIVAN del umbral: cambiar el techo cambia la lista de candidatas,
+  // y conservar destildes de una lista anterior sería adivinar. `destildadas` guarda
+  // solo lo que el usuario sacó a mano de la lista de hoy, y se vacía en el `onChange`
+  // del input (abajo) cada vez que el techo cambia.
   const [destildadas, setDestildadas] = useState<Set<number>>(new Set());
-  const [ultimoTecho, setUltimoTecho] = useState("");
-  if (ultimoTecho !== texto) {                 // patrón de estado derivado, sin efecto
-    setUltimoTecho(texto);
-    setDestildadas(new Set());
-  }
   const marcados = p.igualadas
     .filter((it) => !destildadas.has(it.seq))
     .map((it) => it.seq);
@@ -82,6 +78,8 @@ export default function DialogoUmbralCosto({
           Las actividades en $0 cuyo total contractual no pase el umbral se igualan al
           precio contractual, para poder evaluar sin armarles el APU. Se puede
           deshacer con «Quitar costo a mano».
+          {p.igualadas.length > 1 && " Shift+clic marca en rango."}
+          {p.igualadas.length > 0 && " Cambiar el umbral vuelve a marcar todas."}
         </p>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -95,7 +93,15 @@ export default function DialogoUmbralCosto({
                        text-sm tabular-nums outline-none focus-visible:border-ring"
             type="number" min="0" step="1000000" value={texto}
             placeholder="500000000"
-            onChange={(e) => setTexto(e.target.value)}
+            onChange={(e) => {
+              // Cambiar el techo rehace la lista, así que las marcas se rehacen con
+              // ella: conservar destildes de una lista anterior sería adivinar.
+              setTexto(e.target.value);
+              setDestildadas(new Set());
+            }}
+            // La lista de abajo scrollea: sin esto, pasar la rueda sobre el campo
+            // enfocado cambia el techo de a un millón sin que nadie lo pida.
+            onWheel={(e) => e.currentTarget.blur()}
           />
           {/* El monto escrito, en letras de gente: son nueve dígitos. */}
           <span className="text-sm font-semibold tabular-nums">

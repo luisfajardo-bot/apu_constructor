@@ -70,4 +70,35 @@ describe("DialogoUmbralCosto", () => {
                                items={[item({ precio_contractual: 0, contractual_total: 0 })]} />);
     expect(screen.getByText(/sin precio contractual/i)).toBeTruthy();
   });
+
+  it("Shift+clic vuelve a marcar el rango entero", () => {
+    const onAplicar = abrir();
+    escribirUmbral("5000");                                    // entran las tres
+    fireEvent.click(screen.getByLabelText("Marcar línea 1"));  // destilda seq 2
+    fireEvent.click(screen.getByLabelText("Marcar línea 2"));  // destilda seq 1
+    fireEvent.click(screen.getByLabelText("Marcar línea 3"));  // destilda seq 0, y ancla acá
+    fireEvent.click(screen.getByLabelText("Marcar línea 1"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /Igualar/ }));
+    expect(onAplicar).toHaveBeenCalledWith(5000, [0, 1, 2]);
+  });
+
+  it("mientras aplica, ni se cierra ni se vuelve a aplicar", () => {
+    render(<DialogoUmbralCosto abierto items={ITEMS} aplicando
+                               onAplicar={vi.fn()} onCerrar={vi.fn()} />);
+    const cerrar = screen.getByRole("button", { name: /Cerrar/ }) as HTMLButtonElement;
+    const aplicar = screen.getByRole("button", { name: /Aplicando/ }) as HTMLButtonElement;
+    expect(cerrar.disabled).toBe(true);
+    expect(aplicar.disabled).toBe(true);
+  });
+
+  it("el desglose distingue las que ya tienen APU de las que no", () => {
+    render(<DialogoUmbralCosto abierto aplicando={false} onAplicar={vi.fn()}
+                               onCerrar={vi.fn()}
+                               items={[item({ seq: 0, contractual_total: 100 }),
+                                       item({ seq: 1, contractual_total: 100,
+                                              apu_codigo: "A1", apu_nombre: "UN APU" })]} />);
+    fireEvent.change(screen.getByLabelText("Umbral de total contractual"),
+                     { target: { value: "500" } });
+    expect(screen.getByText(/1 sin APU · 1 con APU pero sin precios/)).toBeTruthy();
+  });
 });

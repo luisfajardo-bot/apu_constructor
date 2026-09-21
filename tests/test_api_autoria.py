@@ -65,14 +65,92 @@ def test_import_insumos_endpoint(tmp_path):
     cli, _ = _cli(tmp_path)
     data = _xlsx_insumos()
     pv = cli.post("/api/insumos/importar/preview",
-                  files={"archivo": ("insumos.xlsx", data, _XLSX)})
+                  files={"archivo": ("insumos.xlsx", data, _XLSX)},
+                  data={"fuente_import": "PRECIO IDU"})
     assert pv.status_code == 200
     assert [c["codigo"] for c in pv.json()["crear"]] == ["300"]
     assert [c["codigo"] for c in pv.json()["actualizar"]] == ["100"]   # existía -> actualizar
     ap = cli.post("/api/insumos/importar",
-                  files={"archivo": ("insumos.xlsx", data, _XLSX)})
+                  files={"archivo": ("insumos.xlsx", data, _XLSX)},
+                  data={"fuente_import": "PRECIO IDU"})
     assert ap.status_code == 200
     assert ap.json()["creados"] == 1 and ap.json()["actualizados"] == 1
+
+
+def test_import_insumos_sin_fuente_es_422(tmp_path):
+    """El campo es obligatorio en el contrato HTTP: no hay default silencioso."""
+    cli, _ = _cli(tmp_path)
+    r = cli.post("/api/insumos/importar/preview",
+                 files={"archivo": ("insumos.xlsx", _xlsx_insumos(), _XLSX)})
+    assert r.status_code == 422
+
+
+def test_import_insumos_endpoint_protege_el_interno(tmp_path):
+    """El insumo 100 pasa a costo interno; una importación declarada pública deja de
+    poder pisarlo, y el balde viaja en la respuesta.
+
+    `_xlsx_insumos()` trae columna `nombre`: esta es la prueba que cubre el camino
+    "con nombre" (`_match_identidad`) del candado, así que el archivo debe seguir
+    trayendo esa columna."""
+    cli, alm = _cli(tmp_path)
+    iid = alm.precios.get_candidatos("100")[0].id
+    alm.precios.set_precio_por_id(iid, 1000, "COSTO INTERNO")
+    r = cli.post("/api/insumos/importar/preview",
+                 files={"archivo": ("insumos.xlsx", _xlsx_insumos(), _XLSX)},
+                 data={"fuente_import": "PRECIO IDU"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["actualizar"] == []
+    assert [p["codigo"] for p in body["protegida"]] == ["100"]
+
+
+def test_import_insumos_endpoint_forzar_ids(tmp_path):
+    """El id marcado viaja como campo repetido del form y la fila se aplica."""
+    cli, alm = _cli(tmp_path)
+    iid = alm.precios.get_candidatos("100")[0].id      # CEMENTO GRIS, 1000, PRECIO IDU
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["codigo", "nombre", "precio"])
+    ws.append(["100", "CEMENTO GRIZ", 1500])           # typo -> conflicto de código
+    buf = io.BytesIO(); wb.save(buf); data = buf.getvalue()
+
+    sin = cli.post("/api/insumos/importar/preview",
+                   files={"archivo": ("f.xlsx", data, _XLSX)},
+                   data={"fuente_import": "PRECIO IDU"})
+    assert sin.status_code == 200, sin.text
+    assert len(sin.json()["conflicto"]) == 1
+    assert sin.json()["conflicto"][0]["insumo_id"] == iid
+
+    con = cli.post("/api/insumos/importar",
+                   files={"archivo": ("f.xlsx", data, _XLSX)},
+                   data={"fuente_import": "PRECIO IDU", "forzar_ids": str(iid)})
+    assert con.status_code == 200, con.text
+    assert con.json()["actualizados"] == 1
+    assert alm.precios.get_candidatos("100")[0].precio == 1500
+
+
+def test_import_insumos_endpoint_varios_forzar_ids(tmp_path):
+    """El caso de uso real: varias filas marcadas a la vez. Cada id va como una
+    aparición más del mismo campo del form."""
+    cli, alm = _cli(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("201", "ARENA DE PENA LAVADA", "M3", "MAT", 50000, "PRECIO IDU"),
+        Insumo("202", "GRAVA COMUN DE RIO", "M3", "MAT", 60000, "PRECIO IDU")])
+    ids = [alm.precios.get_candidatos("201")[0].id,
+           alm.precios.get_candidatos("202")[0].id]
+    wb = openpyxl.Workbook(); ws = wb.active
+    ws.append(["codigo", "nombre", "precio"])
+    ws.append(["201", "ARENA DE PENA LABADA", 55000])     # typo
+    ws.append(["202", "GRAVA COMUN DE RRIO", 66000])      # typo
+    buf = io.BytesIO(); wb.save(buf); data = buf.getvalue()
+
+    r = cli.post("/api/insumos/importar",
+                 files={"archivo": ("f.xlsx", data, _XLSX)},
+                 data={"fuente_import": "PRECIO IDU",
+                       "forzar_ids": [str(ids[0]), str(ids[1])]})
+    assert r.status_code == 200, r.text
+    assert r.json()["actualizados"] == 2
+    assert alm.precios.get_candidatos("201")[0].precio == 55000
+    assert alm.precios.get_candidatos("202")[0].precio == 66000
 
 
 def _xlsx_apus() -> bytes:

@@ -78,16 +78,17 @@ def test_confirmar_item_costea_con_la_lista(alm, np):
     assert v["items"][0]["costo_unitario"] == 8400
 
 
-def test_construir_corrida_stream_progreso_costea_con_la_lista(alm, np):
-    """construir_corrida_stream pinta la fila EN VIVO en el evento 'progress' con el
+def test_armar_pendientes_progreso_costea_con_la_lista(alm, np):
+    """`armar_pendientes` pinta la fila EN VIVO en el evento 'progress' con el
     Assembler que arma esa corrida (el que ve el usuario mientras se arma, antes de
-    que 'done' recalcule vía vista_corrida). Si ese Assembler se queda sin la lista,
-    el usuario ve precios de Principal durante todo el armado y recién se autocorrige
-    al final. Hay que drenar el generador (no construir_corrida, que descarta el
-    progreso) para capturar el costo tal como lo ve el usuario en vivo."""
-    eventos = list(svc.construir_corrida_stream(
-        alm, "acta.xlsx", _items(), "DIURNO", False,
-        carpeta_id=None, lista_precios_id=np))
+    que `vista_corrida` recalcule al confirmar). Si ese Assembler se queda sin la
+    lista, el usuario ve precios de Principal durante todo el armado y recién se
+    autocorrige al final. Hay que drenar el generador (no construir_corrida, que
+    descarta el progreso) para capturar el costo tal como lo ve el usuario en vivo."""
+    items = _items()
+    cid = svc.crear_corrida_encolada(alm, "acta.xlsx", items, "DIURNO", False,
+                                     carpeta_id=None, lista_precios_id=np)
+    eventos = list(svc.armar_pendientes(alm, cid, items, desde_seq=0))
     progreso = [payload for evento, payload in eventos if evento == "progress"]
     assert len(progreso) == 1
     costo_en_vivo = progreso[0]["fila"]["costo_unitario"]
@@ -140,5 +141,9 @@ def test_generar_cuadro_costea_con_la_lista(alm, np):
     alm.corridas.set_modo(cid, "congelada")
     out = svc.generar_cuadro(alm, cid)
     ws = openpyxl.load_workbook(out)["RESUMEN"]
-    costo_item_2 = ws.cell(row=3, column=6).value   # "Costo Unit." del ítem SIN snapshot
+    # Por NOMBRE de columna y no por posición: la hoja RESUMEN gana columnas cada tanto
+    # (las dos bases del contractual de la ruta IDU corrieron todos los índices), y un
+    # test que lee `column=6` a ciegas se rompe sin que nada esté mal de verdad.
+    enc = [c.value for c in ws[1]]
+    costo_item_2 = ws.cell(row=3, column=enc.index("Costo Unit.") + 1).value
     assert costo_item_2 == 8400

@@ -87,12 +87,15 @@ def plantilla_licitacion() -> bytes:
 
 def plantilla_insumos() -> bytes:
     """Plantilla del importador unificado. Columnas: codigo, nombre, unidad, grupo,
-    precio, fuente. Con nombre crea o actualiza (por identidad código+nombre); sin
-    nombre solo actualiza precio por código."""
+    precio. Con nombre crea o actualiza (por identidad código+nombre); sin nombre solo
+    actualiza precio por código.
+
+    NO lleva columna `fuente`: la fuente la declara la importación en el diálogo y se
+    aplica a todo el archivo. Un archivo viejo que traiga la columna sube igual — el
+    parser la ignora."""
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.append(["codigo", "nombre", "unidad", "grupo", "precio", "fuente"])
-    ws.append(["EJEMPLO-1", "EJEMPLO — con nombre se crea o actualiza",
-               "KG", "MAT", 1000, "COTIZACIÓN"])
-    ws.append(["EJEMPLO-2", "", "", "", 2000, "COTIZACIÓN"])  # sin nombre = solo actualizar precio
+    ws.append(["codigo", "nombre", "unidad", "grupo", "precio"])
+    ws.append(["EJEMPLO-1", "EJEMPLO — con nombre se crea o actualiza", "KG", "MAT", 1000])
+    ws.append(["EJEMPLO-2", "", "", "", 2000])  # sin nombre = solo actualizar precio
     return _a_bytes(wb)

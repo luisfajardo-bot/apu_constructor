@@ -37,9 +37,50 @@ MATCH_ACCEPT = 0.88   # >= se acepta automáticamente
 MATCH_REVIEW = 0.55   # entre REVIEW y ACCEPT -> candidato dudoso (revisar)
 #                     # < REVIEW -> sin match (armado por analogía / manual)
 
+# Corte del armado por fallos SEGUIDOS (servicio/corridas.py::armar_pendientes).
+# Un ítem que revienta deja una fila sin APU y el armado sigue: un ítem venenoso
+# cuesta una fila, no las 1900 de la lista. Pero si lo que se cayó es el ENTORNO
+# (la base, la red), ese mismo comportamiento quema el plan entero: escribe 1900
+# filas "no se pudo armar" y las deja permanentes, porque cuentan para `max_seq` y
+# el worker reanuda DESPUÉS de ellas — nunca las reintenta.
+# No hay forma local de distinguir un ítem malo de un entorno caído; la RACHA es el
+# único discriminador barato: un fallo aislado es un ítem, N seguidos es el entorno.
+# 5 porque un fallo NO es "matcheó mal" (eso es un status, no una excepción): que
+# cinco ítems seguidos levanten una excepción no pasa en una lista real, donde los
+# ítems raros están salpicados (y por eso un éxito reinicia el contador). Al cortar
+# se pierden 4 filas, no 1900, y la corrida queda reintentable.
+MAX_FALLOS_SEGUIDOS_ARMADO = 5
+
+# --- armado como trabajo del servidor (servicio/armador.py) ---
+# Una reclama sin latido por más de esto se considera muerta y otra instancia puede
+# retomar la corrida. Es el tiempo de recuperación tras un reinicio de golpe: más
+# corto arriesga doble armado durante el drenaje de un deploy, más largo hace esperar.
+ARMADO_TTL_RECLAMA_S = 180
+# Cada cuánto se refresca la reclama MIENTRAS se arma. Se mide en TIEMPO y no en ítems
+# porque lo que vence es un lease, que también es tiempo: contar ítems es un proxy de
+# una velocidad que no controlamos (medida entre 2,8 y 6,2 s/ítem, más del doble de
+# variación), y con el proxy el margen contra el TTL depende de qué tan gordos vengan
+# los sub-APUs. Así el margen es fijo: 3x el intervalo antes de que la reclama venza.
+# Cambiar esto sin mirar ARMADO_TTL_RECLAMA_S es quedarse sin ese margen.
+ARMADO_LATIDO_S = 60
+# Respaldo del evento: es lo ÚNICO que hace arrancar un armado huérfano al bootear,
+# cuando no hay ningún evento que despierte al worker.
+ARMADO_POLL_S = 30
+# Reclamas antes de rendirse. Cubre "algo la mata siempre en el mismo punto".
+ARMADO_MAX_INTENTOS = 3
+
 # Umbrales del cruce código+nombre (resolver de insumos, dominio/cruce.py).
 CRUCE_UMBRAL = 0.60   # similitud mínima de nombre para aceptar un cruce aproximado
 CRUCE_MARGEN = 0.10   # ventaja mínima del mejor candidato sobre el segundo
+
+# Umbrales de la composición asistida (dominio/validacion_composicion.py).
+# Techo absurdo por componente: atrapa un rendimiento con la coma corrida (0,5 -> 500)
+# sin bloquear un consumo grande legítimo (arena en m3 por m3 de mampostería).
+COMPOSICION_LIMITE_RENDIMIENTO = 10_000.0
+# Antecedentes mínimos para llamar "atípico" a un rendimiento. Con n=1 o n=2 el "rango"
+# no significa nada y la advertencia sería ruido: por debajo se informa que no hay con
+# qué comparar, que es un dato distinto y útil.
+COMPOSICION_MIN_ANTECEDENTES = 3
 
 # Etiquetas de turno.
 SHIFT_DIURNO = "DIURNO"

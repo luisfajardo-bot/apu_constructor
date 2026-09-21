@@ -105,11 +105,14 @@ def test_el_armado_en_vivo_costea_con_las_distancias_del_proyecto(tmp_path):
     alm.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro, km_granulares=32))
     items = [LicitacionItem(item="1", descripcion="RELLENO", unidad="M3", cantidad=10,
                             precio_contractual=100000.0, shift="DIURNO")]
-    filas = []
-    for evento, payload in svc.construir_corrida_stream(
-            alm, "lic.xlsx", items, "DIURNO", False, carpeta_id=metro):
-        if evento == "progress":
-            filas.append(payload["fila"])
+    # El armado se parte en dos desde el armado reanudable: encolar (crea la corrida
+    # con su plan) y armar. Los eventos salen de `armar_pendientes`, que es el camino
+    # unico -- lo usan igual la CLI/GUI (via `construir_corrida`) y el worker.
+    cid = svc.crear_corrida_encolada(alm, "lic.xlsx", items, "DIURNO", False,
+                                     carpeta_id=metro)
+    filas = [payload["fila"]
+             for evento, payload in svc.armar_pendientes(alm, cid, items)
+             if evento == "progress"]
     costeadas = [f for f in filas if f.get("costo_unitario")]
     assert costeadas, filas
     assert all(f["costo_unitario"] == 33600 for f in costeadas)

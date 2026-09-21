@@ -1,4 +1,5 @@
 import { TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { SIN_APU, etiquetaVeredicto } from "@/lib/corridaTabla";
 import type { ClaveColumna, ControlCorridaTabla, FiltroRango } from "@/lib/corridaTabla";
 import { etiquetaEstado } from "@/components/corrida/EstadoBadge";
 
@@ -17,8 +18,10 @@ const COLS: Col[] = [
   { clave: "unidad", label: "Und", tipo: "select", ancho: "w-12" },
   { clave: "cantidad", label: "Cantidad", tipo: "num", ancho: "w-20", derecha: true },
   { clave: "item", label: "Ítem", tipo: "texto", ancho: "w-24" },
+  { clave: "capitulo", label: "Capítulo", tipo: "texto", ancho: "w-32" },
   { clave: "apu", label: "APU", tipo: "texto", ancho: "w-28" },
   { clave: "status", label: "Estado", tipo: "select", ancho: "w-20" },
+  { clave: "veredicto", label: "Veredicto", tipo: "select", ancho: "w-28" },
   { clave: "precio_contractual", label: "Unit. Contractual", tipo: "num", ancho: "w-28", derecha: true },
   { clave: "costo_unitario", label: "Unit. Costo", tipo: "num", ancho: "w-28", derecha: true },
   { clave: "contractual_total", label: "Total Contractual", tipo: "num", ancho: "w-28", derecha: true },
@@ -26,6 +29,9 @@ const COLS: Col[] = [
   { clave: "margen_total", label: "Margen", tipo: "num", ancho: "w-28", derecha: true },
   { clave: "margen_pct", label: "%", tipo: "num", ancho: "w-16", derecha: true },
 ];
+
+const esCentinela = (clave: ClaveColumna, control: ControlCorridaTabla) =>
+  clave === "apu" && control.filtros.apu === SIN_APU;
 
 function Rango({ clave, label, control }: { clave: ClaveColumna; label: string; control: ControlCorridaTabla }) {
   const r = control.filtros[clave] as FiltroRango;
@@ -48,11 +54,25 @@ function Rango({ clave, label, control }: { clave: ClaveColumna; label: string; 
 export default function CabeceraFiltros({
   control,
   conSeleccion = false,
+  conVeredicto = true,
+  conCapitulo = false,
+  conAcciones = false,
 }: {
   control: ControlCorridaTabla;
   /** Layout: reserva la celda de la columna de checkboxes cuando la selección está activa. */
   conSeleccion?: boolean;
+  /** false = la corrida no tiene ni un veredicto: la columna no se dibuja (14
+   *  columnas no caben en un portátil, y esta estaría entera vacía). */
+  conVeredicto?: boolean;
+  /** false = la corrida no vino de un presupuesto por capítulos: la columna no se
+   *  dibuja, igual que Veredicto. Una corrida plana queda EXACTAMENTE como estaba. */
+  conCapitulo?: boolean;
+  /** true = alguna fila ofrece Componer: se reserva la celda de esa columna. No
+   *  se filtra ni se ordena por ella (no es un dato de la línea, es un botón). */
+  conAcciones?: boolean;
 }) {
+  const cols = COLS.filter((c) => (c.clave !== "veredicto" || conVeredicto)
+                                   && (c.clave !== "capitulo" || conCapitulo));
   const flecha = (clave: ClaveColumna) =>
     control.orden?.clave === clave ? (control.orden.dir === "asc" ? "↑" : "↓") : "";
 
@@ -61,7 +81,7 @@ export default function CabeceraFiltros({
       <TableRow>
         {conSeleccion && <TableHead className="w-8 px-1" />}
         <TableHead className="w-6 px-1" />
-        {COLS.map((c) => (
+        {cols.map((c) => (
           <TableHead key={c.clave} className={`text-xs ${c.ancho} ${c.derecha ? "text-right" : ""}`}>
             <button
               type="button"
@@ -74,34 +94,51 @@ export default function CabeceraFiltros({
             </button>
           </TableHead>
         ))}
+        {conAcciones && <TableHead className="text-xs w-24">Acciones</TableHead>}
       </TableRow>
       <TableRow className="hover:bg-transparent">
         {conSeleccion && <TableHead className="w-8 px-1" />}
         <TableHead className="w-6 px-1" />
-        {COLS.map((c) => (
-          <TableHead key={c.clave} className={`${c.ancho} py-1 align-top`}>
-            {c.tipo === "texto" && (
-              <input
-                className={inputCls} value={control.filtros[c.clave] as string}
-                aria-label={`Filtrar ${c.label}`} placeholder="contiene…"
-                onChange={(e) => control.setFiltro(c.clave, e.target.value)}
-              />
-            )}
-            {c.tipo === "select" && (
-              <select
-                className={inputCls} value={control.filtros[c.clave] as string}
-                aria-label={`Filtrar ${c.label}`}
-                onChange={(e) => control.setFiltro(c.clave, e.target.value)}
-              >
-                <option value="">(todas)</option>
-                {(c.clave === "unidad" ? control.opcionesUnidad : control.opcionesStatus).map((o) => (
-                  <option key={o} value={o}>{c.clave === "status" ? etiquetaEstado(o) : o}</option>
-                ))}
-              </select>
-            )}
-            {c.tipo === "num" && <Rango clave={c.clave} label={c.label} control={control} />}
-          </TableHead>
-        ))}
+        {cols.map((c) => {
+          // El filtro de APU puede llevar el centinela de "sin APU" (lo pone el
+          // contador rojo de la corrida). El centinela se muestra como *placeholder*,
+          // no como value: así no hay texto que editar parcialmente y cualquier tecla
+          // arranca de vacío, como en un filtro normal.
+          const sinApuActivo = esCentinela(c.clave, control);
+          const opciones = c.clave === "unidad" ? control.opcionesUnidad
+            : c.clave === "status" ? control.opcionesStatus
+            : control.opcionesVeredicto;
+          const etiqueta = (o: string) => c.clave === "status" ? etiquetaEstado(o)
+            : c.clave === "veredicto" ? etiquetaVeredicto(o)
+            : o;
+          return (
+            <TableHead key={c.clave} className={`${c.ancho} py-1 align-top`}>
+              {c.tipo === "texto" && (
+                <input
+                  className={`${inputCls}${sinApuActivo ? " border-red-400 placeholder:text-red-700" : ""}`}
+                  value={sinApuActivo ? "" : (control.filtros[c.clave] as string)}
+                  placeholder={sinApuActivo ? "(sin APU)" : "contiene…"}
+                  aria-label={`Filtrar ${c.label}`}
+                  onChange={(e) => control.setFiltro(c.clave, e.target.value)}
+                />
+              )}
+              {c.tipo === "select" && (
+                <select
+                  className={inputCls} value={control.filtros[c.clave] as string}
+                  aria-label={`Filtrar ${c.label}`}
+                  onChange={(e) => control.setFiltro(c.clave, e.target.value)}
+                >
+                  <option value="">(todas)</option>
+                  {opciones.map((o) => (
+                    <option key={o} value={o}>{etiqueta(o)}</option>
+                  ))}
+                </select>
+              )}
+              {c.tipo === "num" && <Rango clave={c.clave} label={c.label} control={control} />}
+            </TableHead>
+          );
+        })}
+        {conAcciones && <TableHead className="w-24 py-1" />}
       </TableRow>
     </TableHeader>
   );

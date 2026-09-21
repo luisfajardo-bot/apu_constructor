@@ -9,16 +9,24 @@ export interface ListaPrecios {
   creada_en: string;
 }
 
-export interface Progreso {
-  i: number;
-  total: number;
-  descripcion: string;
-  fila?: ItemCuadro; // fila ya costeada del APU recién armado (para la tabla en vivo)
-}
-
-export interface CorridaIniciada {
+/** Respuesta de crear una corrida: se ENCOLÓ, no se armó. Armar 1900 líneas lleva
+ *  horas y la petición vuelve en el acto; el progreso sale del poll de la corrida. */
+export interface CorridaEncolada {
   id: number;
   total: number;
+  estado: string;
+}
+
+/** Cómo va el armado que corre en el servidor. `null` cuando la corrida ya terminó
+ *  de armarse: un progreso al 100 % que no se apaga es peor que nada. */
+export interface ProgresoArmado {
+  hechos: number;
+  total: number;
+  /** 0 = le toca ahora (o ya está armándose); > 0 = está esperando su turno. */
+  posicion_en_cola: number;
+  intentos: number;
+  /** Motivo por el que se rindió. Puede traer pegada la cola técnica del error real. */
+  ultimo_error: string | null;
 }
 
 export interface Totales {
@@ -28,6 +36,163 @@ export interface Totales {
   margen_pct: number;
   n_items: number;
   n_revision: number;
+}
+
+// ─── Revisión con IA ────────────────────────────────────────────────────────
+
+export type DictamenIA = "ok" | "dudoso" | "cambiar" | "sin_apu";
+
+export interface VeredictoIA {
+  seq: number;
+  dictamen: DictamenIA;
+  apu_sugerido: string | null;
+  turno_sugerido: string | null;
+  confianza: number; // 0..1
+  justificacion: string;
+  // barrido = triaje sin objeción (nunca miró la composición completa);
+  // profundo = la IA sí vio la composición del asignado y de cada candidato.
+  nivel: "barrido" | "profundo";
+}
+
+/** Progreso del stream de revisión. 'started' llega una vez con el total de filas;
+ *  'barriendo' llega una vez POR LOTE del barrido (así el stream no se queda mudo
+ *  en corridas grandes, donde el triaje son varias llamadas seguidas a la IA);
+ *  'barrido' llega una vez, al terminar el triaje completo. */
+export type ProgresoRevision =
+  // `lotes` viaja en el mismo 'started' (el backend lo calcula ANTES del primer
+  // yield justo para esto): así el triaje se puede pintar "0 de N" desde el
+  // arranque y no como un indeterminado de varios minutos. Opcional porque el
+  // dato es del contador, no del contrato mínimo del evento.
+  | { evento: "started"; total: number; lotes?: number }
+  | { evento: "barriendo"; lote: number; lotes: number }
+  | { evento: "barrido"; revisar: number; sin_respuesta: number[] };
+
+/** Resumen final ('done') de la revisión: conteo de filas por dictamen más las
+ *  que quedaron sin veredicto porque el barrido no las contestó. */
+export interface ResumenRevision {
+  total: number;
+  ok: number;
+  dudoso: number;
+  cambiar: number;
+  sin_apu: number;
+  sin_veredicto: number;
+}
+
+/** Un componente propuesto, con todo lo que lo explica. Espejo del contrato de
+ *  `apu_tool/dominio/composicion.py`. Ningún campo es monetario, a propósito. */
+export interface ComponentePropuesto {
+  codigo: string;
+  tipo: "insumo" | "apu";
+  funcion: string;              // "" = la IA no dijo un rol legible
+  rendimiento: number;
+  origen: string;
+  referencias: { apu_codigo: string; turno: string }[];
+  hipotesis: Record<string, unknown>;
+  calculo: {
+    operacion: string; numerador: number; denominador: number; resultado: number;
+  } | null;
+  justificacion: string;
+  nivel_evidencia: "alto" | "medio" | "bajo";
+  ref_shift: string;
+}
+
+export interface Hallazgo {
+  codigo: string;
+  mensaje: string;
+  componente: string;           // "" = hallazgo del conjunto, no de una fila
+}
+
+export interface ValidacionComposicion {
+  valido: boolean;
+  errores: Hallazgo[];
+  advertencias: Hallazgo[];
+  metricas: { superadas: number; totales: number };
+}
+
+/** El nivel lo calcula la plataforma. `incertidumbre_declarada` (lo que el modelo
+ *  dice de sí mismo) va aparte y NO influye: se muestra rotulada como dato suyo. */
+export type NivelConfianza = "alta" | "media" | "baja" | "insuficiente";
+
+export interface MotivoConfianza {
+  senal: string;
+  /** `detalle` y no `valor`: "valor" está en la denylist de privacidad del backend
+   *  (por valor_unitario / valor_total) y el guardián mira nombres de clave. */
+  detalle: string;
+  aporte: number;
+}
+
+export type EstadoComposicion =
+  | "generando" | "propuesta" | "editada" | "aprobada" | "rechazada" | "error";
+
+export interface ComposicionVersion {
+  corrida_id: number;
+  seq: number;
+  version: number;
+  estado: EstadoComposicion;
+  actividad: {
+    item: string; descripcion: string; unidad: string; cantidad: number;
+    shift: string;
+    /** Código IDU que manda el presupuesto. Si la línea quedó sin APU es porque ese
+     *  código no existe en la biblioteca, así que es el que debería llevar el APU
+     *  nuevo. Opcional: los expedientes creados antes de este cambio no lo traen. */
+    codigo_sugerido?: string;
+  };
+  ficha: null;                  // fase 2
+  propuesta: {
+    componentes: ComponentePropuesto[];
+    supuestos: { campo: string; supuesto: string; impacto: string }[];
+    incertidumbre_declarada: number;
+    justificacion: string;
+  } | null;
+  validacion: ValidacionComposicion | null;
+  confianza: NivelConfianza | null;
+  confianza_motivos: MotivoConfianza[] | null;
+  antecedentes: {
+    codigos_permitidos: string[];
+    apus_referencia: { codigo: string; turno: string }[];
+  } | null;
+  modelo: string | null;
+  prompt_version: string | null;
+  apu_codigo: string | null;
+  apu_turno: string | null;
+  autor: string | null;
+  creada_en: string;
+  motivo: string | null;
+}
+
+export interface EntradaCatalogo {
+  nombre: string;
+  unidad: string;
+  grupo: string;
+}
+
+export interface VistaComposicion {
+  vigente: ComposicionVersion | null;
+  historial: ComposicionVersion[];
+  /** Nombre y unidad de cada código de la propuesta vigente. Viene de la respuesta
+   *  y no de la fila persistida: la propuesta guarda lo que dijo el modelo (solo el
+   *  código) y el nombre se lee fresco del catálogo. Un código que no está en el
+   *  catálogo NO aparece acá — y eso es correcto, el validador ya emitió
+   *  CODIGO_INEXISTENTE y el usuario tiene que verlo. */
+  catalogo: Record<string, EntradaCatalogo>;
+  /** Modo de la corrida al momento de cargar el expediente. `congelada` = foto
+   *  inmutable: la mesa se apaga entera. Es una foto, no un estado en vivo — si la
+   *  congelan con la mesa abierta, el 409 de la primera escritura sigue siendo la
+   *  red (cubrir eso pedía un poll, que este repo no hace). */
+  corrida_modo: "activa" | "congelada";
+  /** Esta línea tiene un costo puesto a mano (igualado al contractual, ver
+   *  "Costo puesto a mano" en CLAUDE.md). Aprobar un APU lo reemplaza por el costo
+   *  calculado — `actualizar_eleccion` lo borra solo — así que la mesa avisa antes
+   *  de que desaparezca en silencio. Mismo criterio que `seqs_sin_apu`: > 0, no
+   *  `!= null`. */
+  costo_a_mano: boolean;
+}
+
+/** Un APU distinto por fila para aplicar sugerencias de la IA en un solo recosteo. */
+export interface AsignacionIA {
+  seq: number;
+  apu_codigo: string;
+  shift?: string;
 }
 
 export interface ItemCuadro {
@@ -47,6 +212,19 @@ export interface ItemCuadro {
   contractual_total: number;
   costo_total: number;
   margen_total: number;
+  /** El costo lo puso una persona (igualado al contractual), no lo calculó el motor. */
+  costo_manual: boolean;
+  // Veredicto de la última revisión con IA, o null si esta fila no se revisó.
+  revision: VeredictoIA | null;
+  // --- ruta IDU: vacíos/0 en una corrida plana, y ahí la columna no se muestra ---
+  /** "2" — la referencia estable del capítulo, no su nombre. */
+  capitulo_codigo: string;
+  capitulo_nombre: string;
+  /** El ítem de pago tal como venía en el Formulario 1 ("2,001-N"). */
+  item_pago_original: string;
+  /** Valor unitario básico SIN AIU. `precio_contractual` es el que INCLUYE AIU. */
+  precio_contractual_sin_aiu: number;
+  contractual_total_sin_aiu: number;
 }
 
 /** Una línea tal como la leyó el Excel, antes de armarse. */
@@ -105,11 +283,16 @@ export interface DetalleItem {
   apu_codigo: string;
   apu_turno: string;
   apu_nombre: string;
+  /** Código IDU que pedía el presupuesto (ruta IDU); "" en una corrida plana. */
+  codigo_sugerido: string;
+  /** Unidad del ítem de licitación. */
+  unidad: string;
   status: string;
   explicacion: string;
   candidatos: Candidato[];
   composicion: LineaComposicion[];
   costo_unitario: number;
+  costo_manual: boolean;
 }
 
 export interface Insumo {
@@ -227,6 +410,51 @@ export interface CorridaDetalle {
   transporte: TransporteCorrida | null;
   lista_precios_id: number | null;
   lista_nombre: string;
+  // Apaga el botón "Revisar con IA" cuando el servidor no tiene ANTHROPIC_API_KEY.
+  ia_disponible: boolean;
+  /** Solo con estado 'armando' o 'armado_detenido'; `null` si ya terminó de armarse. */
+  armado: ProgresoArmado | null;
+  /** Resumen por capítulo, ya sumado por el backend. `[]` si la corrida no tiene
+   *  capítulos. El frontend NO suma dinero: solo pinta lo que llega. */
+  capitulos: CapituloCorrida[];
+  /** De dónde salió el presupuesto. `null` en corridas anteriores a la ruta IDU. */
+  origen: OrigenCorrida | null;
+  /** Solo en la respuesta de `igualarCostoAlContractual`. */
+  igualadas?: number[];
+  /** Seqs con contractual ≤ 0: no se tocan (regla "nada en $0"). */
+  rechazadas?: number[];
+  /** Solo en la respuesta de aplicar una re-búsqueda. */
+  rebusqueda?: { aplicadas: number[]; salteadas: number[] };
+}
+
+/** Una línea de la vista previa de "volver a buscar APU". El costo y el margen
+ *  vienen calculados del backend: el frontend no suma plata. */
+export interface PropuestaRebusqueda {
+  seq: number;
+  item: string;
+  descripcion: string;
+  unidad: string;
+  cantidad: number;
+  apu_actual: { codigo: string; nombre: string } | null;
+  apu_propuesto: { codigo: string; nombre: string; turno: string };
+  score: number;
+  status: string;
+  explicacion: string;
+  precio_contractual: number;
+  costo_unitario: number;
+  margen_unitario: number;
+  margen_pct: number;
+  /** Si se marca sola en la previa. Lo decide el backend: hoy está en $0, salvo que
+   *  tenga una composición a medias (ahí aplicar dejaría el borrador huérfano). */
+  marcar_por_defecto: boolean;
+  /** Esta fila tiene un expediente de composición sin aprobar ni rechazar. */
+  composicion_pendiente: boolean;
+}
+
+export interface RebusquedaPrevia {
+  corrida_id: number;
+  escaneadas: number;
+  propuestas: PropuestaRebusqueda[];
 }
 
 export interface ListaInsumos {
@@ -251,6 +479,22 @@ export interface ImportConflicto {
   nombre: string;
   turno?: string;   // solo en el import de APUs
   motivo: string;
+  // Solo en los conflictos de CÓDIGO del import de insumos: el insumo contra el que se
+  // ofrece actualizar, para poder aplicarlo igual desde el preview.
+  campo?: "codigo" | "nombre";
+  insumo_id?: number;
+  nombre_actual?: string;
+  precio_actual?: number;
+  fuente_actual?: string;
+  parecido?: number;
+  // El precio que trae el archivo para esa fila. El backend arma la entrada con
+  // `{**f, ...}`, así que los campos de la fila parseada viajan también.
+  precio?: number;
+  // Señal, NO decisión: los números del nombre del archivo y del de la base coinciden.
+  // Se pinta como aviso en la fila; ninguna casilla viene marcada por el servidor.
+  numeros_coinciden?: boolean;
+  // `precio_actual` es 0.0 por el LEFT JOIN cuando no hay tarifa en la lista consultada.
+  sin_precio_actual?: boolean;
 }
 
 export interface ImportInsumosUpsertPreview {
@@ -260,11 +504,28 @@ export interface ImportInsumosUpsertPreview {
   no_encontrada: { codigo: string }[];
   invalida: InsumoImportFila[];
   conflicto?: ImportConflicto[];
+  // Filas que una importación pública NO pisa por tener hoy un precio interno.
+  protegida?: ImportProtegida[];
+  // Cómo clasificó el backend la fuente declarada. Se pinta para que se vea que
+  // "PRECIO IDU 2026" clasifica interno y por lo tanto NO protege nada.
+  clasificacion_import?: "publico" | "interno";
+}
+
+export interface ImportProtegida {
+  codigo: string;
+  nombre: string;
+  fuente_actual: string;
+  precio_actual: number;
+  precio_archivo: number | null;
 }
 
 export interface ImportUpsertResultado {
   creados: number;
   actualizados: number;
+  protegidos?: number;
+  // Filas que `preview_importar_insumos` descartó (ni precio en el archivo ni tarifa
+  // en la lista destino): no se escriben y sin esto desaparecían sin contar en nada.
+  invalidos?: number;
   errores: { codigo: string; error: string }[];
 }
 
@@ -466,4 +727,102 @@ export interface AjusteProyecto {
   nota?: string;
   creado_en?: string;
   creado_por?: string | null;
+}
+
+// ─── Ruta IDU (Formulario 1 de Presupuesto Oficial) ──────────────────────────
+
+/** De dónde salió el presupuesto. Espejo de `EntidadOrigen` del backend: valor
+ *  estable, no texto libre. Solo IDU tiene lector especializado hoy; las demás usan
+ *  el importador genérico a propósito. */
+export const ENTIDADES = [
+  { valor: "NO_IDENTIFICADA", etiqueta: "No identificada" },
+  { valor: "IDU", etiqueta: "IDU" },
+  { valor: "METRO_BOGOTA", etiqueta: "Metro de Bogotá" },
+  { valor: "INVIAS", etiqueta: "INVÍAS" },
+  { valor: "OTRA_PUBLICA", etiqueta: "Otra entidad pública" },
+  { valor: "PRIVADA", etiqueta: "Cliente privado" },
+] as const;
+
+export type Entidad = (typeof ENTIDADES)[number]["valor"];
+
+export interface AdvertenciaPresupuesto {
+  tipo: string;
+  /** Fila del Excel, 1-based. 0 = no aplica a una fila puntual. */
+  fila: number;
+  detalle: string;
+}
+
+export interface CapituloPrevia {
+  codigo: string;
+  nombre: string;
+  orden: number;
+  fila_origen: number;
+  actividades: number;
+  contractual: number;
+  contractual_sin_aiu: number;
+}
+
+/** Lo que se detectó en el archivo, ANTES de crear nada. */
+export interface PreviaPresupuesto {
+  entidad: Entidad;
+  formato: string;
+  archivo: string;
+  hoja: string;
+  fila_encabezado: number;
+  parser_version: string;
+  capitulos: CapituloPrevia[];
+  actividades: number;
+  filas_ignoradas: number;
+  totales: { contractual: number; contractual_sin_aiu: number };
+  conciliacion: {
+    contractual_con_aiu?: number;
+    contractual_sin_aiu?: number;
+    subtotales_excel?: number;
+    diferencia?: number;
+    subtotales_ok?: boolean;
+  };
+  errores: string[];
+  advertencias: AdvertenciaPresupuesto[];
+  /** Hasta 50 advertencias que apuntan a una fila concreta. */
+  filas_senaladas: AdvertenciaPresupuesto[];
+  /** Lo decide el SERVIDOR. El botón solo obedece; `POST /corridas` lo revalida. */
+  puede_aprobar: boolean;
+  requiere_confirmacion: boolean;
+}
+
+/** Una fila del resumen por capítulo de una corrida ya armada. Lo calcula el backend
+ *  (`dominio/report_categorizado.resumen_por_capitulo`): acá NO se suma dinero. */
+export interface CapituloCorrida {
+  codigo: string;
+  nombre: string;
+  orden: number;
+  actividades: number;
+  con_apu: number;
+  sin_apu: number;
+  contractual: number;
+  contractual_sin_aiu: number;
+  costo: number;
+  diferencia: number;
+  margen_pct: number;
+  /** Actividades con costo válido / actividades totales. */
+  cobertura: number;
+  /** Lo mismo, pero ponderado por contractual: un capítulo puede estar al 95 % por
+   *  conteo y a la mitad por plata si lo que falta son las actividades caras. */
+  cobertura_valor: number;
+  /** false = hay actividades sin costear; el margen NO es definitivo. */
+  completo: boolean;
+}
+
+/** Metadatos de importación de la corrida. */
+export interface OrigenCorrida {
+  entidad?: string;
+  formato?: string;
+  archivo?: string;
+  hoja?: string;
+  fila_encabezado?: number;
+  parser_version?: string;
+  importada_en?: string;
+  confirmada_por?: string;
+  capitulos?: number;
+  actividades?: number;
 }

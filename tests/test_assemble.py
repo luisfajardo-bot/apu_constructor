@@ -134,3 +134,49 @@ def test_item_sin_apu_queda_con_alerta_de_costeo(assembler):
     item = LicitacionItem("11", "SUMINISTRO DE REDES ELECTRICAS", "M3", 5, 0.0, "DIURNO")
     a = assembler.assemble_item(item)
     assert alertas_costeo(a), "un ítem en $0 nunca puede quedar sin alerta"
+
+
+def test_fallback_sin_candidatos_no_pide_elegir(assembler):
+    # "..." normaliza a cadena vacía (nucleo/texto.py::normalizar le quita toda la
+    # puntuación) y similarity() devuelve 0.0 si algún lado normaliza vacío, así que
+    # el matcher no guarda ni un candidato. Alcanzable con datos reales: una fila de
+    # encabezado de capítulo en la lista de licitación.
+    item = LicitacionItem("12", "...", "M3", 1, 0.0, "DIURNO")
+    assert assembler.matcher.match(item).candidatos == []
+
+    a = assembler.assemble_item(item)
+    assert a.apu_codigo is None
+    assert a.status == MatchStatus.NEW
+    assert "elige uno de los candidatos" not in a.explicacion.lower()
+
+
+class _AdvisorEspia:
+    """Revienta si el armado lo toca. El armado tiene que ser determinístico."""
+    def __getattr__(self, nombre):
+        # Cualquier atributo, no una lista de métodos que se desactualiza: cuando la
+        # composición vieja murió, este espía quedó vigilando `choose_apu` y
+        # `compose_apu`, que ya no existen, y habría dejado pasar un `componer`.
+        raise AssertionError(
+            f"assemble_item no debe tocar la IA (intentó usar '{nombre}')")
+
+
+def test_armado_nunca_llama_a_la_ia(assembler):
+    """El armado es determinístico: si toca a la IA, este test revienta."""
+    asm = Assembler(assembler.alm, advisor=_AdvisorEspia())
+
+    # Dudoso (banda REVIEW, score 0.7022 — ver test_fallback_sigue_asignando_arriba_del_piso):
+    # toma el mejor candidato, sin IA.
+    dudoso = LicitacionItem(item="1", descripcion="EXCAVACION MANUAL",
+                            unidad="M3", cantidad=1, precio_contractual=0, shift="DIURNO")
+    r1 = asm.assemble_item(dudoso)
+    assert r1.apu_codigo == "3009"
+    assert r1.status == MatchStatus.REVIEW
+
+    # Sin coincidencia (banda NEW, score 0.2303 — ver
+    # test_fallback_no_asigna_apu_por_debajo_del_piso): queda SIN APU, nunca generado.
+    nuevo = LicitacionItem(item="2", descripcion="SUMINISTRO DE REDES ELECTRICAS",
+                           unidad="M2", cantidad=1, precio_contractual=0, shift="DIURNO")
+    r2 = asm.assemble_item(nuevo)
+    assert r2.apu_codigo is None
+    assert r2.status == MatchStatus.NEW
+    assert r2.origen == "manual"

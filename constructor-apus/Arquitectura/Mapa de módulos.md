@@ -40,6 +40,7 @@ flowchart TD
 | `apus_db.py` | Acceso a apus.db (SQLite): biblioteca histórica de APUs (composición + rendimiento + turno). |
 | `auditoria_db.py` | Acceso SQLite a la tabla `auditoria` (vive en seguridad.db, junto a perfiles). |
 | `carpetas_db.py` | Acceso a la tabla `carpeta` (vive en corridas.db). Implementa RepositorioCarpetas. |
+| `composiciones_db.py` | Acceso a la tabla `composicion` (vive en corridas.db). Implementa |
 | `correcciones.py` | Correcciones de código aplicadas al semillar (normalización mínima). |
 | `corridas_db.py` | Acceso a corridas.db (SQLite): estado de aplicación de un armado en progreso. |
 | `migracion_pg.py` | Migración de catálogo SQLite → Postgres (Supabase). Corridas NO se migran. |
@@ -47,6 +48,7 @@ flowchart TD
 | `pg/apus_pg.py` | Backend Postgres de APUs. Implementa RepositorioApus. Port 1:1 de apus_db.py. |
 | `pg/auditoria_pg.py` | Backend Postgres de auditoría (seguridad.auditoria). Implementa RepositorioAuditoria. |
 | `pg/carpetas_pg.py` | Backend Postgres de carpetas. Implementa RepositorioCarpetas. Port de carpetas_db.py. |
+| `pg/composiciones_pg.py` | Backend Postgres del expediente de composición. Implementa RepositorioComposiciones. |
 | `pg/conexion.py` | Pool de conexiones Postgres (Supabase) para el backend de nube. |
 | `pg/corridas_pg.py` | Backend Postgres de corridas. Implementa RepositorioCorridas. Port de corridas_db.py. |
 | `pg/perfiles_pg.py` | Acceso Postgres a seguridad.perfiles. Implementa RepositorioPerfiles. Port de perfiles_db. |
@@ -59,21 +61,26 @@ flowchart TD
 
 | Archivo | Responsabilidad |
 | --- | --- |
-| `ai_assist.py` | Capa de IA acotada para decidir la ESTRUCTURA de los APUs. |
+| `ai_assist.py` | Capa de IA acotada para COMPONER la estructura de un APU, a pedido. |
 | `alertas.py` | Alertas de costeo: motivos por los que un ítem necesita revisión de costo. |
 | `assemble.py` | Orquestador del pipeline por ítem. |
 | `compose.py` | Recuperación de insumos candidatos para la composición generativa. |
+| `composicion.py` | Contrato de la composición asistida. |
+| `composicion_agente.py` | Orquestador de la composición asistida. |
 | `cruce.py` | Resolución del cruce insumo-de-APU -> insumo-de-catálogo, por código + nombre. |
+| `entrada.py` | Qué lector le toca a cada entidad. El ÚNICO punto de despacho. |
 | `integridad.py` | Chequeo de integridad del vínculo APU -> insumo (que cruza las dos bases). |
 | `licitacion.py` | Lectura de la lista de licitación (entrada) y generación de un ejemplo. |
 | `matching.py` | Matcher determinístico de actividades contra el catálogo de APUs. |
 | `pipeline.py` | Funciones de alto nivel que orquestan el pipeline completo. |
-| `presupuesto.py` | Lectura del presupuesto oficial por capítulos (hoja FOR 1-PPTO OFICIAL). |
+| `presupuesto.py` | Lectura del Formulario 1 de Presupuesto Oficial del IDU, por capítulos. |
 | `pricing.py` | Motor de precios determinístico. |
 | `privacy.py` | Frontera de privacidad de precios. |
 | `report.py` | Generación del cuadro resumen (salida en Excel). |
 | `report_categorizado.py` | Cuadro resumen agrupado por capítulos del presupuesto. |
+| `revision.py` | Revisión con IA de una corrida YA armada. |
 | `transporte.py` | Desviaciones de un proyecto respecto de la biblioteca de APUs. |
+| `validacion_composicion.py` | Validación determinística de una propuesta de composición. |
 
 ## servicio/ — API web (FastAPI)
 
@@ -82,10 +89,12 @@ flowchart TD
 | `ajustes.py` | Ajustes puntuales de composición por proyecto: las excepciones que decide el |
 | `app.py` | App FastAPI: monta /api y, si existe el build, sirve el frontend (web/dist). |
 | `apus.py` | Lectura de la biblioteca de APUs (para la página de APUs). |
+| `armador.py` | El worker del armado: un hilo que consume la cola que vive en la base. |
 | `auditoria.py` | Servicio de auditoría: helper transaccional para registrar eventos y lectura paginada. |
 | `auth.py` | Autenticación (Supabase Auth) y autorización (RBAC) para la API. |
 | `autoria.py` | Lógica de servicio para AGREGAR a la base: insumos y APUs nuevos. |
 | `carpetas.py` | Servicio de carpetas: reglas de negocio (profundidad máx. 2, unicidad de |
+| `composicion.py` | Lógica de servicio del expediente de composición asistida. |
 | `corridas.py` | Lógica de la capa de servicio para las corridas (armado web). |
 | `dependencias.py` | Inyección de dependencias de la API: el Almacen vive en app.state. |
 | `esquemas.py` | DTOs del contrato HTTP. Las respuestas de cuadro/ítems se devuelven como dict. |

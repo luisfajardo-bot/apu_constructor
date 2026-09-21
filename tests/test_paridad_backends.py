@@ -9,7 +9,7 @@ from apu_tool.datos.precios_db import PreciosDB
 from apu_tool.datos.pg.precios_pg import PreciosPg
 from apu_tool.datos.corridas_db import CorridasDB
 from apu_tool.datos.pg.corridas_pg import CorridasPg
-from apu_tool.datos.repositorio import RepositorioPrecios
+from apu_tool.datos.repositorio import RepositorioPrecios, RepositorioCorridas
 
 # Métodos públicos que existen en un backend pero NO forman parte del contrato
 # (RepositorioPrecios): son detalle de implementación de CADA backend, no algo
@@ -94,3 +94,18 @@ def test_mismos_nombres_de_parametros_corridas():
         p_sq = list(inspect.signature(sq[nombre]).parameters)
         p_pg = list(inspect.signature(pg[nombre]).parameters)
         assert p_sq == p_pg, f"{nombre}: SQLite {p_sq} != Postgres {p_pg}"
+
+
+def test_firmas_coinciden_con_el_protocol_corridas():
+    """Mismo razonamiento que en Precios: comparar los dos backends SOLO entre sí
+    deja pasar el drift donde AMBOS cambian una firma y se olvidan del Protocol,
+    que es el contrato real que consume `servicio/`. Tercera fuente de verdad."""
+    sq = _publicos(CorridasDB)
+    for nombre in sorted(sq):
+        fn_protocol = RepositorioCorridas.__dict__.get(nombre)
+        assert fn_protocol is not None, (
+            f"{nombre}: es público en CorridasDB pero el Protocol no lo declara")
+        p_sq = list(inspect.signature(sq[nombre]).parameters)
+        p_protocol = list(inspect.signature(fn_protocol).parameters)
+        assert p_sq == p_protocol, (
+            f"{nombre}: implementación {p_sq} != Protocol {p_protocol}")

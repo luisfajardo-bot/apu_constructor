@@ -7,17 +7,17 @@ import DefinirClave from "@/pages/DefinirClave";
 import MisCorridas from "@/pages/MisCorridas";
 import CorridasInicio from "@/pages/CorridasInicio";
 import Corrida from "@/pages/Corrida";
+import Composicion from "@/pages/Composicion";
 import Insumos from "@/pages/Insumos";
 import Apus from "@/pages/Apus";
 import Usuarios from "@/pages/Usuarios";
 import Auditoria from "@/pages/Auditoria";
 import DistanciasProyecto from "@/pages/DistanciasProyecto";
 import ClasificacionTransporte from "@/pages/ClasificacionTransporte";
-import { ArmadoVivoProvider } from "@/lib/armado";
 
 export default function App() {
   return (
-    <ArmadoVivoProvider>
+    <>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/definir-clave" element={<DefinirClave />} />
@@ -27,6 +27,7 @@ export default function App() {
             <Route path="corridas" element={<MisCorridas />} />
             <Route path="corridas/nueva" element={<CorridasInicio />} />
             <Route path="corridas/:id" element={<Corrida />} />
+            <Route path="corridas/:id/componer/:seq" element={<Composicion />} />
             <Route path="insumos" element={<Insumos />} />
             <Route path="apus" element={<Apus />} />
             <Route path="proyecto/:carpetaId/distancias" element={<DistanciasProyecto />} />
@@ -40,6 +41,6 @@ export default function App() {
       </Routes>
       {/* Toaster global: cubre también /login y /definir-clave (fuera del Layout). */}
       <Toaster richColors position="top-right" />
-    </ArmadoVivoProvider>
+    </>
   );
 }

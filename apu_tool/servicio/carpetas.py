@@ -10,8 +10,10 @@ import sqlite3
 from typing import Optional
 
 from apu_tool.datos.almacen import Almacen
+from apu_tool.datos.repositorio import ArmadoDuplicado
 from apu_tool.nucleo.models import Carpeta
 from apu_tool.servicio.auditoria import registrar_auditoria
+from apu_tool.servicio.corridas import ARMANDO_O_A_MEDIAS, armado_en_curso
 
 
 class CarpetaInvalida(Exception):
@@ -158,6 +160,15 @@ def mover_corrida(alm: Almacen, corrida_id: int, carpeta_id: int, actor=None) ->
         return False
     if alm.carpetas.get(carpeta_id) is None:
         raise CarpetaInvalida("La carpeta destino no existe.")
+    # Mover es un UPDATE de `carpeta_id`, así que también lo mira
+    # `ux_corrida_armando_archivo`: si el destino ya tiene un armado a medias de este
+    # archivo, el UPDATE reventaba con un error de integridad crudo. Se avisa antes,
+    # con el id del que lo ocupa. `!= corrida_id` porque moverla a su propia carpeta
+    # es un no-op y ahí el que "ocupa" el destino es ella misma.
+    if meta.estado in ARMANDO_O_A_MEDIAS:
+        ocupada = armado_en_curso(alm, carpeta_id, meta.archivo)
+        if ocupada is not None and ocupada != corrida_id:
+            raise ArmadoDuplicado(meta.archivo, ocupada)
     with alm.transaccion("corridas") as conn:
         # Mutación + auditoría en la MISMA transacción; el repo es agnóstico de dialecto.
         alm.corridas.set_carpeta(corrida_id, carpeta_id, conn=conn)

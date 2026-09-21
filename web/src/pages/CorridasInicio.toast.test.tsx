@@ -14,8 +14,10 @@ import { expect, test, vi } from "vitest";
 import { Toaster } from "sonner";
 import CorridasInicio from "./CorridasInicio";
 
-vi.mock("@/lib/armado", () => ({
-  useArmadoVivo: () => ({ armarArchivo: vi.fn(), armarEjemplo: vi.fn() }),
+vi.mock("@/api/corridas", async (original) => ({
+  ...(await original<object>()),
+  crearCorrida: vi.fn(),
+  crearSample: vi.fn(),
 }));
 
 vi.mock("@/api/carpetas", () => ({

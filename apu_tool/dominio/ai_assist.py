@@ -1,102 +1,145 @@
 ﻿"""
-Capa de IA acotada para decidir la ESTRUCTURA de los APUs.
+Capa de IA acotada para COMPONER la estructura de un APU, a pedido.
 
-Qué hace la IA:
-  - Para ítems dudosos o nuevos, elige cuál APU del histórico es el más adecuado
-    como base (por afinidad técnica de la actividad y de sus insumos), con un nivel
-    de confianza y una justificación corta.
+Qué hace la IA acá:
+  - Para una actividad sin APU adecuado en la biblioteca, y SOLO cuando el usuario
+    lo pide explícitamente (el orquestador `dominio/composicion_agente.py`), propone
+    una composición: qué insumos, con qué rendimiento y POR QUÉ. Es una PROPUESTA;
+    se confirma por el alta normal de APUs, nadie la costea a espaldas del usuario.
 
 Qué NO hace la IA:
+  - No participa del armado de corridas. El armado es determinístico (assemble.py):
+    elige entre los APUs del histórico o deja la fila SIN APU, nunca inventa.
   - No ve precios, costos ni totales (ver privacy.py). Recibe únicamente
     actividades, insumos, unidades y rendimientos.
-  - No calcula dinero. El costo lo arma el motor determinístico (pricing.py) a
-    partir del APU que la IA eligió.
+  - No calcula dinero. El costo lo arma el motor determinístico (pricing.py).
 
-Si no hay credenciales (ANTHROPIC_API_KEY) o falla la llamada, se usa un fallback
-determinístico basado en el matcher. El programa nunca depende de la IA para correr.
+La auditoría de una corrida YA armada vive aparte, en `dominio/revision.py`.
+
+Sin credenciales (ANTHROPIC_API_KEY) `componer` levanta `IANoDisponible` y el ítem
+queda manual: el programa nunca depende de la IA para correr.
 """
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from typing import Optional
 
 from apu_tool import config
 from apu_tool.dominio import privacy
-from apu_tool.dominio.compose import CandidateInsumo, candidate_insumo_to_dict
-from apu_tool.nucleo.models import DePricedApu, LicitacionItem, MatchCandidate
-
-_SYSTEM_PROMPT = """\
-Eres un ingeniero de costos de obra civil. Te dan una ACTIVIDAD de una licitación y
-una lista de APUs candidatos del histórico de la empresa (cada uno con su unidad y su
-composición de insumos con rendimientos). Tu tarea es elegir cuál APU candidato es la
-mejor base para armar el APU de la actividad, por afinidad técnica.
-
-Reglas:
-- Decides SOLO con base en la actividad, las unidades, los insumos y los rendimientos.
-- NUNCA recibirás precios ni costos, y no debes inventarlos ni pedirlos.
-- Si ningún candidato es razonable, devuelve apu_codigo = null.
-- Prefiere coincidencia de unidad y de tipo de trabajo (excavación, concreto, etc.).
-
-Responde EXCLUSIVAMENTE con un JSON válido con este esquema:
-{"apu_codigo": <string|null>, "confianza": <number 0..1>, "justificacion": <string corto>}
-"""
-
-_RESPONSE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "apu_codigo": {"type": ["string", "null"]},
-        "confianza": {"type": "number"},
-        "justificacion": {"type": "string"},
-    },
-    "required": ["apu_codigo", "confianza", "justificacion"],
-    "additionalProperties": False,
-}
+from apu_tool.dominio.composicion import (
+    FUNCIONES, NIVELES_EVIDENCIA, OPERACIONES, ORIGENES, Propuesta,
+    propuesta_desde_json,
+)
 
 
-@dataclass
-class AIDecision:
-    apu_codigo: Optional[str]
-    confianza: float
-    justificacion: str
-    fuente: str  # "ia" o "deterministico"
+class IANoDisponible(RuntimeError):
+    """La IA no se puede usar por CONFIGURACIÓN del servidor: falta
+    `ANTHROPIC_API_KEY`, falta el SDK, o la credencial que hay no sirve. Es distinto
+    de "la IA no contestó" (un 429, un timeout, un JSON truncado): eso se reintenta,
+    esto hay que ir a arreglarlo. Vive acá, en la fachada de la IA, porque las dos
+    puertas al SDK la necesitan — `ApuAdvisor.componer` y `revision.Revisor._pedir`."""
 
 
-@dataclass
-class ComposedComponent:
-    insumo_codigo: str
-    rendimiento: float
+MSG_CREDENCIAL = ("La credencial de la IA (ANTHROPIC_API_KEY) no es válida o fue "
+                  "revocada: revísala en el servidor.")
+
+# 401 = credencial inválida/revocada; 403 = sin permiso (p. ej. para este modelo).
+# Se mira `status_code` y no la clase del SDK a propósito: `anthropic` es dependencia
+# OPCIONAL y este módulo se importa siempre, así que no se puede hacer
+# `except anthropic.AuthenticationError` sin volverla obligatoria.
+_ESTADOS_DE_CREDENCIAL = (401, 403)
 
 
-@dataclass
-class ComposeResult:
-    componentes: list[ComposedComponent]
-    justificacion: str
-    confianza: float
+def credencial_invalida(exc: BaseException) -> bool:
+    """¿Este fallo es de credencial, y no un 429/500/timeout que conviene tragarse?"""
+    return getattr(exc, "status_code", None) in _ESTADOS_DE_CREDENCIAL
 
 
-_COMPOSE_SYSTEM = """\
-Eres un ingeniero de costos de obra civil. Te dan una ACTIVIDAD nueva (sin un APU
-histórico adecuado), una lista de INSUMOS disponibles (con código, nombre y unidad)
-y algunos APUs de actividades parecidas como ejemplo (con sus insumos y rendimientos).
+MSG_SIN_SALDO = ("La cuenta de Anthropic del servidor no tiene saldo. Compra "
+                 "créditos en console.anthropic.com (Plans & Billing) y vuelve a "
+                 "intentar.")
 
-Tu tarea: armar la composición del APU de la actividad, eligiendo insumos de la lista
-disponible y asignando a cada uno un RENDIMIENTO (cantidad de insumo por unidad de la
-actividad) con criterio técnico, guiándote por los ejemplos.
+# Un 400 por saldo agotado NO es un fallo pasajero que convenga reintentar: es
+# configuración del servidor, igual que una credencial vencida, y hay que decirlo con
+# el mismo detalle. Sin esto la API mandaba "Your credit balance is too low" —
+# perfectamente accionable— y el usuario leía "Error interno", buscando en la
+# aplicación un problema que estaba en la consola de Anthropic.
+#
+# Se mira el TEXTO porque la API no da un código propio para este caso: el estado es
+# 400 y el tipo `invalid_request_error`, los mismos que un esquema mal armado (que sí
+# es un bug nuestro). Es frágil a que Anthropic cambie la redacción, y por eso el
+# degradado es seguro: si deja de coincidir, se vuelve al comportamiento de antes
+# —mensaje genérico y traceback completo en el log—, no a un error peor.
+_SENALES_SIN_SALDO = ("credit balance", "purchase credits", "plans & billing")
+
+
+def sin_saldo(exc: BaseException) -> bool:
+    """¿Este 400 es por saldo agotado, y no por un payload mal armado?"""
+    if getattr(exc, "status_code", None) != 400:
+        return False
+    texto = str(getattr(exc, "message", "") or exc).lower()
+    return any(s in texto for s in _SENALES_SIN_SALDO)
+
+
+# Versión del prompt de composición. Se guarda con cada propuesta: sin esto, cuando el
+# modelo empiece a proponer distinto no hay forma de saber si cambió el modelo o el
+# prompt. Se sube A MANO al tocar `_SISTEMA_COMPOSICION` o `_ESQUEMA_COMPOSICION`.
+PROMPT_VERSION = "composicion/v4"
+
+_SISTEMA_COMPOSICION = """\
+Eres un ingeniero de costos de obra civil. Te dan una ACTIVIDAD de licitación que no
+tiene un APU adecuado en la biblioteca histórica, una lista cerrada de INSUMOS
+DISPONIBLES (código, nombre, unidad, grupo), APUs DE REFERENCIA técnicamente cercanos
+con su composición, y RENDIMIENTOS OBSERVADOS: con qué cantidades aparece cada insumo
+en la biblioteca.
+
+Tu tarea: proponer la composición del APU y EXPLICAR cada componente.
 
 Reglas estrictas:
-- Usa ÚNICAMENTE códigos de insumo que estén en la lista de insumos disponibles.
+- Usa ÚNICAMENTE códigos de la lista de insumos disponibles. Un código que no esté ahí
+  se rechaza entero: no inventes ninguno.
 - NUNCA recibirás precios ni costos, y no debes inventarlos ni pedirlos.
-- Incluye típicamente mano de obra (cuadrilla), equipo/herramienta y materiales según
-  corresponda a la actividad. Entre 2 y 12 insumos.
-- Los rendimientos deben ser cantidades físicas razonables por unidad de la actividad.
+- Los rendimientos son cantidades FÍSICAS por unidad de la actividad.
+- En `rendimientos_observados`, `descartados_otra_unidad` cuenta filas del mismo
+  insumo medidas en OTRA unidad, que quedaron fuera del rango. Un `n` alto con
+  descartes altos es evidencia más débil de lo que parece.
+- Cuando derives un rendimiento de una hipótesis de producción, escribe la fórmula en
+  `calculo`: la aritmética la verifica un programa y su resultado manda sobre el tuyo;
+  esfuérzate en la hipótesis, no en la cuenta.
+- `hipotesis` es el razonamiento productivo detrás del rendimiento, en pares
+  clave-valor: por ejemplo {"horas_jornada": 8, "produccion_por_jornada": 96,
+  "unidad_produccion": "m3/dia"}. No se valida, se le muestra a un ingeniero de costos
+  para que pueda discutir el criterio y no solo el número. Si el rendimiento viene
+  copiado de un antecedente y no de una hipótesis propia, manda {}.
+- `funcion` es el ROL del insumo dentro del APU, del vocabulario cerrado. No es el
+  nombre de la actividad; eso va en `justificacion`.
+- `origen` dice de dónde sale el rendimiento, y es lo que la plataforma usa para
+  medir cuánto respaldo tiene la propuesta. Sé honesto:
+  - "copiado_de_antecedente": lo tomaste igual de un APU de referencia. Cítalo.
+  - "ajustado_de_antecedente": partiste de uno y lo moviste por una razón que
+    explicas en `justificacion`. Cítalo igual. Si además hiciste una cuenta, usa
+    este valor y manda igual el `calculo`.
+  - "calculado_desde_produccion": lo derivaste de una hipótesis. Manda `calculo`.
+  - "supuesto_tecnico": lo pusiste por criterio, sin antecedente ni cuenta. Declara
+    el supuesto en `supuestos`.
+  - "sin_evidencia": no tienes en qué apoyarte. Es una respuesta legítima y
+    preferible a inventar un respaldo.
+- `nivel_evidencia` es qué tan firme es ese respaldo: "alto" si el antecedente es
+  directamente comparable, "medio" si hay que extrapolar, "bajo" si es analogía
+  lejana.
+- `referencias` solo puede citar APUs que estén en los de referencia que te dimos.
+- Si algún dato que falta cambiaría materialmente la composición, decláralo en
+  `supuestos` en vez de inventarlo en silencio: declararlos baja la confianza mucho
+  menos que esconderlos.
+- `incertidumbre_declarada`: 0 = no tienes ninguna duda, 1 = es pura conjetura. Es lo
+  CONTRARIO de una confianza; no lo llenes como si fuera "qué tan seguro estás".
+- Incluye típicamente mano de obra o equipo, herramienta y materiales según la
+  actividad. Entre 2 y 12 componentes.
 
-Responde EXCLUSIVAMENTE con un JSON válido con este esquema:
-{"componentes": [{"insumo_codigo": <string>, "rendimiento": <number>}],
- "confianza": <number 0..1>, "justificacion": <string corto>}
+Responde EXCLUSIVAMENTE con un JSON válido con el esquema pedido.
 """
 
-_COMPOSE_SCHEMA = {
+_ESQUEMA_COMPOSICION = {
     "type": "object",
     "properties": {
         "componentes": {
@@ -104,180 +147,151 @@ _COMPOSE_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "insumo_codigo": {"type": "string"},
+                    "codigo": {"type": "string"},
+                    # En esta fase el enum es MÁS CORTO que el vocabulario del
+                    # contrato, a propósito: la lista blanca solo lleva códigos de
+                    # insumo (el retriever filtra los sub-APUs), así que `tipo="apu"`
+                    # y `funcion="sub_apu"` son trampas — el validador los rechaza
+                    # siempre. El contrato y el validador SÍ soportan sub-APUs; lo que
+                    # falta es que la IA los proponga, y eso es la fase 3. Cuando
+                    # llegue, esto vuelve a `list(TIPOS)` y `list(FUNCIONES)`.
+                    "tipo": {"type": "string", "enum": ["insumo"]},
+                    "funcion": {"type": "string",
+                                "enum": [f for f in FUNCIONES if f != "sub_apu"]},
                     "rendimiento": {"type": "number"},
+                    "origen": {"type": "string", "enum": list(ORIGENES)},
+                    "referencias": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"apu_codigo": {"type": "string"},
+                                           "turno": {"type": "string"}},
+                            "required": ["apu_codigo", "turno"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "hipotesis": {"type": "object", "additionalProperties": True},
+                    "calculo": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "operacion": {"type": "string",
+                                          "enum": list(OPERACIONES)},
+                            "numerador": {"type": "number"},
+                            "denominador": {"type": "number"},
+                            "resultado": {"type": "number"},
+                        },
+                        "required": ["operacion", "numerador", "denominador",
+                                     "resultado"],
+                        "additionalProperties": False,
+                    },
+                    "justificacion": {"type": "string"},
+                    "nivel_evidencia": {"type": "string",
+                                        "enum": list(NIVELES_EVIDENCIA)},
                 },
-                "required": ["insumo_codigo", "rendimiento"],
+                "required": ["codigo", "tipo", "funcion", "rendimiento", "origen",
+                             "referencias", "hipotesis", "calculo", "justificacion",
+                             "nivel_evidencia"],
                 "additionalProperties": False,
             },
         },
-        "confianza": {"type": "number"},
+        "supuestos": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"campo": {"type": "string"},
+                               "supuesto": {"type": "string"},
+                               "impacto": {"type": "string"}},
+                "required": ["campo", "supuesto", "impacto"],
+                "additionalProperties": False,
+            },
+        },
+        "incertidumbre_declarada": {"type": "number", "minimum": 0, "maximum": 1},
         "justificacion": {"type": "string"},
     },
-    "required": ["componentes", "confianza", "justificacion"],
+    "required": ["componentes", "supuestos", "incertidumbre_declarada",
+                 "justificacion"],
     "additionalProperties": False,
 }
 
 
 class ApuAdvisor:
-    """Fachada sobre la IA con fallback determinístico."""
+    """Fachada sobre la IA. Sin credenciales, `componer` levanta `IANoDisponible`."""
 
     def __init__(self, enabled: Optional[bool] = None, model: str = config.AI_MODEL):
         self.model = model
         self.enabled = config.ai_available() if enabled is None else enabled
         self._client = None
+        # Dos causas de "no se puede", dos mensajes: sin este flag, un SDK no
+        # instalado se reportaba como "falta ANTHROPIC_API_KEY" y mandaba a revisar
+        # la variable equivocada. Mismo criterio que `Revisor._pedir`.
+        self._sdk_ausente = False
         if self.enabled:
             try:
                 import anthropic
                 self._client = anthropic.Anthropic()
             except Exception:
-                self.enabled = False  # sin SDK -> fallback
+                self.enabled = False  # sin SDK -> componer levanta IANoDisponible
+                self._sdk_ausente = True
 
-    # ------------------------------------------------------------------ API
-    def choose_apu(
-        self,
-        item: LicitacionItem,
-        candidatos: list[MatchCandidate],
-        depriced_apus: dict[str, DePricedApu],
-    ) -> AIDecision:
-        """Elige el mejor APU base. `depriced_apus` mapea codigo -> composición SIN dinero."""
-        if not candidatos:
-            return AIDecision(None, 0.0, "Sin candidatos.", "deterministico")
+    def componer(self, item, insumos, ejemplos, observados) -> Propuesta:
+        """Una llamada al modelo con el contrato v2. Devuelve la propuesta PARSEADA.
 
-        if self.enabled and self._client is not None:
-            try:
-                return self._choose_with_ai(item, candidatos, depriced_apus)
-            except Exception as exc:  # cualquier fallo -> fallback, nunca rompe
-                dec = self._choose_deterministic(candidatos)
-                dec.justificacion += f" (IA no disponible: {type(exc).__name__})"
-                return dec
-        return self._choose_deterministic(candidatos)
+        No valida nada: eso es de `dominio/validacion_composicion.py`, que además
+        recalcula la aritmética. Acá solo se habla con el modelo y se lee lo que dijo.
 
-    def compose_apu(
-        self,
-        item: LicitacionItem,
-        insumos: list[CandidateInsumo],
-        ejemplos: list[DePricedApu],
-    ) -> Optional[ComposeResult]:
-        """Compone un APU desde cero para una actividad nueva.
-
-        Devuelve None si la IA no está disponible (en ese caso el ítem queda manual).
-        Los rendimientos los pone la IA; los precios NO los ve.
+        Una respuesta ilegible da una propuesta VACÍA, que el validador rechaza con
+        `PROPUESTA_VACIA`. Nadie sale por válido por accidente — misma regla que
+        `revision.Revisor.profundizar`, que degrada a "dudoso".
         """
-        if not (self.enabled and self._client is not None) or not insumos:
-            return None
-        codigos_validos = {i.codigo for i in insumos}
-        payload = {
-            "actividad": privacy.licitacion_item_to_dict(item),
-            "insumos_disponibles": [candidate_insumo_to_dict(i) for i in insumos],
-            "ejemplos": [privacy.depriced_apu_to_dict(a) for a in ejemplos],
-        }
+        if not self.enabled or self._client is None:
+            if getattr(self, "_sdk_ausente", False):
+                raise IANoDisponible(
+                    "Componer un APU con IA necesita el SDK de anthropic instalado "
+                    "en el servidor.")
+            raise IANoDisponible(
+                "Componer un APU con IA necesita ANTHROPIC_API_KEY en el servidor.")
+        if not insumos:
+            # Sin lista blanca no hay nada entre lo que elegir: pedírselo igual sería
+            # invitarlo a inventar códigos, que es lo único que el contrato prohíbe.
+            raise ValueError("No hay insumos candidatos para esta actividad.")
+        payload = privacy.payload_composicion(item, insumos, ejemplos, observados)
+        # FUERA del try: el invariante #1 nunca se traga. Adentro, una PrivacyViolation
+        # saldría por el `except` de abajo y el usuario leería "la IA no pudo componer"
+        # mientras nadie se entera de que saltó el guardián. Mismo criterio que
+        # `revision.barrer_lote`.
+        contenido = privacy.safe_json(payload)
         try:
-            user_content = privacy.safe_json(payload)  # garantía: sin dinero
-            resp = self._client.messages.create(
-                model=self.model,
-                # Techo, no gasto: cubre el pensamiento adaptativo MÁS el JSON.
-                # Si queda corto, el JSON sale truncado y se pierde la respuesta.
-                max_tokens=16000,
-                system=_COMPOSE_SYSTEM,
-                thinking={"type": "adaptive"},
-                output_config={
-                    "effort": "medium",
-                    "format": {"type": "json_schema", "schema": _COMPOSE_SCHEMA},
-                },
-                messages=[{"role": "user", "content": user_content}],
-            )
-            text = next((b.text for b in resp.content if b.type == "text"), "{}")
-            data = json.loads(text)
+            resp = self._pedir_al_sdk(_SISTEMA_COMPOSICION, _ESQUEMA_COMPOSICION,
+                                      contenido, "medium")
+        except Exception as exc:
+            if credencial_invalida(exc):
+                raise IANoDisponible(MSG_CREDENCIAL) from exc
+            if sin_saldo(exc):
+                raise IANoDisponible(MSG_SIN_SALDO) from exc
+            raise
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            # Truncada, no vacía. Sin esto el usuario lee "la IA no propuso ningún
+            # componente" y va a revisar la actividad, cuando el problema es el techo.
+            raise RuntimeError(
+                "La respuesta de la IA se cortó por longitud: vuelve a intentar o "
+                "reduce la cantidad de insumos candidatos.")
+        texto = next((b.text for b in resp.content if b.type == "text"), "{}")
+        try:
+            data = json.loads(texto)
         except Exception:
-            return None
+            return Propuesta()   # JSON truncado: propuesta vacía, no una mentira
+        return propuesta_desde_json(data)
 
-        comps: list[ComposedComponent] = []
-        for c in data.get("componentes", []):
-            cod = str(c.get("insumo_codigo", "")).strip()
-            rend = float(c.get("rendimiento", 0) or 0)
-            if cod in codigos_validos and rend > 0:
-                comps.append(ComposedComponent(cod, rend))
-        if not comps:
-            return None
-        return ComposeResult(
-            componentes=comps,
-            justificacion=str(data.get("justificacion", "")).strip(),
-            confianza=float(data.get("confianza", 0.0)),
-        )
-
-    # --------------------------------------------------------------- interno
-    def _choose_deterministic(self, candidatos: list[MatchCandidate]) -> AIDecision:
-        best = candidatos[0]
-        # PISO: por debajo de MATCH_REVIEW el "mejor" candidato es ruido, no una
-        # elección. Devolvía candidatos[0] sin mirar umbral, así que un 25% de
-        # parecido de nombre producía un APU asignado y un precio de seis cifras con
-        # pinta de autoritativo. Caso real de producción (2026-08-04): una
-        # "Localización y replanteo" quedó costeada como PEDESTAL DE CONCRETO —
-        # 2010 veces el costo correcto, y el margen etiquetado "0.0%".
-        #
-        # Con apu_codigo=None, assemble_item intenta la composición generativa y, si
-        # no hay IA, marca el ítem como manual en $0 CON alerta. Los candidatos se
-        # siguen guardando aparte (corridas.py), así que la lista con "Elegir" sigue
-        # ahí: no deja al usuario sin salida, le pide la decisión que no se puede
-        # tomar sola. Mejor un $0 con alerta que un número inventado.
-        #
-        # El piso NO se aplica a _choose_with_ai a propósito: la IA sí ve la
-        # composición de cada candidato (insumos, rendimientos, unidad), así que
-        # puede elegir con criterio uno cuyo nombre puntúe bajo. Filtrarla por
-        # similaridad de nombre la reduciría a un matcher fuzzy con más pasos.
-        if best.score < config.MATCH_REVIEW:
-            return AIDecision(
-                apu_codigo=None, confianza=best.score,
-                justificacion=(
-                    f"Mejor coincidencia {best.score:.0%}, por debajo del mínimo de "
-                    f"{config.MATCH_REVIEW:.0%} para asignar un APU. "
-                    f"Elige uno de los candidatos o ármalo a mano."
-                ),
-                fuente="deterministico",
-            )
-        return AIDecision(
-            apu_codigo=best.apu_codigo, confianza=best.score,
-            justificacion=f"Mejor similaridad de nombre ({best.score:.0%}).",
-            fuente="deterministico",
-        )
-
-    def _choose_with_ai(
-        self,
-        item: LicitacionItem,
-        candidatos: list[MatchCandidate],
-        depriced_apus: dict[str, DePricedApu],
-    ) -> AIDecision:
-        payload = {
-            "actividad": privacy.licitacion_item_to_dict(item),
-            "candidatos": [
-                privacy.depriced_apu_to_dict(depriced_apus[c.apu_codigo])
-                for c in candidatos
-                if c.apu_codigo in depriced_apus
-            ],
-        }
-        # Verificación dura: si esto contuviera dinero, lanza PrivacyViolation.
-        user_content = privacy.safe_json(payload)
-
-        resp = self._client.messages.create(
+    def _pedir_al_sdk(self, system: str, schema: dict, contenido: str, effort: str):
+        """La llamada pelada al SDK. Aparte para que el `try` de arriba envuelva SOLO
+        la red y no el parseo, y para que los tests la sustituyan sin simular el
+        cliente de anthropic — el mismo patrón que `revision.Revisor`."""
+        return self._client.messages.create(
             model=self.model,
-            # Techo, no gasto: el pensamiento adaptativo comparte este límite con
-            # el JSON de respuesta.
-            max_tokens=16000,
-            system=_SYSTEM_PROMPT,
+            max_tokens=16000,        # techo, no gasto: cubre el pensamiento y el JSON
+            system=system,
             thinking={"type": "adaptive"},
-            output_config={
-                "effort": "medium",
-                "format": {"type": "json_schema", "schema": _RESPONSE_SCHEMA},
-            },
-            messages=[{"role": "user", "content": user_content}],
-        )
-        text = next((b.text for b in resp.content if b.type == "text"), "{}")
-        data = json.loads(text)
-        cod = data.get("apu_codigo")
-        return AIDecision(
-            apu_codigo=str(cod) if cod else None,
-            confianza=float(data.get("confianza", 0.0)),
-            justificacion=str(data.get("justificacion", "")).strip(),
-            fuente="ia",
+            output_config={"effort": effort,
+                           "format": {"type": "json_schema", "schema": schema}},
+            messages=[{"role": "user", "content": contenido}],
         )

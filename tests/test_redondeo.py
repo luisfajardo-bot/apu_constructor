@@ -22,6 +22,11 @@ def test_cero_genuino_queda_en_cero():
     assert mul_redondeado(0, 1000) == 0            # rendimiento 0
 
 
+def test_nan_no_revienta_queda_en_cero():
+    """`nan <= 0` es False: sin `not (p > 0)` esto tira ValueError en math.floor."""
+    assert mul_redondeado(float("nan"), 1000) == 0
+
+
 def test_devuelve_int():
     assert isinstance(mul_redondeado(1.05, 1250), int)
     assert isinstance(mul_redondeado(2.0, 0), int)

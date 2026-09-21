@@ -1,6 +1,7 @@
 import pytest
 
 from apu_tool.datos.almacen import Almacen
+from apu_tool.datos.repositorio import ArmadoDuplicado
 from apu_tool.servicio import carpetas as svc
 from apu_tool.servicio.carpetas import CarpetaInvalida, CarpetaNoVacia
 
@@ -92,6 +93,25 @@ def test_eliminar_bloqueado_si_no_vacia(tmp_path):
 def test_eliminar_carpeta_inexistente_devuelve_false(tmp_path):
     alm = _alm(tmp_path)
     assert svc.eliminar_carpeta(alm, 9999, actor=None) is False
+
+
+def test_no_se_puede_mover_un_armado_donde_ya_hay_otro_del_mismo_archivo(tmp_path):
+    """Mover es un UPDATE de `carpeta_id`, así que también pasa por
+    `ux_corrida_armando_archivo`: sin este aviso el índice lo frenaba con un error de
+    integridad crudo (un 500). Moverla a su propia carpeta sigue siendo un no-op."""
+    alm = _alm(tmp_path)
+    a = svc.crear_carpeta(alm, "A", parent_id=None, actor=None)
+    b = svc.crear_carpeta(alm, "B", parent_id=None, actor=None)
+    en_a = _corrida_en(alm, a["id"])
+    en_b = _corrida_en(alm, b["id"])            # el MISMO archivo, otra carpeta
+
+    with pytest.raises(ArmadoDuplicado) as e:
+        svc.mover_corrida(alm, en_b, a["id"], actor=None)
+    assert e.value.corrida_id == en_a           # cuál es la que ocupa el destino
+    assert alm.corridas.get_corrida(en_b).carpeta_id == b["id"]   # no se movió
+
+    # A su propia carpeta: el que ocupa el destino es ella misma, y eso no es choque.
+    assert svc.mover_corrida(alm, en_b, b["id"], actor=None) is True
 
 
 def test_mover_corrida(tmp_path):

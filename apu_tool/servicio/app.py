@@ -13,6 +13,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
+from apu_tool.servicio import armador
 from apu_tool.servicio import limites
 from apu_tool.servicio import rutas
 from apu_tool.servicio.limites import LimiteSubida
@@ -34,7 +35,19 @@ def create_app(almacen: Optional[Almacen] = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # `app.state.almacen` ya está asignado (ver abajo) antes de que esto corra.
+        app.state.armador_hilo, app.state.armador_parar = armador.arrancar(app.state.almacen)
         yield
+        app.state.armador_parar.set()
+        # El worker puede estar dormido hasta ARMADO_POLL_S (30 s) esperando este mismo
+        # Event de módulo (compartido por TODAS las apps del proceso): sin levantarlo
+        # acá, el apagado tarda hasta 30 s de más en que el hilo se entere.
+        armador.hay_trabajo.set()
+        # SIN join(): el hilo puede estar a mitad de un armado de tres horas. Bloquear
+        # el apagado a esperarlo solo logra que Render lo mate igual, más tarde y en un
+        # punto peor. Es daemon (muere con el proceso) y lo que quede a medias lo
+        # retoma la instancia siguiente cuando venza la reclama (TTL) — para eso existe
+        # la reclama. Si algún día esto lleva un `hilo.join()`, es el error, no el arreglo.
         app.state.almacen.cerrar()  # cierra el pool Postgres (no-op en SQLite)
 
     _docs = config.docs_enabled()

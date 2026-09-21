@@ -59,7 +59,20 @@ CREATE TABLE IF NOT EXISTS corridas.corrida (
     -- Tarifa de la corrida. NULL = Principal. Sin FK: lista_precios vive en el
     -- catálogo de precios, mismo trato que corrida_item.apu_codigo. La integridad
     -- se cuida no borrando listas (la API no expone DELETE).
-    lista_precios_id BIGINT
+    lista_precios_id BIGINT,
+    -- Las líneas ya interpretadas del Excel, en orden. Única fuente de qué falta
+    -- armar: el archivo subido no se guarda. OJO: lleva `precio_contractual`, o sea
+    -- DINERO; nunca puede viajar en un payload hacia la IA (invariante #1).
+    plan_json     TEXT,
+    -- De dónde salió el presupuesto: entidad, formato, hoja, versión del parser, quién
+    -- confirmó la estructura y la conciliación contra el Excel. NULL en toda corrida
+    -- anterior a la ruta IDU. Lleva DINERO adentro (la conciliación): nunca viaja hacia
+    -- la IA; está en privacy._FORBIDDEN_KEYS.
+    origen_json   TEXT,
+    intentos      INTEGER NOT NULL DEFAULT 0,
+    ultimo_error  TEXT,
+    armando_por   TEXT,
+    armando_desde TEXT
 );
 
 CREATE TABLE IF NOT EXISTS corridas.corrida_item (
@@ -77,18 +90,63 @@ CREATE TABLE IF NOT EXISTS corridas.corrida_item (
     explicacion   TEXT,
     componentes_json TEXT,
     candidatos_json  TEXT,
-    snapshot_json    TEXT
+    snapshot_json    TEXT,
+    -- Veredicto de la IA revisora sobre el APU de esta fila. NULL = nunca revisada.
+    revision_json    TEXT,
+    -- Costo unitario declarado por una persona (proyectos especiales: la actividad vale
+    -- lo que dice el contrato y armarle el APU no paga). NULL = costeo normal desde la
+    -- composición. Se borra en actualizar_eleccion: si la fila cambia de APU, manda el APU.
+    costo_manual     DOUBLE PRECISION
 );
 CREATE INDEX IF NOT EXISTS ix_corrida_item ON corridas.corrida_item(corrida_id, seq);
 
 -- Migración idempotente para bases existentes.
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS modo TEXT NOT NULL DEFAULT 'activa';
 ALTER TABLE corridas.corrida_item ADD COLUMN IF NOT EXISTS snapshot_json TEXT;
+ALTER TABLE corridas.corrida_item ADD COLUMN IF NOT EXISTS revision_json TEXT;
+ALTER TABLE corridas.corrida_item ADD COLUMN IF NOT EXISTS costo_manual DOUBLE PRECISION;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS carpeta_id BIGINT
     REFERENCES corridas.carpeta(id) ON DELETE RESTRICT;
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS nombre TEXT;
 UPDATE corridas.corrida SET nombre = archivo WHERE nombre IS NULL OR nombre = '';
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS lista_precios_id BIGINT;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS plan_json TEXT;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS origen_json TEXT;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS intentos INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS ultimo_error TEXT;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS armando_por TEXT;
+ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS armando_desde TEXT;
+
+-- Expediente de composición asistida. Equivalente a la tabla `composicion` de
+-- db/corridas.sql: una fila POR VERSIÓN (append-only); la vigente es la de mayor
+-- `version`. SIN dinero: actividad_json guarda la vista des-monetizada del ítem.
+CREATE TABLE IF NOT EXISTS corridas.composicion (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    corrida_id      BIGINT NOT NULL REFERENCES corridas.corrida(id) ON DELETE CASCADE,
+    seq             INTEGER NOT NULL,
+    version         INTEGER NOT NULL,
+    estado          TEXT NOT NULL,
+    actividad_json  TEXT NOT NULL,
+    ficha_json      TEXT,
+    propuesta_json  TEXT,
+    validacion_json TEXT,
+    confianza       TEXT,
+    confianza_json  TEXT,
+    antecedentes_json TEXT,
+    modelo          TEXT,
+    prompt_version  TEXT,
+    apu_codigo      TEXT,
+    apu_turno       TEXT,
+    autor           TEXT,
+    creada_en       TEXT NOT NULL,
+    motivo          TEXT
+);
+-- La protección del doble clic, y por eso es un índice y no un `if`.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_composicion_version
+    ON corridas.composicion(corrida_id, seq, version);
+-- Sin índice secundario sobre (corrida_id, seq): `ux_composicion_version` ya lo cubre
+-- por prefijo izquierdo, y las dos únicas consultas del repo filtran por esas dos
+-- columnas y ordenan por `version`, que es exactamente su forma.
 
 -- Bootstrap "Sin clasificar" + backfill de corridas sin carpeta (idempotente).
 INSERT INTO corridas.carpeta (nombre, creada_en)

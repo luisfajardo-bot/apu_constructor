@@ -219,11 +219,41 @@ class LicitacionItem:
     shift: str                    # DIURNO / NOCTURNO (del ítem o global)
     categoria: str = ""           # capítulo del presupuesto (vacío en el flujo plano)
     codigo_sugerido: str = ""     # código IDU dado por el presupuesto (armado directo)
+    # --- capítulo del presupuesto (ruta IDU) ---------------------------------
+    # Todos con default: es lo que hace que una corrida encolada ANTES de este deploy
+    # se rehidrate sin explotar (`plan_de` hace LicitacionItem(**d) sobre plan_json).
+    # `categoria` se conserva y se DERIVA de estos dos en el lector, para que
+    # report_categorizado.agrupar_por_capitulo y sus tests sigan funcionando igual.
+    capitulo_codigo: str = ""          # "2" — la referencia estable, no el nombre
+    capitulo_nombre: str = ""          # "PAVIMENTOS"
+    item_pago_original: str = ""       # "2,001-N" tal cual venía, para auditoría
+    fila_origen: int = 0               # fila del Excel de la que salió, 1-based
+    # Valor unitario SIN AIU. Es DINERO: va a privacy._FORBIDDEN_KEYS y NO viaja en
+    # licitacion_item_to_dict. `precio_contractual` sigue siendo el que manda (con AIU).
+    precio_contractual_sin_aiu: float = 0.0
 
 
 # ---------------------------------------------------------------------------
 # Resultados del pipeline
 # ---------------------------------------------------------------------------
+class EntidadOrigen(str, Enum):
+    """De dónde salió el presupuesto de una corrida.
+
+    Valor ESTABLE, no texto libre: se guarda en `corrida.origen_json` y decide qué
+    lector se usa (`dominio/entrada.py`). `str, Enum` como MatchStatus, para que
+    sobreviva a `asdict()` y a `json.dumps()` sin conversión.
+
+    Hoy solo IDU tiene lector especializado. Las demás usan el importador genérico a
+    propósito: no se inventan reglas para formatos que nadie midió.
+    """
+    IDU = "IDU"
+    METRO_BOGOTA = "METRO_BOGOTA"
+    INVIAS = "INVIAS"
+    OTRA_PUBLICA = "OTRA_PUBLICA"
+    PRIVADA = "PRIVADA"
+    NO_IDENTIFICADA = "NO_IDENTIFICADA"
+
+
 class MatchStatus(str, Enum):
     AUTO = "auto"          # match determinístico claro
     REVIEW = "review"      # candidato dudoso, requiere confirmación
@@ -287,6 +317,14 @@ class AssembledApu:
     status: MatchStatus
     confianza: float
     explicacion: str = ""
+    # "historico" | "manual". Ya NADIE produce "generado": murió con la composición
+    # de dos campos (`Assembler.generar_composicion`), que se mudó al orquestador
+    # `dominio/composicion_agente.py` y propone en vez de armar. No lo revivas
+    # creyendo que es un valor vivo. Se sigue leyendo como texto libre a propósito:
+    # `corrida_item.origen` es una columna persistida y las filas armadas antes de
+    # que la IA dejara de armar pueden traerlo, así que validarlo contra un
+    # vocabulario cerrado rompería corridas viejas.
+    origen: str = "historico"
     origen: str = "historico"     # "historico" | "generado" | "manual"
     # Acarreos que el proyecto NO pudo reescalar por falta de clasificación. Viajan
     # CON el ítem —y no como parámetro de `alertas_costeo`— porque los consumidores
@@ -305,6 +343,16 @@ class AssembledApu:
         return mul_redondeado(self.item.precio_contractual, self.item.cantidad)
 
     @property
+    def contractual_total_sin_aiu(self) -> int:
+        """El contractual del ítem sin AIU. Misma regla de redondeo que su gemelo.
+
+        La ruta IDU lee las DOS bases del Formulario 1: `precio_contractual` es el valor
+        unitario CON AIU (el que concilia con el VALOR TOTAL del Excel) y este es el
+        básico sin AIU. 0 en una corrida que no venga del IDU.
+        """
+        return mul_redondeado(self.item.precio_contractual_sin_aiu, self.item.cantidad)
+
+    @property
     def margen_unitario(self) -> float:
         return self.item.precio_contractual - self.costo_unitario
 
@@ -316,6 +364,20 @@ class AssembledApu:
     def margen_pct(self) -> float:
         base = self.item.precio_contractual
         return (self.margen_unitario / base) if base else 0.0
+
+    @property
+    def costo_a_mano(self) -> bool:
+        """El costo lo declaró una persona, no lo calculó el motor.
+
+        Firma: sin componentes y con costo positivo. Es inequívoca porque el costo del
+        motor es la suma de los componentes — sin componentes esa suma es 0 (un APU
+        vacío, un sub-APU en ciclo o un insumo huérfano igual devuelven componentes).
+        Vive acá y no en cada consumidor porque la leen cuatro lugares (la vista de la
+        API, las alertas y los dos escritores de Excel) y `> 0` cambiado en uno solo
+        sería un drift silencioso. Funciona igual con la corrida congelada: el snapshot
+        guarda `composicion: []` con el mismo costo.
+        """
+        return not self.componentes and self.costo_unitario > 0
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +399,18 @@ class CorridaMeta:
     # Tarifa contra la que se costea la corrida. None = Principal (el catálogo).
     # Se fija AL CREAR y no cambia: una corrida nunca debe mudar de tarifa por accidente.
     lista_precios_id: Optional[int] = None
+    # --- armado como trabajo del servidor (ver docs/superpowers/specs/2026-09-07-armado-reanudable-design.md) ---
+    # `estado='armando'` ES la cola: nadie saca una corrida de ahí salvo el worker al
+    # terminarla o `reencolar_armado`. Un set_estado sin guarda la borra de la cola.
+    intentos: int = 0                      # +1 por cada reclama; al pasar el tope -> 'armado_detenido'
+    ultimo_error: Optional[str] = None     # por qué se detuvo, en español, para la pantalla
+    armando_por: Optional[str] = None      # id de la instancia que la reclamó
+    armando_desde: Optional[str] = None    # ISO 8601 del último latido de esa reclama
+    # De dónde salió el presupuesto (entidad, hoja, parser, conciliación). None en toda
+    # corrida anterior a la ruta IDU: la pantalla lo muestra como "sin clasificación por
+    # capítulo", y NO se inventan capítulos retroactivamente. Es DINERO por dentro (la
+    # conciliación): `origen_json` está en privacy._FORBIDDEN_KEYS.
+    origen: Optional[dict] = None
 
 
 @dataclass
@@ -353,3 +427,57 @@ class CorridaItemRow:
     explicacion: str
     componentes: list[dict]       # [{insumo_codigo, insumo_nombre, unidad, rendimiento}] (sin dinero)
     candidatos: list[dict]        # [{apu_codigo, apu_nombre, score, motivo}] (sin dinero)
+    revision: Optional[dict] = None   # veredicto de la IA (sin dinero); None = sin revisar
+    # Costo unitario puesto a mano (proyectos especiales). None = costear normal desde
+    # la composición. NUNCA entra a un payload de la IA: es dinero (ver privacy.py).
+    costo_manual: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class ComposicionRow:
+    """Una VERSIÓN del expediente de composición de una fila de corrida.
+
+    Append-only: cada acción que cambia la propuesta (generar, regenerar, editar,
+    aprobar, rechazar) escribe una fila nueva y la vigente es la de mayor `version`.
+    El historial de correcciones sale gratis, y es lo que la fase 4 va a leer como
+    evidencia.
+
+    NO lleva dinero, y es deliberado: `actividad` guarda la vista des-monetizada
+    (`privacy.licitacion_item_to_dict`), no el `LicitacionItem` crudo, que traería
+    `precio_contractual`. Así la fila entera se puede reinyectar en un payload hacia la
+    IA sin volver a filtrarla. Es la lección de `plan_json`, aplicada antes de tropezar.
+
+    Tampoco hay campo para razonamiento del modelo: solo justificaciones cortas, datos
+    estructurados, referencias y decisiones observables.
+    """
+    id: Optional[int]
+    corrida_id: int
+    seq: int
+    version: int
+    estado: str                       # de dominio.composicion.ESTADOS
+    actividad: dict
+    ficha: Optional[dict]             # fase 2; None en fase 1
+    propuesta: Optional[dict]
+    validacion: Optional[dict]
+    confianza: Optional[str]          # alta | media | baja | insuficiente
+    confianza_motivos: Optional[list]
+    antecedentes: Optional[dict]
+    modelo: Optional[str]
+    prompt_version: Optional[str]
+    apu_codigo: Optional[str]         # el APU creado, solo si estado == 'aprobada'
+    apu_turno: Optional[str]
+    autor: Optional[str]
+    creada_en: str
+    motivo: Optional[str]             # el error, o la razón del rechazo
+
+    def to_dict(self) -> dict:
+        return {
+            "corrida_id": self.corrida_id, "seq": self.seq, "version": self.version,
+            "estado": self.estado, "actividad": self.actividad, "ficha": self.ficha,
+            "propuesta": self.propuesta, "validacion": self.validacion,
+            "confianza": self.confianza, "confianza_motivos": self.confianza_motivos,
+            "antecedentes": self.antecedentes, "modelo": self.modelo,
+            "prompt_version": self.prompt_version, "apu_codigo": self.apu_codigo,
+            "apu_turno": self.apu_turno, "autor": self.autor,
+            "creada_en": self.creada_en, "motivo": self.motivo,
+        }

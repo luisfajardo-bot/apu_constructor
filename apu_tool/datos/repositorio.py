@@ -9,8 +9,9 @@ from __future__ import annotations
 from typing import Iterable, Optional, Protocol, runtime_checkable
 
 from apu_tool.nucleo.models import (
-    AjusteProyecto, Apu, ApuComponent, Carpeta, ClaseTransporte, CorridaItemRow, CorridaMeta,
-    DePricedApu, EventoAuditoria, Insumo, ListaPrecios, ParametrosProyecto, Perfil,
+    AjusteProyecto, Apu, ApuComponent, Carpeta, ClaseTransporte, ComposicionRow,
+    CorridaItemRow, CorridaMeta, DePricedApu, EventoAuditoria, Insumo, ListaPrecios,
+    ParametrosProyecto, Perfil,
 )
 
 
@@ -22,6 +23,43 @@ class CorridaEliminada(Exception):
     def __init__(self, corrida_id: int):
         super().__init__(f"La corrida {corrida_id} fue eliminada durante el armado.")
         self.corrida_id = corrida_id
+
+
+class ArmadoDuplicado(Exception):
+    """Ya hay un armado a medias del MISMO archivo en la MISMA carpeta.
+
+    Lo frena el índice único parcial `ux_corrida_armando_archivo` (los estados
+    'armando' y 'armado_detenido'), no una comprobación previa: las dos peticiones de
+    un doble clic llegan a milisegundos de distancia, las dos leerían "no hay
+    ninguna" y las dos encolarían tres horas de armado del mismo Excel.
+
+    `corrida_id` es la corrida que YA existe, para llevar al usuario ahí en vez de
+    dejarlo reintentando. Es opcional porque esta capa ve la violación pero no los
+    estados que la definen (viven en el servicio, en `ARMANDO_O_A_MEDIAS`): lo
+    completa `servicio.corridas.crear_corrida_encolada`.
+    """
+
+    def __init__(self, archivo: str, corrida_id: Optional[int] = None):
+        self.archivo = archivo
+        self.corrida_id = corrida_id
+        cola = (f" (corrida {corrida_id}): te llevamos a esa en vez de armar el mismo "
+                f"archivo dos veces." if corrida_id else ": esperá a que termine.")
+        super().__init__(f"Ya hay un armado en curso de «{archivo}» en esta carpeta"
+                         + cola)
+
+
+class VersionYaExiste(Exception):
+    """Se intentó escribir una versión de composición que ya está.
+
+    La levanta el índice único `ux_composicion_version`, no una comprobación previa:
+    las dos peticiones de un doble clic leerían la misma versión vigente y las dos
+    creerían estar escribiendo la siguiente. El servicio la traduce a un 409.
+    """
+
+    def __init__(self, corrida_id: int, seq: int, version: int):
+        super().__init__(f"La composición {corrida_id}/{seq} ya tiene la versión "
+                         f"{version}: alguien más la cambió mientras trabajabas.")
+        self.corrida_id, self.seq, self.version = corrida_id, seq, version
 
 
 @runtime_checkable
@@ -132,6 +170,10 @@ class RepositorioApus(Protocol):
         """Como get_components pero para muchos (codigo, shift) en UNA consulta.
         Devuelve {(codigo, shift): [componentes...]} para las claves halladas."""
         ...
+    def rendimientos_por_insumo(self, codigos: Iterable[str]
+                                ) -> dict[str, list[tuple[str, float]]]:
+        """(unidad, rendimiento) con que cada insumo aparece en la biblioteca."""
+        ...
     def component_counts(self) -> dict[tuple[str, str], int]: ...
     def componentes_subapu_candidatos(self) -> list[dict]:
         """Componentes tipo='insumo' cuyo código es un APU (candidatos a sub-APU)."""
@@ -169,7 +211,11 @@ class RepositorioApus(Protocol):
 class RepositorioCorridas(Protocol):
     def init_schema(self) -> None: ...
     def reset(self) -> None: ...
-    def crear_corrida(self, meta: CorridaMeta) -> int: ...
+    def crear_corrida(self, meta: CorridaMeta) -> int:
+        """Crea la corrida y devuelve su id. Lanza `ArmadoDuplicado` si ya hay un
+        armado a medias del mismo `archivo` en la misma `carpeta_id` (lo decide el
+        índice, no una consulta previa: ver la excepción)."""
+        ...
     def guardar_items(self, corrida_id: int, items: list[CorridaItemRow]) -> int: ...
     def agregar_item(self, corrida_id: int, fila: CorridaItemRow) -> None:
         """Inserta un ítem (armado incremental). Lanza CorridaEliminada si la
@@ -186,7 +232,23 @@ class RepositorioCorridas(Protocol):
     def actualizar_eleccion(self, corrida_id: int, seq: int, *, status: str,
                             apu_codigo: Optional[str], apu_nombre: str, unidad: str,
                             shift: str, origen: str, confianza: float,
-                            explicacion: str, componentes: list[dict]) -> None: ...
+                            explicacion: str, componentes: list[dict]) -> None:
+        """Cambia el APU elegido de una fila. BORRA su revisión y su costo puesto a
+        mano: el veredicto hablaba del APU anterior, y el costo a mano ya no manda
+        porque la fila volvió a tener una composición real."""
+        ...
+    def set_candidatos(self, corrida_id: int,
+                       candidatos: dict[int, list[dict]]) -> None:
+        """Refresca la lista de candidatos de varias filas, {seq: candidatos}.
+
+        NO toca el APU elegido, ni el veredicto, ni el costo puesto a mano: refrescar
+        candidatos no es cambiar de APU, y por eso no pasa por `actualizar_eleccion`,
+        que borra los dos.
+
+        Es por lote (no fila por fila) por la misma razón que `set_costo_manual`: crear
+        un APU puede cambiar la lista de cientos de filas, y contra Postgres eso serían
+        cientos de round-trips. Un dict vacío no escribe nada."""
+        ...
     def set_cuadro(self, corrida_id: int, path: str) -> None: ...
     def set_estado(self, corrida_id: int, estado: str) -> None: ...
     def set_duracion(self, corrida_id: int, duracion_ms: int) -> None: ...
@@ -194,6 +256,122 @@ class RepositorioCorridas(Protocol):
     def set_nombre(self, corrida_id: int, nombre: str) -> None: ...
     def set_snapshot(self, corrida_id: int, seq: int, payload: dict) -> None: ...
     def get_snapshots(self, corrida_id: int) -> dict[int, dict]: ...
+    def set_revision(self, corrida_id: int, seq: int, payload: Optional[dict]) -> None:
+        """Veredicto de la IA de una fila. payload=None lo borra."""
+        ...
+    def set_costo_manual(self, corrida_id: int, costos: dict[int, float], conn=None) -> None:
+        """Costo unitario puesto a mano, {seq: costo}, y la fila queda `confirmed`.
+
+        Poner el costo a mano ES un confirm, así que también borra `revision_json`
+        (el veredicto hablaba de una fila que ya no es esta), la misma razón por la
+        que lo borra `actualizar_eleccion`. Y `actualizar_eleccion` a su vez BORRA
+        `costo_manual`: si la fila cambia de APU, manda el APU."""
+        ...
+    def set_plan(self, corrida_id: int, plan_json: str, conn=None) -> None:
+        """Guarda las líneas ya interpretadas del Excel. Única fuente de qué falta
+        armar: el archivo subido no se persiste."""
+        ...
+    def get_plan(self, corrida_id: int) -> Optional[str]:
+        """El plan crudo, o None si la corrida no existe o no tiene."""
+        ...
+    def set_origen(self, corrida_id: int, origen_json: str, conn=None) -> None:
+        """De dónde salió el presupuesto (entidad, hoja, parser, conciliación).
+
+        Se escribe UNA vez, justo después de crear la corrida, por la misma razón que
+        `set_plan`: no ensucia el INSERT de los dos backends con una columna opcional.
+        """
+        ...
+
+    def get_origen(self, corrida_id: int) -> Optional[str]:
+        """El JSON crudo del origen, o None si la corrida es anterior a la ruta IDU."""
+        ...
+
+    def max_seq(self, corrida_id: int) -> int:
+        """El `seq` más alto ya armado, o -1 si no hay ninguno. El worker reanuda en
+        `max_seq + 1`. Se usa el MÁXIMO y no la cantidad: con una fila borrada en el
+        medio, contar reanudaría sobre un seq que ya existe."""
+        ...
+
+    def reclamar_armado(self, instancia: str, ahora: str,
+                        limite_vencimiento: str) -> Optional[int]:
+        """Toma la corrida en 'armando' más vieja que nadie esté armando, y devuelve
+        su id (None si no hay ninguna). Sube `intentos`.
+
+        ES UN SOLO UPDATE CONDICIONAL, no un "leo y después escribo": durante un
+        deploy la instancia nueva arranca mientras la vieja todavía drena, y sin
+        atomicidad las dos armarían la misma corrida. `corrida_item` NO tiene
+        UNIQUE(corrida_id, seq) —llega en una tarea posterior—, así que hoy nada
+        detecta las filas duplicadas después del hecho: esta reclama es la única
+        defensa que hay.
+
+        `limite_vencimiento` es el ISO por debajo del cual una reclama se considera
+        muerta (ahora - config.ARMADO_TTL_RECLAMA_S, constante de una tarea posterior;
+        todavía no existe).
+
+        OJO: el vencimiento se mide con el reloj del que llama, no con el de la base.
+        Una instancia adelantada le puede robar una reclama viva a otra, y un latido
+        con hora futura deja la corrida intocable hasta que el tiempo real la alcance.
+        En Render los relojes van por NTP y esto no se ve; si algún día molesta, el
+        arreglo es tomar `now()` de la base en vez de recibir los ISO de afuera."""
+        ...
+
+    def latir_armado(self, corrida_id: int, ahora: str,
+                     instancia: Optional[str] = None) -> bool:
+        """Refresca `armando_desde` para que la reclama no venza mientras se trabaja.
+
+        Con `instancia` solo late si esa instancia SIGUE siendo la dueña (ver el
+        fencing de `finalizar_armado`); con None late igual, sea de quien sea.
+
+        Devuelve si el UPDATE aplicó, y eso es el AVISO: el fencing impide que un
+        worker desplazado pise al dueño nuevo, pero no lo entera de que lo
+        desplazaron. Un `False` acá es la forma barata (cada tanto, no por ítem) de
+        que un worker que perdió la reclama se dé cuenta y pare limpio, en vez de
+        seguir armando en paralelo durante horas."""
+        ...
+
+    def finalizar_armado(self, corrida_id: int, estado: str,
+                         duracion_ms: Optional[int] = None,
+                         error: Optional[str] = None,
+                         instancia: Optional[str] = None) -> bool:
+        """Fija `estado`, libera la reclama y guarda la duración o el motivo.
+
+        Con `estado='en_revision'` o `'armado_detenido'` saca la corrida de la cola
+        (es el único camino de salida junto con `reencolar_armado`). El worker
+        también la llama con `estado='armando'` tras un fallo que no es de un ítem:
+        ahí la corrida SIGUE en la cola, solo se suelta la reclama para que se pueda
+        reintentar de inmediato en vez de esperar el TTL. `intentos` no se toca, así
+        que el tope sigue aplicando.
+
+        `duracion_ms=None` significa "no la sé", NO "borrala": la duración vieja
+        queda. `error` sí se pisa siempre, incluso con None: terminar bien tiene que
+        limpiar el motivo del intento que falló.
+
+        `instancia` es el FENCING y es opcional. Si viene, el UPDATE solo aplica
+        mientras esa instancia siga siendo la dueña (`armando_por`): en un deploy de
+        Render el worker viejo sigue armando mientras drena, su reclama vence, el
+        nuevo la toma, y sin esto el viejo le soltaría la reclama al dueño legítimo
+        (con `estado='armando'` es peor: una tercera instancia la reclama y quedan
+        dos armando la misma corrida). Es opcional porque el camino sincrónico
+        (`construir_corrida`, el de CLI y GUI) crea y arma en el acto, sin worker y
+        sin reclama: ahí no hay dueño que verificar. El worker siempre la pasa.
+
+        Devuelve si el UPDATE aplicó: `False` con `instancia` significa que la reclama
+        ya no es tuya (ver `latir_armado`).
+
+        Con `estado='armado_detenido'` pasá SIEMPRE el `error`: una corrida detenida
+        sin motivo no le dice a nadie qué se rompió ni si vale la pena reanudarla, y
+        el motivo tiene que quedar visible."""
+        ...
+
+    def reencolar_armado(self, corrida_id: int) -> None:
+        """Vuelve a poner la corrida en la cola desde cero: 'armando', intentos en 0,
+        sin error y sin reclama. Lo usa el endpoint de reanudar a mano."""
+        ...
+
+    def posicion_en_cola(self, corrida_id: int) -> int:
+        """Cuántas corridas en 'armando' son más viejas que esta. 0 = es la próxima."""
+        ...
+
     def set_carpeta(self, corrida_id: int, carpeta_id: int, conn=None) -> None: ...
     def listar_corridas(self) -> list[CorridaMeta]: ...
     def eliminar_corrida(self, corrida_id: int, conn=None) -> bool: ...
@@ -283,4 +461,28 @@ class RepositorioAuditoria(Protocol):
                limit: int = 100, offset: int = 0) -> tuple[list[dict], int]:
         """Lectura paginada (abre su propia conexión). antes/despues/contexto ya
         parseados a objetos Python (dict/None). Orden ts desc."""
+        ...
+
+
+@runtime_checkable
+class RepositorioComposiciones(Protocol):
+    def agregar(self, fila: ComposicionRow, conn=None) -> None:
+        """Escribe una versión NUEVA. Levanta VersionYaExiste si esa versión ya está."""
+        ...
+
+    def vigente(self, corrida_id: int, seq: int) -> Optional[ComposicionRow]:
+        """La versión de mayor número, o None si nunca se compuso esta fila."""
+        ...
+
+    def historial(self, corrida_id: int, seq: int) -> list[ComposicionRow]:
+        """Todas las versiones, de la más vieja a la más nueva."""
+        ...
+
+    def estados_vigentes(self, corrida_id: int) -> dict[int, str]:
+        """`{seq: estado}` de la versión VIGENTE (la de mayor `version`) de cada fila
+        de la corrida que tenga expediente. Las filas sin expediente no aparecen.
+
+        En lote y no fila por fila: una corrida tiene miles de líneas y preguntar de a
+        una sería el N+1 de siempre. Devuelve el estado crudo; qué estados cuentan como
+        "en curso" lo decide quien llama, no el repositorio."""
         ...

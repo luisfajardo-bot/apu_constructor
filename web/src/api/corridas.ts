@@ -1,26 +1,59 @@
-import { apiGet, apiPost, apiDelete, authHeader, descargarArchivo } from "@/api/client";
+import { apiGet, apiPost, apiDelete, authHeader, descargarArchivo, mensajeDeError, ErrorApi } from "@/api/client";
 import type {
+  AsignacionIA,
   StatusResponse,
-  CorridaCreada,
   CorridaDetalle,
-  CorridaIniciada,
+  CorridaEncolada,
   CorridaResumen,
   DetalleItem,
   LineaNueva,
+  PreviaPresupuesto,
   PreviewLineas,
-  Progreso,
+  ProgresoRevision,
+  RebusquedaPrevia,
+  ResumenRevision,
+  VeredictoIA,
 } from "@/lib/tipos";
 
 export function getStatus(): Promise<StatusResponse> {
   return apiGet<StatusResponse>("/status");
 }
 
-export function crearSample(): Promise<CorridaCreada> {
-  return apiPost<CorridaCreada>("/sample");
+/** Encola el ejemplo. Vuelve en el acto: `estado` llega en 'armando' y lo que se ve
+ *  después sale del poll de `getCorrida`, no de esta respuesta. */
+export function crearSample(): Promise<CorridaEncolada> {
+  return apiPost<CorridaEncolada>("/sample");
 }
 
-export function crearCorrida(form: FormData): Promise<CorridaCreada> {
-  return apiPost<CorridaCreada>("/corridas", form);
+/** Encola el armado del archivo subido. Vuelve en el acto (armar 1900 líneas lleva
+ *  horas y no cabe en una petición HTTP); el progreso sale del poll de `getCorrida`.
+ *  Rebota con 409 si ya hay un armado a medias del mismo archivo en la misma carpeta:
+ *  ese error trae el id, y `corridaEnCurso` lo saca. */
+export function crearCorrida(form: FormData): Promise<CorridaEncolada> {
+  return apiPost<CorridaEncolada>("/corridas", form);
+}
+
+/** Qué se detectó en el archivo, SIN crear nada. El navegador se queda con el archivo
+ *  y lo reenvía al aprobar: no hay borrador en el servidor que expirar ni limpiar. */
+export function previsualizarCorrida(form: FormData): Promise<PreviaPresupuesto> {
+  return apiPost<PreviaPresupuesto>("/corridas/previsualizar", form);
+}
+
+/** Devuelve a la cola una corrida en `armado_detenido` (rol editor). Lo ya armado se
+ *  conserva: el worker entra donde quedó. */
+export function reanudarArmado(id: number): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/reanudar`);
+}
+
+/** El id de la corrida que YA se está armando, si `e` es el 409 del doble clic.
+ *  `null` para cualquier otro error — incluido un 409 de otra cosa, que no trae id.
+ *
+ *  Existe porque ese 409 no es un error del usuario: es el mismo armado que acaba de
+ *  pedir. Con el id se lo lleva ahí; sin él, el doble clic termina en un cartel rojo. */
+export function corridaEnCurso(e: unknown): number | null {
+  if (!(e instanceof ErrorApi) || e.status !== 409) return null;
+  const id = (e.detail as { corrida_id?: unknown } | null)?.corrida_id;
+  return typeof id === "number" ? id : null;
 }
 
 export function listarCorridas(): Promise<CorridaResumen[]> {
@@ -70,6 +103,44 @@ export function confirmarLote(
   });
 }
 
+/** Copia el precio contractual de cada línea marcada como su costo unitario.
+ *  Para proyectos especiales: valen lo que dice el contrato y armarles el APU no paga.
+ *  Devuelve la corrida recosteada (misma forma que `confirmarLote`) más `igualadas`
+ *  y `rechazadas` (las de contractual ≤ 0, que no se tocan). */
+export function igualarCostoAlContractual(
+  id: number,
+  seqs: number[],
+): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/igualar-costo`, { seqs });
+}
+
+/** Aplica N sugerencias de la IA en un solo recosteo: un APU (y turno) distinto
+ *  por fila. Devuelve la corrida recosteada (misma forma que `confirmar`). */
+export function aplicarSugerencias(
+  id: number,
+  asignaciones: AsignacionIA[],
+): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/items/confirmar-lote`, {
+    seqs: [],
+    asignaciones,
+  });
+}
+
+/** Qué cambiaría si se volviera a matchear la corrida contra la biblioteca de hoy.
+ *  NO escribe: propone. */
+export function rebuscarApus(id: number): Promise<RebusquedaPrevia> {
+  return apiPost<RebusquedaPrevia>(`/corridas/${id}/rebuscar`, {});
+}
+
+/** Aplica la re-búsqueda a las líneas marcadas, en un solo recosteo. El servidor
+ *  recalcula la propuesta: las que ya no estén vigentes vuelven en `salteadas`. */
+export function aplicarRebusqueda(
+  id: number,
+  seqs: number[],
+): Promise<CorridaDetalle> {
+  return apiPost<CorridaDetalle>(`/corridas/${id}/rebuscar/aplicar`, { seqs });
+}
+
 /** Qué se agregaría con este Excel (y qué ya está en la corrida). No escribe. */
 export function previewLineas(id: number, form: FormData): Promise<PreviewLineas> {
   return apiPost<PreviewLineas>(`/corridas/${id}/items/preview`, form);
@@ -99,27 +170,8 @@ export function activarCorrida(id: number): Promise<CorridaDetalle> {
 }
 
 /** Descarga el cuadro xlsx con el token Bearer (una navegación normal no lleva el header). */
-export async function descargarCuadro(id: number): Promise<void> {
-  const r = await fetch(`/api/corridas/${id}/cuadro`, { headers: { ...(await authHeader()) } });
-  if (r.status === 401) {
-    const { supabase } = await import("@/lib/supabase");
-    await supabase.auth.signOut();
-    throw new Error("Sesión expirada.");
-  }
-  if (!r.ok) {
-    const err = await r.json().catch(() => ({}) as { detail?: string });
-    throw new Error(err.detail || r.statusText);
-  }
-  const blob = await r.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `cuadro_corrida_${id}.xlsx`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
+export const descargarCuadro = (id: number) =>
+  descargarArchivo(`/corridas/${id}/cuadro`, `cuadro_corrida_${id}.xlsx`);
 
 export function descargarPlantillaLicitacion(): Promise<void> {
   return descargarArchivo("/corridas/plantilla", "plantilla_licitacion.xlsx");
@@ -140,12 +192,15 @@ export function parseSse(block: string): { event: string; data: unknown } | null
   }
 }
 
-async function streamCorrida(
+/** Abre un SSE en `path` y llama a `onEvent` por cada evento parseado. Es el fetch +
+ *  auth + chequeo de 401/ok + bucle de lectura del stream que usa `revisarCorridaStream`
+ *  (revisión con IA): el consumidor decide qué hacer con cada evento, incluyendo cuándo
+ *  terminar (lanzar acá dentro de `onEvent` rechaza la promesa de afuera). */
+export async function consumirSse(
   path: string,
   init: RequestInit,
-  onProgress: (p: Progreso) => void,
-  onStarted?: (c: CorridaIniciada) => void,
-): Promise<CorridaCreada> {
+  onEvent: (ev: { event: string; data: unknown }) => void,
+): Promise<void> {
   const r = await fetch("/api" + path, {
     ...init,
     headers: { ...(init.headers || {}), ...(await authHeader()) },
@@ -156,13 +211,11 @@ async function streamCorrida(
     throw new Error("Sesión expirada.");
   }
   if (!r.ok || !r.body) {
-    const err = await r.json().catch(() => ({}) as { detail?: string });
-    throw new Error(err.detail || r.statusText);
+    throw new Error(mensajeDeError(await r.json().catch(() => null), r.statusText));
   }
   const reader = r.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  let done: CorridaCreada | null = null;
   for (;;) {
     const { value, done: fin } = await reader.read();
     if (fin) break;
@@ -171,29 +224,43 @@ async function streamCorrida(
     while ((idx = buf.indexOf("\n\n")) >= 0) {
       const ev = parseSse(buf.slice(0, idx));
       buf = buf.slice(idx + 2);
-      if (!ev) continue;
-      if (ev.event === "started") onStarted?.(ev.data as CorridaIniciada);
-      else if (ev.event === "progress") onProgress(ev.data as Progreso);
-      else if (ev.event === "done") done = ev.data as CorridaCreada;
-      else if (ev.event === "error")
-        throw new Error((ev.data as { detail?: string }).detail || "Error al armar");
+      if (ev) onEvent(ev);
     }
   }
-  if (!done) throw new Error("La corrida no terminó correctamente.");
-  return done;
 }
 
-export function crearCorridaStream(
-  form: FormData,
-  onProgress: (p: Progreso) => void,
-  onStarted?: (c: CorridaIniciada) => void,
-) {
-  return streamCorrida("/corridas/stream", { method: "POST", body: form }, onProgress, onStarted);
-}
-
-export function crearSampleStream(
-  onProgress: (p: Progreso) => void,
-  onStarted?: (c: CorridaIniciada) => void,
-) {
-  return streamCorrida("/sample/stream", { method: "POST" }, onProgress, onStarted);
+/** Audita la corrida con IA (barrido + profundización). La IA propone; nunca aplica.
+ *  `onVeredicto` llega una vez por fila con veredicto (evento 'veredicto'); `onProgreso`
+ *  es opcional y avisa el arranque ('started', con el total), cada lote del triaje
+ *  ('barriendo' — el barrido de una corrida grande son varias llamadas seguidas a la
+ *  IA, y sin este evento el stream se ve mudo un buen rato) y el fin del triaje
+ *  ('barrido', con cuántas filas quedaron marcadas y cuáles no contestaron). Resuelve
+ *  con el resumen del evento 'done'; un stream que corta sin 'done', o un evento
+ *  'error', rechaza la promesa. */
+export async function revisarCorridaStream(
+  id: number,
+  onVeredicto: (v: VeredictoIA) => void,
+  onProgreso?: (p: ProgresoRevision) => void,
+): Promise<ResumenRevision> {
+  let resumen: ResumenRevision | null = null;
+  await consumirSse(`/corridas/${id}/revision/stream`, { method: "POST" }, (ev) => {
+    if (ev.event === "veredicto") {
+      onVeredicto((ev.data as { veredicto: VeredictoIA }).veredicto);
+    } else if (ev.event === "started") {
+      onProgreso?.({ evento: "started", ...(ev.data as { total: number; lotes?: number }) });
+    } else if (ev.event === "barriendo") {
+      onProgreso?.({ evento: "barriendo", ...(ev.data as { lote: number; lotes: number }) });
+    } else if (ev.event === "barrido") {
+      onProgreso?.({
+        evento: "barrido",
+        ...(ev.data as { revisar: number; sin_respuesta: number[] }),
+      });
+    } else if (ev.event === "done") {
+      resumen = ev.data as ResumenRevision;
+    } else if (ev.event === "error") {
+      throw new Error(mensajeDeError(ev.data, "Error al revisar"));
+    }
+  });
+  if (!resumen) throw new Error("La revisión no terminó correctamente.");
+  return resumen;
 }

@@ -17,9 +17,10 @@ biblioteca histórica de APUs y el catálogo de precios de la empresa.
 - **Usuarios:** el **equipo de la empresa** (analistas / presupuestadores). Arman sus
   licitaciones contra una **data central común**.
 - **Entrada:** **app web** (navegador) como destino; **CLI** para operación y automatización.
-- **Flujo de uso:** presupuesto por capítulos → cruce con la biblioteca de APUs (por código)
-  → la IA decide la **estructura** del APU (nunca ve dinero) → costeo con el precio interno
-  vigente → **cuadro contractual vs costo**, por capítulo.
+- **Flujo de uso:** presupuesto por capítulos → cruce con la biblioteca de APUs (por código,
+  matching determinístico, sin IA) → una fila sin APU puede resolverse pidiéndole a la IA
+  una **propuesta de composición** (nunca ve dinero) que el usuario revisa y aprueba →
+  costeo con el precio interno vigente → **cuadro contractual vs costo**, por capítulo.
 
 ## Las cuatro capas
 
@@ -67,6 +68,7 @@ intento_plan/
 │   ├── datos/                     ── NIVEL 01 · plataforma de datos
 │   │   ├── repositorio.py         #   Protocols de almacenamiento
 │   │   ├── precios_db.py   apus_db.py   carpetas_db.py   corridas_db.py
+│   │   ├── composiciones_db.py    #   expediente de composición (vive en corridas.db)
 │   │   ├── auditoria_db.py   perfiles_db.py
 │   │   ├── almacen.py             #   fachada Almacen (agrupa SQLite/Postgres)
 │   │   ├── seed.py   correcciones.py
@@ -74,8 +76,10 @@ intento_plan/
 │   │   └── pg/                    #   backend Postgres (espejo 1:1 de los *_db.py)
 │   │
 │   ├── dominio/                   ── NIVEL 02 · motor (lógica pura)
-│   │   ├── licitacion.py   presupuesto.py   matching.py   cruce.py   compose.py
-│   │   ├── privacy.py   ai_assist.py   assemble.py
+│   │   ├── licitacion.py   presupuesto.py   entrada.py   matching.py   cruce.py
+│   │   ├── compose.py
+│   │   ├── composicion.py   validacion_composicion.py   #   contrato + validador del agente de composición
+│   │   ├── privacy.py   ai_assist.py   composicion_agente.py   assemble.py
 │   │   ├── pricing.py   alertas.py   report.py   report_categorizado.py
 │   │   ├── integridad.py          #   chequeo de integridad APU↔insumo
 │   │   └── pipeline.py            #   orquestación (usa datos + dominio)
@@ -83,7 +87,7 @@ intento_plan/
 │   ├── servicio/                  ── NIVEL 03 · API (FastAPI) — 50 endpoints
 │   │   ├── app.py   rutas.py   dependencias.py   esquemas.py
 │   │   ├── auth.py   limites.py   seguridad_headers.py
-│   │   └── corridas.py   insumos.py   listas.py   autoria.py   subapus.py   apus.py
+│   │   └── corridas.py   composicion.py   insumos.py   listas.py   autoria.py   subapus.py   apus.py
 │   │       carpetas.py   usuarios.py   auditoria.py   supabase_admin.py   plantillas.py
 │   │       presencia.py           #   quién está usando la app ahora (dict en memoria, sin DB)
 │   │

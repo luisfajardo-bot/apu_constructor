@@ -1,0 +1,206 @@
+"""La fachada de IA de la composición: una llamada, contrato v2, degradado explícito.
+
+No se llama a la API real: se sustituye `_pedir_al_sdk`, la ÚNICA puerta al SDK, con
+el mismo truco que usan los tests de `revision.py`.
+"""
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from apu_tool.dominio import privacy
+from apu_tool.dominio.ai_assist import (
+    PROMPT_VERSION, ApuAdvisor, IANoDisponible, sin_saldo,
+)
+from apu_tool.dominio.compose import CandidateInsumo, RendimientoObservado
+from apu_tool.nucleo.models import DePricedApu, DePricedComponent, LicitacionItem
+
+ITEM = LicitacionItem("1.3", "EXCAVACION MANUAL", "M3", 120.0, 180000.0, "DIURNO")
+INSUMOS = [CandidateInsumo("4279", "CUADRILLA", "HR", "MO")]
+EJEMPLOS = [DePricedApu("A1", "UNO", "M3", "DIURNO", "EXCAVACIONES",
+                        (DePricedComponent("4279", "CUADRILLA", "HR", 0.62),))]
+OBS = {"4279": RendimientoObservado("4279", "HR", 14, 0.40, 0.62, 1.10)}
+
+BUENA = {"componentes": [{"codigo": "4279", "tipo": "insumo",
+                          "funcion": "mano_de_obra", "rendimiento": 0.62,
+                          "origen": "copiado_de_antecedente",
+                          "referencias": [{"apu_codigo": "A1", "turno": "DIURNO"}],
+                          "hipotesis": {}, "calculo": None, "justificacion": "j",
+                          "nivel_evidencia": "alto"}],
+         "supuestos": [], "incertidumbre_declarada": 0.3, "justificacion": "g"}
+
+
+class AdvisorFalso(ApuAdvisor):
+    """Sustituye la única puerta al SDK. `texto` es lo que 'devuelve' el modelo."""
+
+    def __init__(self, texto: str):
+        self.enabled = True
+        self._client = object()
+        self.model = "falso"
+        self.texto = texto
+        self.contenido_enviado = None
+
+    def _pedir_al_sdk(self, system, schema, contenido, effort):
+        self.contenido_enviado = contenido
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="text", text=self.texto)])
+
+
+def test_devuelve_una_propuesta_parseada():
+    a = AdvisorFalso(json.dumps(BUENA))
+    p = a.componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert len(p.componentes) == 1
+    assert p.componentes[0].codigo == "4279"
+    assert p.incertidumbre_declarada == 0.3
+
+
+def test_no_le_manda_el_precio_contractual_al_modelo():
+    a = AdvisorFalso(json.dumps(BUENA))
+    a.componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert "180000" not in a.contenido_enviado
+
+
+def test_revienta_antes_de_tocar_la_red_si_hay_dinero(monkeypatch):
+    """La PrivacyViolation NO se traga: sale del try, como en revision.Revisor._pedir."""
+    a = AdvisorFalso(json.dumps(BUENA))
+    monkeypatch.setattr(privacy, "payload_composicion",
+                        lambda *_a, **_k: {"actividad": {"precio_contractual": 1}})
+    with pytest.raises(privacy.PrivacyViolation):
+        a.componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert a.contenido_enviado is None      # nunca llegó al SDK
+
+
+@pytest.mark.parametrize("texto", ["", "no soy json", "{", "[1,2]", '"ok"', "42",
+                                   "{}", '{"componentes": []}'])
+def test_una_respuesta_ilegible_o_vacia_da_propuesta_vacia_no_revienta(texto):
+    p = AdvisorFalso(texto).componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert p.componentes == ()
+
+
+def test_sin_credencial_levanta_ia_no_disponible():
+    a = ApuAdvisor(enabled=False)
+    with pytest.raises(IANoDisponible):
+        a.componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+
+
+def test_sdk_ausente_no_se_confunde_con_credencial_faltante():
+    """Un SDK no instalado y una credencial ausente son causas distintas: mandar el
+    mismo mensaje hace revisar la variable equivocada. Mismo criterio que
+    `Revisor._pedir`."""
+    a = ApuAdvisor(enabled=False)
+    a._sdk_ausente = True
+    with pytest.raises(IANoDisponible, match="SDK"):
+        a.componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+
+
+def test_sin_insumos_candidatos_levanta_valueerror():
+    """No hay lista blanca: pedirle algo al modelo sería invitarlo a inventar."""
+    with pytest.raises(ValueError):
+        AdvisorFalso(json.dumps(BUENA)).componer(ITEM, [], EJEMPLOS, OBS)
+
+
+def test_la_version_del_prompt_esta_declarada():
+    assert PROMPT_VERSION.startswith("composicion/")
+
+
+def test_un_401_del_sdk_se_convierte_en_ia_no_disponible():
+    class Rota(AdvisorFalso):
+        def _pedir_al_sdk(self, *a, **k):
+            raise type("E", (Exception,), {"status_code": 401})()
+
+    with pytest.raises(IANoDisponible):
+        Rota("").componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+
+
+def test_un_429_del_sdk_no_se_confunde_con_falta_de_credencial():
+    class Lenta(AdvisorFalso):
+        def _pedir_al_sdk(self, *a, **k):
+            raise type("E", (Exception,), {"status_code": 429})()
+
+    with pytest.raises(Exception) as exc:
+        Lenta("").componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert not isinstance(exc.value, IANoDisponible)
+
+
+def test_un_400_por_saldo_agotado_dice_que_falta_saldo():
+    """La API manda un mensaje accionable; convertirlo en "Error interno" manda al
+    usuario a buscar en la aplicación un problema que está en la consola."""
+    class SinSaldo(AdvisorFalso):
+        def _pedir_al_sdk(self, *a, **k):
+            raise type("E", (Exception,), {
+                "status_code": 400,
+                "message": ("Your credit balance is too low to access the Anthropic "
+                            "API. Please go to Plans & Billing to upgrade or "
+                            "purchase credits."),
+            })()
+
+    with pytest.raises(IANoDisponible) as exc:
+        SinSaldo("").componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert "saldo" in str(exc.value).lower()
+
+
+def test_un_400_que_no_es_de_saldo_no_se_disfraza():
+    """Un 400 por un payload mal armado es un bug NUESTRO y tiene que verse crudo,
+    no salir como un problema de facturación."""
+    class Payload(AdvisorFalso):
+        def _pedir_al_sdk(self, *a, **k):
+            raise type("E", (Exception,), {
+                "status_code": 400,
+                "message": "tools.0.custom.input_schema: invalid schema",
+            })()
+
+    with pytest.raises(Exception) as exc:
+        Payload("").componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+    assert not isinstance(exc.value, IANoDisponible)
+
+
+@pytest.mark.parametrize("status_code, message, esperado", [
+    (400, "Your credit balance is too low to access the Anthropic API. Please go "
+          "to Plans & Billing to upgrade or purchase credits.", True),
+    (401, "invalid x-api-key", False),
+    (429, "rate limit exceeded", False),
+    (400, "tools.0.custom.input_schema: invalid schema", False),
+])
+def test_sin_saldo_solo_reconoce_el_400_de_facturacion(status_code, message, esperado):
+    exc = type("E", (Exception,), {"status_code": status_code, "message": message})()
+    assert sin_saldo(exc) is esperado
+
+
+def test_el_esquema_acota_el_vocabulario_al_alcance_de_la_fase():
+    """El enum es más corto que el vocabulario del contrato a propósito: en esta fase
+    la IA no propone sub-APUs, y ofrecerle un valor que el validador rechaza siempre
+    es tenderle una trampa. En la fase 3 vuelven a coincidir."""
+    from apu_tool.dominio.ai_assist import _ESQUEMA_COMPOSICION
+    from apu_tool.dominio.composicion import (
+        FUNCIONES, NIVELES_EVIDENCIA, OPERACIONES, ORIGENES,
+    )
+    props = _ESQUEMA_COMPOSICION["properties"]["componentes"]["items"]["properties"]
+    assert props["tipo"]["enum"] == ["insumo"]
+    assert "sub_apu" not in props["funcion"]["enum"]
+    assert set(props["funcion"]["enum"]) == set(FUNCIONES) - {"sub_apu"}
+    assert props["origen"]["enum"] == list(ORIGENES)
+    assert props["nivel_evidencia"]["enum"] == list(NIVELES_EVIDENCIA)
+    assert props["calculo"]["properties"]["operacion"]["enum"] == list(OPERACIONES)
+
+
+def test_una_respuesta_cortada_por_limite_de_tokens_no_se_lee_como_vacia():
+    """`stop_reason == "max_tokens"` es una respuesta TRUNCADA, no una propuesta
+    vacía: sin distinguirlas, el usuario lee "la IA no propuso nada" cuando el
+    problema es el techo de tokens."""
+    class Cortada(AdvisorFalso):
+        def _pedir_al_sdk(self, *a, **k):
+            return SimpleNamespace(
+                stop_reason="max_tokens",
+                content=[SimpleNamespace(type="text", text="{")])
+
+    with pytest.raises(RuntimeError, match="cortó por longitud"):
+        Cortada("").componer(ITEM, INSUMOS, EJEMPLOS, OBS)
+
+
+def test_una_respuesta_sin_bloque_de_texto_da_propuesta_vacia():
+    """Con pensamiento adaptativo, una respuesta de puro pensamiento es real."""
+    class SinTexto(AdvisorFalso):
+        def _pedir_al_sdk(self, *a, **k):
+            return SimpleNamespace(content=[SimpleNamespace(type="thinking")])
+
+    assert SinTexto("").componer(ITEM, INSUMOS, EJEMPLOS, OBS).componentes == ()

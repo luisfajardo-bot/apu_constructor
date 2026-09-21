@@ -21,3 +21,7 @@ test("mulRedondeado: 0 genuino queda en 0", () => {
   expect(mulRedondeado(2, 0)).toBe(0);
   expect(mulRedondeado(0, 1000)).toBe(0);
 });
+
+test("un NaN queda en 0 y no se pinta NaN", () => {
+  expect(mulRedondeado(NaN, 1000)).toBe(0);
+});

@@ -14,6 +14,7 @@ def test_excel_corrupto_da_400_no_500(tmp_path):
     cli = cliente(_app(tmp_path), rol="editor")
     basura = b"esto no es un xlsx"
     r = cli.post("/api/insumos/importar/preview",
+                 data={"fuente_import": "PRECIO IDU"},
                  files={"archivo": ("lista.xlsx", basura,
                                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     assert r.status_code == 400, r.text

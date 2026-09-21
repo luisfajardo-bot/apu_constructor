@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import type { ItemCuadro } from "@/lib/tipos";
+import type { DictamenIA, ItemCuadro, VeredictoIA } from "@/lib/tipos";
 
 export type ClaveColumna =
-  | "descripcion" | "unidad" | "cantidad" | "item" | "apu" | "status"
+  | "descripcion" | "unidad" | "cantidad" | "item" | "capitulo" | "apu" | "status"
+  | "veredicto"
   | "precio_contractual" | "costo_unitario"
   | "contractual_total" | "costo_total" | "margen_total" | "margen_pct";
 
@@ -16,8 +17,13 @@ export interface FiltrosColumna {
   unidad: string;
   cantidad: FiltroRango;
   item: string;
+  /** Código y nombre del capítulo en un solo texto: buscar "2" o "PAVIMENTOS"
+   *  encuentra lo mismo. Vacío en una corrida sin capítulos, donde la columna
+   *  ni siquiera se dibuja. */
+  capitulo: string;
   apu: string;
   status: string;
+  veredicto: string;
   precio_contractual: FiltroRango;
   costo_unitario: FiltroRango;
   contractual_total: FiltroRango;
@@ -28,15 +34,64 @@ export interface FiltrosColumna {
 
 export const FILTROS_VACIOS: FiltrosColumna = {
   descripcion: "", unidad: "", cantidad: { min: "", max: "" }, item: "",
-  apu: "", status: "",
+  capitulo: "", apu: "", status: "", veredicto: "",
   precio_contractual: { min: "", max: "" }, costo_unitario: { min: "", max: "" },
   contractual_total: { min: "", max: "" },
   costo_total: { min: "", max: "" }, margen_total: { min: "", max: "" },
   margen_pct: { min: "", max: "" },
 };
 
+/** Valor centinela del filtro de APU: deja solo las filas SIN APU asignado. */
+export const SIN_APU = "__sin__";
+
+/** Valor centinela del filtro de Veredicto: deja solo las filas SIN veredicto (la IA
+ *  no las contestó, o se agregaron después de revisar). Centinela propio y no el de
+ *  APU: son dos columnas distintas y compartirlo ataría el filtro de una al de la
+ *  otra. Un valor imposible como dictamen, así que el filtro exacto del resto del
+ *  vocabulario (`valorVeredicto(it) !== f.veredicto`) sigue igual. */
+export const SIN_VEREDICTO = "__sin_veredicto__";
+
+/** Etiqueta corta y color de cada dictamen de la revisión con IA. Los colores
+ *  salen del vocabulario de "significado" de index.css (positivo / revisar /
+ *  info / destructivo), no de la paleta cruda de Tailwind. */
+export const VEREDICTO_UI: Record<DictamenIA, { label: string; cls: string }> = {
+  ok:      { label: "✔ ok",      cls: "text-margen-pos" },
+  dudoso:  { label: "⚠ dudoso",  cls: "text-revisar" },
+  cambiar: { label: "↔ cambiar", cls: "text-info" },
+  sin_apu: { label: "✖ sin APU", cls: "text-destructive" },
+};
+
+export function etiquetaVeredicto(dictamen: string): string {
+  if (dictamen === SIN_VEREDICTO) return "— sin revisar";
+  return VEREDICTO_UI[dictamen as DictamenIA]?.label ?? dictamen;
+}
+
+/** El nivel del veredicto, en palabras de persona: `barrido` es un triaje que NO
+ *  miró la composición (no tiene la autoridad de un análisis a fondo) y `profundo`
+ *  sí vio los insumos y rendimientos del asignado y de cada candidato. */
+const NIVEL_TEXTO: Record<VeredictoIA["nivel"], string> = {
+  barrido: "Triaje rápido",
+  profundo: "Análisis a fondo",
+};
+
+/** Texto del `title` de la celda: nivel + confianza + la justificación. La etiqueta
+ *  visible se queda corta a propósito (la tabla es densa), así que el matiz —cuánto
+ *  miró la IA y qué tan segura está— vive acá. */
+export function tituloVeredicto(v: VeredictoIA): string {
+  const cabecera = `${NIVEL_TEXTO[v.nivel] ?? v.nivel} · confianza ${
+    Math.round(v.confianza * 100)}%`;
+  return v.justificacion ? `${cabecera} — ${v.justificacion}` : cabecera;
+}
+
+/** Texto por el que se filtra y ordena la columna Veredicto. "" cuando la fila
+ *  no tiene veredicto (la corrida no se revisó, o la IA no contestó esa fila). */
+export function valorVeredicto(it: ItemCuadro): string {
+  return it.revision?.dictamen ?? "";
+}
+
 const REVISABLE = new Set(["review", "new", "REVIEW", "NEW"]);
-const CLAVES_TEXTO: ClaveColumna[] = ["descripcion", "unidad", "item", "apu", "status"];
+const CLAVES_TEXTO: ClaveColumna[] = ["descripcion", "unidad", "item", "capitulo",
+                                      "apu", "status", "veredicto"];
 
 export function normalizar(s: string): string {
   return (s ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
@@ -62,8 +117,21 @@ export function filtrar(items: ItemCuadro[], f: FiltrosColumna, soloRevision: bo
     if (f.unidad && it.unidad !== f.unidad) return false;
     if (!enRango(it.cantidad, f.cantidad)) return false;
     if (!contiene(it.item, f.item)) return false;
-    if (!contiene(`${it.apu_codigo} ${it.apu_nombre}`, f.apu)) return false;
+    // Código y nombre juntos, igual que el filtro de APU: el usuario escribe "2" o
+    // "PAVIMENTOS" y encuentra las mismas filas.
+    if (!contiene(`${it.capitulo_codigo} ${it.capitulo_nombre}`, f.capitulo)) return false;
+    // "__sin__" es un centinela dentro del filtro de texto de APU, no un estado
+    // aparte: el contador rojo de "sin APU" reusa la maquinaria de filtros que ya
+    // existe (y el botón "Limpiar" lo apaga como a cualquier otro filtro).
+    if (f.apu === SIN_APU) {
+      if (it.apu_codigo) return false;
+    } else if (!contiene(`${it.apu_codigo} ${it.apu_nombre}`, f.apu)) return false;
     if (f.status && it.status !== f.status) return false;
+    // El vacío SIGNIFICA algo en Veredicto (la IA no contestó esa fila), así que
+    // tiene su propio centinela: sin esto no habría forma de encontrar esas filas.
+    if (f.veredicto === SIN_VEREDICTO) {
+      if (it.revision) return false;
+    } else if (f.veredicto && valorVeredicto(it) !== f.veredicto) return false;
     if (!enRango(it.precio_contractual, f.precio_contractual)) return false;
     if (!enRango(it.costo_unitario, f.costo_unitario)) return false;
     if (!enRango(it.contractual_total, f.contractual_total)) return false;
@@ -79,8 +147,10 @@ function valorTexto(it: ItemCuadro, clave: ClaveColumna): string {
     case "descripcion": return it.descripcion;
     case "unidad": return it.unidad;
     case "item": return it.item;
+    case "capitulo": return `${it.capitulo_codigo} ${it.capitulo_nombre}`;
     case "apu": return it.apu_codigo;
     case "status": return it.status;
+    case "veredicto": return valorVeredicto(it);
     default: return "";
   }
 }
@@ -111,13 +181,26 @@ export function ordenar(items: ItemCuadro[], orden: EstadoOrden): ItemCuadro[] {
   });
 }
 
-export function opcionesDe(items: ItemCuadro[], clave: "unidad" | "status"): string[] {
+export function opcionesDe(
+  items: ItemCuadro[],
+  clave: "unidad" | "status" | "veredicto",
+): string[] {
   const set = new Set<string>();
+  let hayVacio = false;
   for (const it of items) {
-    const v = clave === "unidad" ? it.unidad : it.status;
+    const v = clave === "unidad" ? it.unidad
+      : clave === "status" ? it.status
+      : valorVeredicto(it);
     if (v) set.add(v);
+    else hayVacio = true;
   }
-  return [...set].sort((a, b) => a.localeCompare(b, "es-CO", { numeric: true }));
+  const ordenadas = [...set].sort((a, b) => a.localeCompare(b, "es-CO", { numeric: true }));
+  // Solo Veredicto ofrece el vacío como opción: en Und y Estado un vacío es un dato
+  // que falta, acá es el resultado de que la IA no contestara esa fila — y sin la
+  // opción no hay forma de filtrarlas. Va al final y aparte del sort: es un
+  // centinela, no un valor del vocabulario.
+  if (clave === "veredicto" && hayVacio) ordenadas.push(SIN_VEREDICTO);
+  return ordenadas;
 }
 
 export function siguienteOrden(prev: EstadoOrden, clave: ClaveColumna): EstadoOrden {
@@ -144,6 +227,7 @@ export interface ControlCorridaTabla {
   hayFiltros: boolean;
   opcionesUnidad: string[];
   opcionesStatus: string[];
+  opcionesVeredicto: string[];
 }
 
 export function useCorridaTabla(items: ItemCuadro[]): ControlCorridaTabla {
@@ -157,6 +241,7 @@ export function useCorridaTabla(items: ItemCuadro[]): ControlCorridaTabla {
   );
   const opcionesUnidad = useMemo(() => opcionesDe(items, "unidad"), [items]);
   const opcionesStatus = useMemo(() => opcionesDe(items, "status"), [items]);
+  const opcionesVeredicto = useMemo(() => opcionesDe(items, "veredicto"), [items]);
   const hayFiltros = hayFiltrosActivos(filtros, orden, soloRevision);
 
   return {
@@ -172,5 +257,6 @@ export function useCorridaTabla(items: ItemCuadro[]): ControlCorridaTabla {
     hayFiltros,
     opcionesUnidad,
     opcionesStatus,
+    opcionesVeredicto,
   };
 }

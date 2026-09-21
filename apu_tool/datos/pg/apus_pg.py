@@ -296,6 +296,23 @@ class ApusPg:
                 "ORDER BY c.apu_codigo, c.shift, c.insumo_codigo").fetchall()
         return [dict(r) for r in rows if normalizar(r["unidad"]) == objetivo]
 
+    def rendimientos_por_insumo(self, codigos) -> dict[str, list[tuple[str, float]]]:
+        """Espejo Postgres de ApusDB.rendimientos_por_insumo. Sin trocear: psycopg
+        manda la lista como un solo parámetro (= ANY), no como N placeholders."""
+        codes = [c for c in dict.fromkeys(str(x) for x in codigos if x)]
+        out: dict[str, list[tuple[str, float]]] = {}
+        if not codes:
+            return out
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT insumo_codigo, unidad, rendimiento FROM apus.apu_componentes "
+                "WHERE insumo_codigo = ANY(%s) AND tipo = 'insumo'", (codes,)
+            ).fetchall()
+        for r in rows:
+            out.setdefault(r["insumo_codigo"], []).append(
+                (r["unidad"] or "", float(r["rendimiento"] or 0.0)))
+        return out
+
     def get_depriced_apu(self, codigo: str, shift: str) -> Optional[DePricedApu]:
         apu = self.get_apu(codigo, shift)
         if apu is None:

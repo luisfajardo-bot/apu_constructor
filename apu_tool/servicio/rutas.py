@@ -17,14 +17,19 @@ from openpyxl.utils.exceptions import InvalidFileException
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
+from apu_tool.datos.repositorio import VersionYaExiste
 from apu_tool.dominio.licitacion import read_licitacion
 from apu_tool.dominio.pipeline import BibliotecaVacia, ensure_seeded, generate_sample
 from apu_tool.nucleo.models import LicitacionItem
 from apu_tool.servicio import ajustes as ajustes_svc
 from apu_tool.servicio import apus as apus_svc
+from apu_tool.servicio import armador
 from apu_tool.servicio import auditoria as auditoria_svc
 from apu_tool.servicio import autoria
 from apu_tool.servicio import carpetas as carpetas_svc
+from apu_tool.servicio import composicion as composicion_svc
+from apu_tool.dominio import entrada
+from apu_tool.nucleo.models import EntidadOrigen
 from apu_tool.servicio import corridas as svc
 from apu_tool.servicio.carpetas import CarpetaInvalida, CarpetaNoVacia
 from apu_tool.servicio import insumos as insumos_svc
@@ -39,8 +44,10 @@ from apu_tool.servicio import limites
 from pydantic import BaseModel
 from apu_tool.servicio.esquemas import (
     AgregarLineasIn, AjusteProyectoIn, ApuEditIn, ApuNuevoIn, BorrarLineasIn,
-    CambiosIn, ClasificarIn, ConfirmarIn, ConfirmarLoteIn, EstadoIn, InsumoNuevoIn,
-    ListaPreciosIn, RolIn, StatusOut, TransporteParamsIn, UsuarioInvitarIn)
+    CambiosIn, ClasificarIn, ComposicionAprobarIn, ComposicionEditarIn,
+    ComposicionRechazarIn, ConfirmarIn, ConfirmarLoteIn, EstadoIn, IgualarCostoIn,
+    InsumoNuevoIn, ListaPreciosIn, RebuscarAplicarIn, RolIn, StatusOut,
+    TransporteParamsIn, UsuarioInvitarIn)
 
 
 class CarpetaIn(BaseModel):
@@ -141,25 +148,75 @@ def eliminar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
     return {"eliminada": cid}
 
 
-def _items_del_upload(nombre: str, contenido: bytes, turno: str) -> list[LicitacionItem]:
-    """Bytes de una lista subida -> ítems de licitación. Traduce a 400 los fallos de
-    lectura (columna faltante, ítem sin turno, archivo que no es Excel)."""
-    suf = Path(nombre or "lic.xlsx").suffix or ".xlsx"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suf) as tmp:
-        tmp.write(contenido)
-        tmp_path = tmp.name
+def _entidad_o_400(valor):
+    """Texto -> EntidadOrigen. Una entidad inventada es un error de la petición, no
+    una razón para adivinar el lector genérico."""
     try:
-        items = read_licitacion(tmp_path, default_shift=turno, require_turno=True)
+        return entrada.parse_entidad(valor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except (zipfile.BadZipFile, InvalidFileException):
-        raise HTTPException(status_code=400,
-                            detail="El archivo no es un Excel válido o está corrupto.")
-    finally:
-        os.unlink(tmp_path)
-    if not items:
-        raise HTTPException(status_code=400, detail="La lista no tiene ítems legibles.")
-    return items
+
+
+def _leer_o_400(entidad, nombre: str, contenido: bytes,
+                default_shift: str = config.SHIFT_DIURNO):
+    """Bytes subidos -> LecturaPresupuesto, con el lector de esa entidad.
+
+    Traduce a 400 los errores BLOQUEANTES del lector (hoja incompatible, columna que
+    falta, ítem sin turno, archivo que no es Excel). A diferencia de la previa —que los
+    MUESTRA para que el usuario los lea— acá no hay nada que decidir: no se crea una
+    corrida de un archivo que no se pudo leer.
+    """
+    lectura = svc.leer_para_corrida(entidad, contenido, nombre, default_shift)
+    if lectura.errores:
+        raise HTTPException(status_code=400, detail=" ".join(lectura.errores))
+    return lectura
+
+
+def _encolar(alm: Almacen, archivo: str, items: list[LicitacionItem], turno: str,
+             use_ai: Optional[bool], **kw) -> dict:
+    """Encola el armado y arma la respuesta, o rebota con 409 si ya hay uno igual.
+
+    Los dos endpoints que crean corridas pasan por acá para que el doble clic se
+    traduzca igual en los dos: el 409 lleva el id de la corrida que YA se está
+    armando, y con eso el frontend te lleva ahí en vez de encolar otras tres horas
+    de armado del mismo Excel."""
+    try:
+        cid = svc.crear_corrida_encolada(alm, archivo, items, turno, use_ai, **kw)
+    except svc.ArmadoDuplicado as e:
+        # detail estructurado (como el de FilasSinApu): `corrida_id` es lo que el
+        # frontend necesita para navegar, y sacarlo de la prosa con un regex sería peor.
+        raise HTTPException(status_code=409,
+                            detail={"mensaje": str(e), "corrida_id": e.corrida_id})
+    return _encolada(cid, len(items))
+
+
+def _encolada(cid: int, total: int) -> dict:
+    """La respuesta de crear una corrida: se encoló, no se armó.
+
+    Armar 1900 líneas lleva de una a tres horas y las instancias de Render viven entre
+    18 y 30 minutos, así que hacerlo DENTRO de la petición no terminaba nunca. Ahora la
+    petición vuelve en el acto y el armado lo toma el worker desde la cola
+    (`estado='armando'` ES la cola); el progreso sale por `GET /corridas/{id}`.
+
+    El `set()` es solo para que el worker arranque YA en vez de esperar su poll de
+    respaldo: si se perdiera, la corrida se arma igual, 30 segundos más tarde."""
+    armador.hay_trabajo.set()
+    return {"id": cid, "total": total, "estado": "armando"}
+
+
+@router.post("/corridas/previsualizar")
+async def previsualizar_corrida(entidad: str = Form(...),
+                                archivo: UploadFile = File(...),
+                                _: object = Depends(requiere_rol("consulta"))):
+    """Qué se detectó en el archivo. NO escribe nada: no hay borrador que limpiar.
+
+    El navegador se queda con el archivo y lo reenvía al aprobar; el parser es
+    determinístico, así que la segunda lectura da la misma estructura. Si diera otra,
+    `POST /corridas` responde 400, que es la respuesta correcta.
+    """
+    ent = _entidad_o_400(entidad)
+    return svc.previsualizar(ent, await archivo.read(),
+                             archivo.filename or "archivo.xlsx")
 
 
 @router.post("/corridas")
@@ -168,18 +225,32 @@ async def crear_corrida(turno: str = Form(config.SHIFT_DIURNO),
                         carpeta_id: int = Form(...),
                         nombre: Optional[str] = Form(None),
                         lista_id: Optional[int] = Form(None),
+                        entidad: str = Form("NO_IDENTIFICADA"),
+                        confirmada: bool = Form(False),
                         archivo: UploadFile = File(...),
                         alm: Almacen = Depends(get_almacen),
-                        _: object = Depends(requiere_rol("consulta"))):
+                        actor: object = Depends(requiere_rol("consulta"))):
     if alm.carpetas.get(carpeta_id) is None:
         raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
     _validar_lista(alm, lista_id)
     _asegurar_biblioteca(alm)
-    items = _items_del_upload(archivo.filename, await archivo.read(), turno)
-    cid = svc.construir_corrida(alm, archivo.filename or "licitacion", items, turno, use_ai,
-                                carpeta_id=carpeta_id, nombre=nombre,
-                                lista_precios_id=lista_id)
-    return {"id": cid, "resumen": svc.vista_corrida(alm, cid)["totales"]}
+    ent = _entidad_o_400(entidad)
+    if entrada.requiere_confirmacion(ent) and not confirmada:
+        # La estructura tiene que pasar por la pantalla de previsualización. Sin esto,
+        # un POST directo saltaría la única revisión humana de 14 capítulos y 1939 filas.
+        raise HTTPException(
+            status_code=400,
+            detail="La estructura detectada debe confirmarse antes de crear la "
+                   "corrida. Previsualiza el archivo y aprueba el resumen.")
+    nombre_archivo = archivo.filename or "licitacion"
+    # El servidor RELEE y revalida: `confirmada=true` es lo que dice el cliente, no una
+    # prueba. Un archivo distinto al que se previsualizó rebota acá con 400.
+    lectura = _leer_o_400(ent, nombre_archivo, await archivo.read())
+    origen = (svc.origen_de(ent, lectura, nombre_archivo, getattr(actor, "email", ""))
+              if entrada.requiere_confirmacion(ent) else None)
+    return _encolar(alm, nombre_archivo, lectura.items, turno, use_ai,
+                    carpeta_id=carpeta_id, nombre=nombre, lista_precios_id=lista_id,
+                    origen=origen)
 
 
 @router.post("/sample")
@@ -198,9 +269,8 @@ def crear_sample(alm: Almacen = Depends(get_almacen),
     if not items:
         raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
     sc = carpetas_svc.carpeta_sin_clasificar_id(alm)
-    cid = svc.construir_corrida(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False,
-                                carpeta_id=sc, nombre="Ejemplo")
-    return {"id": cid, "resumen": svc.vista_corrida(alm, cid)["totales"]}
+    return _encolar(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False,
+                    carpeta_id=sc, nombre="Ejemplo")
 
 
 def _event_stream(gen):
@@ -213,49 +283,6 @@ def _event_stream(gen):
         yield f"event: error\ndata: {json.dumps({'detail': 'Error interno.'}, ensure_ascii=False)}\n\n"
 
 
-@router.post("/corridas/stream")
-async def crear_corrida_stream(turno: str = Form(config.SHIFT_DIURNO),
-                               use_ai: Optional[bool] = Form(None),
-                               carpeta_id: int = Form(...),
-                               nombre: Optional[str] = Form(None),
-                               lista_id: Optional[int] = Form(None),
-                               archivo: UploadFile = File(...),
-                               alm: Almacen = Depends(get_almacen),
-                               _: object = Depends(requiere_rol("consulta"))):
-    if alm.carpetas.get(carpeta_id) is None:
-        raise HTTPException(status_code=400, detail="La carpeta indicada no existe.")
-    _validar_lista(alm, lista_id)
-    _asegurar_biblioteca(alm)
-    items = _items_del_upload(archivo.filename, await archivo.read(), turno)
-    gen = svc.construir_corrida_stream(alm, archivo.filename or "licitacion", items, turno,
-                                       use_ai, carpeta_id=carpeta_id, nombre=nombre,
-                                       lista_precios_id=lista_id)
-    return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache"})
-
-
-@router.post("/sample/stream")
-def crear_sample_stream(alm: Almacen = Depends(get_almacen),
-                        _: object = Depends(requiere_rol("consulta"))):
-    _asegurar_biblioteca(alm)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-        sample_path = tmp.name
-    try:
-        generate_sample(out_path=Path(sample_path), alm=alm)
-        items = read_licitacion(sample_path, default_shift=config.SHIFT_DIURNO)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        os.unlink(sample_path)
-    if not items:
-        raise HTTPException(status_code=400, detail="El ejemplo generado no tiene ítems legibles.")
-    sc = carpetas_svc.carpeta_sin_clasificar_id(alm)
-    gen = svc.construir_corrida_stream(alm, "ejemplo.xlsx", items, config.SHIFT_DIURNO, False,
-                                       carpeta_id=sc, nombre="Ejemplo")
-    return StreamingResponse(_event_stream(gen), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache"})
-
-
 @router.get("/corridas/{cid}")
 def get_corrida(cid: int, alm: Almacen = Depends(get_almacen),
                 _: object = Depends(requiere_rol("consulta"))):
@@ -263,6 +290,108 @@ def get_corrida(cid: int, alm: Almacen = Depends(get_almacen),
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v
+
+
+@router.post("/corridas/{cid}/revision/stream")
+def revisar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
+                    _: object = Depends(requiere_rol("editor"))):
+    """Audita la corrida con IA. Propone; no aplica nada."""
+    try:
+        # Valida ANTES de devolver el generador: si no, el error saldría con el
+        # stream ya abierto y el cliente vería un 200 que muere solo.
+        gen = svc.revisar_corrida_stream(alm, cid)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para revisar.")
+    except svc.IANoDisponible as e:
+        # 503 y no 409: falta configuración del servidor, no es un conflicto con el
+        # estado de la corrida (ese sí es el 409 de arriba).
+        raise HTTPException(status_code=503, detail=str(e))
+    if gen is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return StreamingResponse(_event_stream(gen),
+                             media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
+
+
+# ---- composición asistida (el expediente de una fila sin APU) ----
+# Cinco endpoints sobre la MISMA fila: leer el expediente, generar (SSE), guardar la
+# edición humana, aprobar y rechazar. `consulta` lee; los cuatro que escriben piden
+# `editor`, incluido aprobar: da de alta un APU en la biblioteca.
+def _composicion_o_error(llamada):
+    """Traduce al contrato HTTP lo que levanta `servicio/composicion.py`.
+
+    `ValueError` es el de las reglas de `autoria.py` (código repetido, rendimiento en
+    0): 422 y no 400, porque el cuerpo está bien formado y lo que el dominio rechaza
+    es la entidad. Sin este `except`, lo atraparía el handler global de ValueError de
+    `app.py` y saldría un 400 con "Solicitud inválida.", perdiendo el motivo.
+    """
+    try:
+        v = llamada()
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para modificar.")
+    except VersionYaExiste as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except (composicion_svc.ComposicionInvalida, ValueError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if v is None:
+        raise HTTPException(status_code=404, detail="Fila no encontrada.")
+    return v
+
+
+@router.get("/corridas/{cid}/composicion/{seq}")
+def get_composicion(cid: int, seq: int, alm: Almacen = Depends(get_almacen),
+                    _: object = Depends(requiere_rol("consulta"))):
+    v = composicion_svc.vista(alm, cid, seq)
+    if v is None:
+        raise HTTPException(status_code=404, detail="Fila no encontrada.")
+    return v
+
+
+@router.post("/corridas/{cid}/composicion/{seq}/stream")
+def componer_composicion(cid: int, seq: int, alm: Almacen = Depends(get_almacen),
+                         actor=Depends(requiere_rol("editor"))):
+    """Compone un APU para esta fila con IA. Propone; aprobar es del usuario."""
+    try:
+        # Valida ANTES de devolver el generador, igual que la revisión: con el stream
+        # ya abierto, el error saldría dentro de un 200 que muere solo.
+        gen = composicion_svc.generar_stream(alm, cid, seq, actor)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para componer.")
+    except svc.IANoDisponible as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if gen is None:
+        raise HTTPException(status_code=404, detail="Fila no encontrada.")
+    return StreamingResponse(_event_stream(gen),
+                             media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
+
+
+@router.put("/corridas/{cid}/composicion/{seq}")
+def editar_composicion(cid: int, seq: int, body: ComposicionEditarIn,
+                       alm: Almacen = Depends(get_almacen),
+                       actor=Depends(requiere_rol("editor"))):
+    return _composicion_o_error(
+        lambda: composicion_svc.guardar_edicion(alm, cid, seq, body.model_dump(),
+                                                actor))
+
+
+@router.post("/corridas/{cid}/composicion/{seq}/aprobar")
+def aprobar_composicion(cid: int, seq: int, body: ComposicionAprobarIn,
+                        alm: Almacen = Depends(get_almacen),
+                        actor=Depends(requiere_rol("editor"))):
+    return _composicion_o_error(
+        lambda: composicion_svc.aprobar(alm, cid, seq, body.model_dump(), actor))
+
+
+@router.post("/corridas/{cid}/composicion/{seq}/rechazar")
+def rechazar_composicion(cid: int, seq: int, body: ComposicionRechazarIn,
+                         alm: Almacen = Depends(get_almacen),
+                         actor=Depends(requiere_rol("editor"))):
+    return _composicion_o_error(
+        lambda: composicion_svc.rechazar(alm, cid, seq, body.model_dump(), actor))
 
 
 @router.get("/corridas/{cid}/items/{seq}")
@@ -294,13 +423,75 @@ def confirmar(cid: int, seq: int, body: ConfirmarIn,
 def confirmar_lote(cid: int, body: ConfirmarLoteIn,
                    alm: Almacen = Depends(get_almacen),
                    _: object = Depends(requiere_rol("consulta"))):
+    # seq repetido: gana el último (dict por comprensión). Es una escritura idempotente
+    # sobre la misma fila y el cliente arma la lista de filas distintas; rechazar el lote
+    # entero por un duplicado costaría validación sin evitar ningún $0.
+    mapa = ({a.seq: (a.apu_codigo, a.shift) for a in body.asignaciones}
+            if body.asignaciones else None)
     try:
-        v = svc.confirmar_items(alm, cid, body.seqs, body.apu_codigo, body.shift)
+        v = svc.confirmar_items(alm, cid, body.seqs, body.apu_codigo, body.shift,
+                                asignaciones=mapa)
     except svc.CorridaCongelada:
         raise HTTPException(status_code=409,
                             detail="La corrida está congelada; actívala para modificar.")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return v
+
+
+@router.post("/corridas/{cid}/rebuscar")
+def rebuscar(cid: int, alm: Almacen = Depends(get_almacen),
+             _: object = Depends(requiere_rol("consulta"))):
+    """Qué cambiaría si se volviera a matchear la corrida contra la biblioteca de hoy.
+    NO escribe: propone. Rol `consulta`, el mismo que `confirmar-lote`, porque es la
+    misma operación (asignar un APU que ya existe); no declara dinero de la nada como
+    `igualar-costo`."""
+    try:
+        v = svc.rebuscar(alm, cid)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para volver "
+                                   "a buscar APU.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return v
+
+
+@router.post("/corridas/{cid}/rebuscar/aplicar")
+def rebuscar_aplicar(cid: int, body: RebuscarAplicarIn,
+                     alm: Almacen = Depends(get_almacen),
+                     _: object = Depends(requiere_rol("consulta"))):
+    try:
+        v = svc.aplicar_rebusqueda(alm, cid, body.seqs)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para volver "
+                                   "a buscar APU.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return v
+
+
+@router.post("/corridas/{cid}/igualar-costo")
+def igualar_costo(cid: int, body: IgualarCostoIn,
+                  alm: Almacen = Depends(get_almacen),
+                  actor=Depends(requiere_rol("editor"))):
+    # Rol `editor` a propósito, MÁS ESTRICTO que sus vecinos (confirmar-lote, congelar
+    # y generar-cuadro piden "consulta", que es el hallazgo Alto "el rol consulta
+    # escribe/borra" de la auditoría 2026-08-28, todavía sin arreglar). No se les
+    # cambia el rol a esos —le sacaría el acceso a gente que hoy trabaja— pero un
+    # endpoint nuevo que DECLARA DINERO no se le abre a un rol de solo lectura.
+    try:
+        v = svc.igualar_costo_al_contractual(alm, cid, body.seqs, actor)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para modificar.")
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v
@@ -347,7 +538,11 @@ async def preview_lineas(cid: int, archivo: UploadFile = File(...),
                          _: object = Depends(requiere_rol("consulta"))):
     """Qué se agregaría con este Excel y qué ya está en la corrida. No escribe nada."""
     meta = _meta_o_404(alm, cid)
-    items = _items_del_upload(archivo.filename, await archivo.read(), meta.turno_def)
+    # Importador genérico: estas son líneas sueltas para una corrida que ya existe, no
+    # un presupuesto con estructura. Va por el mismo camino que el resto para que la
+    # traducción de errores a 400 sea una sola.
+    items = _leer_o_400(EntidadOrigen.NO_IDENTIFICADA, archivo.filename or "lineas.xlsx",
+                        await archivo.read(), meta.turno_def).items
     return svc.preview_agregar(alm, cid, items)
 
 
@@ -357,7 +552,11 @@ async def importar_lineas(cid: int, archivo: UploadFile = File(...),
                           _: object = Depends(requiere_rol("consulta"))):
     """Agrega a la corrida las líneas del Excel (solo las que faltaron)."""
     meta = _meta_o_404(alm, cid)
-    items = _items_del_upload(archivo.filename, await archivo.read(), meta.turno_def)
+    # Importador genérico: estas son líneas sueltas para una corrida que ya existe, no
+    # un presupuesto con estructura. Va por el mismo camino que el resto para que la
+    # traducción de errores a 400 sea una sola.
+    items = _leer_o_400(EntidadOrigen.NO_IDENTIFICADA, archivo.filename or "lineas.xlsx",
+                        await archivo.read(), meta.turno_def).items
     return _agregar_o_error(alm, cid, items)
 
 
@@ -390,6 +589,10 @@ def borrar_lineas(cid: int, body: BorrarLineasIn,
     except svc.CorridaCongelada:
         raise HTTPException(status_code=409,
                             detail="La corrida está congelada; actívala para modificar.")
+    except ValueError as e:
+        # Mismo trato que en `_agregar_o_error`: hoy es "todavía se está armando",
+        # que es accionable (esperar), no un error del servidor.
+        raise HTTPException(status_code=400, detail=str(e))
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v
@@ -398,7 +601,20 @@ def borrar_lineas(cid: int, body: BorrarLineasIn,
 @router.post("/corridas/{cid}/congelar")
 def congelar(cid: int, alm: Almacen = Depends(get_almacen),
              _: object = Depends(requiere_rol("consulta"))):
-    v = svc.congelar(alm, cid)
+    try:
+        v = svc.congelar(alm, cid)
+    except svc.ArmadoIncompleto as e:
+        # 409 con el progreso: la pantalla ya lo muestra, pero quien fuerce el POST
+        # tiene que enterarse de que le faltan líneas, no de un error genérico.
+        raise HTTPException(
+            status_code=409,
+            detail={"mensaje": str(e), "hechos": e.hechos, "total": e.total})
+    except svc.FilasSinApu as e:
+        # Único endpoint con detail estructurado (el resto de este archivo usa
+        # string): `seqs` es lo que el frontend necesita para resaltar las filas
+        # y sacarlo de la prosa a punta de regex sería peor que esto.
+        raise HTTPException(status_code=409,
+                            detail={"mensaje": str(e), "seqs": e.seqs})
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v
@@ -411,6 +627,33 @@ def activar(cid: int, alm: Almacen = Depends(get_almacen),
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v
+
+
+@router.post("/corridas/{cid}/reanudar")
+def reanudar(cid: int, alm: Almacen = Depends(get_almacen),
+             _: object = Depends(requiere_rol("editor"))):
+    """Devuelve a la cola una corrida que se rindió (`armado_detenido`), desde cero:
+    `intentos` en 0 y sin error. Lo ya armado se conserva — el worker entra en
+    `max_seq + 1`.
+
+    Rol `editor` y no `consulta` como sus vecinos, por el mismo criterio que
+    `igualar-costo`: relanza horas de trabajo del servidor.
+    """
+    meta = _meta_o_404(alm, cid)
+    if meta.estado != "armado_detenido":
+        # Solo se reanuda lo que se rindió. Reencolar una que YA está en la cola le
+        # borraría los `intentos` (el tope no llegaría nunca); reencolar una terminada
+        # la volvería de solo lectura hasta que el worker la retome —y una
+        # 'finalizada' perdería ese estado— sin que nadie lo haya pedido.
+        raise HTTPException(
+            status_code=409,
+            detail=("La corrida ya está en la cola de armado."
+                    if meta.estado == "armando" else
+                    "La corrida no está detenida: solo se reanuda un armado que se "
+                    "interrumpió."))
+    alm.corridas.reencolar_armado(cid)
+    armador.hay_trabajo.set()      # que el worker la tome YA, no en el próximo poll
+    return svc.vista_corrida(alm, cid)
 
 
 @router.post("/corridas/{cid}/renombrar")
@@ -429,7 +672,20 @@ def renombrar(cid: int, body: RenombrarCorridaIn,
 @router.get("/corridas/{cid}/cuadro")
 def cuadro(cid: int, alm: Almacen = Depends(get_almacen),
           _: object = Depends(requiere_rol("consulta"))):
-    out = svc.generar_cuadro(alm, cid)
+    try:
+        out = svc.generar_cuadro(alm, cid)
+    except svc.ArmadoIncompleto as e:
+        # 409 con el progreso: la pantalla ya lo muestra, pero quien fuerce el POST
+        # tiene que enterarse de que le faltan líneas, no de un error genérico.
+        raise HTTPException(
+            status_code=409,
+            detail={"mensaje": str(e), "hechos": e.hechos, "total": e.total})
+    except svc.FilasSinApu as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"mensaje": f"{e} Si está congelada, actívala, asígnalas y "
+                               f"vuelve a congelar.",
+                    "seqs": e.seqs})
     if out is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return FileResponse(str(out), filename=out.name, media_type=_XLSX)
@@ -556,14 +812,17 @@ def insumos_cambios(body: CambiosIn, alm: Almacen = Depends(get_almacen),
 
 @router.post("/insumos/importar/preview")
 async def insumos_importar_preview(archivo: UploadFile = File(...),
+                                   fuente_import: str = Form(...),
                                    lista_id: Optional[int] = Form(None),
+                                   forzar_ids: list[int] = Form([]),
                                    alm: Almacen = Depends(get_almacen),
                                    _: object = Depends(requiere_rol("editor"))):
     _validar_lista(alm, lista_id)
     contenido = await archivo.read()
     try:
         return autoria.preview_importar_insumos(alm, contenido,
-                                                archivo.filename or "insumos.xlsx", lista_id)
+                                                archivo.filename or "insumos.xlsx",
+                                                fuente_import, lista_id, set(forzar_ids))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except (zipfile.BadZipFile, InvalidFileException):
@@ -572,14 +831,18 @@ async def insumos_importar_preview(archivo: UploadFile = File(...),
 
 @router.post("/insumos/importar")
 async def insumos_importar(archivo: UploadFile = File(...),
+                           fuente_import: str = Form(...),
                            lista_id: Optional[int] = Form(None),
+                           forzar_ids: list[int] = Form([]),
                            alm: Almacen = Depends(get_almacen),
                            actor=Depends(requiere_rol("editor"))):
     _validar_lista(alm, lista_id)
     contenido = await archivo.read()
     try:
         return autoria.aplicar_importar_insumos(alm, contenido, archivo.filename or "insumos.xlsx",
-                                                actor=actor, lista_id=lista_id)
+                                                fuente_import, actor=actor,
+                                                lista_id=lista_id,
+                                                forzar_ids=set(forzar_ids))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except (zipfile.BadZipFile, InvalidFileException):
@@ -796,6 +1059,15 @@ def mover_corrida(cid: int, body: MoverCorridaIn, alm: Almacen = Depends(get_alm
             raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     except CarpetaInvalida as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except svc.ArmadoDuplicado as e:
+        # El mensaje de la excepción es el de crear una corrida ("te llevamos a esa");
+        # moviendo, lo que hay que decir es por qué el destino está ocupado.
+        raise HTTPException(
+            status_code=409,
+            detail={"mensaje": f"En la carpeta destino ya hay un armado en curso de "
+                               f"«{e.archivo}» (corrida {e.corrida_id}). Esperá a que "
+                               f"termine antes de mover esta.",
+                    "corrida_id": e.corrida_id})
     return svc.vista_corrida(alm, cid)
 
 

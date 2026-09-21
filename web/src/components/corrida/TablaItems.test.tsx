@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import TablaItems from "./TablaItems";
 import { useCorridaTabla } from "@/lib/corridaTabla";
@@ -6,8 +6,9 @@ import { useCorridaTabla } from "@/lib/corridaTabla";
 vi.mock("@/api/corridas", () => ({
   getItem: vi.fn(async () => ({
     seq: 0, descripcion: "Concreto", apu_codigo: "111", apu_turno: "DIURNO",
-    apu_nombre: "APU VIEJO",
+    apu_nombre: "APU VIEJO", codigo_sugerido: "", unidad: "M3",
     status: "matched", explicacion: "", candidatos: [], composicion: [], costo_unitario: 0,
+    costo_manual: false,
   })),
   confirmar: vi.fn(async () => ({
     id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
@@ -20,6 +21,15 @@ vi.mock("@/api/corridas", () => ({
   borrarLineas: vi.fn(async () => ({
     id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
     totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
+  })),
+  aplicarSugerencias: vi.fn(async () => ({
+    id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
+    totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
+  })),
+  igualarCostoAlContractual: vi.fn(async () => ({
+    id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
+    totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
+    igualadas: [0], rechazadas: [],
   })),
 }));
 vi.mock("@/api/autoria", () => ({
@@ -40,6 +50,7 @@ vi.mock("@/api/autoria", () => ({
   crearApu: vi.fn(async () => ({})),
   editarApu: vi.fn(async () => ({})),
   getGruposApu: vi.fn(async () => ["PAVIMENTOS", "REDES DE ACUEDUCTO"]),
+  conflictoApu: vi.fn(async () => ({ campo: null, motivo: null })),
 }));
 vi.mock("@/api/insumos", () => ({
   listarInsumos: vi.fn(async () => ({ items: [], total: 0, limit: 15, offset: 0 })),
@@ -50,8 +61,25 @@ const ITEM = {
   seq: 0, item: "1", descripcion: "Concreto", unidad: "M3", cantidad: 10,
   apu_codigo: "111", apu_nombre: "APU VIEJO", status: "matched", confianza: 1,
   precio_contractual: 0, costo_unitario: 0, margen_unitario: 0, margen_pct: 0,
-  contractual_total: 0, costo_total: 0, margen_total: 0,
+  contractual_total: 0, costo_total: 0, margen_total: 0, revision: null,
+  costo_manual: false,
 };
+
+/** Veredicto "cambiar" con APU y turno sugeridos: el único que ofrece Aplicar. */
+const VEREDICTO_CAMBIAR = {
+  seq: 0, dictamen: "cambiar", apu_sugerido: "222", turno_sugerido: "NOCTURNO",
+  confianza: 0.9, justificacion: "El asignado es de otra unidad.", nivel: "profundo",
+};
+
+/** La etiqueta del veredicto EN LA FILA. El <option> del filtro de la cabecera
+ *  lleva el mismo texto, así que un getByText pelado encuentra dos nodos. */
+const celdaVeredicto = (texto: string) =>
+  screen.getAllByText(texto).filter((el) => el.tagName === "SPAN")[0];
+
+const veredicto = (seq: number, dictamen: string) => ({
+  ...VEREDICTO_CAMBIAR, seq, dictamen,
+  apu_sugerido: dictamen === "cambiar" ? "222" : null,
+});
 
 test("reasigna un ítem matched vía el buscador (pasa el turno elegido)", async () => {
   const { default: TablaItems } = await import("./TablaItems");
@@ -123,7 +151,9 @@ test("muestra el código de licitación (Ítem) junto al APU", async () => {
   expect(screen.getByText("111")).toBeTruthy();
 });
 
-function TablaConControl({ items, readOnly }: { items: typeof ITEM[]; readOnly?: boolean }) {
+function TablaConControl({ items, readOnly, puedeEditar }: {
+  items: typeof ITEM[]; readOnly?: boolean; puedeEditar?: boolean;
+}) {
   const control = useCorridaTabla(items);
   return (
     <TablaItems
@@ -132,6 +162,7 @@ function TablaConControl({ items, readOnly }: { items: typeof ITEM[]; readOnly?:
       control={control}
       onConfirmado={() => {}}
       readOnly={readOnly}
+      puedeEditar={puedeEditar}
     />
   );
 }
@@ -217,7 +248,7 @@ test("Confirmar el APU actual manda solo las filas que tienen APU", async () => 
   fireEvent.click(screen.getByLabelText(/Marcar todas las líneas/i));
   fireEvent.click(screen.getByRole("button", { name: /Confirmar el APU actual/i }));
   await waitFor(() =>
-    expect(confirmarLote).toHaveBeenCalledWith(1, [0, 1, 3], undefined, undefined));
+    expect(confirmarLote).toHaveBeenCalledWith(1, [0, 1, 3]));
 });
 
 test("después de asignar se limpia la selección", async () => {
@@ -313,55 +344,14 @@ test("muestra el unitario contractual y el costo unitario en la fila", async () 
   expect(screen.getByText("$567")).toBeTruthy();
 });
 
-test("con rol editor, el ítem ofrece duplicar el APU y usarlo aquí", async () => {
-  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} puedeEditar />);
-  fireEvent.click(screen.getByLabelText("Expandir fila"));
-  expect(
-    await screen.findByRole("button", { name: /Duplicar este APU/i }),
-  ).toBeTruthy();
-});
-
-test("sin rol editor no ofrece duplicar", async () => {
-  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} />);
-  fireEvent.click(screen.getByLabelText("Expandir fila"));
-  await screen.findByText(/Cambiar APU/i);
-  expect(screen.queryByRole("button", { name: /Duplicar este APU/i })).toBeNull();
-});
-
-test("no ofrece duplicar cuando el ítem no tiene APU asignado", async () => {
-  const { getItem } = await import("@/api/corridas");
-  vi.mocked(getItem).mockResolvedValueOnce({
-    seq: 0, descripcion: "Concreto", apu_codigo: "", apu_turno: "DIURNO",
-    apu_nombre: "", status: "matched", explicacion: "", candidatos: [], composicion: [],
-    costo_unitario: 0,
-  });
-  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} puedeEditar />);
-  fireEvent.click(screen.getByLabelText("Expandir fila"));
-  await screen.findByText(/Cambiar APU/i);
-  expect(screen.queryByRole("button", { name: /Duplicar este APU/i })).toBeNull();
-});
-
-test("en corrida congelada no ofrece duplicar", async () => {
-  render(
-    <TablaItems
-      corridaId={1}
-      items={[ITEM]}
-      onConfirmado={() => {}}
-      puedeEditar
-      readOnly
-    />,
-  );
-  fireEvent.click(screen.getByLabelText("Expandir fila"));
-  expect(screen.queryByRole("button", { name: /Duplicar este APU/i })).toBeNull();
-});
-
 test("al crear la copia, el ítem queda reasignado al APU nuevo (sin toast de éxito duplicado)", async () => {
   const { confirmar } = await import("@/api/corridas");
   const { toast } = await import("sonner");
   vi.mocked(toast.success).mockClear();
   render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} puedeEditar />);
   fireEvent.click(screen.getByLabelText("Expandir fila"));
-  fireEvent.click(await screen.findByRole("button", { name: /Duplicar este APU/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /Armar APU/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Duplicar el APU asignado/ }));
   // el diálogo abre precargado desde la biblioteca
   fireEvent.change(await screen.findByDisplayValue("MEZCLA MD12"), {
     target: { value: "MEZCLA MD13" },
@@ -387,7 +377,8 @@ test("si el APU se crea pero la reasignación falla, el toast lo dice (no sugier
   vi.mocked(toast.error).mockClear();
   render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} puedeEditar />);
   fireEvent.click(screen.getByLabelText("Expandir fila"));
-  fireEvent.click(await screen.findByRole("button", { name: /Duplicar este APU/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /Armar APU/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Duplicar el APU asignado/ }));
   fireEvent.change(await screen.findByDisplayValue("MEZCLA MD12"), {
     target: { value: "MEZCLA MD13" },
   });
@@ -397,7 +388,7 @@ test("si el APU se crea pero la reasignación falla, el toast lo dice (no sugier
   // reportar el error como si nada se hubiera creado.
   await waitFor(() =>
     expect(toast.error).toHaveBeenCalledWith(
-      "APU 3454-2 creado; no se pudo asignar al ítem — asignalo con Cambiar APU.",
+      "APU 3454-2 creado; no se pudo asignar al ítem — asígnalo con Cambiar APU.",
     ));
   expect(toast.success).not.toHaveBeenCalledWith(
     expect.stringContaining("asignado al ítem"),
@@ -427,74 +418,6 @@ test("regresión: con puedeEditar={false}, 'Confirmar APU actual' sigue visible 
   await waitFor(() => expect(confirmar).toHaveBeenCalledWith(1, 0, "111", undefined));
 });
 
-test("duplicar en dos filas distintas: gana el pedido más reciente, no el que resuelve último", async () => {
-  const { getItem } = await import("@/api/corridas");
-  const { getApuDetalle } = await import("@/api/autoria");
-
-  // Dos filas con orígenes distinguibles (código y nombre) para poder afirmar
-  // cuál quedó mostrado en el diálogo.
-  vi.mocked(getItem)
-    .mockImplementationOnce(async () => ({
-      seq: 0, descripcion: "Item A", apu_codigo: "3454", apu_turno: "DIURNO",
-      apu_nombre: "MEZCLA MD12", status: "matched", explicacion: "",
-      candidatos: [], composicion: [], costo_unitario: 0,
-    }))
-    .mockImplementationOnce(async () => ({
-      seq: 1, descripcion: "Item B", apu_codigo: "7788", apu_turno: "DIURNO",
-      apu_nombre: "BASE GRANULAR", status: "matched", explicacion: "",
-      candidatos: [], composicion: [], costo_unitario: 0,
-    }));
-
-  // Diferidos: controlamos a mano el orden de resolución (al revés del orden
-  // de los clicks) para reproducir la carrera del hallazgo.
-  let resolverA: ((v: unknown) => void) | null = null;
-  let resolverB: ((v: unknown) => void) | null = null;
-  vi.mocked(getApuDetalle)
-    .mockImplementationOnce(() => new Promise((res) => { resolverA = res as (v: unknown) => void; }))
-    .mockImplementationOnce(() => new Promise((res) => { resolverB = res as (v: unknown) => void; }));
-
-  const items = [
-    { ...ITEM, seq: 0, apu_codigo: "3454" },
-    { ...ITEM, seq: 1, apu_codigo: "7788" },
-  ];
-  render(<TablaItems corridaId={1} items={items} onConfirmado={() => {}} puedeEditar />);
-
-  const chevrones = screen.getAllByLabelText("Expandir fila");
-  fireEvent.click(chevrones[0]);
-  fireEvent.click(chevrones[1]);
-
-  await waitFor(() =>
-    expect(screen.getAllByRole("button", { name: /Duplicar este APU/i })).toHaveLength(2),
-  );
-  const botones = screen.getAllByRole("button", { name: /Duplicar este APU/i });
-  fireEvent.click(botones[0]); // pide duplicar A (seq 0) primero
-  fireEvent.click(botones[1]); // pide duplicar B (seq 1) después — este es el pedido vigente
-
-  // Resuelve al revés de los clicks: A (el pedido viejo) llega DESPUÉS que B.
-  // `waitFor` daría un falso positivo aquí (ver DialogoAgregarApu.test.tsx): el
-  // primer chequeo sin lanzar corta antes de que el setState de la promesa
-  // termine de propagar. Por eso se resuelve y se drena la cola de microtasks
-  // dentro de `act`, y se afirma después con un `expect` plano.
-  await act(async () => {
-    resolverB!({
-      codigo: "7788", turno: "DIURNO", nombre: "BASE GRANULAR", unidad: "M3",
-      grupo: "PAV", costo_unitario: 100000, composicion: [],
-    });
-    await new Promise((r) => setTimeout(r, 0));
-  });
-  await act(async () => {
-    resolverA!({
-      codigo: "3454", turno: "DIURNO", nombre: "MEZCLA MD12", unidad: "M3",
-      grupo: "PAV", costo_unitario: 480000, composicion: [],
-    });
-    await new Promise((r) => setTimeout(r, 0));
-  });
-
-  // Gana el pedido más reciente (B), aunque el de A haya resuelto después.
-  expect(screen.getByText(/Duplicar APU 7788/)).toBeTruthy();
-  expect(screen.queryByText(/Duplicar APU 3454/)).toBeNull();
-});
-
 test("borra las líneas marcadas después de confirmar", async () => {
   const { borrarLineas } = await import("@/api/corridas");
   const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -518,4 +441,465 @@ test("cancelar la confirmación no borra nada", async () => {
 
   expect(borrarLineas).not.toHaveBeenCalled();
   confirmSpy.mockRestore();
+});
+
+// ─── columna Veredicto (revisión con IA) ─────────────────────────────────────
+
+test("los cuatro dictámenes se muestran con etiqueta y color distinguibles", () => {
+  const items = ["ok", "dudoso", "cambiar", "sin_apu"].map((d, i) => ({
+    ...ITEM, seq: i, item: String(i + 1), descripcion: `Fila ${i}`,
+    revision: veredicto(i, d),
+  }));
+  render(<TablaConControl items={items} />);
+  const etiquetas = ["✔ ok", "⚠ dudoso", "↔ cambiar", "✖ sin APU"];
+  const clases = etiquetas.map((t) => celdaVeredicto(t).className);
+  // las cuatro presentes...
+  expect(clases).toHaveLength(4);
+  // ...y con cuatro colores distintos (si compartieran clase, no se distinguen)
+  expect(new Set(clases).size).toBe(4);
+});
+
+test("una fila sin veredicto muestra un guion y no rompe la tabla", () => {
+  // Con la columna condicionada a que HAYA veredictos, el caso interesante es la
+  // fila sin revisar en una corrida ya revisada (no la corrida entera sin revisar).
+  render(<TablaConControl items={[
+    { ...ITEM, seq: 0, revision: null },
+    { ...ITEM, seq: 1, item: "2", descripcion: "Otra", revision: { ...VEREDICTO_CAMBIAR, seq: 1 } },
+  ]} />);
+  expect(screen.getByText("—")).toBeTruthy();
+  expect(screen.getByText("Concreto")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^Aplicar$/ })).toBeNull();
+});
+
+test("el title de la celda dice el nivel en palabras, la confianza y la justificación", () => {
+  render(<TablaConControl items={[{ ...ITEM, revision: VEREDICTO_CAMBIAR }]} />);
+  // Un análisis a fondo SÍ miró la composición: la celda tiene que poder decirlo.
+  expect(celdaVeredicto("↔ cambiar").getAttribute("title"))
+    .toBe("Análisis a fondo · confianza 90% — El asignado es de otra unidad.");
+});
+
+test("un veredicto de barrido se anuncia como triaje, no como análisis a fondo", () => {
+  const revision = {
+    ...VEREDICTO_CAMBIAR, dictamen: "ok", apu_sugerido: null, turno_sugerido: null,
+    nivel: "barrido", confianza: 0, justificacion: "Sin objeciones en el barrido.",
+  };
+  render(<TablaConControl items={[{ ...ITEM, revision }]} />);
+  const title = celdaVeredicto("✔ ok").getAttribute("title") ?? "";
+  expect(title.startsWith("Triaje rápido · confianza 0%")).toBe(true);
+  expect(title.includes("Análisis a fondo")).toBe(false);
+});
+
+// ─── la columna solo existe si hay algo que mostrar ──────────────────────────
+
+/** Columnas de la primera fila de la cabecera (la de los rótulos). */
+const colsCabecera = () =>
+  document.querySelectorAll("thead tr")[0].querySelectorAll("th").length;
+
+test("sin un solo veredicto, la columna Veredicto no se dibuja", () => {
+  render(<TablaConControl items={[{ ...ITEM, revision: null }]} />);
+  expect(screen.queryByLabelText("Ordenar por Veredicto")).toBeNull();
+  expect(screen.queryByLabelText("Filtrar Veredicto")).toBeNull();
+});
+
+test("con al menos un veredicto, la columna Veredicto aparece", () => {
+  render(<TablaConControl items={[
+    { ...ITEM, seq: 0, revision: null },
+    { ...ITEM, seq: 1, item: "2", descripcion: "Otra", revision: { ...VEREDICTO_CAMBIAR, seq: 1 } },
+  ]} />);
+  expect(screen.getByLabelText("Ordenar por Veredicto")).toBeTruthy();
+  expect(screen.getByLabelText("Filtrar Veredicto")).toBeTruthy();
+});
+
+test("el colSpan de la fila expandida cuadra con la cabecera SIN veredictos", async () => {
+  render(<TablaConControl items={[{ ...ITEM, revision: null }]} />);
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await waitFor(() => {
+    const celda = document.querySelector("tbody td[colspan]") as HTMLTableCellElement;
+    expect(Number(celda.getAttribute("colspan"))).toBe(colsCabecera());
+  });
+});
+
+test("el colSpan de la fila expandida cuadra con la cabecera CON veredictos", async () => {
+  render(<TablaConControl items={[{ ...ITEM, revision: VEREDICTO_CAMBIAR }]} />);
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await waitFor(() => {
+    const celda = document.querySelector("tbody td[colspan]") as HTMLTableCellElement;
+    expect(Number(celda.getAttribute("colspan"))).toBe(colsCabecera());
+  });
+});
+
+test("Aplicar manda el seq, el APU sugerido y el turno de la sugerencia", async () => {
+  const { aplicarSugerencias } = await import("@/api/corridas");
+  vi.mocked(aplicarSugerencias).mockClear();
+  const items = [{ ...ITEM, seq: 7, revision: { ...VEREDICTO_CAMBIAR, seq: 7 } }];
+  render(<TablaConControl items={items} puedeEditar />);
+  fireEvent.click(screen.getByRole("button", { name: /^Aplicar$/ }));
+  await waitFor(() =>
+    expect(aplicarSugerencias).toHaveBeenCalledWith(1, [
+      { seq: 7, apu_codigo: "222", shift: "NOCTURNO" },
+    ]));
+});
+
+test("un dictamen que no es 'cambiar' no ofrece Aplicar aunque traiga APU sugerido", () => {
+  // El backend garantiza que el código no sobrevive con otro dictamen; la
+  // interfaz decide por el dictamen igual, sin apoyarse en esa garantía.
+  const items = [{
+    ...ITEM, revision: { ...VEREDICTO_CAMBIAR, dictamen: "ok", apu_sugerido: "222" },
+  }];
+  render(<TablaConControl items={items} puedeEditar />);
+  expect(screen.queryByRole("button", { name: /^Aplicar$/ })).toBeNull();
+});
+
+test("sin rol editor no aparece Aplicar", () => {
+  render(<TablaConControl items={[{ ...ITEM, revision: VEREDICTO_CAMBIAR }]} />);
+  expect(screen.queryByRole("button", { name: /^Aplicar$/ })).toBeNull();
+});
+
+test("en corrida congelada no aparece Aplicar", () => {
+  render(
+    <TablaConControl items={[{ ...ITEM, revision: VEREDICTO_CAMBIAR }]} puedeEditar readOnly />,
+  );
+  expect(screen.queryByRole("button", { name: /^Aplicar$/ })).toBeNull();
+});
+
+test("si aplicar la sugerencia falla, lo dice con un toast de error", async () => {
+  const { aplicarSugerencias } = await import("@/api/corridas");
+  const { toast } = await import("sonner");
+  vi.mocked(aplicarSugerencias).mockRejectedValueOnce(new Error("fallo de red"));
+  vi.mocked(toast.error).mockClear();
+  render(<TablaConControl items={[{ ...ITEM, revision: VEREDICTO_CAMBIAR }]} puedeEditar />);
+  fireEvent.click(screen.getByRole("button", { name: /^Aplicar$/ }));
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith("fallo de red"));
+});
+
+test("filtra por el desplegable de Veredicto", () => {
+  const items = [
+    { ...ITEM, seq: 0, descripcion: "Alfa", revision: veredicto(0, "ok") },
+    { ...ITEM, seq: 1, descripcion: "Beta", revision: veredicto(1, "cambiar") },
+    { ...ITEM, seq: 2, descripcion: "Gama", revision: null },
+  ];
+  render(<TablaConControl items={items} />);
+  fireEvent.change(screen.getByLabelText("Filtrar Veredicto"), { target: { value: "cambiar" } });
+  expect(screen.queryByText("Alfa")).toBeNull();
+  expect(screen.getByText("Beta")).toBeTruthy();
+  expect(screen.queryByText("Gama")).toBeNull();
+});
+
+test("el desplegable de Veredicto encuentra las filas sin revisar", () => {
+  // El caso que importa: la IA falló 40 de 300 filas. Sin esta opción esas filas
+  // salen con un guion igual que cualquier otra y no hay forma de localizarlas.
+  const items = [
+    { ...ITEM, seq: 0, descripcion: "Alfa", revision: veredicto(0, "ok") },
+    { ...ITEM, seq: 1, descripcion: "Beta", revision: null },
+    { ...ITEM, seq: 2, descripcion: "Gama", revision: null },
+  ];
+  render(<TablaConControl items={items} />);
+  const select = screen.getByLabelText("Filtrar Veredicto") as HTMLSelectElement;
+  const sinRevisar = [...select.options].find((o) => o.text === "— sin revisar");
+  expect(sinRevisar).toBeTruthy();
+
+  fireEvent.change(select, { target: { value: sinRevisar!.value } });
+  expect(screen.queryByText("Alfa")).toBeNull();
+  expect(screen.getByText("Beta")).toBeTruthy();
+  expect(screen.getByText("Gama")).toBeTruthy();
+});
+
+test("si todas las filas tienen veredicto, no se ofrece \"sin revisar\"", () => {
+  render(<TablaConControl items={[
+    { ...ITEM, seq: 0, descripcion: "Alfa", revision: veredicto(0, "ok") },
+  ]} />);
+  const select = screen.getByLabelText("Filtrar Veredicto") as HTMLSelectElement;
+  expect([...select.options].map((o) => o.text)).toEqual(["(todas)", "✔ ok"]);
+});
+
+// ─── La puerta de entrada a la mesa de composición ───────────────────────────
+// Componer ya NO depende de haber corrido la revisión con IA sobre toda la corrida:
+// se ofrece en cualquier fila sin APU (o con veredicto `sin_apu`), desde la columna
+// Acciones. El botón solo AVISA al padre con el seq; navegar es de la página, que es
+// la que está dentro del Router (esta tabla se monta sin él en estos tests).
+
+/** Veredicto `sin_apu`: el que ofrece Componer aunque la fila SÍ tenga APU. */
+const VEREDICTO_SIN_APU = {
+  seq: 0, dictamen: "sin_apu", apu_sugerido: null, turno_sugerido: null,
+  confianza: 0.8, justificacion: "No hay sardineles A-10.", nivel: "profundo",
+};
+
+test("con dictamen sin_apu y rol editor aparece Componer", () => {
+  render(
+    <TablaItems corridaId={1} items={[{ ...ITEM, revision: VEREDICTO_SIN_APU }]}
+      onConfirmado={() => {}} onComponer={() => {}} puedeEditar />,
+  );
+  expect(screen.getByRole("button", { name: /^Componer$/ })).toBeTruthy();
+});
+
+test("los demás dictámenes no ofrecen Componer", () => {
+  const items = [
+    { ...ITEM, seq: 0, descripcion: "Alfa", revision: veredicto(0, "ok") },
+    { ...ITEM, seq: 1, descripcion: "Beta", revision: veredicto(1, "cambiar") },
+    { ...ITEM, seq: 2, descripcion: "Gama", revision: veredicto(2, "dudoso") },
+  ];
+  render(<TablaItems corridaId={1} items={items} onConfirmado={() => {}}
+                     onComponer={() => {}} puedeEditar />);
+  expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
+});
+
+test("sin rol editor no aparece Componer", () => {
+  render(
+    <TablaItems corridaId={1} items={[{ ...ITEM, revision: VEREDICTO_SIN_APU }]}
+      onConfirmado={() => {}} onComponer={() => {}} />,
+  );
+  expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
+});
+
+test("en corrida congelada no aparece Componer", () => {
+  render(
+    <TablaItems corridaId={1} items={[{ ...ITEM, revision: VEREDICTO_SIN_APU }]}
+      onConfirmado={() => {}} onComponer={() => {}} puedeEditar readOnly />,
+  );
+  expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
+});
+
+test("una fila sin APU ofrece componer sin haber corrido la revisión", () => {
+  render(
+    <TablaItems corridaId={1}
+      items={[{ ...ITEM, apu_codigo: "", apu_nombre: "", revision: null }]}
+      onConfirmado={() => {}} onComponer={() => {}} puedeEditar />,
+  );
+  expect(screen.getByRole("button", { name: /^Componer$/ })).toBeTruthy();
+});
+
+test("una fila CON APU y sin veredicto no ofrece componer", () => {
+  render(
+    <TablaItems corridaId={1} items={[{ ...ITEM, revision: null }]}
+      onConfirmado={() => {}} onComponer={() => {}} puedeEditar />,
+  );
+  expect(screen.queryByRole("button", { name: /^Componer$/ })).toBeNull();
+});
+
+test("una fila con costo puesto a mano SÍ ofrece componer", () => {
+  // Igualar al contractual era la salida cuando no había APU: es justo la fila que
+  // más necesita poder componerse. Asignar un APU de verdad borra el costo manual
+  // solo (`actualizar_eleccion`), así que bloquearla acá cerraría el camino en las
+  // líneas que más lo piden (pedido explícito del dueño del producto).
+  render(
+    <TablaItems corridaId={1}
+      items={[{ ...ITEM, apu_codigo: "", apu_nombre: "", costo_manual: true }]}
+      onConfirmado={() => {}} onComponer={() => {}} puedeEditar />,
+  );
+  expect(screen.getByRole("button", { name: /^Componer$/ })).toBeTruthy();
+});
+
+test("Componer avisa al padre con el seq de ESA fila", () => {
+  const onComponer = vi.fn();
+  const items = [
+    { ...ITEM, seq: 0, descripcion: "Alfa" },
+    { ...ITEM, seq: 5, item: "2", descripcion: "SARDINEL A-10",
+      apu_codigo: "", apu_nombre: "" },
+  ];
+  render(<TablaItems corridaId={1} items={items} onConfirmado={() => {}}
+                     onComponer={onComponer} puedeEditar />);
+  fireEvent.click(screen.getByRole("button", { name: /^Componer$/ }));
+  expect(onComponer).toHaveBeenCalledWith(5);
+});
+
+// ─── Igualar costo al contractual (proyectos especiales) ────────────────────
+
+test("con filas marcadas aparece el botón de igualar al contractual", async () => {
+  render(<TablaConControl items={itemsCuatro()} puedeEditar />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  expect(await screen.findByText(/Igualar costo al contractual/i)).toBeTruthy();
+});
+
+test("igualar manda los seqs marcados", async () => {
+  const { igualarCostoAlContractual } = await import("@/api/corridas");
+  render(<TablaConControl items={itemsCuatro()} puedeEditar />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  fireEvent.click(screen.getByLabelText("Marcar ítem 2"));
+  fireEvent.click(await screen.findByText(/Igualar costo al contractual/i));
+  await waitFor(() =>
+    expect(igualarCostoAlContractual).toHaveBeenCalledWith(1, [0, 1]),
+  );
+});
+
+test("sin permiso de editor no hay botón de igualar", async () => {
+  render(<TablaConControl items={itemsCuatro()} puedeEditar={false} />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  // La barra sí aparece (confirmar y borrar los puede un rol consulta), el botón no.
+  expect(await screen.findByText(/Confirmar el APU actual/i)).toBeTruthy();
+  expect(screen.queryByText(/Igualar costo al contractual/i)).toBeNull();
+});
+
+test("una respuesta con rechazadas muestra un toast de error", async () => {
+  const { igualarCostoAlContractual } = await import("@/api/corridas");
+  const { toast } = await import("sonner");
+  vi.mocked(toast.error).mockClear();
+  vi.mocked(igualarCostoAlContractual).mockResolvedValueOnce({
+    id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
+    totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
+    igualadas: [], rechazadas: [0],
+  });
+  render(<TablaConControl items={itemsCuatro()} puedeEditar />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  fireEvent.click(await screen.findByText(/Igualar costo al contractual/i));
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+    expect.stringContaining("Sin tocar por contractual en $0"),
+  ));
+});
+
+test("si igualar falla, muestra un toast de error y NO limpia la selección", async () => {
+  const { igualarCostoAlContractual } = await import("@/api/corridas");
+  const { toast } = await import("sonner");
+  vi.mocked(toast.error).mockClear();
+  vi.mocked(igualarCostoAlContractual).mockRejectedValueOnce(new Error("boom"));
+  render(<TablaConControl items={itemsCuatro()} puedeEditar />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  fireEvent.click(await screen.findByText(/Igualar costo al contractual/i));
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith("boom"));
+  // La selección sobrevive a propósito: el usuario puede reintentar sin volver a marcar.
+  expect(await screen.findByText(/1 línea marcada/i)).toBeTruthy();
+});
+
+test("la fila con costo a mano muestra el badge", () => {
+  render(
+    <TablaConControl
+      items={[{ ...ITEM, seq: 0, costo_unitario: 92106000, costo_manual: true }]}
+    />,
+  );
+  expect(screen.getByText("a mano")).toBeTruthy();
+});
+
+test("sin costo a mano no hay badge", () => {
+  render(<TablaConControl items={[{ ...ITEM, seq: 0, costo_manual: false }]} />);
+  expect(screen.queryByText("a mano")).toBeNull();
+});
+
+test("en solo lectura no hay botón de igualar", () => {
+  render(<TablaConControl items={itemsCuatro()} readOnly={true} />);
+  expect(screen.queryByText(/Igualar costo al contractual/i)).toBeNull();
+});
+
+test("confirmar el APU actual no toca las filas con costo a mano", async () => {
+  const { confirmarLote } = await import("@/api/corridas");
+  render(
+    <TablaConControl
+      items={[
+        { ...ITEM, seq: 0, item: "1", costo_manual: true },
+        { ...ITEM, seq: 1, item: "2", costo_manual: false },
+      ]}
+    />,
+  );
+  fireEvent.click(screen.getByLabelText(/Marcar todas las líneas/i));
+  fireEvent.click(await screen.findByText(/Confirmar el APU actual/i));
+  await waitFor(() => expect(confirmarLote).toHaveBeenCalledWith(1, [1]));
+});
+
+/** El badge de estado EN LA FILA. El <option> del filtro de la cabecera lleva el mismo
+ *  texto, así que un getByText pelado encuentra dos nodos (igual que celdaVeredicto). */
+const badgeEstado = (texto: string) =>
+  screen.queryAllByText(texto).filter((el) => el.tagName === "SPAN");
+
+test("la fila con costo a mano muestra el estado CONTRACTUAL, no CONFIRM", () => {
+  render(
+    <TablaConControl
+      items={[{ ...ITEM, seq: 0, status: "confirmed", costo_manual: true }]}
+    />,
+  );
+  expect(badgeEstado("CONTRACTUAL")).toHaveLength(1);
+  expect(badgeEstado("CONFIRM")).toHaveLength(0);
+});
+
+test("una fila confirmada normal sigue mostrando CONFIRM", () => {
+  render(
+    <TablaConControl
+      items={[{ ...ITEM, seq: 0, status: "confirmed", costo_manual: false }]}
+    />,
+  );
+  expect(badgeEstado("CONFIRM")).toHaveLength(1);
+  expect(badgeEstado("CONTRACTUAL")).toHaveLength(0);
+});
+
+test("al desplegar una fila se ve la descripción completa de la actividad", async () => {
+  const LARGA =
+    "SUMINISTRO E INSTALACION DE TUBERIA PVC SANITARIA DE 6 PULGADAS INCLUYE " +
+    "ACCESORIOS, EXCAVACION, CAMA DE ARENA Y RETIRO DE SOBRANTES A BOTADERO AUTORIZADO";
+  const { default: TablaItems } = await import("./TablaItems");
+  const mod = await import("@/api/corridas");
+  vi.mocked(mod.getItem).mockResolvedValueOnce({
+    seq: 0, descripcion: LARGA, apu_codigo: "111", apu_turno: "DIURNO",
+    apu_nombre: "APU VIEJO", status: "matched", explicacion: "",
+    candidatos: [], composicion: [], costo_unitario: 0, costo_manual: false,
+  });
+  render(
+    <TablaItems
+      corridaId={1}
+      items={[{ ...ITEM, descripcion: LARGA }]}
+      onConfirmado={() => {}}
+    />,
+  );
+
+  // Colapsada: la descripción vive solo en la fila.
+  expect(screen.getAllByText(LARGA)).toHaveLength(1);
+
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await screen.findByText(/APU: 111/);
+
+  // Desplegada: el panel la repite completa, bajo su propio encabezado.
+  expect(screen.getByText(/Actividad de la licitación/i)).toBeTruthy();
+  expect(screen.getAllByText(LARGA)).toHaveLength(2);
+});
+
+// ─── Armar APU (reemplaza a Duplicar) ────────────────────────────────────────
+
+test("el botón Armar APU aparece en una fila CON APU, y ya no el de duplicar", async () => {
+  const { default: TablaItems } = await import("./TablaItems");
+  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}}
+                     puedeEditar />);
+
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await screen.findByText(/APU: 111/);          // el detalle ya cargó
+
+  expect(screen.getByRole("button", { name: /Armar APU/ })).toBeTruthy();
+  // El botón viejo era condicional y con otro texto: ya no existe.
+  expect(screen.queryByRole("button", { name: /Duplicar este APU y usarlo aquí/ }))
+    .toBeNull();
+});
+
+test("el botón Armar APU aparece también en una fila SIN APU", async () => {
+  // Es el caso que antes NO tenía botón: sin APU no había nada que duplicar.
+  const { getItem } = await import("@/api/corridas");
+  vi.mocked(getItem).mockResolvedValueOnce({
+    seq: 0, descripcion: "Concreto", apu_codigo: "", apu_turno: "DIURNO",
+    apu_nombre: "(sin base — armar manual)", codigo_sugerido: "9001", unidad: "M3",
+    status: "new", explicacion: "", candidatos: [], composicion: [],
+    costo_unitario: 0, costo_manual: false,
+  });
+  const { default: TablaItems } = await import("./TablaItems");
+  render(<TablaItems corridaId={1} onConfirmado={() => {}} puedeEditar
+                     items={[{ ...ITEM, apu_codigo: null, status: "new" }]} />);
+
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+
+  expect(await screen.findByRole("button", { name: /Armar APU/ })).toBeTruthy();
+});
+
+test("sin rol editor el botón Armar APU no aparece", async () => {
+  const { default: TablaItems } = await import("./TablaItems");
+  // `puedeEditar` es false por defecto en el componente.
+  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}} />);
+
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await screen.findByText(/APU: 111/);
+
+  expect(screen.queryByRole("button", { name: /Armar APU/ })).toBeNull();
+});
+
+test("con la corrida congelada el botón Armar APU no aparece", async () => {
+  const { default: TablaItems } = await import("./TablaItems");
+  render(<TablaItems corridaId={1} items={[ITEM]} onConfirmado={() => {}}
+                     puedeEditar readOnly />);
+
+  fireEvent.click(screen.getByLabelText("Expandir fila"));
+  await screen.findByText(/APU: 111/);
+
+  expect(screen.queryByRole("button", { name: /Armar APU/ })).toBeNull();
 });

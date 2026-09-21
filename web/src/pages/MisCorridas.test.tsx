@@ -159,3 +159,23 @@ test("dentro de una subcarpeta (nivel 2) NO se ofrecen distancias: son del proye
   await waitFor(() => expect(screen.getByText("Lote 3")).toBeTruthy());
   expect(screen.queryByRole("link", { name: /distancias/i })).toBeNull();
 });
+
+test("las corridas a medio armar se distinguen de las terminadas en la lista", async () => {
+  // El bug que esto tapa: una corrida a medio armar se veía igual que una terminada,
+  // y `armado_detenido` salía crudo, con guion bajo.
+  const corrida = (id: number, estado: string) => ({
+    id, nombre: `lic${id}.xlsx`, archivo: `lic${id}.xlsx`, creada_en: "2026-09-08T10:00:00",
+    estado, modo: "activa", n_items: 290, n_revision: 0, duracion_ms: null,
+    contractual: null, costo: null, margen: null, margen_pct: null,
+    carpeta_id: 1, lista_precios_id: null, lista_nombre: "Principal",
+  });
+  vi.mocked(listarCorridas).mockResolvedValueOnce([
+    corrida(9, "armado_detenido"), corrida(10, "armando"),
+  ]);
+  render(<MemoryRouter initialEntries={["/corridas?carpeta=1"]}><MisCorridas /></MemoryRouter>);
+
+  await waitFor(() => expect(screen.getByText("Armado detenido")).toBeTruthy());
+  expect(screen.getByText("Armando…")).toBeTruthy();
+  // Y no se ven en crudo, con guion bajo.
+  expect(screen.queryByText("armado_detenido")).toBeNull();
+});

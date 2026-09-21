@@ -40,7 +40,7 @@ def test_plantilla_insumos_round_trip(tmp_path):
     from apu_tool.servicio import autoria
     alm = _alm(tmp_path)
     pv = autoria.preview_importar_insumos(alm, plantillas.plantilla_insumos(),
-                                          "plantilla_insumos.xlsx")
+                                          "plantilla_insumos.xlsx", "PRECIO IDU")
     # la plantilla trae una fila con nombre (crear) y una sin nombre (actualizar/no encontrada)
     assert any(f["codigo"] == "EJEMPLO-1" for f in pv["crear"])
 

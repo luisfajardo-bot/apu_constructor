@@ -336,6 +336,30 @@ class ApusDB:
                 "ORDER BY c.apu_codigo, c.shift, c.insumo_codigo").fetchall()
         return [dict(r) for r in rows if normalizar(r["unidad"]) == objetivo]
 
+    def rendimientos_por_insumo(self, codigos) -> dict[str, list[tuple[str, float]]]:
+        """Para cada código de insumo, los (unidad, rendimiento) con que aparece en la
+        biblioteca. Es la materia prima de `dominio/compose.rendimientos_observados`.
+
+        Una sola consulta: recorrer los APUs en memoria para esto sería leer la
+        biblioteca entera por cada composición.
+        """
+        codes = [c for c in dict.fromkeys(str(x) for x in codigos if x)]
+        out: dict[str, list[tuple[str, float]]] = {}
+        if not codes:
+            return out
+        with self.connect() as conn:
+            for i in range(0, len(codes), 800):     # límite de placeholders de SQLite
+                chunk = codes[i:i + 800]
+                ph = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    f"SELECT insumo_codigo, unidad, rendimiento FROM apu_componentes "
+                    f"WHERE insumo_codigo IN ({ph}) AND tipo = 'insumo'", chunk
+                ).fetchall()
+                for r in rows:
+                    out.setdefault(r["insumo_codigo"], []).append(
+                        (r["unidad"] or "", float(r["rendimiento"] or 0.0)))
+        return out
+
     def get_depriced_apu(self, codigo: str, shift: str) -> Optional[DePricedApu]:
         apu = self.get_apu(codigo, shift)
         if apu is None:

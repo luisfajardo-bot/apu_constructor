@@ -100,7 +100,7 @@ def test_post_insumos_crear_lista_inexistente_400(tmp_path):
 def test_post_insumos_importar_preview_lista_inexistente_400(tmp_path):
     cli, _ = _cli(tmp_path)
     r = cli.post("/api/insumos/importar/preview",
-                 data={"lista_id": "999"},
+                 data={"fuente_import": "PRECIO IDU", "lista_id": "999"},
                  files={"archivo": ("l.xlsx", _xlsx_insumos(), _XLSX)})
     assert r.status_code == 400
 
@@ -108,7 +108,7 @@ def test_post_insumos_importar_preview_lista_inexistente_400(tmp_path):
 def test_post_insumos_importar_lista_inexistente_400(tmp_path):
     cli, _ = _cli(tmp_path)
     r = cli.post("/api/insumos/importar",
-                 data={"lista_id": "999"},
+                 data={"fuente_import": "PRECIO IDU", "lista_id": "999"},
                  files={"archivo": ("l.xlsx", _xlsx_insumos(), _XLSX)})
     assert r.status_code == 400
 
@@ -132,18 +132,6 @@ def test_post_corridas_lista_inexistente_400(tmp_path):
                      files={"archivo": ("lic.xlsx", f, _XLSX)})
     assert r.status_code == 400
     assert "no existe" in r.json()["detail"]
-
-
-def test_post_corridas_stream_lista_inexistente_400(tmp_path):
-    cli, _ = _cli(tmp_path, rol="consulta")
-    obra = cli.post("/api/carpetas", json={"nombre": "Obra"}).json()
-    lic = _xlsx_lic(tmp_path)
-    with open(lic, "rb") as f:
-        r = cli.post("/api/corridas/stream",
-                     data={"turno": "DIURNO", "use_ai": "false",
-                           "carpeta_id": str(obra["id"]), "lista_id": "999"},
-                     files={"archivo": ("lic.xlsx", f, _XLSX)})
-    assert r.status_code == 400
 
 
 def test_post_corridas_sin_lista_ok(tmp_path):

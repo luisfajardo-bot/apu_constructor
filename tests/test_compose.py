@@ -1,37 +1,14 @@
-"""Composición generativa: se simula la IA (no se llama a la API real)."""
+"""Recuperación de insumos candidatos: qué entra a la lista blanca y qué no.
+
+Lo que se hace con esa lista — pedirle una composición al modelo, validarla y
+puntuarla — se prueba en `test_composicion_motor.py`. El armado NO llega acá (ver
+test_assemble.py::test_armado_nunca_llama_a_la_ia).
+"""
 import pytest
 
-from apu_tool.dominio.ai_assist import (
-    AIDecision,
-    ApuAdvisor,
-    ComposedComponent,
-    ComposeResult,
-)
-from apu_tool.dominio.assemble import Assembler
-from apu_tool.dominio.compose import InsumoRetriever
 from apu_tool.datos.almacen import Almacen
-from apu_tool.nucleo.models import (
-    Apu,
-    ApuComponent,
-    Insumo,
-    LicitacionItem,
-    MatchStatus,
-)
-
-
-class FakeAdvisor(ApuAdvisor):
-    """Simula la IA: fuerza el camino generativo y devuelve una composición fija."""
-    def __init__(self, composicion):
-        self.enabled = True
-        self._client = object()  # no se usa
-        self.model = "fake"
-        self._composicion = composicion
-
-    def choose_apu(self, item, candidatos, depriced):
-        return AIDecision(None, 0.0, "sin base", "ia")  # fuerza generación
-
-    def compose_apu(self, item, insumos, ejemplos):
-        return self._composicion
+from apu_tool.dominio.compose import InsumoRetriever
+from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
 
 
 @pytest.fixture()
@@ -58,38 +35,12 @@ def test_retriever_returns_candidates(alm):
     assert "322" in codigos          # por nombre (CONCRETO)
 
 
-def test_generative_composition_is_costed(alm):
-    comp = ComposeResult(
-        componentes=[ComposedComponent("4279", 2.0), ComposedComponent("322", 0.1)],
-        justificacion="cuadrilla + concreto", confianza=0.7)
-    assembler = Assembler(alm, advisor=FakeAdvisor(comp))
-    item = LicitacionItem("1", "JARDINERA PREFABRICADA EN CONCRETO", "M2", 10,
-                          120000, "DIURNO")
-    a = assembler.assemble_item(item)
-    assert a.origen == "generado"
-    assert a.status == MatchStatus.REVIEW
-    # 2.0*40000 + 0.1*500000 = 130000
-    assert a.costo_unitario == pytest.approx(130000)
-    assert len(a.componentes) == 2
-
-
-def test_generative_drops_invalid_codes(alm):
-    comp = ComposeResult(
-        componentes=[ComposedComponent("4279", 1.0),
-                     ComposedComponent("NOEXISTE", 5.0)],
-        justificacion="x", confianza=0.5)
-    assembler = Assembler(alm, advisor=FakeAdvisor(comp))
-    item = LicitacionItem("1", "ALGO NUEVO", "M2", 1, 1000, "DIURNO")
-    a = assembler.assemble_item(item)
-    assert len(a.componentes) == 1           # se descarta el código inválido
-    assert a.componentes[0].insumo_codigo == "4279"
-
-
-def test_no_ai_keeps_manual(alm):
-    # advisor real deshabilitado -> compose devuelve None -> manual
-    assembler = Assembler(alm, advisor=ApuAdvisor(enabled=False))
-    item = LicitacionItem("1", "ACTIVIDAD TOTALMENTE INEXISTENTE XYZ", "UN", 1, 1, "DIURNO")
-    a = assembler.assemble_item(item)
-    assert a.status in (MatchStatus.NEW, MatchStatus.REVIEW)
-    if a.status == MatchStatus.NEW:
-        assert a.origen == "manual"
+def test_un_subapu_de_un_apu_de_referencia_no_entra_como_candidato(alm):
+    """La IA no propone sub-APUs en esta fase: un código de APU en la lista blanca
+    la invita a proponer algo que el validador después rechaza."""
+    alm.apus.insert_apus([Apu("SUB", "SUB-APU DE PRUEBA", "M3", "DIURNO")])
+    alm.apus.insert_components([
+        ApuComponent("3010", "DIURNO", "SUB", "SUB-APU DE PRUEBA", "M3", 1.0, 0,
+                     tipo="apu", ref_shift="DIURNO")])
+    insumos, _ = InsumoRetriever(alm).retrieve("DEMOLICION PAVIMENTO", "DIURNO")
+    assert "SUB" not in {i.codigo for i in insumos}

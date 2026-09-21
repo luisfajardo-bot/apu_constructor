@@ -73,21 +73,18 @@ def test_detalle_item_inexistente(tmp_path):
     assert corridas.confirmar_item(alm, 1, 0, "A1") is None
 
 
-def test_construir_corrida_stream_emite_started_progreso_done(tmp_path):
+def test_armar_pendientes_emite_progress_con_fila_costeada(tmp_path):
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
-    eventos = list(corridas.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False))
-    assert [e[0] for e in eventos] == ["started", "progress", "done"]
-    started = eventos[0][1]
-    assert isinstance(started["id"], int) and started["total"] == 1
-    prog = eventos[1][1]
+    cid = corridas.crear_corrida_encolada(alm, "lic.xlsx", items, "DIURNO", False)
+    eventos = list(corridas.armar_pendientes(alm, cid, items, desde_seq=0))
+    assert [e[0] for e in eventos] == ["progress"]
+    prog = eventos[0][1]
     assert prog["i"] == 1 and prog["total"] == 1 and prog["descripcion"] == "Concreto clase D"
     # El progress trae la fila ya costeada (para pintar la tabla en vivo).
     assert prog["fila"]["apu_codigo"] == "A1"
     assert prog["fila"]["costo_unitario"] == 1.05 * 350000.0
-    done = eventos[2][1]
-    assert done["id"] == started["id"] and done["resumen"]["n_items"] == 1
 
 
 def test_construir_corrida_sigue_devolviendo_id(tmp_path):
@@ -146,51 +143,37 @@ def test_listar_corridas_fila_robusta_ante_error_de_costeo(tmp_path, monkeypatch
     assert fila["margen"] is None and fila["margen_pct"] is None
 
 
-def test_stream_persiste_duracion(tmp_path):
-    alm = _almacen_seed(tmp_path)
-    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
-                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
-    eventos = list(corridas.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False))
-    done = next(p for ev, p in eventos if ev == "done")
-    assert isinstance(done["duracion_ms"], int) and done["duracion_ms"] >= 0
-    assert alm.corridas.get_corrida(done["id"]).duracion_ms == done["duracion_ms"]
-
-
-def test_stream_arma_incremental_y_estado(tmp_path):
-    # Armado incremental: la corrida nace 'armando' y cada ítem se persiste al
-    # emitir su 'progress' (la tabla crece, no aparece toda al final); al terminar
-    # queda 'en_revision'.
+def test_armar_pendientes_arma_incremental_sin_tocar_el_estado(tmp_path):
+    # Armado incremental: cada ítem se persiste al emitir su 'progress' (la tabla
+    # crece, no aparece toda al final). `armar_pendientes` no toca `estado`: eso es
+    # trabajo de quien la envuelve (`construir_corrida` o el worker).
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO"),
              LicitacionItem(item="2", descripcion="Concreto clase D", unidad="M3",
                             cantidad=5.0, precio_contractual=200000.0, shift="DIURNO")]
-    gen = corridas.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False)
-    ev, payload = next(gen)                              # started
-    assert ev == "started"
-    cid = payload["id"]
-    assert alm.corridas.get_corrida(cid).estado == "armando"
-    assert len(alm.corridas.get_items(cid)) == 0        # aún sin ítems
-    ev, _ = next(gen)                                    # progress 1
+    cid = corridas.crear_corrida_encolada(alm, "lic.xlsx", items, "DIURNO", False)
+    assert len(alm.corridas.get_items(cid)) == 0            # aún sin ítems
+    gen = corridas.armar_pendientes(alm, cid, items, desde_seq=0)
+    ev, _ = next(gen)                                        # progress 1
     assert ev == "progress"
-    assert len(alm.corridas.get_items(cid)) == 1        # persistido al vuelo
-    resto = list(gen)                                    # progress 2 + done
-    assert resto[-1][0] == "done"
+    assert len(alm.corridas.get_items(cid)) == 1            # persistido al vuelo
+    resto = list(gen)                                        # progress 2
+    assert resto[-1][0] == "progress"
     assert len(alm.corridas.get_items(cid)) == 2
-    assert alm.corridas.get_corrida(cid).estado == "en_revision"
+    assert alm.corridas.get_corrida(cid).estado == "armando"
 
 
-def test_stream_cancela_si_borran_corrida(tmp_path):
-    # Si la corrida se elimina durante el armado, el stream emite 'error' de
+def test_armar_pendientes_cancela_si_borran_corrida(tmp_path):
+    # Si la corrida se elimina durante el armado, el generador emite 'error' de
     # cancelación (no propaga FOREIGN KEY) y se detiene.
     alm = _almacen_seed(tmp_path)
     items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
                             cantidad=10.0, precio_contractual=400000.0, shift="DIURNO"),
              LicitacionItem(item="2", descripcion="Concreto clase D", unidad="M3",
                             cantidad=5.0, precio_contractual=200000.0, shift="DIURNO")]
-    gen = corridas.construir_corrida_stream(alm, "lic.xlsx", items, "DIURNO", False)
-    _, payload = next(gen)                               # started
-    cid = payload["id"]
+    cid = corridas.crear_corrida_encolada(alm, "lic.xlsx", items, "DIURNO", False)
+    gen = corridas.armar_pendientes(alm, cid, items, desde_seq=0)
     next(gen)                                            # progress 1 (item 0 persistido)
     assert alm.corridas.eliminar_corrida(cid) is True    # el usuario la borra a mitad
     resto = list(gen)                                    # debe cerrar con 'error', sin excepción
@@ -473,3 +456,45 @@ def test_construir_corrida_guarda_carpeta(tmp_path):
     fila = next(f for f in corridas.listar_corridas(alm) if f["id"] == cid)
     assert fila["carpeta_id"] == carp["id"]
     assert corridas.vista_corrida(alm, cid)["carpeta_id"] == carp["id"]
+
+
+def test_detalle_item_trae_el_codigo_del_presupuesto_y_la_unidad(tmp_path):
+    """Los necesita "Armar APU" para precargar el alta desde la fila: el código que
+    pedía el presupuesto es justo el que debería llevar el APU nuevo."""
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO",
+                            codigo_sugerido="9001")]
+    cid = corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False)
+    det = corridas.detalle_item(alm, cid, 0)
+    assert det["codigo_sugerido"] == "9001"
+    assert det["unidad"] == "M3"
+
+
+def test_detalle_item_sin_codigo_del_presupuesto_devuelve_vacio(tmp_path):
+    """Una corrida plana (sin ruta IDU) no trae código: tiene que ser "" y no reventar."""
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M3",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    cid = corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False)
+    det = corridas.detalle_item(alm, cid, 0)
+    assert det["codigo_sugerido"] == ""
+    assert det["unidad"] == "M3"
+
+
+def test_detalle_item_manda_la_unidad_del_item_no_la_del_apu(tmp_path):
+    """La unidad es la de la ACTIVIDAD, no la del APU asignado.
+
+    Este test existe porque los dos de arriba no lo distinguen: ahí el ítem y el APU
+    son los dos "M3", así que devolver cualquiera de las dos pasaría. Acá la actividad
+    pide M2 y el APU que el matcher le asigna es M3, y solo una de las dos respuestas
+    es la correcta: "Armar APU" precarga un APU NUEVO para esta actividad, así que
+    manda la unidad que pide la licitación.
+    """
+    alm = _almacen_seed(tmp_path)
+    items = [LicitacionItem(item="1", descripcion="Concreto clase D", unidad="M2",
+                            cantidad=10.0, precio_contractual=400000.0, shift="DIURNO")]
+    cid = corridas.construir_corrida(alm, "lic.xlsx", items, "DIURNO", use_ai=False)
+    fila = alm.corridas.get_items(cid)[0]
+    assert fila.apu_codigo == "A1" and fila.unidad == "M3"   # el APU asignado es M3
+    assert corridas.detalle_item(alm, cid, 0)["unidad"] == "M2"   # la actividad pide M2

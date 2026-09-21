@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 50 planes, 56 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 59 planes, 66 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -13,6 +13,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 50 plane
 
 - [[Auditorías/auditoria-codigo-2026-07-01|Auditoría de código — Armador de APUs (2026-07-01)]]
 - [[Auditorías/auditoria-codigo-2026-07-08|Auditoría de código — Armador de APUs (2026-07-08)]]
+- [[Auditorías/auditoria-seguridad-2026-08-28|Auditoría de seguridad — Armador de APUs]]
 
 ## Runbooks
 
@@ -22,14 +23,26 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 50 plane
 ## Otros
 
 - [[Otros/estado-agregar-lineas-corrida|Estado — agregar líneas a una corrida activa]]
+- [[Otros/estado-ia-revisora|Estado — la IA pasa de armar a revisar]]
 - [[Otros/estado-login-google|Dónde quedó el login con Google]]
 - [[Otros/listas-precios-np|Listas de precios y APUs de No Previstos (NP)]]
+- [[Otros/pendientes-agente-composicion|Pendientes del agente de composición asistida]]
 - [[Otros/smoke-test-listas-np|Smoke test — Listas de precios / APUs de No Previstos (NP)]]
 
 ## Specs (diseños)
 
 | Fecha | Título |
 | --- | --- |
+| 2026-09-18 | [[Specs/2026-09-18-armar-apu-desde-corrida-design|Armar APU desde una fila de la corrida]] |
+| 2026-09-16 | [[Specs/2026-09-16-rebuscar-apu-corrida-design|Volver a buscar APU en una corrida activa]] |
+| 2026-09-15 | [[Specs/2026-09-15-import-insumos-proteger-internos-design|Importar insumos sin pisar los precios internos]] |
+| 2026-09-15 | [[Specs/2026-09-15-forzar-conflictos-import-design|Decidir fila por fila qué conflictos del import se aplican igual]] |
+| 2026-09-14 | [[Specs/2026-09-14-descripciones-corrida-design|Ver completa la descripción de una actividad en la corrida]] |
+| 2026-09-11 | [[Specs/2026-09-11-ruta-idu-formulario-1-design|Ruta IDU — Formulario 1 de Presupuesto Oficial]] |
+| 2026-09-10 | [[Specs/2026-09-10-agente-composicion-design|Agente de composición asistida de APUs — fase 0 + fase 1: el expediente]] |
+| 2026-09-07 | [[Specs/2026-09-07-igualar-costo-contractual-design|Igualar el costo unitario al precio contractual]] |
+| 2026-09-07 | [[Specs/2026-09-07-armado-reanudable-design|Armado reanudable — el armado deja la petición y pasa a ser trabajo del servidor]] |
+| 2026-08-31 | [[Specs/2026-08-31-ia-revisora-post-armado-design|IA revisora post-armado (y candado de filas sin APU)]] |
 | 2026-08-26 | [[Specs/2026-08-26-distancias-transporte-proyecto-design|Distancias de transporte y ajustes por proyecto]] |
 | 2026-08-18 | [[Specs/2026-08-18-agregar-lineas-corrida-design|Agregar líneas a una corrida activa]] |
 | 2026-08-10 | [[Specs/2026-08-10-sin-duplicados-alta-design|Alta sin códigos ni nombres repetidos (insumos y APUs)]] |
@@ -91,6 +104,15 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 50 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-09-18 | [[Planes/2026-09-18-armar-apu-desde-corrida|Armar APU desde una fila de la corrida — Plan de implementación]] |
+| 2026-09-16 | [[Planes/2026-09-16-rebuscar-apu-corrida|Volver a buscar APU en una corrida activa — Plan de implementación]] |
+| 2026-09-15 | [[Planes/2026-09-15-import-insumos-proteger-internos|Importar insumos sin pisar los precios internos — Plan de implementación]] |
+| 2026-09-15 | [[Planes/2026-09-15-forzar-conflictos-import|Forzar conflictos del import — Plan de implementación]] |
+| 2026-09-11 | [[Planes/2026-09-11-ruta-idu-formulario-1|Ruta IDU — Formulario 1 · Plan de implementación]] |
+| 2026-09-10 | [[Planes/2026-09-10-agente-composicion|Agente de composición asistida de APUs — plan de implementación (fase 0 + fase 1)]] |
+| 2026-09-08 | [[Planes/2026-09-08-armado-reanudable|Armado reanudable — Implementation Plan]] |
+| 2026-09-07 | [[Planes/2026-09-07-igualar-costo-contractual|Igualar el costo unitario al precio contractual — Plan de implementación]] |
+| 2026-08-31 | [[Planes/2026-08-31-ia-revisora-post-armado|IA revisora post-armado — Plan de implementación]] |
 | 2026-08-27 | [[Planes/2026-08-27-distancias-transporte-proyecto|Distancias de transporte y ajustes por proyecto — Plan de implementación]] |
 | 2026-08-18 | [[Planes/2026-08-18-agregar-lineas-corrida|Agregar líneas a una corrida activa — Plan de implementación]] |
 | 2026-08-10 | [[Planes/2026-08-10-login-google|Ingresar con la cuenta de Google — Implementation Plan]] |

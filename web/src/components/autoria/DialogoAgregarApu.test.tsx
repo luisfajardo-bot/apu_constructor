@@ -350,3 +350,26 @@ test("'+ nuevo grupo' con una variante de ortografía reusa el grupo del vocabul
   expect(screen.getAllByRole("option", { name: "PAVIMENTOS" }).length).toBe(1);   // sin variante duplicada
   spy.mockRestore();
 });
+
+test("modo crear con inicial precarga la cabecera y abre con una fila en blanco", async () => {
+  // Este camino lo usa "Armar APU → Desde cero" (components/corrida/DialogoArmarApu.tsx):
+  // fabrica un `inicial` con los datos de la actividad y `composicion: []`. El test de
+  // ese diálogo mockea ESTE componente para probar el contrato, así que sin este test
+  // nadie ejercita la precarga de verdad y "Desde cero" se puede romper en silencio.
+  const { DialogoAgregarApu } = await import("./DialogoAgregarApu");
+  const desdeActividad = {
+    codigo: "9001", turno: "NOCTURNO", nombre: "PANTALLA ACUSTICA MODULAR",
+    unidad: "M2", grupo: "", costo_unitario: 0, composicion: [],
+  };
+  render(
+    <DialogoAgregarApu
+      open onOpenChange={() => {}} onCreado={() => {}}
+      modo="crear" inicial={desdeActividad as never}
+    />,
+  );
+  // El código va TAL CUAL (no derivado con "-2" como en duplicar): es el que pedía el
+  // presupuesto y es el que el APU nuevo debe llevar.
+  expect(screen.getByDisplayValue("9001")).toBeTruthy();
+  expect(screen.getByDisplayValue("PANTALLA ACUSTICA MODULAR")).toBeTruthy();
+  expect(screen.getByDisplayValue("M2")).toBeTruthy();
+});

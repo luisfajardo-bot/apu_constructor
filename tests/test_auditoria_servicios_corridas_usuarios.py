@@ -1,5 +1,5 @@
 from apu_tool.datos.almacen import Almacen
-from apu_tool.nucleo.models import CorridaMeta, Perfil
+from apu_tool.nucleo.models import CorridaItemRow, CorridaMeta, LicitacionItem, Perfil
 from apu_tool.servicio import corridas as corridas_svc
 from apu_tool.servicio import usuarios as usuarios_svc
 from apu_tool.servicio.supabase_admin import AdminSupabaseFake
@@ -31,6 +31,28 @@ def test_eliminar_corrida_inexistente_no_audita(tmp_path):
     alm = _alm(tmp_path)
     assert corridas_svc.eliminar_corrida(alm, 999, actor=_admin()) is False
     assert alm.auditoria.listar()[1] == 0
+
+
+def test_igualar_costo_audita(tmp_path):
+    alm = _alm(tmp_path)
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="x", archivo="lic.xlsx", turno_def="DIURNO",
+        use_ai=False, estado="en_revision"))
+    alm.corridas.agregar_item(cid, CorridaItemRow(
+        seq=0,
+        item=LicitacionItem(item="1", descripcion="PRUEBA DE CARGA", unidad="GLB",
+                            cantidad=1.0, precio_contractual=92106000.0, shift="DIURNO"),
+        status="new", apu_codigo=None, apu_nombre="", unidad="GLB", shift="DIURNO",
+        origen="historico", confianza=0.0, explicacion="", componentes=[], candidatos=[]))
+    corridas_svc.igualar_costo_al_contractual(alm, cid, [0], actor=_admin())
+    items, total = alm.auditoria.listar(accion="corrida.igualar_costo")
+    assert total == 1
+    evento = items[0]
+    assert evento["entidad_tipo"] == "corrida"
+    # `despues` nombra los seqs igualados con su nuevo costo_manual.
+    assert evento["despues"]["lineas"] == [{"seq": 0, "costo_manual": 92106000.0}]
+    # `antes` trae el costo_manual previo (None la primera vez).
+    assert evento["antes"]["lineas"] == [{"seq": 0, "costo_manual": None}]
 
 
 def test_invitar_audita(tmp_path):

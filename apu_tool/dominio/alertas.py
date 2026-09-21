@@ -48,7 +48,11 @@ def alertas_costeo(a: AssembledApu) -> list[str]:
     for apu_sub, cod in a.en_subapus:
         motivos.append(f"{cod}: distancia del proyecto no aplicada "
                        f"(en el sub-APU {apu_sub})")
-    if not motivos and a.costo_unitario <= 0:
+    # Costo declarado por una persona, no calculado por el motor (proyectos
+    # especiales). Se marca SIEMPRE, activa y congelada.
+    if a.costo_a_mano:
+        motivos.append("costo puesto a mano")
+    if not motivos and not (a.costo_unitario > 0):         # ítem sin composición / sin costo / NaN
         motivos.append("APU en $0 (sin composición o sin costo)")
     return motivos
 

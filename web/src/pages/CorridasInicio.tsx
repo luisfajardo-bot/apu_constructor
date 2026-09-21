@@ -1,21 +1,36 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { useArmadoVivo } from "@/lib/armado";
+import { crearCorrida, crearSample, corridaEnCurso, previsualizarCorrida }
+  from "@/api/corridas";
 import { listarCarpetas, crearCarpeta } from "@/api/carpetas";
 import { listarListas } from "@/api/listas";
-import { LISTA_PRINCIPAL_ID, type CarpetaNodo, type ListaPrecios } from "@/lib/tipos";
+import PreviaIdu from "@/components/corrida/PreviaIdu";
+import { ENTIDADES, LISTA_PRINCIPAL_ID, type CarpetaNodo, type Entidad,
+  type ListaPrecios, type PreviaPresupuesto } from "@/lib/tipos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export default function CorridasInicio() {
   const navigate = useNavigate();
-  const { armarArchivo, armarEjemplo } = useArmadoVivo();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [usarIA, setUsarIA] = useState(true);
   const [cargando, setCargando] = useState(false);
+  // Gemelo de `cargando` en un ref porque el candado tiene que valer YA, no en el
+  // próximo render: un Enter sostenido (o un doble clic rápido) dispara dos submits
+  // antes de que React vuelva a pintar, y los dos leerían `cargando === false`.
+  // Antes esto no se notaba porque el botón tardaba HORAS en volver; ahora vuelve al
+  // instante y el segundo envío encolaría otro armado del mismo Excel.
+  const enVuelo = useRef(false);
   const [nombre, setNombre] = useState("");
   const [nombreTocado, setNombreTocado] = useState(false);
+
+  // La entidad decide qué lector usa el backend y si hay que confirmar la estructura.
+  const [entidad, setEntidad] = useState<Entidad>("NO_IDENTIFICADA");
+  // La previa vive ACÁ, no en el servidor: el archivo sigue en el <input> y se reenvía
+  // al aprobar. Sin borrador que expirar, y sin corrida a medio crear si cierran la
+  // pestaña. Por eso "Cancelar" solo tiene que poner esto en null.
+  const [previa, setPrevia] = useState<PreviaPresupuesto | null>(null);
+  const requiereConfirmacion = entidad === "IDU";
 
   // Carpetas
   const [carpetas, setCarpetas] = useState<CarpetaNodo[]>([]);
@@ -96,54 +111,127 @@ export default function CorridasInicio() {
 
   function handleArchivoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
+    setPrevia(null);   // otro archivo: la previa vieja ya no describe nada
     if (f && !nombreTocado) setNombre(stripExt(f.name));
+  }
+
+  /** Encola y navega. Todo lo que crea corridas pasa por acá para que el candado
+   *  contra el doble envío y el rescate del 409 sean uno solo, no dos copias. */
+  async function encolar(pedir: () => Promise<{ id: number }>, respaldo: string) {
+    if (enVuelo.current) return;      // segundo submit del mismo tirón: se ignora
+    enVuelo.current = true;
+    setCargando(true);
+    try {
+      const c = await pedir();
+      navigate(`/corridas/${c.id}`);
+    } catch (err) {
+      // El 409 del armado duplicado NO es un error del usuario: es el mismo armado
+      // que acaba de pedir. Se lo lleva ahí en vez de dejarlo con un cartel rojo.
+      const yaExiste = corridaEnCurso(err);
+      if (yaExiste !== null) {
+        toast.warning("Ese archivo ya se está armando; te llevamos a esa corrida.");
+        navigate(`/corridas/${yaExiste}`);
+      } else {
+        toast.error(err instanceof Error ? err.message : respaldo);
+      }
+    } finally {
+      enVuelo.current = false;
+      setCargando(false);
+    }
+  }
+
+  /** El formulario como FormData. Uno solo para previsualizar y para crear: si fueran
+   *  dos, el archivo que se aprueba podría no ser el que se previsualizó. */
+  function armarForm(archivo: File, confirmada: boolean): FormData {
+    const form = new FormData();
+    form.append("archivo", archivo);
+    form.append("carpeta_id", String(carpetaDestino));
+    form.append("nombre", nombre.trim());
+    form.append("entidad", entidad);
+    if (confirmada) form.append("confirmada", "true");
+    if (listaId !== LISTA_PRINCIPAL_ID) form.append("lista_id", String(listaId));
+    return form;
+  }
+
+  /** El archivo elegido, o null avisando qué falta. Los dos caminos (previsualizar y
+   *  aprobar) validan lo mismo, así que la comprobación vive en un solo lugar. */
+  function archivoElegido(): File | null {
+    if (carpetaDestino == null) {
+      toast.error("Elige una carpeta");
+      return null;
+    }
+    const f = fileRef.current?.files?.[0];
+    if (!f) {
+      toast.error("Selecciona un archivo .xlsx o .csv");
+      return null;
+    }
+    return f;
   }
 
   async function handleArmar(e: React.FormEvent) {
     e.preventDefault();
-    if (carpetaDestino == null) {
-      toast.error("Elige una carpeta");
+    const archivo = archivoElegido();
+    if (!archivo) return;
+    if (!requiereConfirmacion) {
+      await encolar(() => crearCorrida(armarForm(archivo, false)),
+                    "Error al crear la corrida");
       return;
     }
-    const archivo = fileRef.current?.files?.[0];
-    if (!archivo) {
-      toast.error("Selecciona un archivo .xlsx o .csv");
-      return;
-    }
-    const form = new FormData();
-    form.append("archivo", archivo);
-    form.append("use_ai", String(usarIA));
-    form.append("carpeta_id", String(carpetaDestino));
-    form.append("nombre", nombre.trim());
-    if (listaId !== LISTA_PRINCIPAL_ID) form.append("lista_id", String(listaId));
-    const listaElegida = listaId !== LISTA_PRINCIPAL_ID
-      ? { id: listaId, nombre: listas.find((l) => l.id === listaId)?.nombre ?? "" }
-      : undefined;
+    // Ruta IDU: primero se muestra lo que se detectó. No se crea nada todavía.
+    if (enVuelo.current) return;
+    enVuelo.current = true;
     setCargando(true);
     try {
-      await armarArchivo(form, (id) => navigate(`/corridas/${id}`), listaElegida);
+      setPrevia(await previsualizarCorrida(armarForm(archivo, false)));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Error al crear la corrida");
+      toast.error(err instanceof Error ? err.message : "No se pudo leer el archivo");
     } finally {
+      enVuelo.current = false;
       setCargando(false);
     }
+  }
+
+  async function handleAprobar() {
+    const archivo = archivoElegido();
+    if (!archivo) return;
+    await encolar(() => crearCorrida(armarForm(archivo, true)),
+                  "Error al crear la corrida");
   }
 
   async function handleEjemplo() {
-    setCargando(true);
-    try {
-      await armarEjemplo((id) => navigate(`/corridas/${id}`));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Error al crear corrida de ejemplo");
-    } finally {
-      setCargando(false);
-    }
+    await encolar(crearSample, "Error al crear corrida de ejemplo");
   }
 
   return (
-    <div className="max-w-[400px] px-7 py-6">
+    <div className={(previa ? "max-w-[900px]" : "max-w-[400px]") + " px-7 py-6"}>
       <h2 className="mb-4 text-[15px] font-semibold tracking-[-0.01em]">Nueva corrida</h2>
       <form onSubmit={handleArmar} className="flex flex-col gap-3">
+        {/* Entidad: decide el lector del backend. Nativo como los demás selects de esta
+            pantalla — los tests usan fireEvent.change y getByRole("option"), que no
+            funcionan contra el Select de Radix. */}
+        <div className={CLASE_CAMPO}>
+          <label className={CLASE_ETIQUETA} htmlFor="entidad">
+            Entidad o fuente del presupuesto
+          </label>
+          <select
+            id="entidad"
+            value={entidad}
+            onChange={(e) => { setEntidad(e.target.value as Entidad); setPrevia(null); }}
+            disabled={cargando}
+            className={CLASE_SELECT}
+          >
+            {ENTIDADES.map((e) => (
+              <option key={e.valor} value={e.valor}>{e.etiqueta}</option>
+            ))}
+          </select>
+          {requiereConfirmacion && (
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              Se lee el Formulario 1 de Presupuesto Oficial y se confirma la estructura
+              antes de armar.
+            </p>
+          )}
+        </div>
+
         {/* Archivo */}
         <div className={CLASE_CAMPO}>
           <label className={CLASE_ETIQUETA} htmlFor="archivo">
@@ -174,21 +262,6 @@ export default function CorridasInicio() {
             disabled={cargando}
             className="text-xs"
           />
-        </div>
-
-        {/* Usar IA */}
-        <div className="flex items-center gap-1.5">
-          <input
-            id="usar-ia"
-            type="checkbox"
-            checked={usarIA}
-            onChange={(e) => setUsarIA(e.target.checked)}
-            disabled={cargando}
-            className="size-3.5 cursor-pointer accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-          />
-          <label htmlFor="usar-ia" className="cursor-pointer text-xs font-medium">
-            Usar IA
-          </label>
         </div>
 
         {/* Carpeta */}
@@ -263,7 +336,7 @@ export default function CorridasInicio() {
             ))}
           </select>
           {/* El aviso está al lado de DOS botones y solo aplica a uno: "Usar ejemplo"
-              pega a /api/sample/stream, que no recibe lista_id — el ejemplo es una demo
+              pega a /api/sample, que no recibe lista_id — el ejemplo es una demo
               construida sobre Principal (sus contractuales son costo_Principal * (1+margen),
               ver pipeline.py::generate_sample). Sorprendió en el smoke test de producción
               del 2026-08-03, así que se dice explícitamente. Sin <strong> a propósito: el
@@ -286,13 +359,25 @@ export default function CorridasInicio() {
               Y ahora el deshabilitado SE VE gris: antes usaba estilo inline y el
               disabled:opacity-50 del primitivo no llegaba a aplicarse. */}
           <Button type="submit" disabled={cargando}>
-            {cargando ? "Armando…" : "Armar"}
+            {cargando
+              ? (requiereConfirmacion ? "Leyendo…" : "Armando…")
+              : (requiereConfirmacion ? "Previsualizar" : "Armar")}
           </Button>
           <Button type="button" variant="outline" disabled={cargando} onClick={handleEjemplo}>
             Usar ejemplo
           </Button>
         </div>
       </form>
+
+      {previa && (
+        <PreviaIdu
+          previa={previa}
+          cargando={cargando}
+          onAprobar={handleAprobar}
+          onCancelar={() => setPrevia(null)}
+          onCambiarArchivo={() => { setPrevia(null); fileRef.current?.click(); }}
+        />
+      )}
     </div>
   );
 }

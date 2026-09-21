@@ -55,6 +55,19 @@ class IgualarCostoIn(BaseModel):
     seqs: list[int]
 
 
+class IgualarUmbralIn(BaseModel):
+    """El techo por línea y los seq que el usuario marcó en la previa.
+
+    El servidor recalcula la candidatura con estos dos datos: el cliente dice cuáles
+    quiere, no qué se escribe."""
+    umbral_contractual: float
+    seqs: list[int]
+
+
+class QuitarCostoManualIn(BaseModel):
+    seqs: list[int]
+
+
 class RebuscarAplicarIn(BaseModel):
     """Los seq que el usuario marcó en la vista previa de volver a buscar APU."""
     seqs: list[int]

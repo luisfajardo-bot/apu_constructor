@@ -46,7 +46,8 @@ from apu_tool.servicio.esquemas import (
     AgregarLineasIn, AjusteProyectoIn, ApuEditIn, ApuNuevoIn, BorrarLineasIn,
     CambiosIn, ClasificarIn, ComposicionAprobarIn, ComposicionEditarIn,
     ComposicionRechazarIn, ConfirmarIn, ConfirmarLoteIn, EstadoIn, IgualarCostoIn,
-    InsumoNuevoIn, ListaPreciosIn, RebuscarAplicarIn, RolIn, StatusOut,
+    IgualarUmbralIn, InsumoNuevoIn, ListaPreciosIn, QuitarCostoManualIn,
+    RebuscarAplicarIn, RolIn, StatusOut,
     TransporteParamsIn, UsuarioInvitarIn)
 
 
@@ -489,6 +490,39 @@ def igualar_costo(cid: int, body: IgualarCostoIn,
     # endpoint nuevo que DECLARA DINERO no se le abre a un rol de solo lectura.
     try:
         v = svc.igualar_costo_al_contractual(alm, cid, body.seqs, actor)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para modificar.")
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return v
+
+
+@router.post("/corridas/{cid}/igualar-umbral")
+def igualar_umbral(cid: int, body: IgualarUmbralIn,
+                   alm: Almacen = Depends(get_almacen),
+                   actor=Depends(requiere_rol("editor"))):
+    # Rol `editor` por lo mismo que `igualar-costo`: declara dinero. Este además lo
+    # declara de a cientos de filas de un clic.
+    try:
+        v = svc.igualar_por_umbral(alm, cid, body.umbral_contractual, body.seqs, actor)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para modificar.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if v is None:
+        raise HTTPException(status_code=404, detail="Corrida no encontrada.")
+    return v
+
+
+@router.post("/corridas/{cid}/quitar-costo-manual")
+def quitar_costo_manual(cid: int, body: QuitarCostoManualIn,
+                        alm: Almacen = Depends(get_almacen),
+                        actor=Depends(requiere_rol("editor"))):
+    # Mismo rol que poner el costo a mano: quitarlo también mueve plata.
+    try:
+        v = svc.quitar_costo_manual(alm, cid, body.seqs, actor)
     except svc.CorridaCongelada:
         raise HTTPException(status_code=409,
                             detail="La corrida está congelada; actívala para modificar.")

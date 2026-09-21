@@ -462,6 +462,93 @@ def test_igualar_costo_rol_editor_permitido(tmp_path):
     assert r.status_code == 200, r.text
 
 
+def test_igualar_umbral_endpoint(tmp_path):
+    """Feliz: la fila cae bajo el techo y queda con el contractual como costo."""
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_especial(alm)          # una línea sin APU, contractual $92.106.000
+    r = cli.post(f"/api/corridas/{cid}/igualar-umbral",
+                 json={"umbral_contractual": 500_000_000.0, "seqs": [0]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["igualadas"] == [0] and body["salteadas"] == []
+    assert body["items"][0]["costo_manual"] is True
+
+
+def test_igualar_umbral_saltea_lo_que_pasa_el_techo(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_especial(alm)
+    r = cli.post(f"/api/corridas/{cid}/igualar-umbral",
+                 json={"umbral_contractual": 1000.0, "seqs": [0]})
+    assert r.status_code == 200, r.text
+    assert r.json()["salteadas"] == [0]
+    assert r.json()["items"][0]["costo_manual"] is False
+
+
+def test_igualar_umbral_400_si_el_techo_no_es_positivo(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_especial(alm)
+    r = cli.post(f"/api/corridas/{cid}/igualar-umbral",
+                 json={"umbral_contractual": 0.0, "seqs": [0]})
+    assert r.status_code == 400
+
+
+def test_igualar_umbral_409_si_congelada(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_especial(alm)
+    alm.corridas.set_modo(cid, "congelada")
+    r = cli.post(f"/api/corridas/{cid}/igualar-umbral",
+                 json={"umbral_contractual": 500_000_000.0, "seqs": [0]})
+    assert r.status_code == 409
+
+
+def test_igualar_umbral_404_si_no_existe(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    r = cli.post("/api/corridas/9999/igualar-umbral",
+                 json={"umbral_contractual": 500_000_000.0, "seqs": [0]})
+    assert r.status_code == 404
+
+
+def test_igualar_umbral_rol_consulta_prohibido(tmp_path):
+    """Declara dinero, y de a cientos de filas: no se le abre al rol de solo lectura."""
+    cli, alm = _cli_rol(tmp_path, "consulta")
+    cid = _corrida_especial(alm)
+    r = cli.post(f"/api/corridas/{cid}/igualar-umbral",
+                 json={"umbral_contractual": 500_000_000.0, "seqs": [0]})
+    assert r.status_code == 403
+
+
+def test_quitar_costo_manual_endpoint(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_especial(alm)
+    alm.corridas.set_costo_manual(cid, {0: 92106000.0})
+    r = cli.post(f"/api/corridas/{cid}/quitar-costo-manual", json={"seqs": [0]})
+    assert r.status_code == 200, r.text
+    assert r.json()["quitadas"] == [0]
+    assert r.json()["items"][0]["costo_manual"] is False
+
+
+def test_quitar_costo_manual_409_si_congelada(tmp_path):
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_especial(alm)
+    alm.corridas.set_costo_manual(cid, {0: 92106000.0})
+    alm.corridas.set_modo(cid, "congelada")
+    r = cli.post(f"/api/corridas/{cid}/quitar-costo-manual", json={"seqs": [0]})
+    assert r.status_code == 409
+
+
+def test_quitar_costo_manual_404_si_no_existe(tmp_path):
+    cli, _ = _cliente(tmp_path)
+    r = cli.post("/api/corridas/9999/quitar-costo-manual", json={"seqs": [0]})
+    assert r.status_code == 404
+
+
+def test_quitar_costo_manual_rol_consulta_prohibido(tmp_path):
+    cli, alm = _cli_rol(tmp_path, "consulta")
+    cid = _corrida_especial(alm)
+    r = cli.post(f"/api/corridas/{cid}/quitar-costo-manual", json={"seqs": [0]})
+    assert r.status_code == 403
+
+
 # --------------------------------------------------------------------------
 # Armado partido en dos: crear-encolada + armar-pendientes (el worker entra por
 # el medio, en el ítem donde quedó).

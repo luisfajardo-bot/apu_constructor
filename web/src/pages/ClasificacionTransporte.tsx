@@ -133,7 +133,16 @@ export default function ClasificacionTransporte() {
                              km_base: Number(e.target.value.replace(",", ".")) || 0 })} />
                   </td>
                   <td className={`py-1 pr-3 text-right ${raro ? "text-amber-600" : ""}`}>
-                    <span>{NUM.format(f.volumen)}</span>{raro ? " ⚠" : ""}
+                    {/* Editable, no solo derivado del km base: el volumen ES lo que
+                        costea (`volumen × km`), y hay valores puestos a mano que
+                        ningún km base reproduce exacto. Mover el km base lo sigue
+                        recalculando; escribir acá manda directo. */}
+                    <Input className="w-20 text-right" inputMode="decimal"
+                           aria-label={`Volumen de ${k}`}
+                           value={String(f.volumen)}
+                           onChange={(e) => editar(k, {
+                             volumen: Number(e.target.value.replace(",", ".")) || 0 })} />
+                    {raro ? " ⚠" : ""}
                   </td>
                   <td className="py-1 pr-3 text-right">
                     {f.km_implicito === null ? "—" : NUM.format(f.km_implicito)}

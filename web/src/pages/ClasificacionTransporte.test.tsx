@@ -34,7 +34,7 @@ describe("ClasificacionTransporte", () => {
     montar();
     expect(await screen.findByText("SUMIDERO")).toBeTruthy();
     expect(screen.getAllByDisplayValue("granulares").length).toBe(2);
-    expect(screen.getByText("0,0112")).toBeTruthy();
+    expect(screen.getByDisplayValue("0.0112")).toBeTruthy();
   });
 
   it("guarda la clasificación en bloque", async () => {
@@ -55,10 +55,28 @@ describe("ClasificacionTransporte", () => {
     await screen.findByText("SUMIDERO");
     const kmBase = screen.getByLabelText("km base de 4390|DIURNO|7462");
     fireEvent.change(kmBase, { target: { value: "10" } });
-    // rendimiento 26.25 / km_base 10 = 2.625 -> "2,625"
-    expect(screen.getByText("2,625")).toBeTruthy();
+    // rendimiento 26.25 / km_base 10 = 2.625
+    expect(screen.getByDisplayValue("2.625")).toBeTruthy();
     // km implícito vuelve a ser el rendimiento original: 26.25 / 2.625 = 10
     expect(screen.getByText("10")).toBeTruthy();
+  });
+
+  it("el volumen se escribe directo y es lo que se guarda", async () => {
+    // Es lo que costea (`volumen × km`). Derivarlo solo del km base dejaba sin
+    // forma de poner un volumen que ningún km base reproduce exacto.
+    vi.spyOn(api, "listarComponentes").mockResolvedValue(LISTA as never);
+    const guardar = vi.spyOn(api, "clasificar")
+      .mockResolvedValue({ aplicados: 2 } as never);
+    montar();
+    await screen.findByText("SUMIDERO");
+    fireEvent.change(screen.getByLabelText("Volumen de 4390|DIURNO|7462"),
+                     { target: { value: "1.3" } });
+    // El km implícito lo delata: 26.25 / 1.3 = 20.19
+    expect(screen.getByText("20,19")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /guardar/i }));
+    await waitFor(() => expect(guardar).toHaveBeenCalled());
+    const filas = guardar.mock.calls.at(-1)?.[0] as { apu_codigo: string; volumen: number }[];
+    expect(filas.find((f) => f.apu_codigo === "4390")?.volumen).toBe(1.3);
   });
 
   it("un km base de 0 no produce Infinity ni NaN", async () => {

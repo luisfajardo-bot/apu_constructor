@@ -212,3 +212,101 @@ def test_quitar_costo_manual_finalizada_vuelve_a_revision(alm):
     alm.corridas.set_costo_manual(cid, {0: 1000.0})
     svc.quitar_costo_manual(alm, cid, [0])
     assert alm.corridas.get_corrida(cid).estado == "en_revision"
+
+
+def _corrida_varias(alm, precios, *, cantidad: float = 1.0) -> int:
+    """Una corrida con una fila por precio, todas SIN APU (o sea, todas en $0)."""
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-09-21T10:00:00", archivo="x.xlsx", turno_def="DIURNO",
+        use_ai=None, estado="en_revision", cuadro_path=None, nombre="x"))
+    for seq, precio in enumerate(precios):
+        alm.corridas.agregar_item(cid, CorridaItemRow(
+            seq=seq,
+            item=LicitacionItem(item=str(seq), descripcion=f"ACTIVIDAD {seq}",
+                                unidad="GLB", cantidad=cantidad,
+                                precio_contractual=precio, shift="DIURNO"),
+            status="new", apu_codigo=None, apu_nombre="", unidad="GLB", shift="DIURNO",
+            origen="historico", confianza=0.0, explicacion="", componentes=[],
+            candidatos=[]))
+    return cid
+
+
+def test_umbral_iguala_lo_de_abajo_y_deja_lo_de_arriba(alm):
+    """El techo es inclusivo: «iguales o menores al límite», como lo pidió el usuario."""
+    cid = _corrida_varias(alm, [100_000_000.0, 500_000_000.0, 900_000_000.0])
+    v = svc.igualar_por_umbral(alm, cid, 500_000_000.0, [0, 1, 2])
+    assert v["igualadas"] == [0, 1]
+    assert v["salteadas"] == [2]
+    assert [f["costo_unitario"] for f in v["items"]] == [
+        100_000_000.0, 500_000_000.0, 0.0]
+
+
+def test_umbral_mide_el_total_y_no_el_unitario(alm):
+    """Unitario chico por cantidad grande es una actividad cara: no se iguala."""
+    cid = _corrida_varias(alm, [1_000_000.0], cantidad=1000.0)   # total = $1.000M
+    v = svc.igualar_por_umbral(alm, cid, 500_000_000.0, [0])
+    assert v["igualadas"] == []
+    assert v["salteadas"] == [0]
+
+
+def test_umbral_saltea_la_fila_que_dejo_de_estar_en_cero(alm):
+    """La carrera de la pestaña vieja: entre la previa y el aplicar le asignaron un
+    APU. Sin el recálculo en el servidor, el costo real se pisaría con el contractual
+    y encima la fila quedaría `confirmed`, fuera del alcance de volver a buscar."""
+    cid = _corrida_varias(alm, [1000.0])
+    alm.corridas.actualizar_eleccion(
+        cid, 0, status="confirmed", apu_codigo="100", apu_nombre="EXCAVACION MANUAL",
+        unidad="M3", shift="DIURNO", origen="historico", confianza=1.0, explicacion="",
+        componentes=[{"insumo_codigo": "4279", "insumo_nombre": "CUADRILLA",
+                      "unidad": "HR", "rendimiento": 1.0}])
+    v = svc.igualar_por_umbral(alm, cid, 500_000_000.0, [0])
+    assert v["igualadas"] == []
+    assert v["salteadas"] == [0]
+    assert v["items"][0]["costo_unitario"] == 40000.0      # el del APU, intacto
+
+
+def test_umbral_no_toca_la_que_ya_tiene_costo_a_mano(alm):
+    cid = _corrida_varias(alm, [1000.0])
+    alm.corridas.set_costo_manual(cid, {0: 777.0})
+    v = svc.igualar_por_umbral(alm, cid, 500_000_000.0, [0])
+    assert v["salteadas"] == [0]
+    assert v["items"][0]["costo_unitario"] == 777.0
+
+
+def test_umbral_saltea_la_fila_sin_precio_contractual(alm):
+    """Está en $0 pero el contrato tampoco la paga: igualarla sería el $0 que la
+    regla de negocio prohíbe, así que ni se propone."""
+    cid = _corrida_varias(alm, [0.0])
+    v = svc.igualar_por_umbral(alm, cid, 500_000_000.0, [0])
+    assert v["salteadas"] == [0]
+    assert v["igualadas"] == []
+
+
+def test_umbral_solo_mira_lo_que_el_cliente_marco(alm):
+    """Destildar una fila en la previa la deja afuera, y ni siquiera se saltea:
+    nunca se pidió."""
+    cid = _corrida_varias(alm, [100.0, 200.0])
+    v = svc.igualar_por_umbral(alm, cid, 500_000_000.0, [1])
+    assert v["igualadas"] == [1]
+    assert v["salteadas"] == []
+    assert v["items"][0]["costo_unitario"] == 0.0
+
+
+def test_umbral_no_positivo_es_error(alm):
+    """Un umbral de $0 no iguala nada y uno negativo es un dedo resbalado. El NaN va
+    con `not (x > 0)`: `nan <= 0` es False y dejaría pasar cualquier fila."""
+    cid = _corrida_varias(alm, [1000.0])
+    for malo in (0.0, -5.0, float("nan")):
+        with pytest.raises(ValueError):
+            svc.igualar_por_umbral(alm, cid, malo, [0])
+
+
+def test_umbral_congelada_no_se_toca(alm):
+    cid = _corrida_varias(alm, [1000.0])
+    alm.corridas.set_modo(cid, "congelada")
+    with pytest.raises(svc.CorridaCongelada):
+        svc.igualar_por_umbral(alm, cid, 500_000_000.0, [0])
+
+
+def test_umbral_corrida_inexistente_devuelve_none(alm):
+    assert svc.igualar_por_umbral(alm, 9999, 500_000_000.0, [0]) is None

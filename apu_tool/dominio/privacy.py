@@ -23,9 +23,13 @@ _FORBIDDEN_KEYS = {
     "costo", "costo_unitario", "costo_total", "valor", "valor_unitario",
     "valor_total", "margen", "price", "cost", "amount", "total",
     "fuente_precio", "costo_manual", "plan_json",
-    # El valor del peaje de un proyecto es dinero. `valor` ya está en la lista,
-    # pero el chequeo es por nombre EXACTO de clave.
+    # Los valores del peaje de un proyecto son dinero, uno por categoría de acarreo.
+    # `valor` ya está en la lista, pero el chequeo es por nombre EXACTO de clave.
+    # Las casillas (`peaje_*_aplica`) NO entran: son booleanos, estructura.
+    # `peaje_valor` se queda aunque el campo único ya no exista: la lista es de
+    # nombres prohibidos y que un nombre muerto siga prohibido no cuesta nada.
     "peaje_valor",
+    "peaje_botadero_valor", "peaje_mezclas_valor", "peaje_granulares_valor",
     # --- ruta IDU (Formulario 1) ------------------------------------------------
     # Las dos bases del contractual y sus multiplicaciones.
     "precio_contractual_sin_aiu", "contractual_total_sin_aiu",

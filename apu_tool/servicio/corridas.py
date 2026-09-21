@@ -690,7 +690,8 @@ def _costear_row(alm: Almacen, row: CorridaItemRow,
             costo_unitario=row.costo_manual, status=MatchStatus(row.status),
             confianza=row.confianza, explicacion=row.explicacion, origen=row.origen)
     pricing = pricing or PricingEngine(alm, lista_id=lista_id, contexto=contexto)
-    seed = ((row.apu_codigo or "", row.shift),)
+    clave_apu = (row.apu_codigo or "", row.shift)
+    seed = (clave_apu,)
     costed = None
     if row.apu_codigo:
         lib = pricing.components(row.apu_codigo, row.shift)   # usa caché precargado si existe
@@ -702,7 +703,7 @@ def _costear_row(alm: Almacen, row: CorridaItemRow,
             # costea la lista vacía tal cual (da 0) y NO se cae al respaldo: ese
             # respaldo recobraría justo lo que el proyecto excluyó, al precio del
             # catálogo y sin alerta. `alertas.py` avisa el $0 en cualquier caso.
-            costed, total = pricing.cost_components(lib, seed)
+            costed, total = pricing.cost_components(lib, seed, clave_apu)
     if costed is None:
         comps = [ApuComponent(
             apu_codigo=row.apu_codigo or "", shift=row.shift,
@@ -711,14 +712,15 @@ def _costear_row(alm: Almacen, row: CorridaItemRow,
             precio_unitario_hist=0.0,
             tipo=c.get("tipo", "insumo"), ref_shift=c.get("ref_shift", ""))
             for c in row.componentes]
-        costed, total = pricing.cost_components(comps, seed)
+        costed, total = pricing.cost_components(comps, seed, clave_apu)
     return AssembledApu(
         item=row.item, apu_codigo=row.apu_codigo, apu_nombre=row.apu_nombre,
         unidad=row.unidad or row.item.unidad, shift=row.shift, componentes=costed,
         costo_unitario=total, status=MatchStatus(row.status),
         confianza=row.confianza, explicacion=row.explicacion, origen=row.origen,
         sin_distancia=pricing.sin_distancia(row.apu_codigo or "", row.shift),
-        en_subapus=pricing.sin_distancia_en_subapus(row.apu_codigo or "", row.shift))
+        en_subapus=pricing.sin_distancia_en_subapus(row.apu_codigo or "", row.shift),
+        peaje_sin_categoria=pricing.peaje_sin_categoria(row.apu_codigo or "", row.shift))
 
 
 def _assembled_desde_snapshot(row: CorridaItemRow, snap: dict) -> AssembledApu:
@@ -884,8 +886,12 @@ def vista_corrida(alm: Almacen, corrida_id: int) -> Optional[dict]:
             "km_botadero": ctx.params.km_botadero,
             "km_mezclas": ctx.params.km_mezclas,
             "km_granulares": ctx.params.km_granulares,
-            "peaje_aplica": ctx.params.peaje_aplica,
-            "peaje_valor": ctx.params.peaje_valor,
+            "peaje_botadero_aplica": ctx.params.peaje_botadero_aplica,
+            "peaje_botadero_valor": ctx.params.peaje_botadero_valor,
+            "peaje_mezclas_aplica": ctx.params.peaje_mezclas_aplica,
+            "peaje_mezclas_valor": ctx.params.peaje_mezclas_valor,
+            "peaje_granulares_aplica": ctx.params.peaje_granulares_aplica,
+            "peaje_granulares_valor": ctx.params.peaje_granulares_valor,
             "ajustes": len(ctx.ajustes)}),
         "lista_precios_id": meta.lista_precios_id,
         "lista_nombre": _nombre_lista(alm, meta.lista_precios_id),

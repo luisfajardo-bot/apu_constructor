@@ -98,9 +98,12 @@ def test_reescala_el_subapu_de_botadero(tmp_path):
 
 
 def test_peaje_no_aplica_lo_saca_de_la_composicion(tmp_path):
+    # 4390 tiene su acarreo clasificado como granulares (ver `_clas`), así que su
+    # peaje es el de granulares.
     alm = _alm(tmp_path)
-    ctx = ContextoProyecto(params=ParametrosProyecto(peaje_aplica=False),
-                           clasificacion={})
+    ctx = ContextoProyecto(
+        params=ParametrosProyecto(peaje_granulares_aplica=False, km_granulares=32),
+        clasificacion=_clas())
     comps, _ = PricingEngine(alm, contexto=ctx).cost_apu("4390", "DIURNO")
     assert all(c.insumo_codigo != "INT3" for c in comps)
     assert all(c.costo > 0 for c in comps)   # y nada quedó en $0
@@ -112,7 +115,13 @@ def test_vaciado_por_el_proyecto_distingue_del_apu_sin_composicion(tmp_path):
     que vaciar. `_costear_row` necesita distinguir los dos para saber si cae al
     respaldo de la fila (bug crítico de la revisión)."""
     alm = _alm(tmp_path)
-    ctx = ContextoProyecto(params=ParametrosProyecto(peaje_aplica=False), clasificacion={})
+    # 9002 no tiene acarreo, así que su peaje no tiene categoría: se vacía por la
+    # regla de unanimidad (las tres dicen que no hay peaje).
+    ctx = ContextoProyecto(
+        params=ParametrosProyecto(peaje_botadero_aplica=False,
+                                  peaje_mezclas_aplica=False,
+                                  peaje_granulares_aplica=False),
+        clasificacion={})
     motor = PricingEngine(alm, contexto=ctx)
     assert motor.components("9002", "DIURNO") == []
     assert motor.vaciado_por_el_proyecto("9002", "DIURNO") is True
@@ -120,16 +129,51 @@ def test_vaciado_por_el_proyecto_distingue_del_apu_sin_composicion(tmp_path):
     assert motor.vaciado_por_el_proyecto("9999", "DIURNO") is False
 
 
-def test_peaje_usa_el_valor_del_proyecto(tmp_path):
+def test_peaje_usa_el_valor_de_SU_categoria(tmp_path):
     alm = _alm(tmp_path)
     ctx = ContextoProyecto(
-        params=ParametrosProyecto(peaje_aplica=True, peaje_valor=12400),
-        clasificacion={})
-    comps, _ = PricingEngine(alm, contexto=ctx).cost_apu("4390", "DIURNO")
+        params=ParametrosProyecto(km_granulares=32,
+                                  peaje_granulares_aplica=True,
+                                  peaje_granulares_valor=12400,
+                                  # las otras dos con otro valor: no se deben usar
+                                  peaje_mezclas_aplica=True, peaje_mezclas_valor=999,
+                                  peaje_botadero_aplica=True, peaje_botadero_valor=1),
+        clasificacion=_clas())
+    motor = PricingEngine(alm, contexto=ctx)
+    comps, _ = motor.cost_apu("4390", "DIURNO")
     peaje = [c for c in comps if c.insumo_codigo == "INT3"][0]
-    assert peaje.precio_unitario == 12400
+    assert peaje.precio_unitario == 12400          # el de granulares, no 999 ni 1
     assert peaje.fuente_precio == "peaje del proyecto"
     assert peaje.costo == 12400
+    assert motor.peaje_sin_categoria("4390", "DIURNO") is False
+
+
+def test_peaje_sin_clasificar_cae_al_catalogo_y_alerta(tmp_path):
+    """El estado de producción el día del deploy: nada clasificado. El peaje tiene
+    que costear IGUAL que antes de esta feature (8000 del catálogo, no 12400) y
+    delatarse, que es lo que hace que desplegar no mueva ningún número."""
+    alm = _alm(tmp_path)
+    ctx = ContextoProyecto(
+        params=ParametrosProyecto(km_granulares=32, peaje_granulares_aplica=True,
+                                  peaje_granulares_valor=12400),
+        clasificacion={})
+    motor = PricingEngine(alm, contexto=ctx)
+    comps, _ = motor.cost_apu("4390", "DIURNO")
+    peaje = [c for c in comps if c.insumo_codigo == "INT3"][0]
+    assert peaje.precio_unitario == 8000           # el del catálogo
+    assert peaje.fuente_precio != "peaje del proyecto"
+    assert motor.peaje_sin_categoria("4390", "DIURNO") is True
+
+
+def test_un_apu_sin_peaje_no_alerta(tmp_path):
+    """La alerta es solo para los APUs que TIENEN fila de peaje: 3017 no tiene, y no
+    hay nada que avisar ahí."""
+    alm = _alm(tmp_path)
+    ctx = ContextoProyecto(params=ParametrosProyecto(km_botadero=34),
+                           clasificacion=_clas())
+    motor = PricingEngine(alm, contexto=ctx)
+    motor.cost_apu("3017", "DIURNO")
+    assert motor.peaje_sin_categoria("3017", "DIURNO") is False
 
 
 def test_pendientes_por_apu(tmp_path):
@@ -208,3 +252,42 @@ def test_un_ajuste_no_inventa_composicion_de_un_apu_inexistente(tmp_path):
     motor = PricingEngine(alm, contexto=ctx)
     assert motor.components("9999", "DIURNO") == []
     assert motor.cost_apu("9999", "DIURNO")[1] == 0
+
+
+def test_el_peaje_nocturno_toma_la_categoria_de_su_propio_acarreo(tmp_path):
+    """El turno es parte de la clave de un APU y de su clasificación. Un nocturno
+    tiene que mirar SU acarreo, no el del gemelo diurno — si la clasificación se
+    buscara solo por código, el nocturno tomaría la categoría del de día.
+
+    La feature de distancias no tenía ningún test de turno nocturno (deuda anotada
+    en su spec); este la paga en el punto donde importa, que es dinero.
+    """
+    alm = _alm(tmp_path)
+    # Gemelo nocturno del 4390: mismo insumo de acarreo, categoría DISTINTA.
+    alm.apus.insert_apus([Apu(codigo="4390 N", nombre="RELLENO", unidad="M3",
+                              shift="NOCTURNO", grupo="VIAS")])
+    alm.apus.insert_components([
+        ApuComponent(apu_codigo="4390 N", shift="NOCTURNO", insumo_codigo="7462",
+                     insumo_nombre="TRANSPORTE DE PETREOS", unidad="M3-KM",
+                     rendimiento=26.25, precio_unitario_hist=1000.0),
+        ApuComponent(apu_codigo="4390 N", shift="NOCTURNO", insumo_codigo="INT3",
+                     insumo_nombre="PEAJE", unidad="GLB", rendimiento=1.0,
+                     precio_unitario_hist=8000.0)])
+    clas = dict(_clas())          # el 4390 DIURNO es granulares
+    clas[("4390 N", "NOCTURNO", "7462")] = ClaseTransporte(
+        apu_codigo="4390 N", shift="NOCTURNO", insumo_codigo="7462",
+        insumo_nombre="TRANSPORTE DE PETREOS", categoria="mezclas",
+        volumen=1.0, km_base=25.0)
+    ctx = ContextoProyecto(
+        params=ParametrosProyecto(
+            km_granulares=32, km_mezclas=28,
+            peaje_granulares_aplica=True, peaje_granulares_valor=12400,
+            peaje_mezclas_aplica=True, peaje_mezclas_valor=3000),
+        clasificacion=clas)
+    motor = PricingEngine(alm, contexto=ctx)
+    comps, _ = motor.cost_apu("4390 N", "NOCTURNO")
+    peaje = [c for c in comps if c.insumo_codigo == "INT3"][0]
+    assert peaje.precio_unitario == 3000        # el de MEZCLAS, no los 12400 del día
+    # y el acarreo nocturno usa los km de mezclas, no los de granulares
+    tte = [c for c in comps if c.insumo_codigo == "7462"][0]
+    assert tte.rendimiento == 28.0              # 1.0 * 28

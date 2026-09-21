@@ -79,30 +79,49 @@ class CarpetasPg:
                              "WHERE carpeta_id=%s", (int(carpeta_id),)).fetchone()
         if r is None:
             return None
+        def bool_o_none(v):
+            return None if v is None else bool(v)
         return ParametrosProyecto(
             carpeta_id=r["carpeta_id"], km_botadero=r["km_botadero"],
             km_mezclas=r["km_mezclas"], km_granulares=r["km_granulares"],
-            peaje_aplica=None if r["peaje_aplica"] is None else bool(r["peaje_aplica"]),
-            peaje_valor=r["peaje_valor"], actualizado_en=r["actualizado_en"] or "",
+            peaje_botadero_aplica=bool_o_none(r["peaje_botadero_aplica"]),
+            peaje_botadero_valor=r["peaje_botadero_valor"],
+            peaje_mezclas_aplica=bool_o_none(r["peaje_mezclas_aplica"]),
+            peaje_mezclas_valor=r["peaje_mezclas_valor"],
+            peaje_granulares_aplica=bool_o_none(r["peaje_granulares_aplica"]),
+            peaje_granulares_valor=r["peaje_granulares_valor"],
+            actualizado_en=r["actualizado_en"] or "",
             actualizado_por=r["actualizado_por"])
 
     def set_parametros(self, params: ParametrosProyecto, conn=None,
                        actualizado_por: Optional[str] = None) -> None:
         ahora = _dt.datetime.now().isoformat(timespec="seconds")
         sql = ("INSERT INTO corridas.proyecto_parametros "
-               "(carpeta_id, km_botadero, km_mezclas, km_granulares, peaje_aplica, "
-               " peaje_valor, actualizado_en, actualizado_por) "
-               "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
+               "(carpeta_id, km_botadero, km_mezclas, km_granulares, "
+               " peaje_botadero_aplica, peaje_botadero_valor, "
+               " peaje_mezclas_aplica, peaje_mezclas_valor, "
+               " peaje_granulares_aplica, peaje_granulares_valor, "
+               " actualizado_en, actualizado_por) "
+               "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
                "ON CONFLICT (carpeta_id) DO UPDATE SET "
                "km_botadero=EXCLUDED.km_botadero, km_mezclas=EXCLUDED.km_mezclas, "
                "km_granulares=EXCLUDED.km_granulares, "
-               "peaje_aplica=EXCLUDED.peaje_aplica, peaje_valor=EXCLUDED.peaje_valor, "
+               "peaje_botadero_aplica=EXCLUDED.peaje_botadero_aplica, "
+               "peaje_botadero_valor=EXCLUDED.peaje_botadero_valor, "
+               "peaje_mezclas_aplica=EXCLUDED.peaje_mezclas_aplica, "
+               "peaje_mezclas_valor=EXCLUDED.peaje_mezclas_valor, "
+               "peaje_granulares_aplica=EXCLUDED.peaje_granulares_aplica, "
+               "peaje_granulares_valor=EXCLUDED.peaje_granulares_valor, "
                "actualizado_en=EXCLUDED.actualizado_en, "
                "actualizado_por=EXCLUDED.actualizado_por")
+        def int_o_none(v):
+            return None if v is None else int(v)
         p = (int(params.carpeta_id), params.km_botadero, params.km_mezclas,
              params.km_granulares,
-             None if params.peaje_aplica is None else int(params.peaje_aplica),
-             params.peaje_valor, ahora, actualizado_por or params.actualizado_por)
+             int_o_none(params.peaje_botadero_aplica), params.peaje_botadero_valor,
+             int_o_none(params.peaje_mezclas_aplica), params.peaje_mezclas_valor,
+             int_o_none(params.peaje_granulares_aplica), params.peaje_granulares_valor,
+             ahora, actualizado_por or params.actualizado_por)
         if conn is not None:
             conn.execute(sql, p)
             return

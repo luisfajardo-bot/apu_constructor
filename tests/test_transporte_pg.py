@@ -44,9 +44,11 @@ def test_contrato_real_postgres():
     cid = carpetas.crear("Metro")
     assert carpetas.get_parametros(cid) is None
     carpetas.set_parametros(ParametrosProyecto(carpeta_id=cid, km_botadero=34,
-                                              peaje_aplica=True, peaje_valor=12400))
+                                              peaje_granulares_aplica=True,
+                                              peaje_granulares_valor=12400))
     p = carpetas.get_parametros(cid)
-    assert p.km_botadero == 34 and p.peaje_aplica is True
+    assert p.km_botadero == 34 and p.peaje_aplica("granulares") is True
+    assert p.peaje_valor("granulares") == 12400
     aid = carpetas.crear_ajuste(AjusteProyecto(
         carpeta_id=cid, apu_codigo="4390", shift="DIURNO", accion="quitar",
         insumo_codigo="6722", insumo_nombre="SUBBASE GRANULAR B-400"))

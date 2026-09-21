@@ -46,9 +46,23 @@ def test_rendimiento_is_allowed():
     privacy.assert_no_money(ok)  # cantidades no son dinero
 
 
-def test_peaje_valor_no_puede_ir_a_la_ia():
+@pytest.mark.parametrize("clave", [
+    "peaje_valor", "peaje_botadero_valor", "peaje_mezclas_valor",
+    "peaje_granulares_valor",
+])
+def test_ningun_valor_de_peaje_puede_ir_a_la_ia(clave):
     with pytest.raises(privacy.PrivacyViolation):
-        privacy.assert_no_money({"proyecto": {"km_botadero": 34, "peaje_valor": 12400}})
+        privacy.assert_no_money({"proyecto": {"km_botadero": 34, clave: 12400}})
+
+
+def test_las_casillas_del_peaje_SI_pueden_ir_a_la_ia():
+    # Son booleanos: si un proyecto paga peaje o no es estructura, no un monto.
+    privacy.assert_no_money({"proyecto": {
+        "peaje_botadero_aplica": True, "peaje_mezclas_aplica": False,
+        "peaje_granulares_aplica": None}})
+
+
+def test_peaje_valor_no_puede_ir_a_la_ia():
     # las distancias y los rendimientos SÍ pueden (son cantidades, no dinero)
     privacy.assert_no_money({"proyecto": {"km_botadero": 34, "km_mezclas": 28},
                              "componentes": [{"rendimiento": 33.6}]})

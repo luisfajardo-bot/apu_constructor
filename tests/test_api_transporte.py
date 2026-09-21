@@ -36,17 +36,20 @@ def test_put_y_get_parametros(tmp_path):
     cid = alm.carpetas.crear("Metro")
     r = cli.put(f"/api/carpetas/{cid}/transporte", json={
         "km_botadero": 34, "km_mezclas": 28, "km_granulares": 32,
-        "peaje_aplica": True, "peaje_valor": 12400})
+        "peaje_granulares_aplica": True, "peaje_granulares_valor": 12400,
+        "peaje_mezclas_aplica": False})
     assert r.status_code == 200, r.text
     p = cli.get(f"/api/carpetas/{cid}/transporte").json()["parametros"]
-    assert p["km_granulares"] == 32 and p["peaje_valor"] == 12400
+    assert p["km_granulares"] == 32 and p["peaje_granulares_valor"] == 12400
+    assert p["peaje_granulares_aplica"] is True
+    assert p["peaje_mezclas_aplica"] is False and p["peaje_mezclas_valor"] is None
 
 
 def test_peaje_sin_valor_es_400(tmp_path):
     cli, alm = _cli(tmp_path)
     cid = alm.carpetas.crear("Metro")
     r = cli.put(f"/api/carpetas/{cid}/transporte",
-                json={"peaje_aplica": True, "peaje_valor": 0})
+                json={"peaje_granulares_aplica": True, "peaje_granulares_valor": 0})
     assert r.status_code == 400 and "$0" in r.text
 
 
@@ -151,7 +154,10 @@ def test_impacto_incluye_el_peaje_quitado(tmp_path):
                         precio_contractual=8000.0, shift="DIURNO")],
         "DIURNO", False, carpeta_id=cid)
     svc.confirmar_item(alm, corrida, 0, "5000", "DIURNO")
-    r = cli.put(f"/api/carpetas/{cid}/transporte", json={"peaje_aplica": False})
+    r = cli.put(f"/api/carpetas/{cid}/transporte",
+                json={"peaje_botadero_aplica": False,
+                      "peaje_mezclas_aplica": False,
+                      "peaje_granulares_aplica": False})
     assert r.status_code == 200, r.text
     imp = cli.get(f"/api/carpetas/{cid}/transporte").json()["impacto"]
     filas = [f for f in imp if f["apu_codigo"] == "5000"]

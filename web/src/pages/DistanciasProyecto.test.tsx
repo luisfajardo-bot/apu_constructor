@@ -15,8 +15,12 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 const VISTA = {
   proyecto: { id: 7, nombre: "Metro" },
+  // Peaje por categoría: granulares paga 12.400, mezclas no paga y botadero está
+  // sin definir. Los tres estados a la vez, que es el caso real.
   parametros: { km_botadero: 34, km_mezclas: null, km_granulares: 32,
-                peaje_aplica: true, peaje_valor: 12400 },
+                peaje_botadero_aplica: null, peaje_botadero_valor: null,
+                peaje_mezclas_aplica: false, peaje_mezclas_valor: null,
+                peaje_granulares_aplica: true, peaje_granulares_valor: 12400 },
   impacto: [{ apu_codigo: "4390", shift: "DIURNO", insumo_codigo: "7462",
               insumo_nombre: "TRANSPORTE DE PETREOS", unidad: "M3-KM",
               rendimiento_actual: 26.25, categoria: "granulares", volumen: 1.05,
@@ -69,19 +73,23 @@ describe("DistanciasProyecto", () => {
     vi.spyOn(api, "verTransporte").mockResolvedValue(VISTA as never);
     const guardar = vi.spyOn(api, "guardarTransporte").mockResolvedValue(VISTA as never);
     montar();
-    const botadero = await screen.findByLabelText(/botadero/i);
+    const botadero = await screen.findByLabelText(/botadero \(km\)/i);
     fireEvent.change(botadero, { target: { value: "40" } });
     fireEvent.click(screen.getByRole("button", { name: /guardar/i }));
     // El backend hace reemplazo total: si algún día alguien manda solo lo que
     // cambió, borra en silencio los otros parámetros del proyecto. Se fijan
-    // las 5 claves (no solo su presencia con objectContaining) para que este
+    // las 9 claves (no solo su presencia con objectContaining) para que este
     // test explote si el PUT deja de mandar alguna.
     await waitFor(() => expect(guardar).toHaveBeenLastCalledWith(7, {
       km_botadero: 40,
       km_mezclas: null,
       km_granulares: 32,
-      peaje_aplica: true,
-      peaje_valor: 12400,
+      peaje_botadero_aplica: false,      // estaba sin definir -> la casilla no marcada
+      peaje_botadero_valor: null,
+      peaje_mezclas_aplica: false,
+      peaje_mezclas_valor: null,
+      peaje_granulares_aplica: true,
+      peaje_granulares_valor: 12400,
     }));
   });
 
@@ -92,7 +100,7 @@ describe("DistanciasProyecto", () => {
     // tests anteriores. Se compara contra este conteo, no contra 0.
     const llamadasPrevias = guardar.mock.calls.length;
     montar();
-    const mezclas = await screen.findByLabelText(/mezclas/i);
+    const mezclas = await screen.findByLabelText(/mezclas \(km\)/i);
     fireEvent.change(mezclas, { target: { value: "3g" } });
     fireEvent.click(screen.getByRole("button", { name: /guardar/i }));
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
@@ -106,11 +114,47 @@ describe("DistanciasProyecto", () => {
     vi.spyOn(api, "verTransporte").mockResolvedValue(VISTA as never);
     const guardar = vi.spyOn(api, "guardarTransporte").mockResolvedValue(VISTA as never);
     montar();
-    const botadero = await screen.findByLabelText(/botadero/i);
+    const botadero = await screen.findByLabelText(/botadero \(km\)/i);
     fireEvent.change(botadero, { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: /guardar/i }));
     await waitFor(() => expect(guardar).toHaveBeenLastCalledWith(
       7, expect.objectContaining({ km_botadero: null })));
+  });
+
+  it("cada categoría tiene su propia casilla y su propio valor de peaje", async () => {
+    vi.spyOn(api, "verTransporte").mockResolvedValue(VISTA as never);
+    const guardar = vi.spyOn(api, "guardarTransporte").mockResolvedValue(VISTA as never);
+    montar();
+    // Granulares ya paga (viene en la vista); se agrega el de mezclas.
+    const casilla = await screen.findByLabelText(/peaje de mezclas/i);
+    fireEvent.click(casilla);
+    // Recién al marcarla aparece su campo de valor: antes no existía.
+    const valor = await screen.findByLabelText(/peaje mezclas/i);
+    fireEvent.change(valor, { target: { value: "8000" } });
+    fireEvent.click(screen.getByRole("button", { name: /guardar/i }));
+    await waitFor(() => expect(guardar).toHaveBeenLastCalledWith(
+      7, expect.objectContaining({
+        peaje_mezclas_aplica: true,
+        peaje_mezclas_valor: 8000,
+        // y las otras dos quedan como estaban
+        peaje_granulares_aplica: true,
+        peaje_granulares_valor: 12400,
+        peaje_botadero_aplica: false,
+      })));
+  });
+
+  it("desmarcar una categoría no manda su valor viejo", async () => {
+    // Desmarcar es decir "acá no se paga", no "vale lo que quedó escrito".
+    vi.spyOn(api, "verTransporte").mockResolvedValue(VISTA as never);
+    const guardar = vi.spyOn(api, "guardarTransporte").mockResolvedValue(VISTA as never);
+    montar();
+    fireEvent.click(await screen.findByLabelText(/peaje de granulares/i));
+    fireEvent.click(screen.getByRole("button", { name: /guardar/i }));
+    await waitFor(() => expect(guardar).toHaveBeenLastCalledWith(
+      7, expect.objectContaining({
+        peaje_granulares_aplica: false,
+        peaje_granulares_valor: null,
+      })));
   });
 
   it("lista los ajustes del proyecto, con la nota visible", async () => {

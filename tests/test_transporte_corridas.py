@@ -141,12 +141,14 @@ def test_la_vista_de_la_corrida_dice_con_que_distancias_costeo(tmp_path):
     alm = _alm(tmp_path)
     metro = alm.carpetas.crear("Metro")
     alm.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro, km_granulares=32,
-                                                  peaje_aplica=True, peaje_valor=12400))
+                                                  peaje_granulares_aplica=True,
+                                                  peaje_granulares_valor=12400))
     cid = _corrida(alm, metro)
     meta = svc.vista_corrida(alm, cid)
     assert meta["carpeta_id"] == metro
     assert meta["transporte"]["km_granulares"] == 32
-    assert meta["transporte"]["peaje_valor"] == 12400
+    assert meta["transporte"]["peaje_granulares_valor"] == 12400
+    assert meta["transporte"]["peaje_granulares_aplica"] is True
     # una corrida sin proyecto no trae distancias
     otra = _corrida(alm, alm.carpetas.crear("Sin distancias"))
     assert svc.vista_corrida(alm, otra)["transporte"] is None
@@ -298,13 +300,23 @@ def test_peaje_quitado_no_vuelve_por_el_respaldo_del_item(tmp_path):
     alm_a = _alm_solo_peaje(tmp_path / "orden_a")
     metro_a = alm_a.carpetas.crear("Metro")
     cid_a = _corrida_peaje(alm_a, metro_a)
-    alm_a.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro_a, peaje_aplica=False))
+    alm_a.carpetas.set_parametros(ParametrosProyecto(
+        carpeta_id=metro_a,
+        # Sin acarreo que le de categoria, el peaje se quita solo si las TRES
+        # categorias dicen que no hay peaje (regla de unanimidad).
+        peaje_botadero_aplica=False, peaje_mezclas_aplica=False,
+        peaje_granulares_aplica=False))
     v_a = svc.vista_corrida(alm_a, cid_a)["items"][0]
 
     # orden B: los parámetros del proyecto se fijan ANTES de armar la corrida.
     alm_b = _alm_solo_peaje(tmp_path / "orden_b")
     metro_b = alm_b.carpetas.crear("Metro")
-    alm_b.carpetas.set_parametros(ParametrosProyecto(carpeta_id=metro_b, peaje_aplica=False))
+    alm_b.carpetas.set_parametros(ParametrosProyecto(
+        carpeta_id=metro_b,
+        # Sin acarreo que le de categoria, el peaje se quita solo si las TRES
+        # categorias dicen que no hay peaje (regla de unanimidad).
+        peaje_botadero_aplica=False, peaje_mezclas_aplica=False,
+        peaje_granulares_aplica=False))
     cid_b = _corrida_peaje(alm_b, metro_b)
     v_b = svc.vista_corrida(alm_b, cid_b)["items"][0]
 

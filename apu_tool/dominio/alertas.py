@@ -48,6 +48,12 @@ def alertas_costeo(a: AssembledApu) -> list[str]:
     for apu_sub, cod in a.en_subapus:
         motivos.append(f"{cod}: distancia del proyecto no aplicada "
                        f"(en el sub-APU {apu_sub})")
+    # El peaje se costeó con el catálogo porque no se supo de qué categoría es. No
+    # es un $0 ni un cruce malo: es el valor del proyecto que NO se aplicó, y sin
+    # esto el ítem sale con el peaje viejo sin que nada lo diga.
+    if a.peaje_sin_categoria:
+        motivos.append("peaje del proyecto no aplicado "
+                       "(falta clasificar el acarreo del APU)")
     # Costo declarado por una persona, no calculado por el motor (proyectos
     # especiales). Se marca SIEMPRE, activa y congelada.
     if a.costo_a_mano:

@@ -34,8 +34,18 @@ const ETIQUETAS: Record<string, string> = {
   km_botadero: "Botadero (km)",
   km_mezclas: "Mezclas (km)",
   km_granulares: "Granulares (km)",
-  peaje_valor: "Valor del peaje",
+  peaje_botadero_valor: "Peaje botadero",
+  peaje_mezclas_valor: "Peaje mezclas",
+  peaje_granulares_valor: "Peaje granulares",
 };
+
+/** Las tres categorías de acarreo, con su rótulo. El peaje es de la caseta por la
+ *  que pasa cada una: pueden pagar todas, ninguna o solo algunas. */
+const CATEGORIAS = [
+  { cat: "botadero", etiqueta: "Botadero" },
+  { cat: "mezclas", etiqueta: "Mezclas" },
+  { cat: "granulares", etiqueta: "Granulares" },
+] as const;
 
 // null = el campo esta vacio a proposito ("esta distancia no aplica").
 // undefined = hay texto que no es un numero: es un error del usuario, no un "no aplica".
@@ -56,7 +66,8 @@ export default function DistanciasProyecto() {
   const puedeEditar = puede(perfil?.rol, "editor");
   const [vista, setVista] = useState<VistaTransporte | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
-  const [peaje, setPeaje] = useState(false);
+  // Una casilla por categoría: marcada = esa caseta se paga.
+  const [peaje, setPeaje] = useState<Record<string, boolean>>({});
   const [guardando, setGuardando] = useState(false);
   const [ajustes, setAjustes] = useState<AjusteProyecto[]>([]);
 
@@ -68,9 +79,15 @@ export default function DistanciasProyecto() {
           km_botadero: v.parametros.km_botadero?.toString() ?? "",
           km_mezclas: v.parametros.km_mezclas?.toString() ?? "",
           km_granulares: v.parametros.km_granulares?.toString() ?? "",
-          peaje_valor: v.parametros.peaje_valor?.toString() ?? "",
+          peaje_botadero_valor: v.parametros.peaje_botadero_valor?.toString() ?? "",
+          peaje_mezclas_valor: v.parametros.peaje_mezclas_valor?.toString() ?? "",
+          peaje_granulares_valor: v.parametros.peaje_granulares_valor?.toString() ?? "",
         });
-        setPeaje(v.parametros.peaje_aplica === true);
+        setPeaje({
+          botadero: v.parametros.peaje_botadero_aplica === true,
+          mezclas: v.parametros.peaje_mezclas_aplica === true,
+          granulares: v.parametros.peaje_granulares_aplica === true,
+        });
       })
       .catch((e) => toast.error(msg(e)));
   }, [carpetaId]);
@@ -101,7 +118,11 @@ export default function DistanciasProyecto() {
     const km_botadero = num(form.km_botadero ?? "");
     const km_mezclas = num(form.km_mezclas ?? "");
     const km_granulares = num(form.km_granulares ?? "");
-    const peaje_valor = peaje ? num(form.peaje_valor ?? "") : null;
+    // El valor de una categoría sin peaje no se manda: desmarcar la casilla es
+    // decir "acá no se paga", no "vale lo que quedó escrito".
+    const valores = Object.fromEntries(CATEGORIAS.map(({ cat }) => [
+      cat, peaje[cat] ? num(form[`peaje_${cat}_valor`] ?? "") : null,
+    ]));
 
     // Basura (texto que no es número) bloquea el guardado; vacío ("no aplica")
     // sigue viajando como null. Ver `num()`.
@@ -109,7 +130,8 @@ export default function DistanciasProyecto() {
       ["km_botadero", km_botadero],
       ["km_mezclas", km_mezclas],
       ["km_granulares", km_granulares],
-      ["peaje_valor", peaje_valor],
+      ...CATEGORIAS.map(({ cat }) =>
+        [`peaje_${cat}_valor`, valores[cat]] as const),
     ] as const).find(([, v]) => v === undefined);
     if (invalido) {
       const [campo] = invalido;
@@ -123,8 +145,12 @@ export default function DistanciasProyecto() {
         km_botadero: km_botadero ?? null,
         km_mezclas: km_mezclas ?? null,
         km_granulares: km_granulares ?? null,
-        peaje_aplica: peaje,
-        peaje_valor: peaje_valor ?? null,
+        peaje_botadero_aplica: peaje.botadero ?? false,
+        peaje_botadero_valor: valores.botadero ?? null,
+        peaje_mezclas_aplica: peaje.mezclas ?? false,
+        peaje_mezclas_valor: valores.mezclas ?? null,
+        peaje_granulares_aplica: peaje.granulares ?? false,
+        peaje_granulares_valor: valores.granulares ?? null,
       };
       setVista(await guardarTransporte(carpetaId, payload));
       toast.success("Distancias del proyecto guardadas. Las corridas activas se recostean.");
@@ -156,22 +182,27 @@ export default function DistanciasProyecto() {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-end gap-4">
-        <Campo id="km_botadero" etiqueta={ETIQUETAS.km_botadero} form={form} setForm={setForm}
-               disabled={!puedeEditar} />
-        <Campo id="km_mezclas" etiqueta={ETIQUETAS.km_mezclas} form={form} setForm={setForm}
-               disabled={!puedeEditar} />
-        <Campo id="km_granulares" etiqueta={ETIQUETAS.km_granulares} form={form} setForm={setForm}
-               disabled={!puedeEditar} />
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={peaje} disabled={!puedeEditar}
-                 onChange={(e) => setPeaje(e.target.checked)} />
-          Peaje
-        </label>
-        {peaje && (
-          <Campo id="peaje_valor" etiqueta={ETIQUETAS.peaje_valor} form={form} setForm={setForm}
-                 disabled={!puedeEditar} />
-        )}
+      {/* Una columna por categoría: su distancia, su casilla de peaje y, si paga,
+          su valor. El peaje de un APU es el de la categoría de su acarreo. */}
+      <div className="flex flex-wrap items-start gap-6">
+        {CATEGORIAS.map(({ cat, etiqueta }) => (
+          <div key={cat} className="flex flex-col gap-2">
+            <Campo id={`km_${cat}`} etiqueta={ETIQUETAS[`km_${cat}`]}
+                   form={form} setForm={setForm} disabled={!puedeEditar} />
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={peaje[cat] ?? false}
+                     disabled={!puedeEditar}
+                     aria-label={`Peaje de ${etiqueta.toLowerCase()}`}
+                     onChange={(e) =>
+                       setPeaje((p) => ({ ...p, [cat]: e.target.checked }))} />
+              Peaje
+            </label>
+            {peaje[cat] && (
+              <Campo id={`peaje_${cat}_valor`} etiqueta={ETIQUETAS[`peaje_${cat}_valor`]}
+                     form={form} setForm={setForm} disabled={!puedeEditar} />
+            )}
+          </div>
+        ))}
         <Button onClick={guardar} disabled={guardando || !puedeEditar}>
           {guardando ? "Guardando…" : "Guardar"}
         </Button>

@@ -11,6 +11,7 @@ import {
   revisarCorridaStream, aplicarSugerencias, reanudarArmado,
   rebuscarApus, aplicarRebusqueda,
 } from "@/api/corridas";
+import type { TransporteCorrida } from "@/lib/tipos";
 import { cop, pct } from "@/lib/moneda";
 import { fmtDuracion } from "@/lib/tiempo";
 import { useCorridaTabla, SIN_APU } from "@/lib/corridaTabla";
@@ -49,6 +50,19 @@ function totalesDe(filas: ItemCuadro[]): Totales {
     n_items: filas.length,
     n_revision: filas.filter((f) => REVISABLE.has(f.status)).length,
   };
+}
+
+/** Resumen corto de los peajes del proyecto para el encabezado de la corrida.
+ *  Cada categoría tiene su caseta: se listan solo las que pagan, y si ninguna
+ *  paga se dice una vez. No suma nada: solo muestra lo que el backend manda. */
+function peajesDe(t: TransporteCorrida): string {
+  const pagan = ([
+    ["botadero", t.peaje_botadero_aplica, t.peaje_botadero_valor],
+    ["mezclas", t.peaje_mezclas_aplica, t.peaje_mezclas_valor],
+    ["granulares", t.peaje_granulares_aplica, t.peaje_granulares_valor],
+  ] as const).filter(([, aplica]) => aplica);
+  if (!pagan.length) return " · sin peaje";
+  return pagan.map(([cat, , valor]) => ` · peaje ${cat} ${cop(valor ?? 0)}`).join("");
 }
 
 export default function Corrida() {
@@ -363,9 +377,7 @@ export default function Corrida() {
                 ? `botadero ${data.transporte.km_botadero ?? "—"} km · mezclas ${
                     data.transporte.km_mezclas ?? "—"} · granulares ${
                     data.transporte.km_granulares ?? "—"}${
-                    data.transporte.peaje_aplica
-                      ? ` · peaje ${cop(data.transporte.peaje_valor ?? 0)}`
-                      : " · sin peaje"}${
+                    peajesDe(data.transporte)}${
                     data.transporte.ajustes > 0
                       ? ` · ${data.transporte.ajustes} ajustes` : ""}`
                 : "Definir distancias del proyecto"}

@@ -135,8 +135,13 @@ class TransporteParamsIn(BaseModel):
     km_botadero: Optional[float] = None
     km_mezclas: Optional[float] = None
     km_granulares: Optional[float] = None
-    peaje_aplica: Optional[bool] = None
-    peaje_valor: Optional[float] = None
+    # Peaje por categoría de acarreo: cada una paga o no, y con su propio valor.
+    peaje_botadero_aplica: Optional[bool] = None
+    peaje_botadero_valor: Optional[float] = None
+    peaje_mezclas_aplica: Optional[bool] = None
+    peaje_mezclas_valor: Optional[float] = None
+    peaje_granulares_aplica: Optional[bool] = None
+    peaje_granulares_valor: Optional[float] = None
 
 
 class ClaseTransporteIn(BaseModel):

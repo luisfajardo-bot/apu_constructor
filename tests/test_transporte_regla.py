@@ -6,8 +6,23 @@ from apu_tool.nucleo.models import ClaseTransporte, ParametrosProyecto
 def test_parametros_vacios():
     assert ParametrosProyecto().vacio is True
     assert ParametrosProyecto(km_botadero=30).vacio is False
-    assert ParametrosProyecto(peaje_aplica=False).vacio is False
-    assert ParametrosProyecto(peaje_valor=12400).vacio is False
+    # Cualquiera de los 6 campos de peaje cuenta: si alguien cargó el valor de UNA
+    # categoría y esto dijera "vacío", el motor descartaría el contexto entero.
+    assert ParametrosProyecto(peaje_granulares_aplica=False).vacio is False
+    assert ParametrosProyecto(peaje_mezclas_valor=12400).vacio is False
+    assert ParametrosProyecto(peaje_botadero_aplica=True).vacio is False
+
+
+def test_peaje_por_categoria():
+    p = ParametrosProyecto(peaje_botadero_aplica=True, peaje_botadero_valor=8000,
+                           peaje_mezclas_aplica=False,
+                           peaje_granulares_valor=12400)
+    assert p.peaje_aplica("botadero") is True and p.peaje_valor("botadero") == 8000
+    assert p.peaje_aplica("mezclas") is False and p.peaje_valor("mezclas") is None
+    # Sin definir la casilla pero con valor cargado: son campos independientes.
+    assert p.peaje_aplica("granulares") is None
+    assert p.peaje_valor("granulares") == 12400
+    assert p.peaje_aplica("inexistente") is None and p.peaje_valor("inexistente") is None
 
 
 def test_km_por_categoria():
@@ -97,20 +112,92 @@ def test_derechos_de_botadero_nunca_escalan():
                                  ParametrosProyecto(km_botadero=34), {}) == ()
 
 
-def test_peaje_se_quita_si_no_aplica():
+def _clas_mezclas():
+    """El acarreo del 4200 clasificado como mezclas: es lo que le da categoría a su
+    fila de peaje, que no tiene una propia."""
+    return {("4200", "DIURNO", "6878"): ClaseTransporte(
+        apu_codigo="4200", shift="DIURNO", insumo_codigo="6878",
+        insumo_nombre="TRANSPORTE DE BASES ASFALTICAS", categoria="mezclas",
+        volumen=1.05, km_base=25.0)}
+
+
+def test_peaje_se_quita_si_su_categoria_no_aplica():
     comps = [_comp("INT3", "PEAJE", unidad="GLB", rend=1.0),
              _comp("6878", "TRANSPORTE DE BASES ASFALTICAS")]
     out = transporte.aplicar(comps, "4200", "DIURNO",
-                             ParametrosProyecto(peaje_aplica=False), {}, ())
+                             ParametrosProyecto(peaje_mezclas_aplica=False,
+                                                km_mezclas=28),
+                             _clas_mezclas(), ())
     assert [c.insumo_codigo for c in out] == ["6878"]
 
 
-def test_peaje_se_conserva_si_aplica():
+def test_el_peaje_de_otra_categoria_no_toca_este_apu():
+    """El APU es de mezclas: que granulares no pague peaje no le quita el suyo."""
+    comps = [_comp("INT3", "PEAJE", unidad="GLB", rend=1.0),
+             _comp("6878", "TRANSPORTE DE BASES ASFALTICAS")]
+    out = transporte.aplicar(comps, "4200", "DIURNO",
+                             ParametrosProyecto(peaje_granulares_aplica=False,
+                                                peaje_mezclas_aplica=True,
+                                                peaje_mezclas_valor=12400,
+                                                km_mezclas=28),
+                             _clas_mezclas(), ())
+    assert [c.insumo_codigo for c in out] == ["INT3", "6878"]
+
+
+def test_peaje_sin_clasificar_se_conserva():
+    """Sin clasificación no se sabe de qué caseta es: la fila pasa y la costea el
+    catálogo. Borrarla sería bajar el precio sin que nadie lo pida."""
+    comps = [_comp("INT3", "PEAJE", unidad="GLB", rend=1.0),
+             _comp("6878", "TRANSPORTE DE BASES ASFALTICAS")]
+    out = transporte.aplicar(comps, "4200", "DIURNO",
+                             ParametrosProyecto(peaje_mezclas_aplica=False,
+                                                km_mezclas=28),
+                             {}, ())
+    assert [c.insumo_codigo for c in out] == ["INT3", "6878"]
+
+
+def test_peaje_sin_clasificar_se_quita_si_las_TRES_dicen_que_no():
+    """«Este proyecto no paga peajes» no depende de saber por qué caseta pasa el
+    acarreo: es la traducción fiel del peaje único que había antes."""
     comps = [_comp("INT3", "PEAJE", unidad="GLB", rend=1.0)]
     out = transporte.aplicar(comps, "4200", "DIURNO",
-                             ParametrosProyecto(peaje_aplica=True, peaje_valor=12400),
+                             ParametrosProyecto(peaje_botadero_aplica=False,
+                                                peaje_mezclas_aplica=False,
+                                                peaje_granulares_aplica=False),
                              {}, ())
-    assert len(out) == 1 and out[0].rendimiento == 1.0   # el valor lo aplica pricing.py
+    assert out == []
+
+
+def test_peaje_con_dos_categorias_se_conserva():
+    """Dos acarreos de categorías distintas: no hay una respuesta, así que la fila
+    pasa y alerta. Mismo trato que sin clasificar."""
+    comps = [_comp("INT3", "PEAJE", unidad="GLB", rend=1.0),
+             _comp("6878", "TRANSPORTE DE BASES ASFALTICAS"),
+             _comp("7462", "TRANSPORTE DE PETREOS")]
+    clas = dict(_clas_mezclas())
+    clas[("4200", "DIURNO", "7462")] = ClaseTransporte(
+        apu_codigo="4200", shift="DIURNO", insumo_codigo="7462",
+        insumo_nombre="TRANSPORTE DE PETREOS", categoria="granulares",
+        volumen=1.0, km_base=25.0)
+    assert transporte.categoria_del_peaje(comps, "4200", "DIURNO", clas) is None
+    out = transporte.aplicar(comps, "4200", "DIURNO",
+                             ParametrosProyecto(peaje_mezclas_aplica=False,
+                                                peaje_granulares_aplica=False,
+                                                km_mezclas=28, km_granulares=32),
+                             clas, ())
+    assert "INT3" in [c.insumo_codigo for c in out]
+
+
+def test_peaje_se_conserva_si_aplica():
+    comps = [_comp("INT3", "PEAJE", unidad="GLB", rend=1.0),
+             _comp("6878", "TRANSPORTE DE BASES ASFALTICAS")]
+    out = transporte.aplicar(comps, "4200", "DIURNO",
+                             ParametrosProyecto(peaje_mezclas_aplica=True,
+                                                peaje_mezclas_valor=12400,
+                                                km_mezclas=28),
+                             _clas_mezclas(), ())
+    peaje = [c for c in out if c.insumo_codigo == "INT3"][0]
+    assert peaje.rendimiento == 1.0   # el valor lo aplica pricing.py
 
 
 def test_subapu_no_se_toca_aqui():

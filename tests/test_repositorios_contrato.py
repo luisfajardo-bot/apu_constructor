@@ -552,9 +552,9 @@ def test_parametros_peaje_valor_sobrevive_el_viaje(repos_proyecto):
     pierde, el proyecto costea con un peaje distinto al que realmente se cargó."""
     _, carpetas = repos_proyecto
     cid = carpetas.crear("Metro")
-    carpetas.set_parametros(ParametrosProyecto(carpeta_id=cid, peaje_aplica=True,
-                                                peaje_valor=12400))
-    assert carpetas.get_parametros(cid).peaje_valor == 12400
+    carpetas.set_parametros(ParametrosProyecto(
+        carpeta_id=cid, peaje_granulares_aplica=True, peaje_granulares_valor=12400))
+    assert carpetas.get_parametros(cid).peaje_valor("granulares") == 12400
 
 
 def test_parametros_peaje_aplica_false_no_es_none(repos_proyecto):
@@ -562,8 +562,9 @@ def test_parametros_peaje_aplica_false_no_es_none(repos_proyecto):
     distintos; confundirlos reactiva un peaje que el proyecto desactivó."""
     _, carpetas = repos_proyecto
     cid = carpetas.crear("Metro")
-    carpetas.set_parametros(ParametrosProyecto(carpeta_id=cid, peaje_aplica=False))
-    assert carpetas.get_parametros(cid).peaje_aplica is False
+    carpetas.set_parametros(ParametrosProyecto(carpeta_id=cid,
+                                               peaje_mezclas_aplica=False))
+    assert carpetas.get_parametros(cid).peaje_aplica("mezclas") is False
 
 
 def test_reguardar_parametros_actualiza_fila_existente(repos_proyecto):
@@ -573,9 +574,11 @@ def test_reguardar_parametros_actualiza_fila_existente(repos_proyecto):
     cid = carpetas.crear("Metro")
     carpetas.set_parametros(ParametrosProyecto(carpeta_id=cid, km_botadero=10))
     carpetas.set_parametros(ParametrosProyecto(
-        carpeta_id=cid, km_botadero=34, peaje_aplica=True, peaje_valor=12400))
+        carpeta_id=cid, km_botadero=34, peaje_botadero_aplica=True,
+        peaje_botadero_valor=12400))
     p = carpetas.get_parametros(cid)
-    assert p.km_botadero == 34 and p.peaje_aplica is True and p.peaje_valor == 12400
+    assert (p.km_botadero == 34 and p.peaje_aplica("botadero") is True
+            and p.peaje_valor("botadero") == 12400)
 
 
 def test_borrar_ajuste_borra_solo_ese(repos_proyecto):

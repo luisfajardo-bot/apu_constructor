@@ -80,7 +80,7 @@ def test_el_ajuste_gana_sobre_la_regla():
 def test_quitar_lo_que_la_regla_conservo():
     comps = [_comp("INT3", "PEAJE", unidad="GLB")]
     out = transporte.aplicar(
-        comps, "4390", "DIURNO", ParametrosProyecto(peaje_aplica=True, peaje_valor=100),
+        comps, "4390", "DIURNO", ParametrosProyecto(peaje_granulares_aplica=True, peaje_granulares_valor=100),
         {}, [_aj("quitar", insumo_codigo="INT3", insumo_nombre="PEAJE")])
     assert out == []
 

@@ -43,6 +43,16 @@ no se clasifican el peaje no se aplica).
 | 1 categoría · marcada pero sin valor | camino normal del catálogo (igual que hoy) |
 | acarreo sin clasificar | catálogo + alerta «peaje del proyecto no aplicado» |
 | acarreos de 2+ categorías | igual que sin clasificar: catálogo + alerta |
+| sin categoría · las **tres** categorías dicen que no hay peaje | **se quita la fila** |
+
+La última fila apareció implementando, no diseñando: el APU cuyo *único* componente es
+el peaje no tiene acarreo del que heredar categoría, así que sin esa regla un proyecto
+sin peajes ya no podría vaciarlo — una regresión contra el peaje único de antes.
+«Este proyecto no paga peajes» no depende de saber por qué caseta pasa el acarreo.
+
+Y la alerta se emite solo si la fila de peaje **sobrevivió** a la regla: un peaje que el
+proyecto excluyó no es un peaje «sin aplicar», y decir lo contrario tapaba la alerta del
+$0 con un motivo falso (lo encontró un test existente, no una revisión).
 
 Lo de "sin clasificar" no es un caso de borde teórico: **es el estado de producción
 hoy** (0 acarreos clasificados). Que se comporte como antes de esta feature es lo

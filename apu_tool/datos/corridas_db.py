@@ -90,6 +90,22 @@ class CorridasDB:
             # Backfill idempotente: corridas viejas muestran su archivo hasta renombrarse.
             conn.execute("UPDATE corrida SET nombre = archivo "
                          "WHERE nombre IS NULL OR nombre = ''")
+            # Peaje por categoría de acarreo. SQLite no tiene ADD COLUMN IF NOT
+            # EXISTS: se mira PRAGMA, como el resto de este método. Las dos columnas
+            # del peaje único se borran (DROP COLUMN, SQLite >= 3.35): se verificó
+            # que la tabla estaba vacía en los dos backends antes de decidirlo.
+            pcols = {r["name"] for r in
+                     conn.execute("PRAGMA table_info(proyecto_parametros)").fetchall()}
+            for cat in ("botadero", "mezclas", "granulares"):
+                if f"peaje_{cat}_aplica" not in pcols:
+                    conn.execute(f"ALTER TABLE proyecto_parametros "
+                                 f"ADD COLUMN peaje_{cat}_aplica INTEGER")
+                if f"peaje_{cat}_valor" not in pcols:
+                    conn.execute(f"ALTER TABLE proyecto_parametros "
+                                 f"ADD COLUMN peaje_{cat}_valor REAL")
+            for vieja in ("peaje_aplica", "peaje_valor"):
+                if vieja in pcols:
+                    conn.execute(f"ALTER TABLE proyecto_parametros DROP COLUMN {vieja}")
             icols = {r["name"] for r in conn.execute("PRAGMA table_info(corrida_item)").fetchall()}
             if "snapshot_json" not in icols:
                 conn.execute("ALTER TABLE corrida_item ADD COLUMN snapshot_json TEXT")

@@ -183,11 +183,16 @@ def _build_desviaciones(ws, parametros, ajustes) -> None:
         ws.append(["Botadero (km)", parametros.km_botadero])
         ws.append(["Mezclas asfálticas (km)", parametros.km_mezclas])
         ws.append(["Granulares y pétreos (km)", parametros.km_granulares])
-        peaje = ("sí" if parametros.peaje_aplica else
-                 "no" if parametros.peaje_aplica is False else "sin definir")
-        ws.append(["¿Hay peaje?", peaje])
-        ws.append(["Valor del peaje", parametros.peaje_valor])
-        ws.cell(row=ws.max_row, column=2).number_format = _MONEY
+        # Una fila de peaje por categoría: el botadero, las mezclas y los
+        # granulares pasan por casetas distintas y cada una puede pagar o no.
+        for cat, etiqueta in (("botadero", "Botadero"),
+                              ("mezclas", "Mezclas asfálticas"),
+                              ("granulares", "Granulares y pétreos")):
+            aplica = parametros.peaje_aplica(cat)
+            ws.append([f"¿Hay peaje? — {etiqueta}",
+                       "sí" if aplica else "no" if aplica is False else "sin definir"])
+            ws.append([f"Valor del peaje — {etiqueta}", parametros.peaje_valor(cat)])
+            ws.cell(row=ws.max_row, column=2).number_format = _MONEY
     if ajustes:
         ws.append([])
         fila = ws.max_row + 1

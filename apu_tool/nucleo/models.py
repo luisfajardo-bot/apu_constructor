@@ -120,14 +120,22 @@ class ParametrosProyecto:
     """Distancias y peaje de un proyecto (carpeta de nivel 1).
 
     Todo `None` = no definido: la regla no toca nada y el costeo es el de hoy.
-    `peaje_valor` es dinero (por eso está en `privacy._FORBIDDEN_KEYS`).
+
+    El peaje es **por categoría de acarreo**: el viaje al botadero, el de mezclas y
+    el de granulares salen por casetas distintas y a veces una paga y otra no. Los
+    tres `peaje_*_valor` son dinero (por eso están en `privacy._FORBIDDEN_KEYS`); los
+    tres `peaje_*_aplica` son estructura y sí pueden viajar.
     """
     carpeta_id: Optional[int] = None
     km_botadero: Optional[float] = None
     km_mezclas: Optional[float] = None
     km_granulares: Optional[float] = None
-    peaje_aplica: Optional[bool] = None
-    peaje_valor: Optional[float] = None
+    peaje_botadero_aplica: Optional[bool] = None
+    peaje_botadero_valor: Optional[float] = None
+    peaje_mezclas_aplica: Optional[bool] = None
+    peaje_mezclas_valor: Optional[float] = None
+    peaje_granulares_aplica: Optional[bool] = None
+    peaje_granulares_valor: Optional[float] = None
     actualizado_en: str = ""
     actualizado_por: Optional[str] = None
 
@@ -136,15 +144,29 @@ class ParametrosProyecto:
                 "mezclas": self.km_mezclas,
                 "granulares": self.km_granulares}.get(categoria)
 
+    def peaje_aplica(self, categoria: str) -> Optional[bool]:
+        """True = hay peaje, False = no hay, None = sin definir. Mismos tres estados
+        que tenía el peaje único del proyecto."""
+        return {"botadero": self.peaje_botadero_aplica,
+                "mezclas": self.peaje_mezclas_aplica,
+                "granulares": self.peaje_granulares_aplica}.get(categoria)
+
+    def peaje_valor(self, categoria: str) -> Optional[float]:
+        return {"botadero": self.peaje_botadero_valor,
+                "mezclas": self.peaje_mezclas_valor,
+                "granulares": self.peaje_granulares_valor}.get(categoria)
+
     @property
     def vacio(self) -> bool:
         """Sin nada definido la regla es un no-op (garantía de no regresión).
-        `peaje_valor` cuenta: si alguien cargó el valor del peaje del proyecto y esto
-        dijera "vacío", el motor descartaría el contexto y costearía con el precio del
-        catálogo sin avisar."""
-        return all(v is None for v in (self.km_botadero, self.km_mezclas,
-                                       self.km_granulares, self.peaje_aplica,
-                                       self.peaje_valor))
+        Los valores del peaje cuentan: si alguien cargó el valor del peaje de una
+        categoría y esto dijera "vacío", el motor descartaría el contexto y costearía
+        con el precio del catálogo sin avisar."""
+        return all(v is None for v in (
+            self.km_botadero, self.km_mezclas, self.km_granulares,
+            self.peaje_botadero_aplica, self.peaje_botadero_valor,
+            self.peaje_mezclas_aplica, self.peaje_mezclas_valor,
+            self.peaje_granulares_aplica, self.peaje_granulares_valor))
 
 
 @dataclass(frozen=True)
@@ -333,6 +355,11 @@ class AssembledApu:
     # los tenga guardados (ver `servicio/corridas.py::congelar`).
     sin_distancia: tuple[str, ...] = ()                    # en este APU
     en_subapus: tuple[tuple[str, str], ...] = ()           # (apu_del_sub, codigo)
+    # El APU tiene fila de peaje pero no se pudo saber de qué categoría es (su
+    # acarreo no está clasificado, o tiene acarreos de dos categorías). Viaja acá por
+    # la misma razón que `sin_distancia`: los consumidores de la alerta son varios y
+    # solo uno tiene el motor a mano.
+    peaje_sin_categoria: bool = False
 
     @property
     def costo_total(self) -> int:

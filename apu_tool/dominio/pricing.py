@@ -45,6 +45,11 @@ class PricingEngine:
         # (apu, shift) -> códigos de acarreo que no se pudieron reescalar; los lee
         # alertas.py para avisar en vez de costear con la distancia equivocada.
         self._sin_distancia: dict[tuple[str, str], tuple[str, ...]] = {}
+        # (apu, shift) -> categoría que le toca al PEAJE de ese APU, o None si tiene
+        # fila de peaje y no se pudo determinar (acarreo sin clasificar, o dos
+        # categorías). La clave existe solo si el APU tiene fila de peaje, así que
+        # `None` y "no está" dicen cosas distintas y hay que distinguirlas.
+        self._peaje_cat: dict[tuple[str, str], str | None] = {}
         # (apu, shift) cuya composición la biblioteca SÍ tenía pero las desviaciones
         # del proyecto la dejaron vacía. `_costear_row` lo necesita para distinguir
         # "el proyecto vació esto" de "la biblioteca no tiene nada" (ver
@@ -110,6 +115,16 @@ class PricingEngine:
         # dedup preservando el orden de aparición
         return tuple(dict.fromkeys(faltan))
 
+    def peaje_sin_categoria(self, apu_codigo: str, shift: str) -> bool:
+        """True si este APU tiene fila de peaje y NO se pudo saber de qué categoría es.
+
+        Es lo que alerta: sin categoría el peaje se costea con el catálogo (igual que
+        antes de esta feature) en vez de con el valor del proyecto, y eso tiene que
+        verse. La clave no está cuando el APU no tiene peaje: ahí no hay nada que
+        avisar."""
+        clave = (apu_codigo, shift)
+        return clave in self._peaje_cat and self._peaje_cat[clave] is None
+
     def vaciado_por_el_proyecto(self, apu_codigo: str, shift: str) -> bool:
         """True si la biblioteca SÍ tiene composición para este APU pero las
         desviaciones del proyecto la dejaron vacía (p. ej. el único componente era
@@ -153,6 +168,13 @@ class PricingEngine:
             self._sin_distancia[(codigo, shift)] = pend
         efectivos = transporte.aplicar(crudos, codigo, shift, self._ctx.params,
                                        self._ctx.clasificacion, self._ctx.ajustes)
+        # La categoría se guarda solo si la fila de peaje SOBREVIVIÓ a la regla: es
+        # lo que el motor va a costear. Un peaje que el proyecto excluyó (las tres
+        # categorías en "no hay peaje") no es un peaje "sin aplicar" — es uno que no
+        # existe, y decir lo contrario tapaba la alerta del $0 con un motivo falso.
+        if any(transporte.es_peaje(c) for c in efectivos):
+            self._peaje_cat[(codigo, shift)] = transporte.categoria_del_peaje(
+                crudos, codigo, shift, self._ctx.clasificacion)
         if not efectivos:
             # Había composición (crudos no vacío) y quedó en nada: el proyecto la
             # vació (p.ej. el único componente era el peaje y no hay peaje). Distinto
@@ -184,6 +206,7 @@ class PricingEngine:
             self._comp_cache.clear()
             self._cache.clear()
             self._sin_distancia.clear()
+            self._peaje_cat.clear()
             self._vaciados.clear()
 
     def _precargar_lote(self, claves_top) -> None:
@@ -207,11 +230,22 @@ class PricingEngine:
                 codigos_ins, lista_id=self._lista_id).items():
             self._cache.setdefault(cod, cands)
 
-    def cost_component(self, comp: ApuComponent, _visitando: tuple = ()) -> CostedComponent:
+    def cost_component(self, comp: ApuComponent, _visitando: tuple = (),
+                       apu_clave: tuple[str, str] | None = None) -> CostedComponent:
+        """`apu_clave` es el (código, turno) del APU al que pertenece `comp`.
+
+        Hace falta para el PEAJE, que toma el valor de la categoría del acarreo de SU
+        APU: la fila de peaje sola no dice de qué categoría es. Se pasa explícito
+        aunque `_visitando[-1]` lo tenga: tenerlo ahí es una casualidad de cómo se
+        arma la guarda de ciclos, y apoyarse en eso es una trampa para el próximo
+        cambio. Sin `apu_clave` el peaje cae al catálogo, que es el comportamiento
+        conservador.
+        """
         if (comp.tipo or "insumo") == "apu":
             return self._cost_subapu(comp, _visitando)
         if self._ctx is not None and transporte.es_peaje(comp):
-            valor = self._ctx.params.peaje_valor
+            cat = self._peaje_cat.get(apu_clave) if apu_clave is not None else None
+            valor = self._ctx.params.peaje_valor(cat) if cat is not None else None
             if valor:                      # 0/None => sigue el camino normal del catálogo
                 return CostedComponent(
                     insumo_codigo=comp.insumo_codigo, insumo_nombre=comp.insumo_nombre,
@@ -286,18 +320,20 @@ class PricingEngine:
         if clave in self._apu_cost_cache:                       # memoización por pasada
             return self._apu_cost_cache[clave]
         comps = self.components(codigo, shift)
-        total = sum(self.cost_component(c, visitando).costo for c in comps)
+        total = sum(self.cost_component(c, visitando, (codigo, shift)).costo
+                    for c in comps)
         self._apu_cost_cache[clave] = total
         return total
 
-    def cost_components(self, comps: list[ApuComponent],
-                        _visitando: tuple = ()) -> tuple[list[CostedComponent], float]:
-        costed = [self.cost_component(c, _visitando) for c in comps]
+    def cost_components(self, comps: list[ApuComponent], _visitando: tuple = (),
+                        apu_clave: tuple[str, str] | None = None
+                        ) -> tuple[list[CostedComponent], float]:
+        costed = [self.cost_component(c, _visitando, apu_clave) for c in comps]
         total = sum(c.costo for c in costed)
         return costed, total
 
     def cost_apu(self, apu_codigo: str, shift: str) -> tuple[list[CostedComponent], float]:
         comps = self.components(apu_codigo, shift)
         seed = ((apu_codigo, shift),)                           # detecta auto-referencia nivel 1
-        costed = [self.cost_component(c, seed) for c in comps]
+        costed = [self.cost_component(c, seed, (apu_codigo, shift)) for c in comps]
         return costed, sum(c.costo for c in costed)

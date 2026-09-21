@@ -16,8 +16,13 @@ CREATE TABLE IF NOT EXISTS corridas.proyecto_parametros (
     km_botadero     DOUBLE PRECISION,
     km_mezclas      DOUBLE PRECISION,
     km_granulares   DOUBLE PRECISION,
-    peaje_aplica    SMALLINT,
-    peaje_valor     DOUBLE PRECISION,
+    -- Peaje POR CATEGORIA de acarreo (ver db/corridas.sql).
+    peaje_botadero_aplica     SMALLINT,
+    peaje_botadero_valor      DOUBLE PRECISION,
+    peaje_mezclas_aplica      SMALLINT,
+    peaje_mezclas_valor       DOUBLE PRECISION,
+    peaje_granulares_aplica   SMALLINT,
+    peaje_granulares_valor    DOUBLE PRECISION,
     actualizado_en  TEXT NOT NULL,
     actualizado_por TEXT
 );
@@ -102,6 +107,18 @@ CREATE INDEX IF NOT EXISTS ix_corrida_item ON corridas.corrida_item(corrida_id, 
 
 -- Migración idempotente para bases existentes.
 ALTER TABLE corridas.corrida ADD COLUMN IF NOT EXISTS modo TEXT NOT NULL DEFAULT 'activa';
+-- Peaje por categoria de acarreo. Las dos columnas del peaje unico se BORRAN: se
+-- verifico que la tabla estaba vacia en los dos backends antes de decidirlo, y
+-- dejarlas muertas seria una trampa para quien las lea despues.
+ALTER TABLE corridas.proyecto_parametros
+    ADD COLUMN IF NOT EXISTS peaje_botadero_aplica   SMALLINT,
+    ADD COLUMN IF NOT EXISTS peaje_botadero_valor    DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS peaje_mezclas_aplica    SMALLINT,
+    ADD COLUMN IF NOT EXISTS peaje_mezclas_valor     DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS peaje_granulares_aplica SMALLINT,
+    ADD COLUMN IF NOT EXISTS peaje_granulares_valor  DOUBLE PRECISION;
+ALTER TABLE corridas.proyecto_parametros DROP COLUMN IF EXISTS peaje_aplica;
+ALTER TABLE corridas.proyecto_parametros DROP COLUMN IF EXISTS peaje_valor;
 ALTER TABLE corridas.corrida_item ADD COLUMN IF NOT EXISTS snapshot_json TEXT;
 ALTER TABLE corridas.corrida_item ADD COLUMN IF NOT EXISTS revision_json TEXT;
 ALTER TABLE corridas.corrida_item ADD COLUMN IF NOT EXISTS costo_manual DOUBLE PRECISION;

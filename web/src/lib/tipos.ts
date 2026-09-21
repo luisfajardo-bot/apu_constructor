@@ -391,8 +391,12 @@ export interface TransporteCorrida {
   km_botadero: number | null;
   km_mezclas: number | null;
   km_granulares: number | null;
-  peaje_aplica: boolean | null;
-  peaje_valor: number | null;
+  peaje_botadero_aplica: boolean | null;
+  peaje_botadero_valor: number | null;
+  peaje_mezclas_aplica: boolean | null;
+  peaje_mezclas_valor: number | null;
+  peaje_granulares_aplica: boolean | null;
+  peaje_granulares_valor: number | null;
   ajustes: number;
 }
 
@@ -647,8 +651,13 @@ export interface ParametrosTransporte {
   km_botadero: number | null;
   km_mezclas: number | null;
   km_granulares: number | null;
-  peaje_aplica: boolean | null;
-  peaje_valor: number | null;
+  /** Peaje POR CATEGORIA: cada caseta se paga o no, con su propio valor. */
+  peaje_botadero_aplica: boolean | null;
+  peaje_botadero_valor: number | null;
+  peaje_mezclas_aplica: boolean | null;
+  peaje_mezclas_valor: number | null;
+  peaje_granulares_aplica: boolean | null;
+  peaje_granulares_valor: number | null;
   actualizado_en?: string;
   actualizado_por?: string | null;
 }

@@ -192,9 +192,10 @@ matching, modelo de IA, clasificación de precios.
   underbid silencioso. API: `GET/POST /api/listas-precios`, `PATCH
   /api/listas-precios/{id}` (sin DELETE, a propósito).
 - **Distancias por proyecto.** Una carpeta de nivel 1 ES un proyecto y puede fijar sus
-  distancias de acarreo (`botadero`, `mezclas`, `granulares`), si hay peaje y cuánto vale
-  (`proyecto_parametros`), más ajustes puntuales de composición (`proyecto_ajuste`, que
-  ganan sobre la regla). El rendimiento efectivo de un componente de acarreo es
+  distancias de acarreo (`botadero`, `mezclas`, `granulares`) y, **por categoría**, si hay
+  peaje y cuánto vale (`proyecto_parametros`: `peaje_{categoria}_{aplica,valor}`, con los
+  accesores `params.peaje_aplica(cat)` / `params.peaje_valor(cat)`), más ajustes puntuales
+  de composición (`proyecto_ajuste`, que ganan sobre la regla). El rendimiento efectivo de un componente de acarreo es
   `volumen × km_del_proyecto`, con el volumen clasificado una vez por componente en
   `componente_transporte` (las filas M3-KM de la biblioteca). Se aplica en
   `PricingEngine.components()`, el único punto de paso; la biblioteca NO se toca y cada
@@ -203,6 +204,18 @@ matching, modelo de IA, clasificación de precios.
   también si vive dentro de un sub-APU, caso en el que la alerta dice en qué sub-APU está.
   La identidad de un componente es **código + nombre**: 6 de los 9 códigos de transporte
   tienen homónimo en el catálogo.
+- **El peaje es de la caseta, no del proyecto.** La fila `INT3 PEAJE` no tiene categoría
+  propia: la hereda del acarreo M3-KM de SU APU (`transporte.categoria_del_peaje`). Medido
+  sobre la biblioteca real, los 31 APUs con peaje tienen acarreos de una sola categoría
+  (22 granulares, 9 mezclas), así que no hay ambigüedad. Si no se puede determinar
+  (acarreo sin clasificar, o dos categorías), el peaje se costea con el **catálogo** —
+  igual que antes de la feature — y el ítem alerta «peaje del proyecto no aplicado»:
+  preferimos avisar a cobrar la caseta equivocada en silencio. La fila se **quita** si su
+  categoría dice que no hay peaje, o si las **tres** lo dicen y no se pudo determinar la
+  categoría (un APU cuyo único componente es el peaje no tiene acarreo del que heredar: la
+  unanimidad es la traducción fiel del peaje único que había antes). `pricing.py` necesita
+  saber de qué APU viene la fila, así que `cost_component` recibe la clave del APU
+  **explícita** — `_visitando[-1]` la tiene por casualidad y apoyarse en eso es una trampa.
 - **Veredicto de la revisión.** El dictamen por fila se guarda en
   `corrida_item.revision_json` (los dos backends) y se **borra solo en cualquier confirm**
   de la fila, cambie el APU o no: `corridas.actualizar_eleccion` escribe `revision_json=NULL`,
@@ -405,6 +418,10 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
 - No metas la distancia de un proyecto dentro de la biblioteca (ni editando el APU ni
   duplicándolo): para eso están `proyecto_parametros` y `proyecto_ajuste`. La distancia es
   del sitio, no del APU.
+- No hagas que un peaje sin categoría determinable se borre ni se cobre con el valor de
+  otra categoría. Se costea con el catálogo y alerta. La única excepción es la unanimidad
+  (las tres categorías en «no hay peaje»), y existe para no perder el comportamiento del
+  peaje único que había antes.
 - No confíes en el código de un insumo de transporte para clasificarlo: 6 de los 9 códigos
   tienen homónimo en el catálogo. Siempre código + nombre.
 - Ojo: `seed --force` borra `componente_transporte` (igual que las listas NP) y hay que

@@ -24,7 +24,12 @@ def _params_out(p: Optional[ParametrosProyecto], carpeta_id: int) -> dict:
     p = p or ParametrosProyecto(carpeta_id=carpeta_id)
     return {"carpeta_id": carpeta_id, "km_botadero": p.km_botadero,
             "km_mezclas": p.km_mezclas, "km_granulares": p.km_granulares,
-            "peaje_aplica": p.peaje_aplica, "peaje_valor": p.peaje_valor,
+            "peaje_botadero_aplica": p.peaje_botadero_aplica,
+            "peaje_botadero_valor": p.peaje_botadero_valor,
+            "peaje_mezclas_aplica": p.peaje_mezclas_aplica,
+            "peaje_mezclas_valor": p.peaje_mezclas_valor,
+            "peaje_granulares_aplica": p.peaje_granulares_aplica,
+            "peaje_granulares_valor": p.peaje_granulares_valor,
             "actualizado_en": p.actualizado_en, "actualizado_por": p.actualizado_por}
 
 
@@ -70,14 +75,19 @@ def guardar(alm: Almacen, carpeta_id: int, datos: dict, actor=None) -> dict:
             raise ValueError(f"{campo} debe ser mayor que 0; deja el campo vacío "
                              f"si esa distancia no aplica al proyecto.")
         kms[campo] = None if v is None else float(v)
-    aplica = datos.get("peaje_aplica")
-    valor = datos.get("peaje_valor")
-    if aplica is True and not (valor and float(valor) > 0):
-        raise ValueError(MSG_PEAJE)
+    # El peaje se valida POR CATEGORIA: marcar «sí hay peaje» en granulares y
+    # dejar el valor vacío es el mismo $0 prohibido que antes, pero ahora puede
+    # pasar en una categoría y no en las otras, y el mensaje dice en cuál.
+    peajes = {}
+    for cat in config.TRANSPORTE_CATEGORIAS:
+        aplica = datos.get(f"peaje_{cat}_aplica")
+        valor = datos.get(f"peaje_{cat}_valor")
+        if aplica is True and not (valor and float(valor) > 0):
+            raise ValueError(f"{MSG_PEAJE} (categoría: {cat})")
+        peajes[f"peaje_{cat}_aplica"] = None if aplica is None else bool(aplica)
+        peajes[f"peaje_{cat}_valor"] = None if valor is None else float(valor)
     previos = alm.carpetas.get_parametros(raiz)
-    nuevos = ParametrosProyecto(
-        carpeta_id=raiz, peaje_aplica=None if aplica is None else bool(aplica),
-        peaje_valor=None if valor is None else float(valor), **kms)
+    nuevos = ParametrosProyecto(carpeta_id=raiz, **kms, **peajes)
     with alm.transaccion("corridas") as conn:
         alm.carpetas.set_parametros(
             nuevos, conn=conn,

@@ -109,6 +109,44 @@ def _clase_util(comp: ApuComponent, apu_codigo: str, shift: str,
     return cls if cls is not None and cls.volumen > 0 else None
 
 
+def categorias_de(componentes: Sequence[ApuComponent], apu_codigo: str, shift: str,
+                  clasificacion: Optional[Clasificacion]) -> set[str]:
+    """Categorías de los acarreos M3-KM de este APU, según la clasificación.
+
+    Es lo que le da categoría a la fila de PEAJE, que no tiene una propia: el peaje
+    de un APU es el de la caseta por donde pasa su acarreo. Medido sobre la
+    biblioteca real, los 31 APUs con peaje tienen acarreos de UNA sola categoría
+    (22 granulares, 9 mezclas), así que el conjunto de un elemento es el caso normal
+    y no una suerte.
+
+    No mira los sub-APUs a propósito: la fila de peaje y el acarreo que la justifica
+    viven en el mismo APU. Un peaje dentro de un sub-APU se resuelve en la pasada de
+    ese sub-APU, que es donde está su propio acarreo.
+    """
+    clasificacion = clasificacion or {}
+    cats = set()
+    for c in componentes:
+        if not _escalable(c):
+            continue
+        cls = _clase_util(c, apu_codigo, shift, clasificacion)
+        if cls is not None:
+            cats.add(cls.categoria)
+    return cats
+
+
+def categoria_del_peaje(componentes: Sequence[ApuComponent], apu_codigo: str,
+                        shift: str, clasificacion: Optional[Clasificacion]) -> Optional[str]:
+    """La categoría que le toca al peaje de este APU, o None si no se puede saber.
+
+    None cubre los dos casos que el spec trata igual: acarreo sin clasificar (el
+    estado de producción hoy) y acarreos de dos categorías distintas (que hoy no
+    existen). En los dos, el peaje se costea con el catálogo y el ítem alerta:
+    preferimos avisar a cobrar el peaje equivocado en silencio.
+    """
+    cats = categorias_de(componentes, apu_codigo, shift, clasificacion)
+    return next(iter(cats)) if len(cats) == 1 else None
+
+
 def pendientes(componentes: Sequence[ApuComponent], apu_codigo: str, shift: str,
                params: Optional[ParametrosProyecto],
                clasificacion: Optional[Clasificacion]) -> tuple[str, ...]:
@@ -142,6 +180,20 @@ def aplicar(componentes: Iterable[ApuComponent], apu_codigo: str, shift: str,
     return comps
 
 
+def _peaje_excluido(params: ParametrosProyecto, categoria: Optional[str]) -> bool:
+    """Si la fila de peaje se saca de la composición.
+
+    Con categoría: la decide su casilla. SIN categoría: solo se saca si las TRES
+    dicen explícitamente que no hay peaje — «este proyecto no paga peajes» no depende
+    de saber por qué caseta pasa el acarreo, y es la traducción fiel del peaje único
+    que había antes. Si alguna categoría paga o está sin definir, la fila se queda y
+    la costea el catálogo (con alerta): preferimos avisar a borrar un costo real.
+    """
+    if categoria is not None:
+        return params.peaje_aplica(categoria) is False
+    return all(params.peaje_aplica(c) is False for c in config.TRANSPORTE_CATEGORIAS)
+
+
 def _aplicar_regla(comps: list[ApuComponent], apu_codigo: str, shift: str,
                    params: ParametrosProyecto,
                    clasificacion: Clasificacion) -> list[ApuComponent]:
@@ -151,7 +203,11 @@ def _aplicar_regla(comps: list[ApuComponent], apu_codigo: str, shift: str,
             salida.append(c)               # el sub-APU se reescala en su propia pasada
             continue
         if es_peaje(c):
-            if params.peaje_aplica is False:
+            # La categoría la da el acarreo del APU. Sin categoría (sin clasificar o
+            # con dos) la fila pasa intacta y la costea el catálogo: la alerta lo
+            # delata, ver `categoria_del_peaje`.
+            cat = categoria_del_peaje(comps, apu_codigo, shift, clasificacion)
+            if _peaje_excluido(params, cat):
                 continue                   # se QUITA: un peaje en $0 está prohibido
             salida.append(c)               # el valor lo pone pricing.py
             continue

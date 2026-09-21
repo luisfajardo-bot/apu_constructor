@@ -17,8 +17,15 @@ CREATE TABLE IF NOT EXISTS proyecto_parametros (
   km_botadero     REAL,
   km_mezclas      REAL,
   km_granulares   REAL,
-  peaje_aplica    INTEGER,    -- NULL = sin definir, 0 = no hay peaje, 1 = sí
-  peaje_valor     REAL,
+  -- Peaje POR CATEGORIA de acarreo: el botadero, las mezclas y los granulares
+  -- salen por casetas distintas y a veces una paga y otra no.
+  -- aplica: NULL = sin definir, 0 = no hay peaje, 1 = sí
+  peaje_botadero_aplica     INTEGER,
+  peaje_botadero_valor      REAL,
+  peaje_mezclas_aplica      INTEGER,
+  peaje_mezclas_valor       REAL,
+  peaje_granulares_aplica   INTEGER,
+  peaje_granulares_valor    REAL,
   actualizado_en  TEXT NOT NULL,
   actualizado_por TEXT
 );

@@ -29,7 +29,8 @@ def test_con_desviaciones_la_hoja_las_lista(tmp_path):
     out = write_report(
         [_ens()], tmp_path / "cuadro.xlsx",
         parametros=ParametrosProyecto(km_botadero=34, km_mezclas=28, km_granulares=32,
-                                      peaje_aplica=True, peaje_valor=12400),
+                                      peaje_granulares_aplica=True,
+                                      peaje_granulares_valor=12400),
         ajustes=[AjusteProyecto(apu_codigo="4390", shift="DIURNO", accion="agregar",
                                 insumo_codigo="9001",
                                 insumo_nombre="GEOTEXTIL NT 2000", unidad="M2",

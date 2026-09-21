@@ -71,16 +71,22 @@ def test_set_y_get_parametros(tmp_path):
     cid = car.crear("Metro")
     car.set_parametros(ParametrosProyecto(
         carpeta_id=cid, km_botadero=34, km_mezclas=28, km_granulares=32,
-        peaje_aplica=True, peaje_valor=12400), actualizado_por="yo@test.co")
+        peaje_granulares_aplica=True, peaje_granulares_valor=12400,
+        peaje_mezclas_aplica=False), actualizado_por="yo@test.co")
     p = car.get_parametros(cid)
     assert (p.km_botadero, p.km_mezclas, p.km_granulares) == (34, 28, 32)
-    assert p.peaje_aplica is True and p.peaje_valor == 12400
+    assert p.peaje_aplica("granulares") is True
+    assert p.peaje_valor("granulares") == 12400
+    # False y None son distintos y los dos tienen que sobrevivir el viaje.
+    assert p.peaje_aplica("mezclas") is False
+    assert p.peaje_aplica("botadero") is None and p.peaje_valor("botadero") is None
     assert p.actualizado_en and p.actualizado_por == "yo@test.co"
     # Reescribir actualiza, no duplica.
     car.set_parametros(ParametrosProyecto(carpeta_id=cid, km_botadero=21,
-                                         peaje_aplica=False))
+                                         peaje_botadero_aplica=False))
     p = car.get_parametros(cid)
-    assert p.km_botadero == 21 and p.peaje_aplica is False and p.km_mezclas is None
+    assert (p.km_botadero == 21 and p.peaje_aplica("botadero") is False
+            and p.km_mezclas is None)
 
 
 def test_crud_de_ajustes(tmp_path):

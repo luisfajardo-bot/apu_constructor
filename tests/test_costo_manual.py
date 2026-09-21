@@ -310,3 +310,18 @@ def test_umbral_congelada_no_se_toca(alm):
 
 def test_umbral_corrida_inexistente_devuelve_none(alm):
     assert svc.igualar_por_umbral(alm, 9999, 500_000_000.0, [0]) is None
+
+
+def test_umbral_iguala_la_fila_con_apu_pero_en_cero(alm):
+    """El SEGUNDO caso que cubre la regla: la fila tiene APU, pero su composición no
+    cuesta nada (insumos sin precio), así que está en $0 y traba el cuadro igual que
+    una sin APU. `_candidata_umbral` mira el costo, no el `apu_codigo`."""
+    alm.apus.insert_apus([Apu("VACIO", "APU SIN COMPOSICION", "M3", "DIURNO", "MOV")])
+    cid = _corrida(alm, contractual=1000.0, apu="VACIO")
+    assert svc.vista_corrida(alm, cid)["items"][0]["costo_unitario"] == 0.0  # el punto de partida
+    v = svc.igualar_por_umbral(alm, cid, 500_000_000.0, [0])
+    assert v["igualadas"] == [0]
+    assert v["salteadas"] == []
+    fila = v["items"][0]
+    assert fila["costo_unitario"] == 1000.0
+    assert fila["costo_manual"] is True

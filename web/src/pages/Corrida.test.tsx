@@ -288,6 +288,16 @@ test("con la corrida congelada no se puede revisar", async () => {
   expect(b.getAttribute("title")).toMatch(/congelada/i);
 });
 
+test("el botón de umbral aparece en una corrida activa con el plan completo", async () => {
+  // CORRIDA por defecto ya es modo "activa" y estado "en_revision" (plan completo),
+  // y el rol se pone "editor" en el beforeEach: las tres condiciones del botón.
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+
+  expect(await screen.findByText(/Igualar bajo umbral/i)).toBeTruthy();
+});
+
 test("el botón de umbral no aparece con la corrida congelada", async () => {
   const { getCorrida } = await import("@/api/corridas");
   vi.mocked(getCorrida).mockResolvedValueOnce({ ...CORRIDA, modo: "congelada" });

@@ -116,6 +116,13 @@ export default function TablaItems({
   const haySeleccion = seleccionadas.length > 0;
   // Solo las marcadas que de verdad tienen costo a mano: el botón no se ofrece
   // cuando no hay nada que deshacer.
+  //
+  // Se APARECE y DESAPARECE, al revés que sus vecinos de la barra (Confirmar,
+  // Igualar, Borrar), que están siempre y resuelven la elegibilidad al clic con un
+  // toast. Es a propósito: los vecinos actúan sobre TODA la selección, y este sobre
+  // un subconjunto — el costo a mano es raro, así que un botón permanente estaría
+  // casi siempre pidiendo un clic que no hace nada. El `(N)` de la etiqueta es la
+  // otra mitad de la misma decisión: dice cuántas de las marcadas se van a tocar.
   const conCostoAMano = visible
     .filter((it) => marcadas.has(it.seq) && it.costo_manual)
     .map((it) => it.seq);

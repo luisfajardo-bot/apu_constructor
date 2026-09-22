@@ -308,6 +308,15 @@ test("el botón de umbral no aparece con la corrida congelada", async () => {
   expect(screen.queryByText(/Igualar bajo umbral/i)).toBeNull();
 });
 
+test("sin rol de editor el botón de umbral no aparece", async () => {
+  rol = "consulta";
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+
+  expect(screen.queryByText(/Igualar bajo umbral/i)).toBeNull();
+});
+
 test("sin rol de editor el botón de revisar no aparece", async () => {
   rol = "consulta";
   const { default: Corrida } = await import("./Corrida");

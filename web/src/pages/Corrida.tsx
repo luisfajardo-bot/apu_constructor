@@ -365,8 +365,12 @@ export default function Corrida() {
       if (salteadas.length > 0) {
         // Nada silencioso: si no se tocó una fila, se dice por qué.
         toast.warning(
-          `${salteadas.length} sin tocar: cambiaron desde que abriste el diálogo `
-          + "(ya tienen APU o costo).");
+          (salteadas.length === 1
+            ? "1 línea sin tocar: cambió desde que abriste el diálogo "
+              + "(ya tiene APU o costo)."
+            : `${salteadas.length} líneas sin tocar: cambiaron desde que abriste `
+              + "el diálogo (ya tienen APU o costo)."),
+        );
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "No se pudo igualar por umbral.");
@@ -625,15 +629,17 @@ export default function Corrida() {
         />
       )}
 
-      {umbralAbierto && (
-        <DialogoUmbralCosto
-          abierto
-          items={data.items}
-          aplicando={aplicandoUmbral}
-          onAplicar={aplicarUmbral}
-          onCerrar={() => setUmbralAbierto(false)}
-        />
-      )}
+      {/* Montado siempre (a diferencia de DialogoRebuscar): tiene texto libre —el
+          umbral tipeado— y un cierre accidental (Escape, clic afuera) no puede
+          obligar a retipear nueve dígitos. El show/hide lo hace `abierto` adentro,
+          sin desmontar el `useState` del campo. */}
+      <DialogoUmbralCosto
+        abierto={umbralAbierto}
+        items={data.items}
+        aplicando={aplicandoUmbral}
+        onAplicar={aplicarUmbral}
+        onCerrar={() => setUmbralAbierto(false)}
+      />
     </div>
   );
 }

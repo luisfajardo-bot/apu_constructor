@@ -19,7 +19,7 @@ import { cop, pct } from "@/lib/moneda";
 import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
 import {
   getItem, confirmar, confirmarLote, borrarLineas, aplicarSugerencias,
-  igualarCostoAlContractual,
+  igualarCostoAlContractual, quitarCostoManual,
 } from "@/api/corridas";
 import { crearAjuste } from "@/api/transporte";
 import type {
@@ -114,6 +114,11 @@ export default function TablaItems({
   // cambia el filtro, las que se fueron no se tocan (y el contador no las cuenta).
   const seleccionadas = visible.filter((it) => marcadas.has(it.seq)).map((it) => it.seq);
   const haySeleccion = seleccionadas.length > 0;
+  // Solo las marcadas que de verdad tienen costo a mano: el botón no se ofrece
+  // cuando no hay nada que deshacer.
+  const conCostoAMano = visible
+    .filter((it) => marcadas.has(it.seq) && it.costo_manual)
+    .map((it) => it.seq);
   // La selección solo existe con `control` (no en el armado en vivo, cuya tabla
   // viene del stream) y con la corrida activa.
   const seleccionable = control !== undefined && !readOnly;
@@ -310,6 +315,25 @@ export default function TablaItems({
     } catch (e) {
       // La selección NO se limpia: el usuario puede reintentar sin volver a marcar.
       toast.error(e instanceof Error ? e.message : "No se pudo igualar el costo.");
+    } finally {
+      setEnLote(false);
+    }
+  }
+
+  /** Deshace el costo puesto a mano: las filas vuelven a costear desde su APU (o a
+   *  quedar en $0 sin APU, que es la verdad y vuelve a trabar el cuadro). */
+  async function quitarCostoAMano() {
+    if (conCostoAMano.length === 0) return;
+    setEnLote(true);
+    try {
+      const actualizada = await quitarCostoManual(corridaId, conCostoAMano);
+      onConfirmado(actualizada);
+      limpiarSeleccion();
+      const n = actualizada.quitadas?.length ?? conCostoAMano.length;
+      toast.success(`${n} ${n === 1 ? "línea devuelta" : "líneas devueltas"} al costeo normal`);
+    } catch (e) {
+      // La selección NO se limpia: el usuario puede reintentar sin volver a marcar.
+      toast.error(e instanceof Error ? e.message : "No se pudo quitar el costo a mano.");
     } finally {
       setEnLote(false);
     }
@@ -644,6 +668,14 @@ export default function TablaItems({
                     onClick={igualarAlContractual}
                     title="Copia el precio contractual como costo. Para actividades globales que valen lo que dice el contrato.">
               {enLote ? "Aplicando…" : "Igualar costo al contractual"}
+            </Button>
+          )}
+          {puedeEditar && conCostoAMano.length > 0 && (
+            <Button size="xs" variant="outline" disabled={enLote}
+                    onClick={quitarCostoAMano}
+                    title={"Borra el costo que se puso a mano: las líneas vuelven a "
+                      + "costear desde su APU. Las que no tengan APU vuelven a $0."}>
+              {enLote ? "Aplicando…" : `Quitar costo a mano (${conCostoAMano.length})`}
             </Button>
           )}
           <Button size="xs" variant="destructive" disabled={enLote}

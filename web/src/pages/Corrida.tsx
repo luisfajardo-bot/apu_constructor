@@ -605,6 +605,7 @@ export default function Corrida() {
         readOnly={data.modo === "congelada"}
         control={control}
         puedeEditar={puedeEditar}
+        planAMedias={planAMedias}
         carpetaId={data.carpeta_id}
         onComponer={(seq) => navigate(`/corridas/${corridaId}/componer/${seq}`, {
           state: { descripcion: data.items.find((f) => f.seq === seq)?.descripcion },

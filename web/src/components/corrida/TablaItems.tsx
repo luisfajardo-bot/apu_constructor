@@ -36,6 +36,10 @@ interface TablaItemsProps {
   control?: ControlCorridaTabla;
   /** Rol editor: habilita "Armar APU" desde una fila de la corrida. */
   puedeEditar?: boolean;
+  /** La corrida todavía tiene líneas por armar (`armando`/`armado_detenido`).
+   *  El servicio rechaza ahí las dos acciones de costo a mano (`_exigir_editable`),
+   *  así que los botones no se ofrecen: un clic que solo sabe dar 400 no es un botón. */
+  planAMedias?: boolean;
   /** Carpeta (proyecto) de la corrida; sin ella no hay a qué proyecto atar un
    *  ajuste de composición, así que "Ajustar" no se ofrece. */
   carpetaId?: number | null;
@@ -75,6 +79,7 @@ export default function TablaItems({
   readOnly = false,
   control,
   puedeEditar = false,
+  planAMedias = false,
   carpetaId = null,
   onComponer,
 }: TablaItemsProps) {
@@ -670,14 +675,14 @@ export default function TablaItems({
           <Button size="xs" variant="outline" disabled={enLote} onClick={() => accionLote()}>
             {enLote ? "Aplicando…" : "Confirmar el APU actual"}
           </Button>
-          {puedeEditar && (
+          {puedeEditar && !planAMedias && (
             <Button size="xs" variant="outline" disabled={enLote}
                     onClick={igualarAlContractual}
                     title="Copia el precio contractual como costo. Para actividades globales que valen lo que dice el contrato.">
               {enLote ? "Aplicando…" : "Igualar costo al contractual"}
             </Button>
           )}
-          {puedeEditar && conCostoAMano.length > 0 && (
+          {puedeEditar && !planAMedias && conCostoAMano.length > 0 && (
             <Button size="xs" variant="outline" disabled={enLote}
                     onClick={quitarCostoAMano}
                     title={"Borra el costo que se puso a mano: las líneas vuelven a "

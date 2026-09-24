@@ -156,8 +156,8 @@ test("muestra el código de licitación (Ítem) junto al APU", async () => {
   expect(screen.getByText("111")).toBeTruthy();
 });
 
-function TablaConControl({ items, readOnly, puedeEditar }: {
-  items: typeof ITEM[]; readOnly?: boolean; puedeEditar?: boolean;
+function TablaConControl({ items, readOnly, puedeEditar, planAMedias }: {
+  items: typeof ITEM[]; readOnly?: boolean; puedeEditar?: boolean; planAMedias?: boolean;
 }) {
   const control = useCorridaTabla(items);
   return (
@@ -168,6 +168,7 @@ function TablaConControl({ items, readOnly, puedeEditar }: {
       onConfirmado={() => {}}
       readOnly={readOnly}
       puedeEditar={puedeEditar}
+      planAMedias={planAMedias}
     />
   );
 }
@@ -937,5 +938,20 @@ test("sin permiso de editor no hay botón de quitar", async () => {
   render(<TablaConControl items={items} puedeEditar={false} />);
   fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
   expect(await screen.findByText(/Confirmar el APU actual/i)).toBeTruthy();
+  expect(screen.queryByText(/Quitar costo a mano/i)).toBeNull();
+});
+
+
+// Con el plan a medias el servicio rechaza las dos acciones de costo a mano
+// (`_exigir_editable`), así que un botón que solo sabe dar 400 no se ofrece. Los
+// tests de arriba, que SÍ esperan ver los dos botones, son el lado positivo.
+test("con el plan a medias no se ofrece igualar ni quitar el costo a mano", async () => {
+  const items = itemsCuatro();
+  items[0] = { ...items[0], costo_manual: true };
+  render(<TablaConControl items={items} puedeEditar planAMedias />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  // La barra aparece igual: confirmar y borrar no dependen del plan.
+  expect(await screen.findByText(/Confirmar el APU actual/i)).toBeTruthy();
+  expect(screen.queryByText(/Igualar costo al contractual/i)).toBeNull();
   expect(screen.queryByText(/Quitar costo a mano/i)).toBeNull();
 });

@@ -68,6 +68,22 @@ test("las que están en $0 pero sin contractual se cuentan aparte", () => {
   expect(p.sinContractual).toBe(1);
 });
 
+test("destildar saca la fila del impacto, no de la lista", () => {
+  const items = [
+    item({ seq: 0, contractual_total: 100 }),
+    item({ seq: 1, contractual_total: 900 }),
+  ];
+  const p = previaUmbral(items, 1000, new Set([1]));
+  // La tabla sigue mostrando las dos: si la destildada desapareciera, no habría
+  // forma de volver a marcarla.
+  expect(p.bajoTecho.map((i) => i.seq)).toEqual([1, 0]);
+  // Pero el impacto (lo que de verdad se va a igualar) ya no la cuenta.
+  expect(p.igualadas.map((i) => i.seq)).toEqual([0]);
+  expect(p.restantes.map((i) => i.seq)).toEqual([1]);
+  expect(p.sumaIgualadas).toBe(100);
+  expect(p.sumaRestantes).toBe(900);
+});
+
 test("umbral 0, negativo o NaN no iguala nada", () => {
   const items = [item({ contractual_total: 100 })];
   for (const malo of [0, -5, NaN]) {

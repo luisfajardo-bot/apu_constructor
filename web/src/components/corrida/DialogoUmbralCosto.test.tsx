@@ -71,6 +71,21 @@ describe("DialogoUmbralCosto", () => {
     expect(screen.getByText(/sin precio contractual/i)).toBeTruthy();
   });
 
+  // Conteos y montos DISTINTOS entre el bloque "se igualan" y "quedan por armar" a
+  // propósito: si el resumen quedara pegado al umbral (sin las exclusiones) en vez
+  // de a los destildes, este test caería aunque el botón dijera el número correcto.
+  it("destildar una fila mueve el resumen: conteo, monto y porcentaje", () => {
+    abrir();
+    escribirUmbral("5000");                                     // entran las tres
+    fireEvent.click(screen.getByLabelText("Marcar línea 1"));   // destilda seq 2 ($5000)
+    expect(screen.getByText(/2 · \$1\.000 · 16\.7% del contrato/)).toBeTruthy();
+    expect(screen.getByText(/1 · \$5\.000 · 83\.3% del contrato/)).toBeTruthy();
+    // La destildada sigue en la tabla, solo destildada: si desapareciera no habría
+    // forma de volver a marcarla.
+    const cb1 = screen.getByLabelText("Marcar línea 1") as HTMLInputElement;
+    expect(cb1.checked).toBe(false);
+  });
+
   it("Shift+clic vuelve a marcar el rango entero", () => {
     const onAplicar = abrir();
     escribirUmbral("5000");                                    // entran las tres

@@ -25,16 +25,13 @@ export default function DialogoUmbralCosto({
 }: Props) {
   const [texto, setTexto] = useState("");
   const umbral = Number(texto);
-  const p = useMemo(() => previaUmbral(items, umbral), [items, umbral]);
 
   // Las marcas se DERIVAN del umbral: cambiar el techo cambia la lista de candidatas,
   // y conservar destildes de una lista anterior sería adivinar. `destildadas` guarda
   // solo lo que el usuario sacó a mano de la lista de hoy, y se vacía en el `onChange`
   // del input (abajo) cada vez que el techo cambia.
   const [destildadas, setDestildadas] = useState<Set<number>>(new Set());
-  const marcados = p.igualadas
-    .filter((it) => !destildadas.has(it.seq))
-    .map((it) => it.seq);
+  const p = useMemo(() => previaUmbral(items, umbral, destildadas), [items, umbral, destildadas]);
 
   // Ancla del último clic SIN Shift, por `seq` (único en la corrida), igual que
   // DialogoRebuscar.
@@ -43,10 +40,10 @@ export default function DialogoUmbralCosto({
   function alternar(idx: number, seq: number, conShift: boolean) {
     const desde = anclaRef.current === null
       ? -1
-      : p.igualadas.findIndex((it) => it.seq === anclaRef.current);
+      : p.bajoTecho.findIndex((it) => it.seq === anclaRef.current);
     if (conShift && desde >= 0) {
       const [a, b] = desde <= idx ? [desde, idx] : [idx, desde];
-      const rango = p.igualadas.slice(a, b + 1).map((it) => it.seq);
+      const rango = p.bajoTecho.slice(a, b + 1).map((it) => it.seq);
       setDestildadas((prev) => {
         const s = new Set(prev);
         for (const seqRango of rango) s.delete(seqRango);   // el rango MARCA
@@ -78,8 +75,8 @@ export default function DialogoUmbralCosto({
           Las actividades en $0 cuyo total contractual no pase el umbral se igualan al
           precio contractual, para poder evaluar sin armarles el APU. Se puede
           deshacer con «Quitar costo a mano».
-          {p.igualadas.length > 1 && " Shift+clic marca en rango."}
-          {p.igualadas.length > 0 && " Cambiar el umbral vuelve a marcar todas."}
+          {p.bajoTecho.length > 1 && " Shift+clic marca en rango."}
+          {p.bajoTecho.length > 0 && " Cambiar el umbral vuelve a marcar todas."}
         </p>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -143,7 +140,7 @@ export default function DialogoUmbralCosto({
           )}
         </div>
 
-        {p.igualadas.length > 0 && (
+        {p.bajoTecho.length > 0 && (
           <div className="max-h-[45vh] overflow-auto rounded border border-border">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-muted">
@@ -156,7 +153,7 @@ export default function DialogoUmbralCosto({
                 </tr>
               </thead>
               <tbody>
-                {p.igualadas.map((it, i) => (
+                {p.bajoTecho.map((it, i) => (
                   <tr key={it.seq} className="border-t border-border hover:bg-muted/40">
                     <td className={td}>
                       {/* `onChange` vacío a propósito: el que sabe del Shift es el
@@ -189,12 +186,14 @@ export default function DialogoUmbralCosto({
           {/* Deshabilitado mientras aplica: cerrar no cancela el POST en vuelo. */}
           <Button size="sm" variant="outline" disabled={aplicando}
             onClick={onCerrar}>Cerrar</Button>
-          <Button size="sm" disabled={marcados.length === 0 || aplicando}
-            onClick={() => onAplicar(umbral, [...marcados].sort((a, b) => a - b))}>
+          <Button size="sm" disabled={p.igualadas.length === 0 || aplicando}
+            onClick={() => onAplicar(
+              umbral, p.igualadas.map((it) => it.seq).sort((a, b) => a - b),
+            )}>
             {aplicando
               ? "Aplicando…"
-              : `Igualar ${marcados.length} ${
-                  marcados.length === 1 ? "línea" : "líneas"}`}
+              : `Igualar ${p.igualadas.length} ${
+                  p.igualadas.length === 1 ? "línea" : "líneas"}`}
           </Button>
         </div>
       </DialogContent>

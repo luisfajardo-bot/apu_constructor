@@ -20,7 +20,7 @@ const ITEMS = [
 ];
 
 function abrir(onAplicar = vi.fn()) {
-  render(<DialogoUmbralCosto abierto items={ITEMS} aplicando={false}
+  render(<DialogoUmbralCosto abierto items={ITEMS} contractualCorrida={6000} aplicando={false}
                              onAplicar={onAplicar} onCerrar={vi.fn()} />);
   return onAplicar;
 }
@@ -65,7 +65,7 @@ describe("DialogoUmbralCosto", () => {
   });
 
   it("avisa de las que están en $0 pero el contrato no paga", () => {
-    render(<DialogoUmbralCosto abierto aplicando={false} onAplicar={vi.fn()}
+    render(<DialogoUmbralCosto abierto aplicando={false} contractualCorrida={300} onAplicar={vi.fn()}
                                onCerrar={vi.fn()}
                                items={[item({ precio_contractual: 0, contractual_total: 0 })]} />);
     expect(screen.getByText(/sin precio contractual/i)).toBeTruthy();
@@ -98,7 +98,7 @@ describe("DialogoUmbralCosto", () => {
   });
 
   it("mientras aplica, ni se cierra ni se vuelve a aplicar", () => {
-    render(<DialogoUmbralCosto abierto items={ITEMS} aplicando
+    render(<DialogoUmbralCosto abierto items={ITEMS} contractualCorrida={6000} aplicando
                                onAplicar={vi.fn()} onCerrar={vi.fn()} />);
     const cerrar = screen.getByRole("button", { name: /Cerrar/ }) as HTMLButtonElement;
     const aplicar = screen.getByRole("button", { name: /Aplicando/ }) as HTMLButtonElement;
@@ -109,7 +109,7 @@ describe("DialogoUmbralCosto", () => {
   // Conteos DISTINTOS a propósito: con 1 y 1, intercambiar `sinApu` por `conApu` en
   // el JSX no cambiaría el texto y el test no vería el bug que existe para atajar.
   it("el desglose distingue las que ya tienen APU de las que no", () => {
-    render(<DialogoUmbralCosto abierto aplicando={false} onAplicar={vi.fn()}
+    render(<DialogoUmbralCosto abierto aplicando={false} contractualCorrida={300} onAplicar={vi.fn()}
                                onCerrar={vi.fn()}
                                items={[item({ seq: 0, contractual_total: 100 }),
                                        item({ seq: 1, contractual_total: 100 }),

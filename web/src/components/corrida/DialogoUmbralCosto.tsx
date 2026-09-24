@@ -10,6 +10,10 @@ interface Props {
   /** Todos los ítems de la corrida: el techo es una decisión de presupuesto, no de
    *  vista, así que NO se filtra por lo que la tabla esté mostrando. */
   items: ItemCuadro[];
+  /** El contractual de toda la corrida, tal como lo manda el backend
+   *  (`totales.contractual`). Es el denominador de los porcentajes, y viene por
+   *  prop en vez de sumarse acá: el frontend no suma dinero. */
+  contractualCorrida: number;
   aplicando: boolean;
   onAplicar: (umbral: number, seqs: number[]) => void;
   onCerrar: () => void;
@@ -21,7 +25,7 @@ interface Props {
  *  Para priorizar: un puñado de actividades se lleva casi todo el presupuesto y
  *  armarle el APU a la cola larga cuesta semanas sin mover la evaluación. */
 export default function DialogoUmbralCosto({
-  abierto, items, aplicando, onAplicar, onCerrar,
+  abierto, items, contractualCorrida, aplicando, onAplicar, onCerrar,
 }: Props) {
   const [texto, setTexto] = useState("");
   const umbral = Number(texto);
@@ -59,8 +63,8 @@ export default function DialogoUmbralCosto({
     });
   }
 
-  const pctIgualadas = porcentaje(p.sumaIgualadas, p.contractualCorrida);
-  const pctRestantes = porcentaje(p.sumaRestantes, p.contractualCorrida);
+  const pctIgualadas = porcentaje(p.sumaIgualadas, contractualCorrida);
+  const pctRestantes = porcentaje(p.sumaRestantes, contractualCorrida);
   const th = "px-2 py-1 text-left font-semibold text-muted-foreground";
   const td = "px-2 py-1 align-top";
 

@@ -25,8 +25,6 @@ export interface PreviaUmbral {
   restantes: ItemCuadro[];
   sumaIgualadas: number;
   sumaRestantes: number;
-  /** Suma de TODAS las filas de la corrida, para los porcentajes. */
-  contractualCorrida: number;
   sinApu: number;
   conApu: number;
   /** En $0 pero con contractual ≤ 0: no se pueden igualar (regla «nada en $0»). */
@@ -65,7 +63,6 @@ export function previaUmbral(
     restantes,
     sumaIgualadas: suma(igualadas),
     sumaRestantes: suma(restantes),
-    contractualCorrida: suma(items),
     sinApu: igualadas.filter((it) => !it.apu_codigo).length,
     conApu: igualadas.filter((it) => !!it.apu_codigo).length,
     sinContractual: items.filter(
@@ -74,7 +71,12 @@ export function previaUmbral(
   };
 }
 
-/** Porcentaje del contrato, a prueba de una corrida que suma $0. */
+/** Porcentaje del contrato, a prueba de una corrida que suma $0.
+ *
+ *  El total va por parámetro y NO se calcula acá: lo manda el backend
+ *  (`totales.contractual`), que es el mismo número que la página ya pinta en el
+ *  encabezado. Sumarlo de nuevo sería un segundo lugar desde el que los dos pueden
+ *  dejar de coincidir — la regla de la casa es que el frontend no suma dinero. */
 export function porcentaje(parte: number, total: number): number {
   return total > 0 ? (parte / total) * 100 : 0;
 }

@@ -39,14 +39,16 @@ test("el techo es inclusivo y parte por el total, no por el unitario", () => {
   expect(p.sumaRestantes).toBe(501);
 });
 
-test("el contractual de la corrida suma TODAS las filas, no solo las candidatas", () => {
+test("una fila ya costeada no es candidata", () => {
   const items = [
     item({ seq: 0, contractual_total: 100 }),
     item({ seq: 1, contractual_total: 9000, costo_unitario: 50 }),  // ya costeada
   ];
+  // El denominador del porcentaje NO sale de acá: lo manda el backend
+  // (`totales.contractual`) y entra al diálogo por prop. El frontend no suma dinero.
   const p = previaUmbral(items, 500);
   expect(p.candidatas).toHaveLength(1);
-  expect(p.contractualCorrida).toBe(9100);
+  expect(p.igualadas.map((i) => i.seq)).toEqual([0]);
 });
 
 // Conteos DISTINTOS a propósito: con 1 y 1, intercambiar `sinApu` por `conApu` no

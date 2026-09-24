@@ -637,6 +637,7 @@ export default function Corrida() {
       <DialogoUmbralCosto
         abierto={umbralAbierto}
         items={data.items}
+        contractualCorrida={data.totales.contractual}
         aplicando={aplicandoUmbral}
         onAplicar={aplicarUmbral}
         onCerrar={() => setUmbralAbierto(false)}

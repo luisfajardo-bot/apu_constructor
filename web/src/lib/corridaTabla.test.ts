@@ -190,3 +190,21 @@ test("etiquetaVeredicto: el centinela se lee en palabras, no como código", () =
   expect(etiquetaVeredicto(SIN_VEREDICTO)).toBe("— sin revisar");
   expect(etiquetaVeredicto("cambiar")).toBe("↔ cambiar");
 });
+
+test("Estado: la fila igualada al contractual se ofrece, filtra y ordena como contractual", () => {
+  // En la base sigue `confirmed`; el badge la pinta CONTRACTUAL y el filtro tiene
+  // que decir lo mismo que el badge.
+  const items = [
+    item({ seq: 1, status: "confirmed" }),
+    item({ seq: 2, status: "confirmed", costo_manual: true }),
+    item({ seq: 3, status: "auto" }),
+  ];
+  expect(opcionesDe(items, "status")).toEqual(["auto", "confirmed", "contractual"]);
+  expect(filtrar(items, { ...FILTROS_VACIOS, status: "contractual" }, false).map((i) => i.seq))
+    .toEqual([2]);
+  expect(filtrar(items, { ...FILTROS_VACIOS, status: "confirmed" }, false).map((i) => i.seq))
+    .toEqual([1]);
+  expect(ordenar(items, { clave: "status", dir: "desc" }).map((i) => i.seq)).toEqual([2, 1, 3]);
+  // "Solo revisión" es negocio, no presentación: la contractual está confirmada.
+  expect(filtrar(items, FILTROS_VACIOS, true)).toHaveLength(0);
+});

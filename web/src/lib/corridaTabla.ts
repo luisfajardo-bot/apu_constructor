@@ -110,6 +110,13 @@ function enRango(valor: number, r: FiltroRango, escala = 1): boolean {
   return true;
 }
 
+/** Estado para PRESENTACIÓN: la fila igualada al contractual sigue guardada como
+ *  `confirmed`, pero se ve (y se filtra) como CONTRACTUAL, igual que el badge. NO va
+ *  en `REVISABLE.has(...)`: eso es negocio, y una fila contractual está confirmada. */
+function estadoDeFila(it: ItemCuadro): string {
+  return it.costo_manual ? "contractual" : it.status;
+}
+
 export function filtrar(items: ItemCuadro[], f: FiltrosColumna, soloRevision: boolean): ItemCuadro[] {
   return items.filter((it) => {
     if (soloRevision && !REVISABLE.has(it.status)) return false;
@@ -126,7 +133,7 @@ export function filtrar(items: ItemCuadro[], f: FiltrosColumna, soloRevision: bo
     if (f.apu === SIN_APU) {
       if (it.apu_codigo) return false;
     } else if (!contiene(`${it.apu_codigo} ${it.apu_nombre}`, f.apu)) return false;
-    if (f.status && it.status !== f.status) return false;
+    if (f.status && estadoDeFila(it) !== f.status) return false;
     // El vacío SIGNIFICA algo en Veredicto (la IA no contestó esa fila), así que
     // tiene su propio centinela: sin esto no habría forma de encontrar esas filas.
     if (f.veredicto === SIN_VEREDICTO) {
@@ -149,7 +156,7 @@ function valorTexto(it: ItemCuadro, clave: ClaveColumna): string {
     case "item": return it.item;
     case "capitulo": return `${it.capitulo_codigo} ${it.capitulo_nombre}`;
     case "apu": return it.apu_codigo;
-    case "status": return it.status;
+    case "status": return estadoDeFila(it);
     case "veredicto": return valorVeredicto(it);
     default: return "";
   }
@@ -189,7 +196,7 @@ export function opcionesDe(
   let hayVacio = false;
   for (const it of items) {
     const v = clave === "unidad" ? it.unidad
-      : clave === "status" ? it.status
+      : clave === "status" ? estadoDeFila(it)
       : valorVeredicto(it);
     if (v) set.add(v);
     else hayVacio = true;

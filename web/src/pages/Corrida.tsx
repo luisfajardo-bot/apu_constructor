@@ -464,7 +464,7 @@ export default function Corrida() {
             <Button size="sm" variant="outline"
               title={"Iguala al contractual las actividades en $0 cuyo total "
                 + "contractual no pase el umbral que pongas. Para priorizar: lo "
-                + "chico se iguala, lo grande lo armás vos."}
+                + "chico se iguala, lo grande lo armas tú."}
               onClick={() => setUmbralAbierto(true)}>
               Igualar bajo umbral…
             </Button>

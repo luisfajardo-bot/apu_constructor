@@ -781,9 +781,31 @@ def test_limpiar_costo_manual_devuelve_la_fila_al_costeo(repo):
     assert filas[1].status == "confirmed"
 
 
-def test_limpiar_costo_manual_con_apu_deja_la_fila_en_review(repo):
-    """Con APU no se puede volver a `new` (la fila SÍ tiene match). No guardamos el
-    status previo, y `review` —«mírala»— es la verdad honesta en vez de adivinar."""
+def test_limpiar_costo_manual_no_degrada_la_fila_confirmada(repo):
+    """Una persona confirmó esa fila: quitarle el costo a mano no la puede degradar.
+
+    Degradarla a `review` la reexponía a «Volver a buscar APU», que saltea solo las
+    `confirmed` — justo lo que CLAUDE.md prohíbe: el re-match no pisa lo que alguien
+    resolvió."""
+    cid = _corrida_con(repo, _item(0, 1500.0))
+    repo.actualizar_eleccion(
+        cid, 0, status="confirmed", apu_codigo="100", apu_nombre="EXCAVACION",
+        unidad="M3", shift="DIURNO", origen="historico", confianza=1.0,
+        explicacion="", componentes=[])
+    repo.set_costo_manual(cid, {0: 1500.0})
+    repo.limpiar_costo_manual(cid, [0])
+    fila = repo.get_items(cid)[0]
+    assert fila.costo_manual is None
+    assert fila.status == "confirmed"
+
+
+def test_limpiar_costo_manual_no_devuelve_el_auto_que_habia_antes(repo):
+    """La contrapartida conocida de no degradar, fijada a propósito.
+
+    `set_costo_manual` fuerza `confirmed`, y no guardamos el status previo: una fila
+    que era `auto` vuelve de igualar→quitar como `confirmed`, no como `auto`. Es un
+    ascenso y no una degradación, y se acepta — la alternativa (adivinar el status
+    viejo) exigiría una columna nueva para un caso de borde."""
     cid = _corrida_con(repo, _item(0, 1500.0))
     repo.actualizar_eleccion(
         cid, 0, status="auto", apu_codigo="100", apu_nombre="EXCAVACION",
@@ -791,9 +813,7 @@ def test_limpiar_costo_manual_con_apu_deja_la_fila_en_review(repo):
         explicacion="", componentes=[])
     repo.set_costo_manual(cid, {0: 1500.0})
     repo.limpiar_costo_manual(cid, [0])
-    fila = repo.get_items(cid)[0]
-    assert fila.costo_manual is None
-    assert fila.status == "review"
+    assert repo.get_items(cid)[0].status == "confirmed"
 
 
 def test_limpiar_costo_manual_vacio_no_escribe(repo):

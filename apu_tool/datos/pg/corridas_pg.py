@@ -269,7 +269,7 @@ class CorridasPg:
             return
         filas = [(int(corrida_id), int(s)) for s in seqs]
         sql = ("UPDATE corridas.corrida_item SET costo_manual=NULL, "
-               "status=CASE WHEN COALESCE(apu_codigo,'')='' THEN 'new' ELSE 'review' END "
+               "status=CASE WHEN COALESCE(apu_codigo,'')='' THEN 'new' ELSE status END "
                "WHERE corrida_id=%s AND seq=%s")
         if conn is not None:
             with conn.cursor() as cur:

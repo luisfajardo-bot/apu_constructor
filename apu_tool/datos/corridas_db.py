@@ -370,7 +370,7 @@ class CorridasDB:
             return
         filas = [(int(corrida_id), int(s)) for s in seqs]
         sql = ("UPDATE corrida_item SET costo_manual=NULL, "
-               "status=CASE WHEN COALESCE(apu_codigo,'')='' THEN 'new' ELSE 'review' END "
+               "status=CASE WHEN COALESCE(apu_codigo,'')='' THEN 'new' ELSE status END "
                "WHERE corrida_id=? AND seq=?")
         if conn is not None:
             conn.executemany(sql, filas)

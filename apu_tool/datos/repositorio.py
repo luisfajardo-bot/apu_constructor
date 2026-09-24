@@ -273,10 +273,17 @@ class RepositorioCorridas(Protocol):
         Es el reverso de `set_costo_manual`, y va por lote por la misma razón: el
         umbral puede tocar cientos de filas de una. Una lista vacía no escribe nada.
 
-        El status vuelve a `new` si la fila no tiene APU (que es exactamente lo que
-        era: así la deja `assemble.py` cuando no hay match) y a `review` si lo tiene.
-        No guardamos el status previo y no hace falta adivinarlo: `review` —«mírala»—
-        es la verdad honesta para una fila que sí tiene match.
+        Sin APU, el status vuelve a `new`: es exactamente lo que era (así la deja
+        `assemble.py` cuando no hay match) y así la fila vuelve a entrar al re-match,
+        que es lo que necesita.
+
+        CON APU, el status **no se toca**. Antes se degradaba a `review`, y eso
+        reexponía al re-match una fila que una persona había confirmado —justo lo que
+        `CLAUDE.md` prohíbe («el re-match no la pisa»)—. No guardamos el status previo,
+        así que la contrapartida es conocida y se acepta: como `set_costo_manual` fuerza
+        `confirmed`, una fila que era `auto` y pasó por igualar→quitar vuelve
+        `confirmed`, no `auto`. Es un ascenso, no una degradación, y es la dirección
+        conservadora: nunca des-confirma lo que alguien resolvió.
 
         NO toca `revision_json`: `set_costo_manual` ya lo había borrado y no hay
         veredicto que restaurar."""

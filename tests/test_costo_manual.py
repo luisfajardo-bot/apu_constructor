@@ -172,7 +172,8 @@ def test_quitar_costo_manual_devuelve_la_fila_al_costeo(alm):
     fila = v["items"][0]
     assert fila["costo_manual"] is False
     assert fila["costo_unitario"] == 40000.0
-    assert fila["status"] == "review"
+    # El status NO se degrada: `set_costo_manual` la dejó `confirmed` y así queda.
+    assert fila["status"] == "confirmed"
 
 
 def test_quitar_costo_manual_sin_apu_vuelve_a_trabar_el_cuadro(alm):

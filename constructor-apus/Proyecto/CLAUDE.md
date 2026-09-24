@@ -284,10 +284,15 @@ matching, modelo de IA, clasificación de precios.
   devuelve en `salteadas` lo que cambió desde la previa — el mismo candado que
   `apu_evaluado` y que `rebuscar/aplicar`: el cliente dice cuáles quiere, no qué se
   escribe. El reverso es `POST /api/corridas/{id}/quitar-costo-manual`: borra el
-  `costo_manual` y devuelve la fila a `new` si no tiene APU o a `review` si lo tiene
-  —no se guarda el status previo, y `review` es la verdad honesta en vez de adivinar
-  un `auto`—; sin vuelta atrás, un techo mal puesto se arregla fila por fila armando
-  APUs que justamente no querías armar. Endpoints: `POST
+  `costo_manual` y devuelve la fila a `new` **si no tiene APU** —así vuelve a entrar al
+  re-match, que es lo que esa fila necesita—; **si tiene APU el status no se toca**.
+  Degradarlo a `review` reexponía al re-match una fila que una persona había
+  confirmado, justo lo que este mismo documento prohíbe más abajo. La contrapartida es
+  conocida y se acepta: como `set_costo_manual` fuerza `confirmed` y no se guarda el
+  status previo, una fila que era `auto` vuelve de igualar→quitar como `confirmed`. Es
+  un ascenso, no una degradación, y es la dirección conservadora. Sin vuelta atrás, un
+  techo mal puesto se arreglaría fila por fila armando APUs que justamente no querías
+  armar. Endpoints: `POST
   /api/corridas/{id}/igualar-costo`, `.../igualar-umbral` y `.../quitar-costo-manual`,
   los tres rol `editor` — más estricto que sus vecinos a propósito, porque declaran
   dinero.
@@ -397,6 +402,14 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   `write_report` sin pasar por `seqs_sin_apu`, y ahí el hueco se ve en la hoja `ALERTAS`
   del cuadro, no en una puerta trabada. Si lo haces global, el punto de paso es
   `pipeline.py`.
+- **Issue conocido, sin arreglar:** `congelar` y las escrituras de costo a mano pueden
+  cruzarse. `congelar` lee las filas una vez y escribe los snapshots de TODAS antes de
+  marcar `modo='congelada'`; si una escritura entra a mitad de ese bucle, la foto queda
+  mixta (unas filas en $0, las siguientes al contractual) y `generar_cuadro` la emite.
+  `_exigir_editable` no lo puede ver: el modo todavía es `activa`. Es preexistente
+  —`confirmar_items` tiene la misma carrera— pero el umbral es la primera escritura
+  masiva de un solo clic, así que la ventana pasó de rara a plausible. Si lo arreglás,
+  el punto de paso es `congelar`, no los llamadores.
 - No saques una corrida de `estado='armando'` con un `set_estado` pelado: ese estado
   **es la cola** del worker de armado (`servicio/armador.py`). Sacarla de ahí la deja a
   medio armar, sin nadie que la retome y sin error que mirar. Los únicos caminos de

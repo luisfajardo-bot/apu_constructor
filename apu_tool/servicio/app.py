@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Optional
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
@@ -69,6 +72,25 @@ def create_app(almacen: Optional[Almacen] = None) -> FastAPI:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     app.add_middleware(SlowAPIMiddleware)
     app.add_middleware(CabecerasSeguridad)
+
+    @app.exception_handler(RequestValidationError)
+    async def _manejar_validacion(request: Request, exc: RequestValidationError):
+        # Casi el handler por defecto de FastAPI. La excepción: un campo
+        # `allow_inf_nan=False` (p.ej. `IgualarUmbralIn.umbral_contractual`) que
+        # rechaza un Infinity/NaN del cliente ecoa ese mismo valor crudo en el error
+        # (`input`). Starlette renderiza la respuesta con `allow_nan=False`, así que
+        # el propio 422 revienta al serializarse — cae al handler genérico de
+        # ValueError de más abajo y el cliente ve un 400 sin detalle en su lugar.
+        # Acá se sanea SOLO ese valor (a texto), no se le saca `input` a nadie más.
+        errores = []
+        for e in exc.errors():
+            e = dict(e)
+            v = e.get("input")
+            if isinstance(v, float) and not math.isfinite(v):
+                e["input"] = repr(v)
+            errores.append(e)
+        return JSONResponse(status_code=422,
+                            content={"detail": jsonable_encoder(errores)})
 
     @app.exception_handler(ValueError)
     async def _manejar_valor(request: Request, exc: ValueError):

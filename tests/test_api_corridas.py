@@ -508,6 +508,18 @@ def test_igualar_umbral_404_si_no_existe(tmp_path):
     assert r.status_code == 404
 
 
+def test_igualar_umbral_422_si_infinity(tmp_path):
+    """`inf > 0` pasa el candado de "techo positivo" e iguala todo; además revienta
+    la serialización de auditoría (json.dumps no admite el literal Infinity). Se
+    rechaza en el borde, antes de tocar nada."""
+    cli, alm = _cliente(tmp_path)
+    cid = _corrida_especial(alm)
+    r = cli.post(f"/api/corridas/{cid}/igualar-umbral",
+                 content='{"umbral_contractual": Infinity, "seqs": [0]}',
+                 headers={"content-type": "application/json"})
+    assert r.status_code == 422
+
+
 def test_igualar_umbral_rol_consulta_prohibido(tmp_path):
     """Declara dinero, y de a cientos de filas: no se le abre al rol de solo lectura."""
     cli, alm = _cli_rol(tmp_path, "consulta")

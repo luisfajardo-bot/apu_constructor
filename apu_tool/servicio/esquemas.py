@@ -60,7 +60,9 @@ class IgualarUmbralIn(BaseModel):
 
     El servidor recalcula la candidatura con estos dos datos: el cliente dice cuáles
     quiere, no qué se escribe."""
-    umbral_contractual: float
+    # allow_inf_nan=False: Infinity pasa `inf > 0`, iguala todo y después revienta al
+    # serializar el contexto de auditoría (json.dumps no admite el literal Infinity).
+    umbral_contractual: float = Field(allow_inf_nan=False)
     seqs: list[int]
 
 

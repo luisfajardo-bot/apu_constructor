@@ -19,7 +19,7 @@ import { cop, pct } from "@/lib/moneda";
 import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
 import {
   getItem, confirmar, confirmarLote, borrarLineas, aplicarSugerencias,
-  igualarCostoAlContractual,
+  igualarCostoAlContractual, quitarCostoManual,
 } from "@/api/corridas";
 import { crearAjuste } from "@/api/transporte";
 import type {
@@ -36,6 +36,10 @@ interface TablaItemsProps {
   control?: ControlCorridaTabla;
   /** Rol editor: habilita "Armar APU" desde una fila de la corrida. */
   puedeEditar?: boolean;
+  /** La corrida todavía tiene líneas por armar (`armando`/`armado_detenido`).
+   *  El servicio rechaza ahí las dos acciones de costo a mano (`_exigir_editable`),
+   *  así que los botones no se ofrecen: un clic que solo sabe dar 400 no es un botón. */
+  planAMedias?: boolean;
   /** Carpeta (proyecto) de la corrida; sin ella no hay a qué proyecto atar un
    *  ajuste de composición, así que "Ajustar" no se ofrece. */
   carpetaId?: number | null;
@@ -75,6 +79,7 @@ export default function TablaItems({
   readOnly = false,
   control,
   puedeEditar = false,
+  planAMedias = false,
   carpetaId = null,
   onComponer,
 }: TablaItemsProps) {
@@ -114,6 +119,18 @@ export default function TablaItems({
   // cambia el filtro, las que se fueron no se tocan (y el contador no las cuenta).
   const seleccionadas = visible.filter((it) => marcadas.has(it.seq)).map((it) => it.seq);
   const haySeleccion = seleccionadas.length > 0;
+  // Solo las marcadas que de verdad tienen costo a mano: el botón no se ofrece
+  // cuando no hay nada que deshacer.
+  //
+  // Se APARECE y DESAPARECE, al revés que sus vecinos de la barra (Confirmar,
+  // Igualar, Borrar), que están siempre y resuelven la elegibilidad al clic con un
+  // toast. Es a propósito: los vecinos actúan sobre TODA la selección, y este sobre
+  // un subconjunto — el costo a mano es raro, así que un botón permanente estaría
+  // casi siempre pidiendo un clic que no hace nada. El `(N)` de la etiqueta es la
+  // otra mitad de la misma decisión: dice cuántas de las marcadas se van a tocar.
+  const conCostoAMano = visible
+    .filter((it) => marcadas.has(it.seq) && it.costo_manual)
+    .map((it) => it.seq);
   // La selección solo existe con `control` (no en el armado en vivo, cuya tabla
   // viene del stream) y con la corrida activa.
   const seleccionable = control !== undefined && !readOnly;
@@ -310,6 +327,25 @@ export default function TablaItems({
     } catch (e) {
       // La selección NO se limpia: el usuario puede reintentar sin volver a marcar.
       toast.error(e instanceof Error ? e.message : "No se pudo igualar el costo.");
+    } finally {
+      setEnLote(false);
+    }
+  }
+
+  /** Deshace el costo puesto a mano: las filas vuelven a costear desde su APU (o a
+   *  quedar en $0 sin APU, que es la verdad y vuelve a trabar el cuadro). */
+  async function quitarCostoAMano() {
+    if (conCostoAMano.length === 0) return;
+    setEnLote(true);
+    try {
+      const actualizada = await quitarCostoManual(corridaId, conCostoAMano);
+      onConfirmado(actualizada);
+      limpiarSeleccion();
+      const n = actualizada.quitadas?.length ?? conCostoAMano.length;
+      toast.success(`${n} ${n === 1 ? "línea devuelta" : "líneas devueltas"} al costeo normal`);
+    } catch (e) {
+      // La selección NO se limpia: el usuario puede reintentar sin volver a marcar.
+      toast.error(e instanceof Error ? e.message : "No se pudo quitar el costo a mano.");
     } finally {
       setEnLote(false);
     }
@@ -639,11 +675,19 @@ export default function TablaItems({
           <Button size="xs" variant="outline" disabled={enLote} onClick={() => accionLote()}>
             {enLote ? "Aplicando…" : "Confirmar el APU actual"}
           </Button>
-          {puedeEditar && (
+          {puedeEditar && !planAMedias && (
             <Button size="xs" variant="outline" disabled={enLote}
                     onClick={igualarAlContractual}
                     title="Copia el precio contractual como costo. Para actividades globales que valen lo que dice el contrato.">
               {enLote ? "Aplicando…" : "Igualar costo al contractual"}
+            </Button>
+          )}
+          {puedeEditar && !planAMedias && conCostoAMano.length > 0 && (
+            <Button size="xs" variant="outline" disabled={enLote}
+                    onClick={quitarCostoAMano}
+                    title={"Borra el costo que se puso a mano: las líneas vuelven a "
+                      + "costear desde su APU. Las que no tengan APU vuelven a $0."}>
+              {enLote ? "Aplicando…" : `Quitar costo a mano (${conCostoAMano.length})`}
             </Button>
           )}
           <Button size="xs" variant="destructive" disabled={enLote}

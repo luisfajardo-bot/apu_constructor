@@ -1,0 +1,122 @@
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import DialogoUmbralCosto from "./DialogoUmbralCosto";
+import type { ItemCuadro } from "@/lib/tipos";
+
+function item(p: Partial<ItemCuadro>): ItemCuadro {
+  return {
+    seq: 0, item: "1", descripcion: "ACTIVIDAD", unidad: "GLB", cantidad: 1,
+    apu_codigo: "", apu_nombre: "", status: "new", confianza: 0,
+    precio_contractual: 1000, costo_unitario: 0, margen_unitario: 0, margen_pct: 0,
+    contractual_total: 1000, costo_total: 0, margen_total: 0,
+    costo_manual: false, revision: null, ...p,
+  } as ItemCuadro;
+}
+
+const ITEMS = [
+  item({ seq: 0, item: "1", contractual_total: 100 }),
+  item({ seq: 1, item: "2", contractual_total: 900 }),
+  item({ seq: 2, item: "3", contractual_total: 5000 }),
+];
+
+function abrir(onAplicar = vi.fn()) {
+  render(<DialogoUmbralCosto abierto items={ITEMS} contractualCorrida={6000} aplicando={false}
+                             onAplicar={onAplicar} onCerrar={vi.fn()} />);
+  return onAplicar;
+}
+
+function escribirUmbral(valor: string) {
+  fireEvent.change(screen.getByLabelText("Umbral de total contractual"),
+                   { target: { value: valor } });
+}
+
+describe("DialogoUmbralCosto", () => {
+  it("sin umbral no propone nada y el botón está deshabilitado", () => {
+    abrir();
+    // Sin jest-dom en este proyecto: se mira la propiedad, no un matcher.
+    const btn = screen.getByRole("button", { name: /Igualar/ }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+  });
+
+  it("el techo es inclusivo: con 900 entran las de 100 y 900, no la de 5000", () => {
+    abrir();
+    escribirUmbral("900");
+    expect(screen.getByLabelText("Marcar línea 1")).toBeTruthy();
+    expect(screen.getByLabelText("Marcar línea 2")).toBeTruthy();
+    expect(screen.queryByLabelText("Marcar línea 3")).toBeNull();
+  });
+
+  it("aplica el umbral y solo los seq marcados", () => {
+    const onAplicar = abrir();
+    escribirUmbral("900");
+    // La lista va de mayor a menor: la línea 1 es el seq 1 ($900).
+    fireEvent.click(screen.getByLabelText("Marcar línea 1"));
+    fireEvent.click(screen.getByRole("button", { name: /Igualar/ }));
+    expect(onAplicar).toHaveBeenCalledWith(900, [0]);
+  });
+
+  it("cambiar el umbral rehace las marcas", () => {
+    const onAplicar = abrir();
+    escribirUmbral("900");
+    fireEvent.click(screen.getByLabelText("Marcar línea 1"));   // destilda el seq 1
+    escribirUmbral("5000");
+    fireEvent.click(screen.getByRole("button", { name: /Igualar/ }));
+    expect(onAplicar).toHaveBeenCalledWith(5000, [0, 1, 2]);
+  });
+
+  it("avisa de las que están en $0 pero el contrato no paga", () => {
+    render(<DialogoUmbralCosto abierto aplicando={false} contractualCorrida={300} onAplicar={vi.fn()}
+                               onCerrar={vi.fn()}
+                               items={[item({ precio_contractual: 0, contractual_total: 0 })]} />);
+    expect(screen.getByText(/sin precio contractual/i)).toBeTruthy();
+  });
+
+  // Conteos y montos DISTINTOS entre el bloque "se igualan" y "quedan por armar" a
+  // propósito: si el resumen quedara pegado al umbral (sin las exclusiones) en vez
+  // de a los destildes, este test caería aunque el botón dijera el número correcto.
+  it("destildar una fila mueve el resumen: conteo, monto y porcentaje", () => {
+    abrir();
+    escribirUmbral("5000");                                     // entran las tres
+    fireEvent.click(screen.getByLabelText("Marcar línea 1"));   // destilda seq 2 ($5000)
+    expect(screen.getByText(/2 · \$1\.000 · 16\.7% del contrato/)).toBeTruthy();
+    expect(screen.getByText(/1 · \$5\.000 · 83\.3% del contrato/)).toBeTruthy();
+    // La destildada sigue en la tabla, solo destildada: si desapareciera no habría
+    // forma de volver a marcarla.
+    const cb1 = screen.getByLabelText("Marcar línea 1") as HTMLInputElement;
+    expect(cb1.checked).toBe(false);
+  });
+
+  it("Shift+clic vuelve a marcar el rango entero", () => {
+    const onAplicar = abrir();
+    escribirUmbral("5000");                                    // entran las tres
+    fireEvent.click(screen.getByLabelText("Marcar línea 1"));  // destilda seq 2
+    fireEvent.click(screen.getByLabelText("Marcar línea 2"));  // destilda seq 1
+    fireEvent.click(screen.getByLabelText("Marcar línea 3"));  // destilda seq 0, y ancla acá
+    fireEvent.click(screen.getByLabelText("Marcar línea 1"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /Igualar/ }));
+    expect(onAplicar).toHaveBeenCalledWith(5000, [0, 1, 2]);
+  });
+
+  it("mientras aplica, ni se cierra ni se vuelve a aplicar", () => {
+    render(<DialogoUmbralCosto abierto items={ITEMS} contractualCorrida={6000} aplicando
+                               onAplicar={vi.fn()} onCerrar={vi.fn()} />);
+    const cerrar = screen.getByRole("button", { name: /Cerrar/ }) as HTMLButtonElement;
+    const aplicar = screen.getByRole("button", { name: /Aplicando/ }) as HTMLButtonElement;
+    expect(cerrar.disabled).toBe(true);
+    expect(aplicar.disabled).toBe(true);
+  });
+
+  // Conteos DISTINTOS a propósito: con 1 y 1, intercambiar `sinApu` por `conApu` en
+  // el JSX no cambiaría el texto y el test no vería el bug que existe para atajar.
+  it("el desglose distingue las que ya tienen APU de las que no", () => {
+    render(<DialogoUmbralCosto abierto aplicando={false} contractualCorrida={300} onAplicar={vi.fn()}
+                               onCerrar={vi.fn()}
+                               items={[item({ seq: 0, contractual_total: 100 }),
+                                       item({ seq: 1, contractual_total: 100 }),
+                                       item({ seq: 2, contractual_total: 100,
+                                              apu_codigo: "A1", apu_nombre: "UN APU" })]} />);
+    fireEvent.change(screen.getByLabelText("Umbral de total contractual"),
+                     { target: { value: "500" } });
+    expect(screen.getByText(/2 sin APU · 1 con APU pero sin precios/)).toBeTruthy();
+  });
+});

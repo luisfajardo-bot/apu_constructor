@@ -6,10 +6,11 @@ import ResumenCapitulos from "@/components/corrida/ResumenCapitulos";
 import TablaItems from "@/components/corrida/TablaItems";
 import { DialogoAgregarLineas } from "@/components/corrida/DialogoAgregarLineas";
 import DialogoRebuscar from "@/components/corrida/DialogoRebuscar";
+import DialogoUmbralCosto from "@/components/corrida/DialogoUmbralCosto";
 import {
   getCorrida, descargarCuadro, congelarCorrida, activarCorrida,
   revisarCorridaStream, aplicarSugerencias, reanudarArmado,
-  rebuscarApus, aplicarRebusqueda,
+  rebuscarApus, aplicarRebusqueda, igualarPorUmbral,
 } from "@/api/corridas";
 import type { TransporteCorrida } from "@/lib/tipos";
 import { cop, pct } from "@/lib/moneda";
@@ -87,6 +88,8 @@ export default function Corrida() {
   const [previaRebusqueda, setPreviaRebusqueda] = useState<RebusquedaPrevia | null>(null);
   const [rebuscando, setRebuscando] = useState(false);
   const [aplicandoRebusqueda, setAplicandoRebusqueda] = useState(false);
+  const [umbralAbierto, setUmbralAbierto] = useState(false);
+  const [aplicandoUmbral, setAplicandoUmbral] = useState(false);
   // Bumpearlo relanza el efecto de carga —y con él la cadena del poll, que se corta
   // sola cuando la corrida deja de estar 'armando'. Es lo que hace que reanudar
   // vuelva a mostrar el progreso sin recargar la página a mano.
@@ -202,7 +205,8 @@ export default function Corrida() {
   // Filas sin APU: se cuentan sobre TODOS los ítems, no sobre los filtrados —
   // el candado no depende de lo que estés mirando. El backend devuelve 409 al
   // congelar o descargar el cuadro; acá se ve antes de chocar contra la puerta.
-  const nSinApu = data.items.filter((f) => !f.apu_codigo).length;
+  // Espejo de `seqs_sin_apu`: una fila con costo puesto a mano sí pasa.
+  const nSinApu = data.items.filter((f) => !f.apu_codigo && !f.costo_manual).length;
   const bloqueado = nSinApu > 0;
   const esActivar = data.modo === "congelada";
   const puedeEditar = puede(perfil?.rol, "editor");
@@ -343,6 +347,39 @@ export default function Corrida() {
     }
   }
 
+  /** Aplica el umbral sobre las líneas marcadas en el diálogo; pinta con lo que
+   *  devuelve el servidor (ya recosteado), sin volver a pedir la corrida. */
+  async function aplicarUmbral(umbral: number, seqs: number[]) {
+    if (aplicandoUmbral) return;      // cinturón contra el doble clic
+    setAplicandoUmbral(true);
+    try {
+      const actualizada = await igualarPorUmbral(corridaId, umbral, seqs);
+      if (montado.current) {
+        setCorrida(actualizada);
+        setUmbralAbierto(false);
+      }
+      const n = actualizada.igualadas?.length ?? 0;
+      toast.success(n === 1
+        ? "1 línea igualada al contractual"
+        : `${n} líneas igualadas al contractual`);
+      const salteadas = actualizada.salteadas ?? [];
+      if (salteadas.length > 0) {
+        // Nada silencioso: si no se tocó una fila, se dice por qué.
+        toast.warning(
+          (salteadas.length === 1
+            ? "1 línea sin tocar: cambió desde que abriste el diálogo "
+              + "(ya tiene APU o costo)."
+            : `${salteadas.length} líneas sin tocar: cambiaron desde que abriste `
+              + "el diálogo (ya tienen APU o costo)."),
+        );
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo igualar por umbral.");
+    } finally {
+      if (montado.current) setAplicandoUmbral(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4" style={{ padding: "16px 20px" }}>
       {/* Header row */}
@@ -421,6 +458,15 @@ export default function Corrida() {
                 + "la biblioteca de hoy. Te muestra qué cambiaría antes de aplicar."}
               onClick={volverABuscar}>
               {rebuscando ? "Buscando…" : "Volver a buscar APU"}
+            </Button>
+          )}
+          {puedeEditar && !esActivar && !planAMedias && (
+            <Button size="sm" variant="outline"
+              title={"Iguala al contractual las actividades en $0 cuyo total "
+                + "contractual no pase el umbral que pongas. Para priorizar: lo "
+                + "chico se iguala, lo grande lo armas tú."}
+              onClick={() => setUmbralAbierto(true)}>
+              Igualar bajo umbral…
             </Button>
           )}
           {puedeEditar && !esActivar && sugerencias.length > 0 && (
@@ -559,6 +605,7 @@ export default function Corrida() {
         readOnly={data.modo === "congelada"}
         control={control}
         puedeEditar={puedeEditar}
+        planAMedias={planAMedias}
         carpetaId={data.carpeta_id}
         onComponer={(seq) => navigate(`/corridas/${corridaId}/componer/${seq}`, {
           state: { descripcion: data.items.find((f) => f.seq === seq)?.descripcion },
@@ -583,6 +630,19 @@ export default function Corrida() {
           onCerrar={() => setPreviaRebusqueda(null)}
         />
       )}
+
+      {/* Montado siempre (a diferencia de DialogoRebuscar): tiene texto libre —el
+          umbral tipeado— y un cierre accidental (Escape, clic afuera) no puede
+          obligar a retipear nueve dígitos. El show/hide lo hace `abierto` adentro,
+          sin desmontar el `useState` del campo. */}
+      <DialogoUmbralCosto
+        abierto={umbralAbierto}
+        items={data.items}
+        contractualCorrida={data.totales.contractual}
+        aplicando={aplicandoUmbral}
+        onAplicar={aplicarUmbral}
+        onCerrar={() => setUmbralAbierto(false)}
+      />
     </div>
   );
 }

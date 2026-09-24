@@ -194,9 +194,10 @@ matching, modelo de IA, clasificación de precios.
   underbid silencioso. API: `GET/POST /api/listas-precios`, `PATCH
   /api/listas-precios/{id}` (sin DELETE, a propósito).
 - **Distancias por proyecto.** Una carpeta de nivel 1 ES un proyecto y puede fijar sus
-  distancias de acarreo (`botadero`, `mezclas`, `granulares`), si hay peaje y cuánto vale
-  (`proyecto_parametros`), más ajustes puntuales de composición (`proyecto_ajuste`, que
-  ganan sobre la regla). El rendimiento efectivo de un componente de acarreo es
+  distancias de acarreo (`botadero`, `mezclas`, `granulares`) y, **por categoría**, si hay
+  peaje y cuánto vale (`proyecto_parametros`: `peaje_{categoria}_{aplica,valor}`, con los
+  accesores `params.peaje_aplica(cat)` / `params.peaje_valor(cat)`), más ajustes puntuales
+  de composición (`proyecto_ajuste`, que ganan sobre la regla). El rendimiento efectivo de un componente de acarreo es
   `volumen × km_del_proyecto`, con el volumen clasificado una vez por componente en
   `componente_transporte` (las filas M3-KM de la biblioteca). Se aplica en
   `PricingEngine.components()`, el único punto de paso; la biblioteca NO se toca y cada
@@ -205,6 +206,18 @@ matching, modelo de IA, clasificación de precios.
   también si vive dentro de un sub-APU, caso en el que la alerta dice en qué sub-APU está.
   La identidad de un componente es **código + nombre**: 6 de los 9 códigos de transporte
   tienen homónimo en el catálogo.
+- **El peaje es de la caseta, no del proyecto.** La fila `INT3 PEAJE` no tiene categoría
+  propia: la hereda del acarreo M3-KM de SU APU (`transporte.categoria_del_peaje`). Medido
+  sobre la biblioteca real, los 31 APUs con peaje tienen acarreos de una sola categoría
+  (22 granulares, 9 mezclas), así que no hay ambigüedad. Si no se puede determinar
+  (acarreo sin clasificar, o dos categorías), el peaje se costea con el **catálogo** —
+  igual que antes de la feature — y el ítem alerta «peaje del proyecto no aplicado»:
+  preferimos avisar a cobrar la caseta equivocada en silencio. La fila se **quita** si su
+  categoría dice que no hay peaje, o si las **tres** lo dicen y no se pudo determinar la
+  categoría (un APU cuyo único componente es el peaje no tiene acarreo del que heredar: la
+  unanimidad es la traducción fiel del peaje único que había antes). `pricing.py` necesita
+  saber de qué APU viene la fila, así que `cost_component` recibe la clave del APU
+  **explícita** — `_visitando[-1]` la tiene por casualidad y apoyarse en eso es una trampa.
 - **Veredicto de la revisión.** El dictamen por fila se guarda en
   `corrida_item.revision_json` (los dos backends) y se **borra solo en cualquier confirm**
   de la fila, cambie el APU o no: `corridas.actualizar_eleccion` escribe `revision_json=NULL`,
@@ -259,8 +272,30 @@ matching, modelo de IA, clasificación de precios.
   que se costeó a mano. Se **borra sola** en `actualizar_eleccion`: armar el APU de verdad y
   asignarlo devuelve la fila al costeo normal. Igualar a un contractual ≤ 0 (o NaN) se
   rechaza (regla "nada en $0"), y el candado exige `> 0` y no `is not None` para no depender
-  de que su único llamador se porte bien. Endpoint: `POST /api/corridas/{id}/igualar-costo`,
-  rol `editor` — más estricto que sus vecinos a propósito, porque declara dinero.
+  de que su único llamador se porte bien.
+  Además del botón por selección, un **umbral** lo hace en lote
+  (`POST /api/corridas/{id}/igualar-umbral`): iguala las filas candidatas —en $0 (sin
+  APU, o con APU pero sin precio de insumos) y con `contractual_total` que no pase el
+  techo que pone el usuario— para priorizar, porque en una licitación de 1000-2000
+  actividades un puñado se lleva casi todo el presupuesto y armarle el APU a la cola
+  larga no mueve la evaluación. La previa la calcula el frontend
+  (`web/src/lib/umbralCosto.ts`, espejo de `_candidata_umbral`) sobre los ítems que ya
+  viajaron, pero `igualar_por_umbral` **recalcula** la candidatura en el servidor y
+  devuelve en `salteadas` lo que cambió desde la previa — el mismo candado que
+  `apu_evaluado` y que `rebuscar/aplicar`: el cliente dice cuáles quiere, no qué se
+  escribe. El reverso es `POST /api/corridas/{id}/quitar-costo-manual`: borra el
+  `costo_manual` y devuelve la fila a `new` **si no tiene APU** —así vuelve a entrar al
+  re-match, que es lo que esa fila necesita—; **si tiene APU el status no se toca**.
+  Degradarlo a `review` reexponía al re-match una fila que una persona había
+  confirmado, justo lo que este mismo documento prohíbe más abajo. La contrapartida es
+  conocida y se acepta: como `set_costo_manual` fuerza `confirmed` y no se guarda el
+  status previo, una fila que era `auto` vuelve de igualar→quitar como `confirmed`. Es
+  un ascenso, no una degradación, y es la dirección conservadora. Sin vuelta atrás, un
+  techo mal puesto se arreglaría fila por fila armando APUs que justamente no querías
+  armar. Endpoints: `POST
+  /api/corridas/{id}/igualar-costo`, `.../igualar-umbral` y `.../quitar-costo-manual`,
+  los tres rol `editor` — más estricto que sus vecinos a propósito, porque declaran
+  dinero.
 - **Volver a buscar APU.** El match corre una vez, al armar; los APUs creados después
   son invisibles para la corrida (costear sí sigue la biblioteca, matchear no). El botón
   **Volver a buscar APU** (`POST /api/corridas/{id}/rebuscar`, rol `consulta`) re-corre
@@ -367,6 +402,14 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   `write_report` sin pasar por `seqs_sin_apu`, y ahí el hueco se ve en la hoja `ALERTAS`
   del cuadro, no en una puerta trabada. Si lo haces global, el punto de paso es
   `pipeline.py`.
+- **Issue conocido, sin arreglar:** `congelar` y las escrituras de costo a mano pueden
+  cruzarse. `congelar` lee las filas una vez y escribe los snapshots de TODAS antes de
+  marcar `modo='congelada'`; si una escritura entra a mitad de ese bucle, la foto queda
+  mixta (unas filas en $0, las siguientes al contractual) y `generar_cuadro` la emite.
+  `_exigir_editable` no lo puede ver: el modo todavía es `activa`. Es preexistente
+  —`confirmar_items` tiene la misma carrera— pero el umbral es la primera escritura
+  masiva de un solo clic, así que la ventana pasó de rara a plausible. Si lo arreglás,
+  el punto de paso es `congelar`, no los llamadores.
 - No saques una corrida de `estado='armando'` con un `set_estado` pelado: ese estado
   **es la cola** del worker de armado (`servicio/armador.py`). Sacarla de ahí la deja a
   medio armar, sin nadie que la retome y sin error que mirar. Los únicos caminos de
@@ -407,6 +450,10 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
 - No metas la distancia de un proyecto dentro de la biblioteca (ni editando el APU ni
   duplicándolo): para eso están `proyecto_parametros` y `proyecto_ajuste`. La distancia es
   del sitio, no del APU.
+- No hagas que un peaje sin categoría determinable se borre ni se cobre con el valor de
+  otra categoría. Se costea con el catálogo y alerta. La única excepción es la unanimidad
+  (las tres categorías en «no hay peaje»), y existe para no perder el comportamiento del
+  peaje único que había antes.
 - No confíes en el código de un insumo de transporte para clasificarlo: 6 de los 9 códigos
   tienen homónimo en el catálogo. Siempre código + nombre.
 - Ojo: `seed --force` borra `componente_transporte` (igual que las listas NP) y hay que
@@ -473,3 +520,21 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   (`title="...\n   ...")`. El salto y la indentación del código entran al tooltip tal
   cual. Va como expresión: `title={"..." + "..."}`. Ya pasó dos veces en esta misma
   feature.
+- No dejes que el cliente dicte qué filas iguala el umbral: `igualar_por_umbral`
+  **recalcula** la candidatura sobre una vista fresca y saltea lo que cambió, igual
+  que el candado de `apu_evaluado` y el de `rebuscar/aplicar`. Sin eso, una pestaña
+  vieja pisa un APU recién asignado con una copia del contractual y encima deja la
+  fila `confirmed`, o sea fuera del alcance de volver a buscar APU. Con diez filas
+  eso se ve; con mil quinientas no.
+- No hagas que el umbral mire los filtros de la tabla: el techo es una decisión de
+  presupuesto, no de vista, así que el diálogo trabaja sobre la corrida entera a
+  propósito.
+- No llames `umbral` a secas al campo del techo: es dinero y va en `_FORBIDDEN_KEYS`
+  como `umbral_contractual`; `umbral` chocaría con los umbrales de matching, que
+  **no** son dinero, y un falso positivo ahí volaría un payload legítimo hacia la IA.
+- No dejes igualar o quitar el costo a mano con el plan a medias (`armando` o
+  `armado_detenido`). Las filas que faltan armar no existen todavía, así que un
+  "5,3% del contrato" ahí es el 5,3% de 290 líneas de 1939: una mentira. Mismo
+  candado que `agregar_items`/`borrar_items` y que `_exigir_rebuscable`
+  (`servicio/corridas.py::_exigir_editable`, que usan `igualar_costo_al_contractual`,
+  `igualar_por_umbral` y `quitar_costo_manual`).

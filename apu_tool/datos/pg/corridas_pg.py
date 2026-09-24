@@ -263,6 +263,21 @@ class CorridasPg:
         with self.cx.connection() as c, c.cursor() as cur:
             cur.executemany(sql, filas)
 
+    def limpiar_costo_manual(self, corrida_id: int, seqs: list[int], conn=None) -> None:
+        """Borra el costo a mano de varias filas (contrato en repositorio.py)."""
+        if not seqs:
+            return
+        filas = [(int(corrida_id), int(s)) for s in seqs]
+        sql = ("UPDATE corridas.corrida_item SET costo_manual=NULL, "
+               "status=CASE WHEN COALESCE(apu_codigo,'')='' THEN 'new' ELSE status END "
+               "WHERE corrida_id=%s AND seq=%s")
+        if conn is not None:
+            with conn.cursor() as cur:
+                cur.executemany(sql, filas)
+            return
+        with self.cx.connection() as c, c.cursor() as cur:
+            cur.executemany(sql, filas)
+
     def set_plan(self, corrida_id: int, plan_json: str, conn=None) -> None:
         sql = "UPDATE corridas.corrida SET plan_json=%s WHERE id=%s"
         if conn is not None:

@@ -187,3 +187,10 @@ def test_los_modulos_de_ia_no_importan_el_parser_ni_el_reporte():
         for prohibido in ("presupuesto", "report_categorizado", "report"):
             assert f"import {prohibido}" not in fuente, f"{nombre} importa {prohibido}"
             assert f"from apu_tool.dominio.{prohibido}" not in fuente, nombre
+
+
+def test_umbral_contractual_es_dinero_para_la_frontera():
+    """No viaja a ningún payload de IA hoy —vive en el request y en la auditoría—
+    pero es un monto con nombre propio, y la regla de la casa es que entre."""
+    with pytest.raises(PrivacyViolation):
+        assert_no_money({"umbral_contractual": 500_000_000.0})

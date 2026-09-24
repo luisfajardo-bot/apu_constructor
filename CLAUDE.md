@@ -270,8 +270,30 @@ matching, modelo de IA, clasificación de precios.
   que se costeó a mano. Se **borra sola** en `actualizar_eleccion`: armar el APU de verdad y
   asignarlo devuelve la fila al costeo normal. Igualar a un contractual ≤ 0 (o NaN) se
   rechaza (regla "nada en $0"), y el candado exige `> 0` y no `is not None` para no depender
-  de que su único llamador se porte bien. Endpoint: `POST /api/corridas/{id}/igualar-costo`,
-  rol `editor` — más estricto que sus vecinos a propósito, porque declara dinero.
+  de que su único llamador se porte bien.
+  Además del botón por selección, un **umbral** lo hace en lote
+  (`POST /api/corridas/{id}/igualar-umbral`): iguala las filas candidatas —en $0 (sin
+  APU, o con APU pero sin precio de insumos) y con `contractual_total` que no pase el
+  techo que pone el usuario— para priorizar, porque en una licitación de 1000-2000
+  actividades un puñado se lleva casi todo el presupuesto y armarle el APU a la cola
+  larga no mueve la evaluación. La previa la calcula el frontend
+  (`web/src/lib/umbralCosto.ts`, espejo de `_candidata_umbral`) sobre los ítems que ya
+  viajaron, pero `igualar_por_umbral` **recalcula** la candidatura en el servidor y
+  devuelve en `salteadas` lo que cambió desde la previa — el mismo candado que
+  `apu_evaluado` y que `rebuscar/aplicar`: el cliente dice cuáles quiere, no qué se
+  escribe. El reverso es `POST /api/corridas/{id}/quitar-costo-manual`: borra el
+  `costo_manual` y devuelve la fila a `new` **si no tiene APU** —así vuelve a entrar al
+  re-match, que es lo que esa fila necesita—; **si tiene APU el status no se toca**.
+  Degradarlo a `review` reexponía al re-match una fila que una persona había
+  confirmado, justo lo que este mismo documento prohíbe más abajo. La contrapartida es
+  conocida y se acepta: como `set_costo_manual` fuerza `confirmed` y no se guarda el
+  status previo, una fila que era `auto` vuelve de igualar→quitar como `confirmed`. Es
+  un ascenso, no una degradación, y es la dirección conservadora. Sin vuelta atrás, un
+  techo mal puesto se arreglaría fila por fila armando APUs que justamente no querías
+  armar. Endpoints: `POST
+  /api/corridas/{id}/igualar-costo`, `.../igualar-umbral` y `.../quitar-costo-manual`,
+  los tres rol `editor` — más estricto que sus vecinos a propósito, porque declaran
+  dinero.
 - **Volver a buscar APU.** El match corre una vez, al armar; los APUs creados después
   son invisibles para la corrida (costear sí sigue la biblioteca, matchear no). El botón
   **Volver a buscar APU** (`POST /api/corridas/{id}/rebuscar`, rol `consulta`) re-corre
@@ -378,6 +400,14 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   `write_report` sin pasar por `seqs_sin_apu`, y ahí el hueco se ve en la hoja `ALERTAS`
   del cuadro, no en una puerta trabada. Si lo haces global, el punto de paso es
   `pipeline.py`.
+- **Issue conocido, sin arreglar:** `congelar` y las escrituras de costo a mano pueden
+  cruzarse. `congelar` lee las filas una vez y escribe los snapshots de TODAS antes de
+  marcar `modo='congelada'`; si una escritura entra a mitad de ese bucle, la foto queda
+  mixta (unas filas en $0, las siguientes al contractual) y `generar_cuadro` la emite.
+  `_exigir_editable` no lo puede ver: el modo todavía es `activa`. Es preexistente
+  —`confirmar_items` tiene la misma carrera— pero el umbral es la primera escritura
+  masiva de un solo clic, así que la ventana pasó de rara a plausible. Si lo arreglás,
+  el punto de paso es `congelar`, no los llamadores.
 - No saques una corrida de `estado='armando'` con un `set_estado` pelado: ese estado
   **es la cola** del worker de armado (`servicio/armador.py`). Sacarla de ahí la deja a
   medio armar, sin nadie que la retome y sin error que mirar. Los únicos caminos de
@@ -488,3 +518,21 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   (`title="...\n   ...")`. El salto y la indentación del código entran al tooltip tal
   cual. Va como expresión: `title={"..." + "..."}`. Ya pasó dos veces en esta misma
   feature.
+- No dejes que el cliente dicte qué filas iguala el umbral: `igualar_por_umbral`
+  **recalcula** la candidatura sobre una vista fresca y saltea lo que cambió, igual
+  que el candado de `apu_evaluado` y el de `rebuscar/aplicar`. Sin eso, una pestaña
+  vieja pisa un APU recién asignado con una copia del contractual y encima deja la
+  fila `confirmed`, o sea fuera del alcance de volver a buscar APU. Con diez filas
+  eso se ve; con mil quinientas no.
+- No hagas que el umbral mire los filtros de la tabla: el techo es una decisión de
+  presupuesto, no de vista, así que el diálogo trabaja sobre la corrida entera a
+  propósito.
+- No llames `umbral` a secas al campo del techo: es dinero y va en `_FORBIDDEN_KEYS`
+  como `umbral_contractual`; `umbral` chocaría con los umbrales de matching, que
+  **no** son dinero, y un falso positivo ahí volaría un payload legítimo hacia la IA.
+- No dejes igualar o quitar el costo a mano con el plan a medias (`armando` o
+  `armado_detenido`). Las filas que faltan armar no existen todavía, así que un
+  "5,3% del contrato" ahí es el 5,3% de 290 líneas de 1939: una mentira. Mismo
+  candado que `agregar_items`/`borrar_items` y que `_exigir_rebuscable`
+  (`servicio/corridas.py::_exigir_editable`, que usan `igualar_costo_al_contractual`,
+  `igualar_por_umbral` y `quitar_costo_manual`).

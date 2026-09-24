@@ -46,6 +46,7 @@ vi.mock("@/api/corridas", () => ({
   revisarCorridaStream: vi.fn(async () => RESUMEN),
   aplicarSugerencias: vi.fn(async () => CORRIDA),
   reanudarArmado: vi.fn(async () => CORRIDA),
+  igualarPorUmbral: vi.fn(async () => CORRIDA),
 }));
 // TablaItems importa BuscadorApu -> @/api/autoria -> @/api/client -> @/lib/supabase,
 // que crea el cliente de Supabase al cargar el módulo (falla sin envs en test). Se
@@ -182,6 +183,29 @@ test("bloquea congelar y descargar cuando hay líneas sin APU", async () => {
   expect(screen.getByText(/1 sin APU/)).toBeTruthy();
 });
 
+test("una fila sin APU pero con costo puesto a mano NO bloquea congelar ni descargar", async () => {
+  // Espejo de `seqs_sin_apu` del backend, que deja pasar `costo_manual > 0`. Sin
+  // esto, igualar al contractual (a mano o por umbral) dejaba los botones trabados
+  // aunque el servidor sí aceptaba congelar y emitir el cuadro.
+  const { getCorrida } = await import("@/api/corridas");
+  (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
+    ...CORRIDA,
+    items: [
+      fila({ seq: 0, descripcion: "Excavación" }),
+      fila({ seq: 1, descripcion: "Global especial", apu_codigo: "", apu_nombre: "",
+             costo_manual: true, costo_unitario: 900, status: "confirmed" }),
+    ],
+  });
+
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Global especial");
+
+  expect(boton(/descargar cuadro/i).disabled).toBe(false);
+  expect(boton(/^congelar$/i).disabled).toBe(false);
+  expect(screen.queryByText(/sin APU$/)).toBeNull();
+});
+
 test("el contador de sin APU filtra la tabla a esas líneas", async () => {
   const { getCorrida } = await import("@/api/corridas");
   (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
@@ -285,6 +309,35 @@ test("con la corrida congelada no se puede revisar", async () => {
   const b = boton(/revisar .* con IA/i);
   expect(b.disabled).toBe(true);
   expect(b.getAttribute("title")).toMatch(/congelada/i);
+});
+
+test("el botón de umbral aparece en una corrida activa con el plan completo", async () => {
+  // CORRIDA por defecto ya es modo "activa" y estado "en_revision" (plan completo),
+  // y el rol se pone "editor" en el beforeEach: las tres condiciones del botón.
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+
+  expect(await screen.findByText(/Igualar bajo umbral/i)).toBeTruthy();
+});
+
+test("el botón de umbral no aparece con la corrida congelada", async () => {
+  const { getCorrida } = await import("@/api/corridas");
+  vi.mocked(getCorrida).mockResolvedValueOnce({ ...CORRIDA, modo: "congelada" });
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+
+  expect(screen.queryByText(/Igualar bajo umbral/i)).toBeNull();
+});
+
+test("sin rol de editor el botón de umbral no aparece", async () => {
+  rol = "consulta";
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Excavación");
+
+  expect(screen.queryByText(/Igualar bajo umbral/i)).toBeNull();
 });
 
 test("sin rol de editor el botón de revisar no aparece", async () => {

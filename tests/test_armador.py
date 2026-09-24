@@ -660,7 +660,13 @@ def test_ninguna_operacion_de_fila_saca_la_corrida_de_la_cola(tmp_path):
 
     Se ejercitan las operaciones que actúan sobre filas de una corrida ya armada y
     que sí tocan `estado` en alguna rama (las dos vuelven a `en_revision` una corrida
-    `finalizada`, porque el cuadro emitido dejó de decir la verdad)."""
+    `finalizada`, porque el cuadro emitido dejó de decir la verdad).
+
+    `igualar_costo_al_contractual` ahora tiene SU PROPIO candado de plan-a-medias
+    (`_exigir_editable`, el mismo de `_exigir_rebuscable`) y rechaza de entrada con
+    `ValueError` — ni siquiera llega a mirar `estado == "finalizada"`. Eso es MÁS
+    estricto que "no saca la corrida de la cola", así que la excepción también prueba
+    el invariante de este test: falla antes de tocar nada."""
     alm = _almacen(tmp_path)
     items = [_item("Concreto clase D"), _item("Concreto clase D")]
     cid = svc.crear_corrida_encolada(alm, "x.xlsx", items, "DIURNO", None,
@@ -671,7 +677,8 @@ def test_ninguna_operacion_de_fila_saca_la_corrida_de_la_cola(tmp_path):
     svc.confirmar_items(alm, cid, [0])
     assert alm.corridas.get_corrida(cid).estado == "armando"
 
-    svc.igualar_costo_al_contractual(alm, cid, [0])
+    with pytest.raises(ValueError):
+        svc.igualar_costo_al_contractual(alm, cid, [0])
     assert alm.corridas.get_corrida(cid).estado == "armando"
 
     # Y sigue siendo reclamable: la cola no se rompió, no solo el rótulo.

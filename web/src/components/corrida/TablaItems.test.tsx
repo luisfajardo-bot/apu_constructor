@@ -31,6 +31,11 @@ vi.mock("@/api/corridas", () => ({
     totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
     igualadas: [0], rechazadas: [],
   })),
+  quitarCostoManual: vi.fn(async () => ({
+    id: 1, archivo: "x", estado: "en_revision", modo: "activa", items: [], duracion_ms: null,
+    totales: { contractual: 0, costo: 0, margen: 0, margen_pct: 0, n_items: 0, n_revision: 0 },
+    quitadas: [0],
+  })),
 }));
 vi.mock("@/api/autoria", () => ({
   listarApus: vi.fn(async () => ({
@@ -151,8 +156,8 @@ test("muestra el código de licitación (Ítem) junto al APU", async () => {
   expect(screen.getByText("111")).toBeTruthy();
 });
 
-function TablaConControl({ items, readOnly, puedeEditar }: {
-  items: typeof ITEM[]; readOnly?: boolean; puedeEditar?: boolean;
+function TablaConControl({ items, readOnly, puedeEditar, planAMedias }: {
+  items: typeof ITEM[]; readOnly?: boolean; puedeEditar?: boolean; planAMedias?: boolean;
 }) {
   const control = useCorridaTabla(items);
   return (
@@ -163,6 +168,7 @@ function TablaConControl({ items, readOnly, puedeEditar }: {
       onConfirmado={() => {}}
       readOnly={readOnly}
       puedeEditar={puedeEditar}
+      planAMedias={planAMedias}
     />
   );
 }
@@ -902,4 +908,50 @@ test("con la corrida congelada el botón Armar APU no aparece", async () => {
   await screen.findByText(/APU: 111/);
 
   expect(screen.queryByRole("button", { name: /Armar APU/ })).toBeNull();
+});
+
+// ─── Quitar el costo puesto a mano ──────────────────────────────────────────
+
+test("sin filas con costo a mano no aparece el botón de quitar", async () => {
+  render(<TablaConControl items={itemsCuatro()} puedeEditar />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  // La barra sí aparece; el botón de quitar no, porque no hay nada que deshacer.
+  expect(await screen.findByText(/Igualar costo al contractual/i)).toBeTruthy();
+  expect(screen.queryByText(/Quitar costo a mano/i)).toBeNull();
+});
+
+test("quitar manda solo los seqs marcados que tienen costo a mano", async () => {
+  const { quitarCostoManual } = await import("@/api/corridas");
+  const items = itemsCuatro();
+  items[0] = { ...items[0], costo_manual: true };    // seq 0
+  items[1] = { ...items[1], costo_manual: true };    // seq 1, NO se marca
+  render(<TablaConControl items={items} puedeEditar />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));   // seq 0, con costo a mano
+  fireEvent.click(screen.getByLabelText("Marcar ítem 3"));   // seq 2, sin costo a mano
+  fireEvent.click(await screen.findByText(/Quitar costo a mano/i));
+  await waitFor(() => expect(quitarCostoManual).toHaveBeenCalledWith(1, [0]));
+});
+
+test("sin permiso de editor no hay botón de quitar", async () => {
+  const items = itemsCuatro();
+  items[0] = { ...items[0], costo_manual: true };
+  render(<TablaConControl items={items} puedeEditar={false} />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  expect(await screen.findByText(/Confirmar el APU actual/i)).toBeTruthy();
+  expect(screen.queryByText(/Quitar costo a mano/i)).toBeNull();
+});
+
+
+// Con el plan a medias el servicio rechaza las dos acciones de costo a mano
+// (`_exigir_editable`), así que un botón que solo sabe dar 400 no se ofrece. Los
+// tests de arriba, que SÍ esperan ver los dos botones, son el lado positivo.
+test("con el plan a medias no se ofrece igualar ni quitar el costo a mano", async () => {
+  const items = itemsCuatro();
+  items[0] = { ...items[0], costo_manual: true };
+  render(<TablaConControl items={items} puedeEditar planAMedias />);
+  fireEvent.click(screen.getByLabelText("Marcar ítem 1"));
+  // La barra aparece igual: confirmar y borrar no dependen del plan.
+  expect(await screen.findByText(/Confirmar el APU actual/i)).toBeTruthy();
+  expect(screen.queryByText(/Igualar costo al contractual/i)).toBeNull();
+  expect(screen.queryByText(/Quitar costo a mano/i)).toBeNull();
 });

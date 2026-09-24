@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 59 planes, 66 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 60 planes, 68 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -33,6 +33,8 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 59 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-09-21 | [[Specs/2026-09-21-umbral-igualar-contractual-design|Igualar por umbral de total contractual]] |
+| 2026-09-21 | [[Specs/2026-09-21-peaje-por-categoria-design|Peaje por categoría de acarreo]] |
 | 2026-09-18 | [[Specs/2026-09-18-armar-apu-desde-corrida-design|Armar APU desde una fila de la corrida]] |
 | 2026-09-16 | [[Specs/2026-09-16-rebuscar-apu-corrida-design|Volver a buscar APU en una corrida activa]] |
 | 2026-09-15 | [[Specs/2026-09-15-import-insumos-proteger-internos-design|Importar insumos sin pisar los precios internos]] |
@@ -104,6 +106,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 59 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-09-21 | [[Planes/2026-09-21-umbral-igualar-contractual|Umbral para igualar el costo al contractual — Implementation Plan]] |
 | 2026-09-18 | [[Planes/2026-09-18-armar-apu-desde-corrida|Armar APU desde una fila de la corrida — Plan de implementación]] |
 | 2026-09-16 | [[Planes/2026-09-16-rebuscar-apu-corrida|Volver a buscar APU en una corrida activa — Plan de implementación]] |
 | 2026-09-15 | [[Planes/2026-09-15-import-insumos-proteger-internos|Importar insumos sin pisar los precios internos — Plan de implementación]] |

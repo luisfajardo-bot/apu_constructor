@@ -78,3 +78,39 @@ def test_cambiar_estado_audita(tmp_path):
     usuarios_svc.cambiar_estado(alm, _admin(), "u1", "inactivo")
     items, total = alm.auditoria.listar(accion="usuario.cambiar_estado")
     assert total == 1 and items[0]["despues"]["estado"] == "inactivo"
+
+
+def test_igualar_por_umbral_deja_el_umbral_en_la_auditoria(tmp_path):
+    """312 filas igualadas de a una y 312 igualadas por un techo de $500M son hechos
+    distintos: el registro tiene que decir con qué regla se aplicó."""
+    alm = _alm(tmp_path)
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="x", archivo="lic.xlsx", turno_def="DIURNO",
+        use_ai=False, estado="en_revision"))
+    alm.corridas.agregar_item(cid, CorridaItemRow(
+        seq=0,
+        item=LicitacionItem(item="1", descripcion="PRUEBA DE CARGA", unidad="GLB",
+                            cantidad=1.0, precio_contractual=1000.0, shift="DIURNO"),
+        status="new", apu_codigo=None, apu_nombre="", unidad="GLB", shift="DIURNO",
+        origen="historico", confianza=0.0, explicacion="", componentes=[], candidatos=[]))
+    corridas_svc.igualar_por_umbral(alm, cid, 500_000_000.0, [0], actor=_admin())
+    items, total = alm.auditoria.listar(accion="corrida.igualar_costo")
+    assert total == 1
+    assert items[0]["contexto"]["umbral_contractual"] == 500_000_000.0
+
+
+def test_igualar_de_a_una_no_inventa_umbral_en_la_auditoria(tmp_path):
+    """El botón de siempre no pone techo: la clave no aparece."""
+    alm = _alm(tmp_path)
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="x", archivo="lic.xlsx", turno_def="DIURNO",
+        use_ai=False, estado="en_revision"))
+    alm.corridas.agregar_item(cid, CorridaItemRow(
+        seq=0,
+        item=LicitacionItem(item="1", descripcion="PRUEBA DE CARGA", unidad="GLB",
+                            cantidad=1.0, precio_contractual=1000.0, shift="DIURNO"),
+        status="new", apu_codigo=None, apu_nombre="", unidad="GLB", shift="DIURNO",
+        origen="historico", confianza=0.0, explicacion="", componentes=[], candidatos=[]))
+    corridas_svc.igualar_costo_al_contractual(alm, cid, [0], actor=_admin())
+    items, _ = alm.auditoria.listar(accion="corrida.igualar_costo")
+    assert "umbral_contractual" not in items[0]["contexto"]

@@ -55,6 +55,21 @@ class IgualarCostoIn(BaseModel):
     seqs: list[int]
 
 
+class IgualarUmbralIn(BaseModel):
+    """El techo por línea y los seq que el usuario marcó en la previa.
+
+    El servidor recalcula la candidatura con estos dos datos: el cliente dice cuáles
+    quiere, no qué se escribe."""
+    # allow_inf_nan=False: Infinity pasa `inf > 0`, iguala todo y después revienta al
+    # serializar el contexto de auditoría (json.dumps no admite el literal Infinity).
+    umbral_contractual: float = Field(allow_inf_nan=False)
+    seqs: list[int]
+
+
+class QuitarCostoManualIn(BaseModel):
+    seqs: list[int]
+
+
 class RebuscarAplicarIn(BaseModel):
     """Los seq que el usuario marcó en la vista previa de volver a buscar APU."""
     seqs: list[int]

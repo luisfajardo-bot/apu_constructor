@@ -1340,8 +1340,25 @@ def aplicar_rebusqueda(alm: Almacen, corrida_id: int,
     return vista
 
 
+def _exigir_editable(alm: Almacen, corrida_id: int, accion: str):
+    """Los candados compartidos por igualar/quitar costo a mano: existe, no está
+    congelada y el plan no está a medias. Mismo candado que `_exigir_rebuscable`
+    (las filas que faltan armar no existen; decidir sobre ellas es mirar media
+    corrida). Devuelve la meta, o None si la corrida no existe."""
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    if meta.modo == "congelada":
+        raise CorridaCongelada(corrida_id)
+    if _plan_a_medias(meta):
+        raise ValueError(_MSG_PLAN_A_MEDIAS.format(accion=accion))
+    return meta
+
+
 def igualar_costo_al_contractual(alm: Almacen, corrida_id: int, seqs: Iterable[int],
-                                 actor=None) -> Optional[dict]:
+                                 actor=None,
+                                 umbral_contractual: Optional[float] = None
+                                 ) -> Optional[dict]:
     """Copia el precio contractual de cada fila marcada como su costo unitario.
 
     Para proyectos especiales: actividades globales que valen lo que dice el contrato
@@ -1359,12 +1376,13 @@ def igualar_costo_al_contractual(alm: Almacen, corrida_id: int, seqs: Iterable[i
     Devuelve la vista de la corrida con dos claves extra —`igualadas` y `rechazadas`
     (seqs con contractual ≤ 0, que no se tocan por la regla "nada en $0")— o None si
     la corrida no existe. Lanza CorridaCongelada si está congelada.
+
+    `umbral_contractual` no cambia lo que se escribe: solo queda en la auditoría
+    cuando el gesto vino del techo por línea (`igualar_por_umbral`).
     """
-    meta = alm.corridas.get_corrida(corrida_id)
+    meta = _exigir_editable(alm, corrida_id, "igualar el costo de")
     if meta is None:
         return None
-    if meta.modo == "congelada":
-        raise CorridaCongelada(corrida_id)
     pedidos = {int(s) for s in seqs}
     filas = [r for r in alm.corridas.get_items(corrida_id) if r.seq in pedidos]
     costos: dict[int, float] = {}
@@ -1387,13 +1405,123 @@ def igualar_costo_al_contractual(alm: Almacen, corrida_id: int, seqs: Iterable[i
                                   for r in filas if r.seq in costos]},
                 despues={"lineas": [{"seq": s, "costo_manual": c}
                                     for s, c in sorted(costos.items())]},
-                contexto={"rechazadas": sorted(rechazadas)})
+                contexto={"rechazadas": sorted(rechazadas),
+                          # Solo cuando el gesto vino de un techo: el registro tiene
+                          # que decir con qué regla se aplicó.
+                          **({} if umbral_contractual is None
+                             else {"umbral_contractual": float(umbral_contractual)})})
         if meta.estado == "finalizada":
             alm.corridas.set_estado(corrida_id, "en_revision")   # el cuadro ya no dice la verdad
     vista = vista_corrida(alm, corrida_id)
     if vista is not None:
         vista["igualadas"] = sorted(costos)
         vista["rechazadas"] = sorted(rechazadas)
+    return vista
+
+
+def _candidata_umbral(item: dict) -> bool:
+    """Una fila que el umbral puede igualar: está en $0 y el contrato sí la paga.
+
+    Una fila SIN APU siempre cuesta $0, así que entra sola; una CON APU pero sin
+    precios también, que es el otro caso que deja el cuadro trabado. `not (x > 0)` y
+    no `x == 0` por el NaN, igual que en el resto del módulo.
+
+    `item` es un ítem de `vista_corrida`, no una fila cruda: ahí `costo_manual` ya es
+    el booleano derivado del ensamble y `costo_unitario` ya está costeado.
+    """
+    return (not item["costo_manual"]
+            and not (item["costo_unitario"] > 0)
+            and item["precio_contractual"] > 0)
+
+
+def igualar_por_umbral(alm: Almacen, corrida_id: int, umbral: float,
+                       seqs: Iterable[int], actor=None) -> Optional[dict]:
+    """Iguala al contractual las filas en $0 cuyo TOTAL contractual no pase el umbral.
+
+    Para priorizar: en una licitación de 1939 actividades un puñado se lleva casi
+    todo el presupuesto y la cola larga pesa centavos. Armarle el APU a cada una de
+    esas cuesta semanas y no mueve la evaluación.
+
+    El cliente manda los `seq` que marcó en la previa, pero la candidatura se
+    RECALCULA acá: si entre la previa y el aplicar alguien le asignó un APU a una
+    fila, se saltea. Es el mismo candado que `apu_evaluado` en la revisión y que
+    `aplicar_rebusqueda` — el cliente dice cuáles quiere, no qué se escribe. Sin
+    esto, una pestaña vieja pisaría un APU recién asignado con una copia del
+    contractual, y encima dejaría la fila `confirmed`, o sea fuera del alcance de
+    volver a buscar APU. Con diez filas eso se ve; con mil quinientas no.
+
+    Cuesta dos costeos: uno para decidir la candidatura y otro para la vista que
+    vuelve. Es una acción deliberada, no un render.
+
+    Devuelve la vista con `igualadas`, `rechazadas` y `salteadas`, o None si la
+    corrida no existe. Lanza CorridaCongelada si está congelada y ValueError si el
+    umbral no es un monto positivo.
+
+    Ojo con `rechazadas`: por ESTE camino viene siempre vacía. La trae el camino de
+    escritura compartido (para el contractual ≤ 0), pero `_candidata_umbral` ya
+    descartó esas filas hacia `salteadas` antes de llegar ahí. Quien consuma la
+    respuesta tiene que mirar `salteadas`, no `rechazadas`.
+    """
+    meta = _exigir_editable(alm, corrida_id, "igualar el costo de")
+    if meta is None:
+        return None
+    # `not (x > 0)` y NO `x <= 0`: con NaN, `nan <= 0` es False y el techo dejaría
+    # pasar cualquier fila.
+    if not (float(umbral) > 0):
+        raise ValueError("El umbral tiene que ser un monto mayor que $0.")
+    vista = vista_corrida(alm, corrida_id)
+    if vista is None:
+        return None
+    pedidos = {int(s) for s in seqs}
+    elegidas: list[int] = []
+    salteadas: list[int] = []
+    for it in vista["items"]:
+        if it["seq"] not in pedidos:
+            continue          # no se pidió: no se iguala y tampoco se reporta
+        if _candidata_umbral(it) and it["contractual_total"] <= umbral:
+            elegidas.append(it["seq"])
+        else:
+            salteadas.append(it["seq"])
+    v = igualar_costo_al_contractual(alm, corrida_id, elegidas, actor,
+                                     umbral_contractual=float(umbral))
+    if v is not None:
+        v["salteadas"] = sorted(salteadas)
+    return v
+
+
+def quitar_costo_manual(alm: Almacen, corrida_id: int, seqs: Iterable[int],
+                        actor=None) -> Optional[dict]:
+    """Borra el costo puesto a mano de las filas marcadas y las devuelve al costeo.
+
+    Es el reverso de `igualar_costo_al_contractual`, y existe porque el umbral puede
+    tocar cientos de filas de un clic: sin vuelta atrás, un techo mal puesto se
+    arregla fila por fila armando APUs que justamente no querías armar.
+
+    Pedir el borrado de una fila que no tiene costo a mano no es un error: es un
+    no-op y no se audita. Devuelve la vista de la corrida con `quitadas`, o None si
+    la corrida no existe. Lanza CorridaCongelada si está congelada.
+    """
+    meta = _exigir_editable(alm, corrida_id, "quitar el costo puesto a mano de")
+    if meta is None:
+        return None
+    pedidos = {int(s) for s in seqs}
+    filas = [r for r in alm.corridas.get_items(corrida_id)
+             if r.seq in pedidos and r.costo_manual is not None]
+    if filas:
+        with alm.transaccion("corridas") as conn:
+            alm.corridas.limpiar_costo_manual(
+                corrida_id, [r.seq for r in filas], conn=conn)
+            registrar_auditoria(
+                alm, conn, actor, "corrida.quitar_costo_manual", "corrida", corrida_id,
+                antes={"lineas": [{"seq": r.seq, "costo_manual": r.costo_manual}
+                                  for r in filas]},
+                despues={"lineas": [{"seq": r.seq, "costo_manual": None}
+                                    for r in filas]})
+        if meta.estado == "finalizada":
+            alm.corridas.set_estado(corrida_id, "en_revision")   # el cuadro ya no dice la verdad
+    vista = vista_corrida(alm, corrida_id)
+    if vista is not None:
+        vista["quitadas"] = sorted(r.seq for r in filas)
     return vista
 
 

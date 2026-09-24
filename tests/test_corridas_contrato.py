@@ -766,3 +766,61 @@ def test_set_candidatos_vacio_no_escribe(repo):
     cid = _corrida_con(repo, _item(0, 1000.0))
     repo.set_candidatos(cid, {})
     assert repo.get_items(cid)[0].candidatos == []
+
+
+def test_limpiar_costo_manual_devuelve_la_fila_al_costeo(repo):
+    """El reverso de set_costo_manual. Sin APU, la fila vuelve a `new`: es
+    exactamente lo que era antes (así la deja `assemble.py` cuando no hay match)."""
+    cid = _corrida_con(repo, _item(0, 1500.0), _item(1, 900.0))
+    repo.set_costo_manual(cid, {0: 1500.0, 1: 900.0})
+    repo.limpiar_costo_manual(cid, [0])
+    filas = {r.seq: r for r in repo.get_items(cid)}
+    assert filas[0].costo_manual is None
+    assert filas[0].status == "new"
+    assert filas[1].costo_manual == 900.0      # la que no se pidió no se toca
+    assert filas[1].status == "confirmed"
+
+
+def test_limpiar_costo_manual_no_degrada_la_fila_confirmada(repo):
+    """Una persona confirmó esa fila: quitarle el costo a mano no la puede degradar.
+
+    Degradarla a `review` la reexponía a «Volver a buscar APU», que saltea solo las
+    `confirmed` — justo lo que CLAUDE.md prohíbe: el re-match no pisa lo que alguien
+    resolvió."""
+    cid = _corrida_con(repo, _item(0, 1500.0))
+    repo.actualizar_eleccion(
+        cid, 0, status="confirmed", apu_codigo="100", apu_nombre="EXCAVACION",
+        unidad="M3", shift="DIURNO", origen="historico", confianza=1.0,
+        explicacion="", componentes=[])
+    repo.set_costo_manual(cid, {0: 1500.0})
+    repo.limpiar_costo_manual(cid, [0])
+    fila = repo.get_items(cid)[0]
+    assert fila.costo_manual is None
+    assert fila.status == "confirmed"
+
+
+def test_limpiar_costo_manual_no_devuelve_el_auto_que_habia_antes(repo):
+    """La contrapartida conocida de no degradar, fijada a propósito.
+
+    `set_costo_manual` fuerza `confirmed`, y no guardamos el status previo: una fila
+    que era `auto` vuelve de igualar→quitar como `confirmed`, no como `auto`. Es un
+    ascenso y no una degradación, y se acepta — la alternativa (adivinar el status
+    viejo) exigiría una columna nueva para un caso de borde."""
+    cid = _corrida_con(repo, _item(0, 1500.0))
+    repo.actualizar_eleccion(
+        cid, 0, status="auto", apu_codigo="100", apu_nombre="EXCAVACION",
+        unidad="M3", shift="DIURNO", origen="historico", confianza=1.0,
+        explicacion="", componentes=[])
+    repo.set_costo_manual(cid, {0: 1500.0})
+    repo.limpiar_costo_manual(cid, [0])
+    assert repo.get_items(cid)[0].status == "confirmed"
+
+
+def test_limpiar_costo_manual_vacio_no_escribe(repo):
+    """Sin esto el test no podría fallar: hay que dejar algo que borrar."""
+    cid = _corrida_con(repo, _item(0, 1500.0))
+    repo.set_costo_manual(cid, {0: 1500.0})
+    repo.limpiar_costo_manual(cid, [])
+    fila = repo.get_items(cid)[0]
+    assert fila.costo_manual == 1500.0
+    assert fila.status == "confirmed"

@@ -23,6 +23,11 @@ _FORBIDDEN_KEYS = {
     "costo", "costo_unitario", "costo_total", "valor", "valor_unitario",
     "valor_total", "margen", "price", "cost", "amount", "total",
     "fuente_precio", "costo_manual", "plan_json",
+    # El techo en pesos con el que se igualan las líneas chicas al contractual. No se
+    # persiste (vive en el request y en la auditoría), pero es un monto con nombre
+    # propio. Se llama así y no `umbral` a secas para no chocar con los umbrales de
+    # matching, que NO son dinero: un falso positivo ahí volaría un payload legítimo.
+    "umbral_contractual",
     # Los valores del peaje de un proyecto son dinero, uno por categoría de acarreo.
     # `valor` ya está en la lista, pero el chequeo es por nombre EXACTO de clave.
     # Las casillas (`peaje_*_aplica`) NO entran: son booleanos, estructura.

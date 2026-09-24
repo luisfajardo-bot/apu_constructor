@@ -205,7 +205,8 @@ export default function Corrida() {
   // Filas sin APU: se cuentan sobre TODOS los ítems, no sobre los filtrados —
   // el candado no depende de lo que estés mirando. El backend devuelve 409 al
   // congelar o descargar el cuadro; acá se ve antes de chocar contra la puerta.
-  const nSinApu = data.items.filter((f) => !f.apu_codigo).length;
+  // Espejo de `seqs_sin_apu`: una fila con costo puesto a mano sí pasa.
+  const nSinApu = data.items.filter((f) => !f.apu_codigo && !f.costo_manual).length;
   const bloqueado = nSinApu > 0;
   const esActivar = data.modo === "congelada";
   const puedeEditar = puede(perfil?.rol, "editor");

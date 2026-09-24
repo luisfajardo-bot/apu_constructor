@@ -183,6 +183,29 @@ test("bloquea congelar y descargar cuando hay líneas sin APU", async () => {
   expect(screen.getByText(/1 sin APU/)).toBeTruthy();
 });
 
+test("una fila sin APU pero con costo puesto a mano NO bloquea congelar ni descargar", async () => {
+  // Espejo de `seqs_sin_apu` del backend, que deja pasar `costo_manual > 0`. Sin
+  // esto, igualar al contractual (a mano o por umbral) dejaba los botones trabados
+  // aunque el servidor sí aceptaba congelar y emitir el cuadro.
+  const { getCorrida } = await import("@/api/corridas");
+  (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
+    ...CORRIDA,
+    items: [
+      fila({ seq: 0, descripcion: "Excavación" }),
+      fila({ seq: 1, descripcion: "Global especial", apu_codigo: "", apu_nombre: "",
+             costo_manual: true, costo_unitario: 900, status: "confirmed" }),
+    ],
+  });
+
+  const { default: Corrida } = await import("./Corrida");
+  render(<Corrida />);
+  await screen.findByText("Global especial");
+
+  expect(boton(/descargar cuadro/i).disabled).toBe(false);
+  expect(boton(/^congelar$/i).disabled).toBe(false);
+  expect(screen.queryByText(/sin APU$/)).toBeNull();
+});
+
 test("el contador de sin APU filtra la tabla a esas líneas", async () => {
   const { getCorrida } = await import("@/api/corridas");
   (getCorrida as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({

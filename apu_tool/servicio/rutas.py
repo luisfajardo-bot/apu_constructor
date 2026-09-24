@@ -493,6 +493,8 @@ def igualar_costo(cid: int, body: IgualarCostoIn,
     except svc.CorridaCongelada:
         raise HTTPException(status_code=409,
                             detail="La corrida está congelada; actívala para modificar.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v
@@ -526,6 +528,8 @@ def quitar_costo_manual(cid: int, body: QuitarCostoManualIn,
     except svc.CorridaCongelada:
         raise HTTPException(status_code=409,
                             detail="La corrida está congelada; actívala para modificar.")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if v is None:
         raise HTTPException(status_code=404, detail="Corrida no encontrada.")
     return v

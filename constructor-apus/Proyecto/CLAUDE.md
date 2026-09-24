@@ -519,3 +519,9 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
 - No llames `umbral` a secas al campo del techo: es dinero y va en `_FORBIDDEN_KEYS`
   como `umbral_contractual`; `umbral` chocaría con los umbrales de matching, que
   **no** son dinero, y un falso positivo ahí volaría un payload legítimo hacia la IA.
+- No dejes igualar o quitar el costo a mano con el plan a medias (`armando` o
+  `armado_detenido`). Las filas que faltan armar no existen todavía, así que un
+  "5,3% del contrato" ahí es el 5,3% de 290 líneas de 1939: una mentira. Mismo
+  candado que `agregar_items`/`borrar_items` y que `_exigir_rebuscable`
+  (`servicio/corridas.py::_exigir_editable`, que usan `igualar_costo_al_contractual`,
+  `igualar_por_umbral` y `quitar_costo_manual`).

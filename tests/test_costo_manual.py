@@ -312,6 +312,59 @@ def test_umbral_corrida_inexistente_devuelve_none(alm):
     assert svc.igualar_por_umbral(alm, 9999, 500_000_000.0, [0]) is None
 
 
+def test_igualar_con_el_plan_a_medias_se_rechaza(alm):
+    """Las filas que faltan armar NO existen: igualar ahí decide sobre una vista
+    parcial. Mismo candado que agregar/borrar líneas y que volver a buscar APU."""
+    cid = _corrida(alm, contractual=1000.0, estado="armando")
+    with pytest.raises(ValueError, match="armar"):
+        svc.igualar_costo_al_contractual(alm, cid, [0])
+
+
+def test_igualar_con_el_plan_detenido_se_rechaza(alm):
+    """`armado_detenido` cuenta igual: el armador puede reanudar en cualquier
+    momento y el espacio de `seq` sigue siendo suyo."""
+    cid = _corrida(alm, contractual=1000.0, estado="armado_detenido")
+    with pytest.raises(ValueError):
+        svc.igualar_costo_al_contractual(alm, cid, [0])
+
+
+def test_umbral_con_el_plan_a_medias_se_rechaza(alm):
+    """`igualar_por_umbral` costea la corrida entera antes de delegar: el candado
+    tiene que frenar ANTES de ese trabajo, no solo en el camino compartido."""
+    cid = _corrida_varias(alm, [1000.0])
+    alm.corridas.set_estado(cid, "armando")
+    with pytest.raises(ValueError, match="armar"):
+        svc.igualar_por_umbral(alm, cid, 500_000_000.0, [0])
+
+
+def test_umbral_con_el_plan_detenido_se_rechaza(alm):
+    cid = _corrida_varias(alm, [1000.0])
+    alm.corridas.set_estado(cid, "armado_detenido")
+    with pytest.raises(ValueError):
+        svc.igualar_por_umbral(alm, cid, 500_000_000.0, [0])
+
+
+def test_quitar_costo_manual_con_el_plan_a_medias_se_rechaza(alm):
+    cid = _corrida(alm, contractual=1000.0, estado="armando")
+    with pytest.raises(ValueError, match="armar"):
+        svc.quitar_costo_manual(alm, cid, [0])
+
+
+def test_quitar_costo_manual_con_el_plan_detenido_se_rechaza(alm):
+    cid = _corrida(alm, contractual=1000.0, estado="armado_detenido")
+    with pytest.raises(ValueError):
+        svc.quitar_costo_manual(alm, cid, [0])
+
+
+def test_las_tres_siguen_funcionando_con_el_plan_completo(alm):
+    """Regresión: el candado nuevo no debe trabar el camino normal (sin plan a
+    medias) de ninguna de las tres funciones."""
+    cid = _corrida_varias(alm, [100_000_000.0, 1000.0, 1000.0])
+    assert svc.igualar_por_umbral(alm, cid, 500_000_000.0, [0])["igualadas"] == [0]
+    assert svc.igualar_costo_al_contractual(alm, cid, [1])["igualadas"] == [1]
+    assert svc.quitar_costo_manual(alm, cid, [1])["quitadas"] == [1]
+
+
 def test_umbral_iguala_la_fila_con_apu_pero_en_cero(alm):
     """El SEGUNDO caso que cubre la regla: la fila tiene APU, pero su composición no
     cuesta nada (insumos sin precio), así que está en $0 y traba el cuadro igual que

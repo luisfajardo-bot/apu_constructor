@@ -1340,6 +1340,21 @@ def aplicar_rebusqueda(alm: Almacen, corrida_id: int,
     return vista
 
 
+def _exigir_editable(alm: Almacen, corrida_id: int, accion: str):
+    """Los candados compartidos por igualar/quitar costo a mano: existe, no está
+    congelada y el plan no está a medias. Mismo candado que `_exigir_rebuscable`
+    (las filas que faltan armar no existen; decidir sobre ellas es mirar media
+    corrida). Devuelve la meta, o None si la corrida no existe."""
+    meta = alm.corridas.get_corrida(corrida_id)
+    if meta is None:
+        return None
+    if meta.modo == "congelada":
+        raise CorridaCongelada(corrida_id)
+    if _plan_a_medias(meta):
+        raise ValueError(_MSG_PLAN_A_MEDIAS.format(accion=accion))
+    return meta
+
+
 def igualar_costo_al_contractual(alm: Almacen, corrida_id: int, seqs: Iterable[int],
                                  actor=None,
                                  umbral_contractual: Optional[float] = None
@@ -1365,11 +1380,9 @@ def igualar_costo_al_contractual(alm: Almacen, corrida_id: int, seqs: Iterable[i
     `umbral_contractual` no cambia lo que se escribe: solo queda en la auditoría
     cuando el gesto vino del techo por línea (`igualar_por_umbral`).
     """
-    meta = alm.corridas.get_corrida(corrida_id)
+    meta = _exigir_editable(alm, corrida_id, "igualar el costo de")
     if meta is None:
         return None
-    if meta.modo == "congelada":
-        raise CorridaCongelada(corrida_id)
     pedidos = {int(s) for s in seqs}
     filas = [r for r in alm.corridas.get_items(corrida_id) if r.seq in pedidos]
     costos: dict[int, float] = {}
@@ -1449,11 +1462,9 @@ def igualar_por_umbral(alm: Almacen, corrida_id: int, umbral: float,
     descartó esas filas hacia `salteadas` antes de llegar ahí. Quien consuma la
     respuesta tiene que mirar `salteadas`, no `rechazadas`.
     """
-    meta = alm.corridas.get_corrida(corrida_id)
+    meta = _exigir_editable(alm, corrida_id, "igualar el costo de")
     if meta is None:
         return None
-    if meta.modo == "congelada":
-        raise CorridaCongelada(corrida_id)
     # `not (x > 0)` y NO `x <= 0`: con NaN, `nan <= 0` es False y el techo dejaría
     # pasar cualquier fila.
     if not (float(umbral) > 0):
@@ -1490,11 +1501,9 @@ def quitar_costo_manual(alm: Almacen, corrida_id: int, seqs: Iterable[int],
     no-op y no se audita. Devuelve la vista de la corrida con `quitadas`, o None si
     la corrida no existe. Lanza CorridaCongelada si está congelada.
     """
-    meta = alm.corridas.get_corrida(corrida_id)
+    meta = _exigir_editable(alm, corrida_id, "quitar el costo puesto a mano de")
     if meta is None:
         return None
-    if meta.modo == "congelada":
-        raise CorridaCongelada(corrida_id)
     pedidos = {int(s) for s in seqs}
     filas = [r for r in alm.corridas.get_items(corrida_id)
              if r.seq in pedidos and r.costo_manual is not None]

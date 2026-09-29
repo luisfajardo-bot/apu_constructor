@@ -12,10 +12,10 @@ import type { Insumo, InsumoDetalle } from "@/lib/tipos";
 import { getInsumo, aplicarCambios } from "@/api/insumos";
 import { useDirtyRows } from "@/lib/useDirtyRows";
 import { cop as fmtMoneda } from "@/lib/moneda";
+import { FUENTE_INTERNA, FUENTES_PRECIO, esFuenteValida } from "@/lib/fuentes";
 
 interface TablaInsumosProps {
   insumos: Insumo[];
-  fuentes?: string[];
   listaId: number;
   onReload: () => void;
   puedeEditar?: boolean;
@@ -26,7 +26,7 @@ interface TablaInsumosProps {
   onDirtyCountChange?: (count: number) => void;
 }
 
-export function TablaInsumos({ insumos, fuentes = [], listaId, onReload, puedeEditar = false, onDirtyCountChange }: TablaInsumosProps) {
+export function TablaInsumos({ insumos, listaId, onReload, puedeEditar = false, onDirtyCountChange }: TablaInsumosProps) {
   const { setCampo, descartar, cambios, count, dirty } = useDirtyRows(
     insumos.map((i) => ({ id: i.id, precio: i.precio, fuente: i.fuente }))
   );
@@ -77,12 +77,6 @@ export function TablaInsumos({ insumos, fuentes = [], listaId, onReload, puedeEd
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden relative">
-      {/* Datalist shared for fuente autocomplete */}
-      <datalist id="fuentes-list">
-        {fuentes.map((f) => (
-          <option key={f} value={f} />
-        ))}
-      </datalist>
       {/* Table area */}
       <div className="flex-1 overflow-auto">
         <table className="w-full text-xs border-collapse">
@@ -175,7 +169,11 @@ export function TablaInsumos({ insumos, fuentes = [], listaId, onReload, puedeEd
                         onBlur={() => setEditPrecio(null)}
                         onChange={(e) => {
                           const v = parseFloat(e.target.value);
-                          if (!Number.isNaN(v)) setCampo(ins.id, "precio", v);
+                          if (Number.isNaN(v)) return;
+                          setCampo(ins.id, "precio", v);
+                          // Un precio digitado casi siempre es interno; si es del IDU,
+                          // se cambia en el selector de al lado.
+                          setCampo(ins.id, "fuente", FUENTE_INTERNA);
                         }}
                       />
                     ) : (
@@ -197,14 +195,21 @@ export function TablaInsumos({ insumos, fuentes = [], listaId, onReload, puedeEd
                   </td>
                   {/* Editable - fuente */}
                   <td className="px-1 py-0.5">
-                    <Input
-                      type="text"
-                      className="h-6 text-xs"
+                    <select
+                      aria-label={`Fuente de ${ins.codigo}`}
+                      className="h-6 w-full rounded border border-border bg-transparent px-1 text-xs disabled:opacity-70"
                       value={fuenteEdit as string}
                       disabled={!puedeEditar}
                       onChange={(e) => setCampo(ins.id, "fuente", e.target.value)}
-                      list="fuentes-list"
-                    />
+                    >
+                      {/* Etiqueta vieja (antes era texto libre): se ve, pero no se puede escoger. */}
+                      {!esFuenteValida(fuenteEdit as string) && (
+                        <option value={fuenteEdit as string} disabled>
+                          {(fuenteEdit as string) || "(sin fuente)"}
+                        </option>
+                      )}
+                      {FUENTES_PRECIO.map((f) => <option key={f} value={f}>{f}</option>)}
+                    </select>
                   </td>
                   {/* Clasif */}
                   <td

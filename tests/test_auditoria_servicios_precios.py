@@ -34,8 +34,8 @@ def test_aplicar_cambios_partial_success_no_audita_el_malo(tmp_path):
     alm = _alm(tmp_path)
     iid = alm.precios.crear_insumo(Insumo("100", "CEMENTO", "KG", "MAT", 1000, "PRECIO IDU"))
     out = insumos_svc.aplicar_cambios(alm, [
-        {"insumo_id": iid, "precio": 1500, "fuente": "X"},
-        {"insumo_id": 99999, "precio": 10, "fuente": "Y"},   # no existe → error
+        {"insumo_id": iid, "precio": 1500, "fuente": "COSTO INTERNO"},
+        {"insumo_id": 99999, "precio": 10, "fuente": "COSTO INTERNO"},   # no existe → error
     ], actor=_actor())
     assert out["aplicados"] == 1 and len(out["errores"]) == 1
     _, total = alm.auditoria.listar()

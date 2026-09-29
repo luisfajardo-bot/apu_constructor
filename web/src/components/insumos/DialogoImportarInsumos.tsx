@@ -10,13 +10,13 @@ import {
   previewImportarInsumos, aplicarImportarInsumos, descargarPlantillaInsumos,
 } from "@/api/insumos";
 import { cop } from "@/lib/moneda";
+import { FUENTES_PRECIO } from "@/lib/fuentes";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   listaId: number;
   listaNombre: string;
-  fuentes: string[];
   onAplicado: () => void;
 }
 
@@ -26,7 +26,7 @@ type Estado =
   | { fase: "preview"; prev: ImportInsumosUpsertPreview }
   | { fase: "aplicando" };
 
-export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombre, fuentes, onAplicado }: Props) {
+export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombre, onAplicado }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const archivoRef = useRef<File | null>(null);
   const [estado, setEstado] = useState<Estado>({ fase: "idle" });
@@ -83,10 +83,9 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
   }
 
   // El preview depende de la fuente declarada (decide qué queda protegido), así que
-  // cambiarla con un archivo ya elegido obliga a recalcularlo. Va en el blur y no en
-  // cada tecla: es un input de texto con datalist.
-  function handleFuenteBlur() {
-    const f = fuente.trim();
+  // cambiarla con un archivo ya elegido obliga a recalcularlo.
+  function cambiarFuente(f: string) {
+    setFuente(f);
     if (!f || !archivoRef.current || f === fuentePreviewRef.current) return;
     void correrPreview(archivoRef.current, f);
   }
@@ -152,20 +151,18 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
           <label htmlFor="fuente-import" className="text-xs font-medium">
             Fuente de esta importación
           </label>
-          <input
+          {/* Sin preselección a propósito: una importación suele ser el listado del IDU,
+              y un default interno rotularía mal miles de filas. */}
+          <select
             id="fuente-import"
-            type="text"
-            list="fuentes-import-list"
             value={fuente}
-            onChange={(e) => setFuente(e.target.value)}
-            onBlur={handleFuenteBlur}
+            onChange={(e) => cambiarFuente(e.target.value)}
             disabled={enAplicando}
-            placeholder="PRECIO IDU"
             className="h-7 rounded border border-border bg-background px-2 text-xs"
-          />
-          <datalist id="fuentes-import-list">
-            {fuentes.map((f) => <option key={f} value={f} />)}
-          </datalist>
+          >
+            <option value="">— Escoge —</option>
+            {FUENTES_PRECIO.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
         </div>
         <p className="text-xs text-muted-foreground">
           Queda rotulada en todas las filas del archivo. Si declaras una fuente pública
@@ -234,9 +231,8 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
 
         {/* El aviso vive ADENTRO del footer, que es `sticky bottom-0`: con un preview de
             miles de filas la persona scrollea hasta acá para aplicar, y arriba del campo
-            de fuente el aviso ya no se veía justo en el momento de decidir. Es la única
-            protección contra una fuente pública mal escrita ("PRECIO IDU 2026" clasifica
-            interno y el candado no se dispara), así que tiene que estar donde está el botón. */}
+            de fuente el aviso ya no se veía justo en el momento de decidir: una importación
+            interna SÍ pisa costos internos, y eso se tiene que leer donde está el botón. */}
         <DialogFooter className="flex-col items-stretch sm:flex-col sm:items-stretch">
           {prev?.clasificacion_import && (
             <p role="status" className={`text-xs font-medium ${
@@ -244,9 +240,9 @@ export function DialogoImportarInsumos({ open, onOpenChange, listaId, listaNombr
             }`}>
               {prev.clasificacion_import === "publico"
                 ? "Esta importación es PÚBLICA: no puede pisar precios internos."
-                : <>Declaraste «{fuentePreviewRef.current}» y el sistema la clasifica como fuente INTERNA:
-                    esta importación SÍ pisa los costos internos de la empresa. Si querías cargar la lista
-                    pública del IDU, la fuente debe decir «<strong>PRECIO IDU</strong>», sin agregarle nada más.</>}
+                : <>Declaraste «{fuentePreviewRef.current}»: esta importación es INTERNA y SÍ pisa
+                    los costos internos de la empresa. Si es la lista pública del IDU, escoge
+                    «<strong>PRECIO IDU</strong>».</>}
             </p>
           )}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

@@ -11,6 +11,7 @@ import {
 import { crearInsumo } from "@/api/autoria";
 import { conflictoInsumo } from "@/api/insumos";
 import type { ConflictoAlta } from "@/lib/tipos";
+import { FUENTE_INTERNA, FUENTES_PRECIO } from "@/lib/fuentes";
 
 interface DialogoAgregarInsumoProps {
   open: boolean;
@@ -34,7 +35,7 @@ const VACIO: Campos = {
   unidad: "",
   grupo: "",
   precio: "",
-  fuente: "",
+  fuente: FUENTE_INTERNA,
 };
 
 const inputCls =
@@ -95,7 +96,6 @@ export function DialogoAgregarInsumo({
     c.nombre.trim() !== "" &&
     c.unidad.trim() !== "" &&
     c.grupo.trim() !== "" &&
-    c.fuente.trim() !== "" &&
     precioValido &&
     conflicto?.motivo == null;
 
@@ -109,7 +109,7 @@ export function DialogoAgregarInsumo({
         unidad: c.unidad.trim(),
         grupo: c.grupo.trim(),
         precio: precioNum,
-        fuente: c.fuente.trim(),
+        fuente: c.fuente,
         lista_id: listaId,
       });
       toast.success(`Insumo ${ins.codigo} creado`);
@@ -171,11 +171,13 @@ export function DialogoAgregarInsumo({
           </label>
           <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted-foreground">Fuente</span>
-            <input
+            <select
               className={inputCls}
               value={c.fuente}
               onChange={(e) => set("fuente", e.target.value)}
-            />
+            >
+              {FUENTES_PRECIO.map((f) => <option key={f} value={f}>{f}</option>)}
+            </select>
           </label>
           <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted-foreground">Precio</span>

@@ -99,14 +99,16 @@ def test_upsert_preview_con_nombre(tmp_path):
 
 
 def test_preview_dice_como_clasifico_la_fuente(tmp_path):
-    """El candado es fail-open: una fuente pública mal escrita clasifica interna y no
-    protege nada. El diálogo pinta esta clave para que se vea antes de aplicar."""
+    """El diálogo pinta esta clave para que se vea antes de aplicar. Una fuente pública
+    mal escrita ("PRECIO IDU 2026") ya no clasifica interna: se rechaza (solo hay dos)."""
     alm = _alm(tmp_path)
     contenido = _xlsx_solo_precio([["100", 1200, ""]])
     assert autoria.preview_importar_insumos(
         alm, contenido, "f.xlsx", "PRECIO IDU")["clasificacion_import"] == "publico"
     assert autoria.preview_importar_insumos(
-        alm, contenido, "f.xlsx", "PRECIO IDU 2026")["clasificacion_import"] == "interno"
+        alm, contenido, "f.xlsx", "COSTO INTERNO")["clasificacion_import"] == "interno"
+    with pytest.raises(ValueError, match="fuente"):
+        autoria.preview_importar_insumos(alm, contenido, "f.xlsx", "PRECIO IDU 2026")
 
 
 def test_upsert_aplicar_crea_y_actualiza(tmp_path):
@@ -120,7 +122,7 @@ def test_upsert_aplicar_crea_y_actualiza(tmp_path):
 def test_upsert_sin_nombre_codigo_unico_actualiza(tmp_path):
     alm = _alm(tmp_path)
     prev = autoria.preview_importar_insumos(alm, _xlsx_solo_precio([["100", 1500, "COMPRAS"]]),
-                                            "precios.xlsx", "COMPRAS")
+                                            "precios.xlsx", "COSTO INTERNO")
     assert len(prev["actualizar"]) == 1 and prev["actualizar"][0]["precio_nuevo"] == 1500
     assert prev["crear"] == [] and prev["no_encontrada"] == []
 
@@ -145,10 +147,10 @@ def test_upsert_sin_nombre_codigo_inexistente_no_encontrada(tmp_path):
 def test_upsert_precio_vacio_en_actualizacion_no_cambia(tmp_path):
     alm = _alm(tmp_path)
     prev = autoria.preview_importar_insumos(alm, _xlsx_solo_precio([["100", "", "IGNORADA"]]),
-                                            "precios.xlsx", "NUEVA FUENTE")
+                                            "precios.xlsx", "COSTO INTERNO")
     c = prev["actualizar"][0]
     assert c["precio_nuevo"] == 1000            # precio actual, no 0
-    assert c["fuente_nueva"] == "NUEVA FUENTE"  # la declarada, no la columna del archivo
+    assert c["fuente_nueva"] == "COSTO INTERNO"  # la declarada, no la columna del archivo
 
 
 def test_fuente_declarada_gana_sobre_la_columna_del_archivo(tmp_path):
@@ -156,16 +158,16 @@ def test_fuente_declarada_gana_sobre_la_columna_del_archivo(tmp_path):
     columna `fuente` dejaba el precio nuevo con la etiqueta vieja: un precio del IDU
     rotulado COSTO INTERNO."""
     alm = _alm(tmp_path)
-    # El archivo dice "FUENTE DEL ARCHIVO"; la importación declara "COTIZACION 2026".
+    # El archivo dice "FUENTE DEL ARCHIVO"; la importación declara "COSTO INTERNO".
     contenido = _xlsx_solo_precio([["100", 1500, "FUENTE DEL ARCHIVO"]])
     prev = autoria.preview_importar_insumos(alm, contenido, "precios.xlsx",
-                                            "COTIZACION 2026")
-    assert prev["actualizar"][0]["fuente_nueva"] == "COTIZACION 2026"
+                                            "COSTO INTERNO")
+    assert prev["actualizar"][0]["fuente_nueva"] == "COSTO INTERNO"
 
     # también al crear
     prev2 = autoria.preview_importar_insumos(alm, _xlsx_upsert(), "insumos.xlsx",
-                                             "COTIZACION 2026")
-    assert prev2["crear"][0]["fuente"] == "COTIZACION 2026"
+                                             "COSTO INTERNO")
+    assert prev2["crear"][0]["fuente"] == "COSTO INTERNO"
 
 
 def test_fuente_declarada_vacia_se_rechaza(tmp_path):
@@ -206,7 +208,7 @@ def test_import_interno_si_pisa_un_precio_interno(tmp_path):
     alm = _alm_con_interno(tmp_path)
     contenido = _xlsx_solo_precio([["500", 27000, ""]])
     prev = autoria.preview_importar_insumos(alm, contenido, "compras.xlsx",
-                                            "COMPRAS ALMACEN 2026")
+                                            "COSTO INTERNO")
     assert prev["protegida"] == []
     assert prev["actualizar"][0]["precio_nuevo"] == 27000
 

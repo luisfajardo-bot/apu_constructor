@@ -116,6 +116,24 @@ def classify_price_source(fuente: str) -> str:
     return "publico" if f in {s.upper() for s in PUBLIC_PRICE_SOURCES} else "interno"
 
 
+# Las ÚNICAS fuentes que se pueden escribir hoy (edición, alta, importación, CLI).
+# Lo guardado antes con otras etiquetas se deja como está: no se migra.
+FUENTE_IDU = "PRECIO IDU"
+FUENTE_INTERNA = "COSTO INTERNO"
+FUENTES_PRECIO = (FUENTE_IDU, FUENTE_INTERNA)
+
+
+def normalizar_fuente_precio(fuente: str, default: str | None) -> str:
+    """La fuente canónica (sin distinguir mayúsculas/espacios); vacía → `default`.
+    Cualquier otra lanza ValueError: preferimos rechazar a rotular mal un precio."""
+    f = " ".join((fuente or "").split()).upper()
+    if not f and default:
+        return default
+    if f in FUENTES_PRECIO:
+        return f
+    raise ValueError(f"La fuente del precio debe ser «{FUENTE_IDU}» o «{FUENTE_INTERNA}».")
+
+
 # ---------------------------------------------------------------------------
 # Listas de precios. Una lista = una tarifa (la del catálogo, o la de una obra
 # de No Previstos). La lista 1 es SIEMPRE 'Principal': es el DEFAULT de la

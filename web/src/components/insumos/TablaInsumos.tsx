@@ -97,7 +97,7 @@ export function TablaInsumos({ insumos, listaId, onReload, puedeEditar = false, 
               <th className="px-2 py-1.5 text-right font-medium text-muted-foreground border-b w-28">
                 Precio
               </th>
-              <th className="px-2 py-1.5 text-left font-medium text-muted-foreground border-b w-32">
+              <th className="px-2 py-1.5 text-left font-medium text-muted-foreground border-b w-40">
                 Fuente
               </th>
               <th className="px-2 py-1.5 text-left font-medium text-muted-foreground border-b w-20">

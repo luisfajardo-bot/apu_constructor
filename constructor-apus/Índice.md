@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 60 planes, 68 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 60 planes, 69 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -33,6 +33,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 60 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-09-29 | [[Specs/2026-09-29-fuente-dos-opciones-design|Fuente de precio: solo dos opciones]] |
 | 2026-09-21 | [[Specs/2026-09-21-umbral-igualar-contractual-design|Igualar por umbral de total contractual]] |
 | 2026-09-21 | [[Specs/2026-09-21-peaje-por-categoria-design|Peaje por categoría de acarreo]] |
 | 2026-09-18 | [[Specs/2026-09-18-armar-apu-desde-corrida-design|Armar APU desde una fila de la corrida]] |

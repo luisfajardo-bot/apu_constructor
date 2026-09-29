@@ -171,6 +171,7 @@ def crear_insumo(alm: Almacen, datos: dict, actor=None, lista_id: Optional[int] 
     precio = _to_float(datos.get("precio"))
     if precio <= 0:
         raise ValueError(MSG_PRECIO_POSITIVO)
+    fuente = config.normalizar_fuente_precio(datos.get("fuente"), config.FUENTE_INTERNA)
     # Después de las validaciones locales: si el payload es basura no vale un viaje a la base.
     motivo = _conflicto_insumo(alm, codigo, nombre)
     if motivo:
@@ -178,7 +179,7 @@ def crear_insumo(alm: Almacen, datos: dict, actor=None, lista_id: Optional[int] 
     ins = Insumo(codigo=codigo, nombre=nombre,
                  unidad=str(datos.get("unidad", "") or ""),
                  grupo=str(datos.get("grupo", "") or ""),
-                 precio=precio, fuente_precio=str(datos.get("fuente", "") or ""))
+                 precio=precio, fuente_precio=fuente)
     with alm.transaccion("precios") as conn:
         iid = alm.precios.crear_insumo(ins, conn=conn,
                                        creado_por=(actor.user_id if actor else None),
@@ -603,9 +604,11 @@ def preview_importar_insumos(alm: Almacen, contenido: bytes, nombre_archivo: str
     conflictos de código. La fila no se escribe directo: se despacha a
     `_upsert_o_invalida`, así que forzar resuelve una pregunta de IDENTIDAD y nunca una
     de PERMISO — el candado de los precios internos sigue mandando."""
-    fuente_import = (fuente_import or "").strip()
-    if not fuente_import:
+    if not (fuente_import or "").strip():
         raise ValueError(MSG_FUENTE_OBLIGATORIA)
+    # Sin default a propósito: una importación suele ser el listado del IDU, y rotularla
+    # interna por omisión mancharía miles de filas.
+    fuente_import = config.normalizar_fuente_precio(fuente_import, None)
     crear, actualizar, ambigua, no_encontrada, invalida, conflicto = [], [], [], [], [], []
     protegida: list[dict] = []
     forzados = set(forzar_ids or ())      # None y [] se tratan igual: no se fuerza nada

@@ -57,7 +57,7 @@ def aplicar_cambios(alm: Almacen, cambios: list[dict], actor=None,
             if precio <= 0:
                 raise ValueError(MSG_PRECIO_POSITIVO)
             iid = int(c["insumo_id"])
-            fuente = str(c.get("fuente", "") or "")
+            fuente = config.normalizar_fuente_precio(c.get("fuente"), config.FUENTE_INTERNA)
             antes_ins = alm.precios.get_insumo_por_id(iid, lista_id=lista_id)
             with alm.transaccion("precios") as conn:
                 alm.precios.set_precio_por_id(iid, precio, fuente, conn=conn,

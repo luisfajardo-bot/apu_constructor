@@ -47,7 +47,7 @@ function montar() {
   return render(
     <DialogoImportarInsumos
       open onOpenChange={() => {}} listaId={7} listaNombre="NP Calle 13"
-      fuentes={["PRECIO IDU", "COSTO INTERNO"]} onAplicado={() => {}}
+      onAplicado={() => {}}
     />
   );
 }
@@ -129,14 +129,14 @@ describe("DialogoImportarInsumos", () => {
   });
 
   it("avisa cuando la fuente declarada clasifica como interna", async () => {
-    // El caso del typo: "PRECIO IDU 2026" clasifica INTERNO y el candado no protege
-    // nada. El aviso es lo único que lo delata antes de aplicar.
+    // Una importación interna SÍ pisa costos internos: el aviso lo dice antes de
+    // aplicar, donde está el botón.
     previewImportarInsumos.mockResolvedValue({
       crear: [], actualizar: [], ambigua: [], no_encontrada: [], invalida: [],
       protegida: [], clasificacion_import: "interno",
     });
     montar();
-    seleccionarFuente("PRECIO IDU 2026");
+    seleccionarFuente("COSTO INTERNO");
     seleccionarArchivo();
 
     expect(await screen.findByText(/INTERNA/)).toBeTruthy();
@@ -170,7 +170,7 @@ describe("DialogoImportarInsumos", () => {
     seleccionarArchivo();
 
     expect(await screen.findByText(/Protegidas/i)).toBeTruthy();
-    expect(screen.getByText("COSTO INTERNO")).toBeTruthy();
+    expect(screen.getByRole("cell", { name: "COSTO INTERNO" })).toBeTruthy();
     expect((screen.getByText("Aplicar (0)") as HTMLButtonElement).disabled).toBe(true);
   });
 

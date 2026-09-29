@@ -374,6 +374,14 @@ matching, modelo de IA, clasificación de precios.
 - Fuentes de precio: `PRECIO IDU` se trata como **público**; el resto
   (`COSTO INTERNO`, `COMPRAS…`, etc.) como **interno/confidencial**
   (`config.PUBLIC_PRICE_SOURCES`).
+- **Solo se escriben dos fuentes:** `PRECIO IDU` o `COSTO INTERNO`
+  (`config.FUENTES_PRECIO`, espejo en `web/src/lib/fuentes.ts`). Editar un precio, dar
+  de alta un insumo, importar y `db update-price` pasan por
+  `config.normalizar_fuente_precio`, que rechaza cualquier otra. Vacía = `COSTO
+  INTERNO`, **menos en la importación**: ahí es obligatorio escoger, porque una tanda
+  suele ser el listado del IDU. En la tabla, digitar un precio pone la fila en `COSTO
+  INTERNO` y se puede cambiar. Lo guardado antes con otras etiquetas (`COMPRAS…`) **no
+  se migró**: se muestra tal cual hasta que alguien edita la fila.
 - **El importador de insumos protege lo interno de lo público, no al revés.** La
   importación en lote (`POST /api/insumos/importar[/preview]`) declara su
   `fuente_import` (obligatoria, se estampa en todas las filas del archivo; la columna
@@ -498,11 +506,10 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   rotulado `COSTO INTERNO`, tratado como confidencial por `config.classify_price_source`
   sin que nada lo avisara.
 - No conviertas en "listo" el aviso de clasificación del diálogo de importación
-  (`DialogoImportarInsumos.tsx`). `classify_price_source` es fail-open: `PRECIO IDU
-  2026` clasifica **interno** y el candado no se dispara. La protección es que el
-  diálogo **muestre** cómo se clasificó la fuente (`clasificacion_import` del preview)
-  antes de aplicar, no que el sistema adivine que quisiste decir `PRECIO IDU`. Un
-  matching difuso ahí sería una fuente nueva de sorpresas.
+  (`DialogoImportarInsumos.tsx`). Ya no hay typo posible (`PRECIO IDU 2026` se
+  rechaza), pero escoger `COSTO INTERNO` por error sí pisa los costos internos: el
+  diálogo **muestra** cómo se clasificó la fuente (`clasificacion_import` del preview)
+  junto al botón de aplicar. Tampoco le pongas un default a ese selector.
 - No hagas que volver a buscar APU toque una fila `confirmed`, ni le agregues un
   "forzar". Una persona resolvió esa fila; el re-match no la pisa. Las de `costo_manual`
   caen ahí solas (`set_costo_manual` las deja `confirmed`), y eso es el candado, no una

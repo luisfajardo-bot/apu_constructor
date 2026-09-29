@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { listarInsumos, getFuentes, type ListarInsumosParams } from "@/api/insumos";
+import { listarInsumos, type ListarInsumosParams } from "@/api/insumos";
 import { listarListas, crearLista, renombrarLista } from "@/api/listas";
 import { LISTA_PRINCIPAL_ID, type Insumo, type ListaPrecios } from "@/lib/tipos";
 import { BarraFiltros, type FiltrosState } from "@/components/insumos/BarraFiltros";
@@ -28,7 +28,6 @@ export default function Insumos() {
   const [listas, setListas] = useState<ListaPrecios[]>([]);
   const [insumos, setInsumos] = useState<Insumo[]>([]);
   const [total, setTotal] = useState(0);
-  const [fuentes, setFuentes] = useState<string[]>([]);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importarOpen, setImportarOpen] = useState(false);
@@ -70,12 +69,6 @@ export default function Insumos() {
   useEffect(() => {
     cargarListas();
   }, [cargarListas]);
-
-  // Las fuentes son atributo de precio de la lista activa: recargar al cambiarla
-  // (TablaInsumos las usa para el autocompletado del editor de fuente).
-  useEffect(() => {
-    getFuentes(filtros.lista).then(setFuentes).catch(() => {});
-  }, [filtros.lista]);
 
   useEffect(() => {
     cargar(filtros);
@@ -199,7 +192,6 @@ export default function Insumos() {
       <TablaInsumos
         key={filtros.lista}
         insumos={insumos}
-        fuentes={fuentes}
         listaId={filtros.lista}
         onReload={recargar}
         puedeEditar={puedeEditar}
@@ -213,7 +205,6 @@ export default function Insumos() {
             onOpenChange={setImportarOpen}
             listaId={filtros.lista}
             listaNombre={listaActivaNombre}
-            fuentes={fuentes}
             onAplicado={recargar}
           />
 

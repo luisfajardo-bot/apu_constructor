@@ -132,8 +132,8 @@ def cmd_db_update_price(args) -> int:
         print(MSG_PRECIO_POSITIVO)
         return 1
     try:
-        alm.precios.set_precio(args.codigo, args.precio,
-                               fuente=args.fuente or "ACTUALIZACION MANUAL",
+        fuente = config.normalizar_fuente_precio(args.fuente, config.FUENTE_INTERNA)
+        alm.precios.set_precio(args.codigo, args.precio, fuente=fuente,
                                nombre=args.nombre)
     except ValueError as e:
         print(str(e))
@@ -286,7 +286,8 @@ def build_parser() -> argparse.ArgumentParser:
     db_up = dbsub.add_parser("update-price", help="Actualizar el precio de un insumo.")
     db_up.add_argument("codigo")
     db_up.add_argument("precio", type=float)
-    db_up.add_argument("--fuente", default="")
+    db_up.add_argument("--fuente", default="",
+                       help='"PRECIO IDU" o "COSTO INTERNO" (por defecto COSTO INTERNO)')
     db_up.add_argument("--nombre", help="Nombre exacto del insumo (desambigua códigos repetidos).")
     db_up.set_defaults(func=cmd_db_update_price)
 

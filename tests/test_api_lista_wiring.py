@@ -49,7 +49,7 @@ def _con_apu(alm):
         "APU-1", "DIURNO", "100", "Concreto 3000 PSI", "M3", 1.0, 1000.0)])
 
 
-def _con_lista(alm, iid, precio, fuente="ACTA NP"):
+def _con_lista(alm, iid, precio, fuente="COSTO INTERNO"):
     """Crea una lista NP y le fija a `iid` un precio propio, distinto de Principal."""
     lid = alm.precios.crear_lista("NP Calle 13")
     alm.precios.set_precio_por_id(iid, precio, fuente, lista_id=lid)
@@ -87,8 +87,8 @@ def test_get_insumos_lista_devuelve_el_precio_de_esa_lista(tmp_path):
 def test_get_insumos_fuentes_lista_devuelve_la_fuente_de_esa_lista(tmp_path):
     cli, alm = _cli(tmp_path, rol="consulta")
     iid = alm.precios.get_candidatos("100")[0].id
-    lid = _con_lista(alm, iid, 5000.0, fuente="ACTA NP")
-    assert cli.get(f"/api/insumos/fuentes?lista={lid}").json() == ["ACTA NP"]
+    lid = _con_lista(alm, iid, 5000.0, fuente="COSTO INTERNO")
+    assert cli.get(f"/api/insumos/fuentes?lista={lid}").json() == ["COSTO INTERNO"]
     assert cli.get("/api/insumos/fuentes").json() == ["PRECIO IDU"]
 
 
@@ -105,7 +105,7 @@ def test_post_insumos_importar_preview_calcula_contra_la_lista(tmp_path):
     iid = alm.precios.get_candidatos("100")[0].id
     lid = _con_lista(alm, iid, 5000.0)
     r = cli.post("/api/insumos/importar/preview",
-                 data={"fuente_import": "ACTA NP", "lista_id": str(lid)},
+                 data={"fuente_import": "COSTO INTERNO", "lista_id": str(lid)},
                  files={"archivo": ("l.xlsx", _xlsx_upsert_100(6000.0), _XLSX)})
     assert r.status_code == 200, r.text
     c = r.json()["actualizar"][0]
@@ -118,7 +118,7 @@ def test_post_insumos_cambios_escribe_en_la_lista_no_en_principal(tmp_path):
     iid = alm.precios.get_candidatos("100")[0].id
     lid = alm.precios.crear_lista("NP Calle 13")
     r = cli.post("/api/insumos/cambios", json={
-        "cambios": [{"insumo_id": iid, "precio": 4200.0, "fuente": "ACTA NP"}],
+        "cambios": [{"insumo_id": iid, "precio": 4200.0, "fuente": "COSTO INTERNO"}],
         "lista_id": lid})
     assert r.status_code == 200 and r.json()["aplicados"] == 1
     assert alm.precios.get_insumo_por_id(iid, lista_id=lid).precio == 4200.0
@@ -130,7 +130,7 @@ def test_post_insumos_crear_escribe_en_la_lista_no_en_principal(tmp_path):
     lid = alm.precios.crear_lista("NP Calle 13")
     r = cli.post("/api/insumos/crear", json={
         "codigo": "NP1", "nombre": "GEOTEXTIL NT 2500", "precio": 8000.0,
-        "fuente": "ACTA NP", "lista_id": lid})
+        "fuente": "COSTO INTERNO", "lista_id": lid})
     assert r.status_code == 200, r.text
     assert alm.precios.get_candidatos("NP1", lista_id=lid)[0].precio == 8000.0
     assert alm.precios.get_candidatos("NP1")[0].sin_precio is True   # Principal sin tarifa
@@ -140,7 +140,7 @@ def test_post_insumos_importar_escribe_en_la_lista_no_en_principal(tmp_path):
     cli, alm = _cli(tmp_path)
     lid = alm.precios.crear_lista("NP Calle 13")
     r = cli.post("/api/insumos/importar",
-                 data={"fuente_import": "ACTA NP", "lista_id": str(lid)},
+                 data={"fuente_import": "COSTO INTERNO", "lista_id": str(lid)},
                  files={"archivo": ("l.xlsx", _xlsx_upsert_100(6000.0), _XLSX)})
     assert r.status_code == 200, r.text
     assert r.json()["actualizados"] == 1 and r.json()["errores"] == []

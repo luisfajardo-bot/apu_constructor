@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { DialogoNotas } from "./DialogoNotas";
 import { IconoNotas } from "./IconoNotas";
 
@@ -34,6 +34,7 @@ beforeEach(() => {
   [listarNotas, crearNota, editarNota, borrarNota].forEach((f) => f.mockReset());
   listarNotas.mockResolvedValue([nota()]);
 });
+afterEach(() => vi.restoreAllMocks());
 
 describe("DialogoNotas", () => {
   it("lista las notas del dueño", async () => {
@@ -72,6 +73,42 @@ describe("DialogoNotas", () => {
     await waitFor(() => expect(borrarNota).toHaveBeenCalledWith(1));
     expect(screen.queryByText("cotización X")).toBeNull();
     expect(onCambio).toHaveBeenCalled();
+  });
+
+  it("descarta la respuesta tardía de un dueño anterior", async () => {
+    const OTRO = { ...DUENO, codigo: "9999", nombre: "OTRO" };
+    let resolverA: (v: unknown) => void = () => {};
+    listarNotas.mockImplementation((d: { codigo: string }) =>
+      d.codigo === "4520" ? new Promise((r) => { resolverA = r; })
+                          : Promise.resolve([nota({ id: 7, texto: "nota de B" })]));
+    const { rerender } = render(
+      <DialogoNotas dueno={DUENO} etiqueta="A" onClose={() => {}} onCambio={() => {}} />);
+    rerender(<DialogoNotas dueno={OTRO} etiqueta="B" onClose={() => {}} onCambio={() => {}} />);
+    expect(await screen.findByText("nota de B")).toBeTruthy();
+    await act(async () => { resolverA([nota({ id: 1, texto: "nota de A" })]); });
+    expect(screen.queryByText("nota de A")).toBeNull();
+    expect(screen.getByText("nota de B")).toBeTruthy();
+  });
+
+  it("un objeto dueño nuevo con los mismos campos no recarga ni borra lo escrito", async () => {
+    const props = { etiqueta: "x", onClose: () => {}, onCambio: () => {} };
+    const { rerender } = render(<DialogoNotas dueno={{ ...DUENO }} {...props} />);
+    await screen.findByText("cotización X");
+    fireEvent.change(screen.getByLabelText("Nueva nota"), { target: { value: "borrador" } });
+    rerender(<DialogoNotas dueno={{ ...DUENO }} {...props} />);
+    expect(listarNotas).toHaveBeenCalledTimes(1);
+    expect((screen.getByLabelText("Nueva nota") as HTMLTextAreaElement).value).toBe("borrador");
+  });
+
+  it("si crear falla, conserva el texto escrito", async () => {
+    crearNota.mockRejectedValue(new Error("boom"));
+    montar();
+    await screen.findByText("cotización X");
+    fireEvent.change(screen.getByLabelText("Nueva nota"), { target: { value: "no perder" } });
+    fireEvent.click(screen.getByRole("button", { name: "Agregar nota" }));
+    await waitFor(() => expect(crearNota).toHaveBeenCalled());
+    await act(async () => {});
+    expect((screen.getByLabelText("Nueva nota") as HTMLTextAreaElement).value).toBe("no perder");
   });
 
   it("sin permisos no muestra botones; consulta no puede escribir", async () => {

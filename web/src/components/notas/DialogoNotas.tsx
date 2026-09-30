@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -29,26 +29,41 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
   const [editando, setEditando] = useState<{ id: number; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
 
+  // Clave estable del dueño: un objeto nuevo con los mismos campos no recarga nada.
+  const claveDueno = dueno ? [dueno.entidad, dueno.codigo, dueno.nombre, dueno.turno].join("|") : "";
+  const duenoRef = useRef(dueno);
+  duenoRef.current = dueno;
+  // Dueño vigente: tras un await, si cambió (o se cerró), no se toca el estado.
+  const claveVigente = useRef(claveDueno);
+  claveVigente.current = claveDueno;
+
   useEffect(() => {
-    if (!dueno) return;
+    const d = duenoRef.current;
+    if (!d) return;
+    let cancelado = false;
     setNotas(null);
     setNueva("");
     setEditando(null);
-    listarNotas(dueno)
-      .then(setNotas)
+    listarNotas(d)
+      .then((r) => { if (!cancelado) setNotas(r); })
       .catch((e) => {
+        if (cancelado) return;
         toast.error(msg(e, "No se pudieron cargar las notas"));
         setNotas([]);
       });
-  }, [dueno]);
+    return () => { cancelado = true; };
+  }, [claveDueno]);
 
   async function agregar() {
     if (!dueno || !nueva.trim()) return;
+    const clave = claveDueno;
     setOcupado(true);
     try {
       const n = await crearNota(dueno, nueva);
-      setNotas((prev) => [...(prev ?? []), n]);
-      setNueva("");
+      if (clave === claveVigente.current) {
+        setNotas((prev) => [...(prev ?? []), n]);
+        setNueva("");
+      }
       onCambio();
     } catch (e) {
       toast.error(msg(e, "No se pudo guardar la nota"));   // lo escrito se conserva
@@ -59,11 +74,14 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
 
   async function guardarEdicion() {
     if (!editando || !editando.texto.trim()) return;
+    const clave = claveDueno;
     setOcupado(true);
     try {
       const n = await editarNota(editando.id, editando.texto);
-      setNotas((prev) => (prev ?? []).map((x) => (x.id === n.id ? n : x)));
-      setEditando(null);
+      if (clave === claveVigente.current) {
+        setNotas((prev) => (prev ?? []).map((x) => (x.id === n.id ? n : x)));
+        setEditando(null);
+      }
       onCambio();
     } catch (e) {
       toast.error(msg(e, "No se pudo editar la nota"));
@@ -74,10 +92,13 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
 
   async function borrar(id: number) {
     if (!window.confirm("¿Borrar esta nota?")) return;
+    const clave = claveDueno;
     setOcupado(true);
     try {
       await borrarNota(id);
-      setNotas((prev) => (prev ?? []).filter((x) => x.id !== id));
+      if (clave === claveVigente.current) {
+        setNotas((prev) => (prev ?? []).filter((x) => x.id !== id));
+      }
       onCambio();
     } catch (e) {
       toast.error(msg(e, "No se pudo borrar la nota"));

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { listarTodasNotas } from "@/api/notas";
+import { listarUsuarios } from "@/api/usuarios";
 import type { Nota } from "@/lib/tipos";
 import { DialogoNotas } from "@/components/notas/DialogoNotas";
 
@@ -12,6 +13,8 @@ const fecha = (iso: string) => new Date(iso).toLocaleString("es-CO");
  *  endpoint /api/notas/todas exige admin: la pestaña no es la única puerta. */
 export default function Notas() {
   const [entidad, setEntidad] = useState("");
+  const [autor, setAutor] = useState("");
+  const [autores, setAutores] = useState<{ id: string; label: string }[]>([]);
   const [inputQ, setInputQ] = useState("");
   const [q, setQ] = useState("");
   const [offset, setOffset] = useState(0);
@@ -26,16 +29,29 @@ export default function Notas() {
     return () => clearTimeout(t);
   }, [inputQ]);
 
+  // Las opciones del filtro de autor se cargan una vez; si falla, queda solo "Todos".
+  useEffect(() => {
+    listarUsuarios().then((us) => setAutores(
+      us.map((u) => ({ id: u.user_id, label: u.nombre || u.email }))
+        .sort((a, b) => a.label.localeCompare(b.label, "es"))
+    )).catch(() => {});
+  }, []);
+
+  // Solo la última petición pinta: una respuesta vieja no pisa a la nueva.
+  const seq = useRef(0);
   const cargar = useCallback(async () => {
+    const mia = ++seq.current;
     setError(null);
     try {
-      const r = await listarTodasNotas({ entidad, q, limit: LIMIT, offset });
+      const r = await listarTodasNotas({ entidad, autor, q, limit: LIMIT, offset });
+      if (mia !== seq.current) return;
       setItems(r.items);
       setTotal(r.total);
     } catch (e) {
+      if (mia !== seq.current) return;
       setError(e instanceof Error ? e.message : "No se pudieron cargar las notas");
     }
-  }, [entidad, q, offset]);
+  }, [entidad, autor, q, offset]);
 
   useEffect(() => { void cargar(); }, [cargar]);
 
@@ -50,6 +66,13 @@ export default function Notas() {
           <option value="">Insumos y APUs</option>
           <option value="insumo">Insumos</option>
           <option value="apu">APUs</option>
+        </select>
+        <label className="ml-2 text-xs" htmlFor="notas-autor">Autor</label>
+        <select id="notas-autor" value={autor}
+                onChange={(e) => { setAutor(e.target.value); setOffset(0); }}
+                className="h-7 rounded border border-border bg-background px-2 text-xs">
+          <option value="">Todos los autores</option>
+          {autores.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
         </select>
         <Input className="h-7 w-64 text-xs" placeholder="Buscar en las notas…"
                value={inputQ} onChange={(e) => setInputQ(e.target.value)} />

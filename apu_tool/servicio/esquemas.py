@@ -92,10 +92,12 @@ class NotaNuevaIn(BaseModel):
     nombre: str = ""             # insumo: parte de la identidad
     turno: str = ""              # apu: parte de la identidad
     texto: str
+    menciones: list[str] = []    # user_id de los mencionados (los valida el servidor)
 
 
 class NotaEditarIn(BaseModel):
     texto: str
+    menciones: Optional[list[str]] = None   # None = no tocar las menciones
 
 
 class ListaPreciosIn(BaseModel):

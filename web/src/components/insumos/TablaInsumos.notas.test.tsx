@@ -6,6 +6,7 @@ const listarNotas = vi.fn(async () => []);
 vi.mock("@/api/notas", () => ({
   listarNotas: (...a: unknown[]) => listarNotas(...(a as [])),
   crearNota: vi.fn(), editarNota: vi.fn(), borrarNota: vi.fn(),
+  listarMencionables: vi.fn(async () => []),
 }));
 vi.mock("@/api/insumos", () => ({ getInsumo: vi.fn(), aplicarCambios: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ perfil: { rol: "editor" } }) }));

@@ -192,7 +192,7 @@ export default function Apus() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-6 px-1" />
-              <TableHead className="w-7 px-1" aria-label="Notas" />
+              <TableHead className="text-xs w-12 px-1 text-center">Notas</TableHead>
               <TableHead className="text-xs w-24">Código</TableHead>
               <TableHead className="text-xs w-20">Turno</TableHead>
               <TableHead className="text-xs">Nombre</TableHead>

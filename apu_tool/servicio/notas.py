@@ -70,7 +70,8 @@ def _resolver_dueno(alm: Almacen, entidad: str, codigo: str, nombre: str,
 
 def _dueno(n: Nota) -> dict:
     """Identidad del dueño leída de la clave, para reabrir su panel desde la pestaña
-    Notas. El nombre del insumo sale normalizado: basta, porque se vuelve a normalizar."""
+    Notas. El nombre del insumo sale tal cual de la etiqueta (lo que va después de ' · ');
+    solo si la etiqueta no lo trae se usa la parte normalizada de la clave."""
     codigo, _, resto = n.clave.partition("|")
     if n.entidad == "insumo":
         nombre = n.etiqueta.split(" · ", 1)[1] if " · " in n.etiqueta else resto

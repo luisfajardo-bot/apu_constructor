@@ -42,7 +42,7 @@ class NotasPg:
         return [_fila(r) for r in rows]
 
     def editar(self, conn, nota_id: int, texto: str, editada_en: str) -> None:
-        conn.execute("UPDATE seguridad.nota SET texto=%s, editada_en=%s WHERE id=%s",
+        conn.execute("UPDATE seguridad.nota SET texto=%s, editada_en=%s WHERE id=%s AND borrada=0",
                      (texto, editada_en, int(nota_id)))
 
     def borrar(self, conn, nota_id: int) -> None:

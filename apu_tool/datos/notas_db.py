@@ -58,7 +58,7 @@ class NotasDB:
         return [_fila(r) for r in rows]
 
     def editar(self, conn, nota_id: int, texto: str, editada_en: str) -> None:
-        conn.execute("UPDATE nota SET texto=?, editada_en=? WHERE id=?",
+        conn.execute("UPDATE nota SET texto=?, editada_en=? WHERE id=? AND borrada=0",
                      (texto, editada_en, int(nota_id)))
 
     def borrar(self, conn, nota_id: int) -> None:
@@ -83,10 +83,12 @@ class NotasDB:
         if autor_id:
             where.append("autor_id=?"); params.append(autor_id)
         if q:
-            where.append("(lower(texto) LIKE ? OR lower(etiqueta) LIKE ?)")
-            params += [f"%{q.lower()}%"] * 2
+            where.append("(cf(texto) LIKE ? OR cf(etiqueta) LIKE ?)")
+            params += [f"%{q.casefold()}%"] * 2
         wsql = " WHERE " + " AND ".join(where)
         with self.connect() as conn:
+            # lower() de SQLite es solo ASCII; casefold da paridad con ILIKE de Postgres
+            conn.create_function("cf", 1, lambda s: (s or "").casefold(), deterministic=True)
             total = conn.execute(f"SELECT COUNT(*) FROM nota{wsql}", params).fetchone()[0]
             rows = conn.execute(
                 f"SELECT * FROM nota{wsql} ORDER BY creada_en DESC, id DESC LIMIT ? OFFSET ?",

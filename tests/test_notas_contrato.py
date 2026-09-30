@@ -87,6 +87,22 @@ def test_editar_y_borrar_suave(repo):
     assert r.listar("insumo", "4520|DUCTO PVC") == []       # pero no se lista
 
 
+def test_no_se_edita_una_nota_borrada(repo):
+    r, tx = repo
+    nid = _crear(r, tx)
+    _escribir(tx, lambda c: r.borrar(c, nid))
+    _escribir(tx, lambda c: r.editar(c, nid, "tarde", "2026-09-30T12:00:00+00:00"))
+    assert r.get(nid).texto == "cotización X" and r.get(nid).editada_en is None
+
+
+def test_buscar_ignora_mayusculas_con_tildes(repo):
+    r, tx = repo
+    if os.environ.get("TEST_DATABASE_URL") and not isinstance(r, __import__("apu_tool.datos.notas_db", fromlist=["NotasDB"]).NotasDB):
+        pytest.skip("solo SQLite: ILIKE de Postgres depende del locale de la BD (en la de prueba no pliega Í/í)")
+    _crear(r, tx, texto="Cotización FERRETERÍA")
+    assert len(r.buscar(q="ferretería")[0]) == 1
+
+
 def test_resumen_por_claves_da_la_ultima_no_borrada(repo):
     r, tx = repo
     _crear(r, tx, texto="vieja", ts="2026-09-30T10:00:00+00:00")

@@ -9,7 +9,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 
-const ENTIDADES = ["", "insumo", "apu", "corrida", "usuario"] as const;
+const ENTIDADES = ["", "insumo", "apu", "corrida", "usuario", "nota"] as const;
 
 function fmtTs(ts: string): string {
   const d = new Date(ts);

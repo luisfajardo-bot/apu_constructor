@@ -76,6 +76,13 @@ test("la navegación es un landmark, separada de las lecturas de estado", async 
   expect(destinos).toEqual(["Corridas", "Insumos", "APUs", "Usuarios", "Auditoría", "Notas"]);
 });
 
+test("la pestaña Notas no aparece para quien no es Admin", async () => {
+  rol = "editor";
+  render(<MemoryRouter><Layout /></MemoryRouter>);
+  const nav = screen.getByRole("navigation");
+  expect(within(nav).queryByRole("link", { name: "Notas" })).toBeNull();
+});
+
 test("la barra muestra cuánta gente está en línea, y quién", async () => {
   rol = "editor";
   render(<MemoryRouter><Layout /></MemoryRouter>);

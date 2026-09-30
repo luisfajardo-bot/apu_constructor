@@ -87,7 +87,7 @@ export default function Notas() {
         <table className="w-full border-collapse text-xs">
           <thead className="sticky top-0 bg-muted/80">
             <tr className="text-left text-muted-foreground">
-              <th className="w-36 border-b px-2 py-1.5 font-medium">Fecha</th>
+              <th className="w-44 whitespace-nowrap border-b px-2 py-1.5 font-medium">Fecha</th>
               <th className="w-44 border-b px-2 py-1.5 font-medium">Autor</th>
               <th className="w-16 border-b px-2 py-1.5 font-medium">Tipo</th>
               <th className="w-80 border-b px-2 py-1.5 font-medium">De</th>
@@ -98,7 +98,7 @@ export default function Notas() {
             {items.map((n) => (
               <tr key={n.id} className="cursor-pointer hover:bg-muted/40"
                   onClick={() => setAbierta(n)}>
-                <td className="px-2 py-1 text-muted-foreground">{fecha(n.creada_en)}</td>
+                <td className="whitespace-nowrap px-2 py-1 text-muted-foreground">{fecha(n.creada_en)}</td>
                 <td className="truncate px-2 py-1">{n.autor_email}</td>
                 <td className="px-2 py-1">{n.entidad === "apu" ? "APU" : "Insumo"}</td>
                 <td className="max-w-[20rem] truncate px-2 py-1" title={n.etiqueta}>{n.etiqueta}</td>

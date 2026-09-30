@@ -85,7 +85,7 @@ export function TablaInsumos({ insumos, listaId, onReload, puedeEditar = false, 
         <table className="w-full text-xs border-collapse">
           <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur">
             <tr>
-              <th className="px-1 py-1.5 border-b w-7" aria-label="Notas" />
+              <th className="px-1 py-1.5 text-center font-medium text-muted-foreground border-b w-12">Notas</th>
               <th className="px-2 py-1.5 text-left font-medium text-muted-foreground border-b w-28">
                 Código
               </th>

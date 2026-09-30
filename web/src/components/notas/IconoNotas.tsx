@@ -21,7 +21,7 @@ export function IconoNotas({ tiene = false, ultima = "", onClick }: Props) {
       }}
       className={
         "inline-flex h-5 w-5 items-center justify-center rounded hover:bg-muted " +
-        (tiene ? "text-primary" : "text-muted-foreground/50")
+        (tiene ? "text-primary" : "text-muted-foreground")
       }
     >
       <MessageSquare className="h-3.5 w-3.5" fill={tiene ? "currentColor" : "none"} />

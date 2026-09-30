@@ -126,3 +126,14 @@ def test_reset_catalogo_no_borra_notas(tmp_path):
                         "2026-09-30T10:00:00+00:00")
     alm.reset_catalogo()              # lo que hace seed --force
     assert [n.texto for n in alm.notas.listar("insumo", "1|X")] == ["sigue"]
+
+
+def test_notas_pg_cumple_el_protocolo():
+    from apu_tool.datos.pg.notas_pg import NotasPg
+    from apu_tool.datos.repositorio import RepositorioNotas
+    assert issubclass(NotasPg, RepositorioNotas) or isinstance(NotasPg(None), RepositorioNotas)
+
+
+def test_ddl_pg_crea_la_tabla_nota():
+    sql = (config.PROJECT_ROOT / "db" / "pg" / "seguridad.sql").read_text(encoding="utf-8")
+    assert "CREATE TABLE IF NOT EXISTS seguridad.nota" in sql

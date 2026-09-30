@@ -29,6 +29,7 @@ class Almacen:
             from apu_tool.datos.pg.corridas_pg import CorridasPg
             from apu_tool.datos.pg.perfiles_pg import PerfilesPg
             from apu_tool.datos.pg.auditoria_pg import AuditoriaPg
+            from apu_tool.datos.pg.notas_pg import NotasPg
             from apu_tool.datos.pg.carpetas_pg import CarpetasPg
             from apu_tool.datos.pg.composiciones_pg import ComposicionesPg
             self._cx = Conexion(config.database_url())
@@ -39,6 +40,7 @@ class Almacen:
             self.composiciones = ComposicionesPg(self._cx)
             self.perfiles = PerfilesPg(self._cx)
             self.auditoria = AuditoriaPg(self._cx)
+            self.notas = NotasPg(self._cx)
             self._paths = None
             self._seg_path = None
         else:

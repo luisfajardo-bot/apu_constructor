@@ -51,6 +51,10 @@ _FORBIDDEN_KEYS = {
     # `origen_json` va por la MISMA razón que `plan_json`: lleva la conciliación
     # —o sea dinero— adentro, así que el objeto entero no puede cruzar la frontera.
     "origen_json",
+    # Notas humanas de insumos/APUs: texto libre que puede llevar montos
+    # («cotización a $45.000»). assert_no_money mira claves, no valores: prohibir la
+    # clave es la única forma de que un payload con notas FALLE en vez de filtrarse.
+    "nota", "notas", "ultima_nota",
 }
 
 

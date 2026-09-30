@@ -104,6 +104,7 @@ flowchart TD
 | `insumos_ocultos.py` | Migración: oculta (no borra) del catálogo de insumos los códigos que son un eco |
 | `limites.py` | Endurecimiento de tráfico: límite de tamaño de subida (aquí) y rate limiting (Task 6). |
 | `listas.py` | Lógica de servicio para las listas de precios (tarifas). |
+| `notas.py` | Notas humanas de insumos y APUs: dueño, permisos y auditoría. |
 | `plantillas.py` | Generación de plantillas .xlsx para los importadores (APUs, insumos, precios). |
 | `presencia.py` | Quién está usando la app ahora mismo. |
 | `rutas.py` | Endpoints de la API. Delgados: validan y delegan en apu_tool.servicio.corridas. |

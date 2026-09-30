@@ -86,6 +86,18 @@ class CambiosIn(BaseModel):
     lista_id: Optional[int] = None      # None = Principal
 
 
+class NotaNuevaIn(BaseModel):
+    entidad: str                 # insumo | apu
+    codigo: str
+    nombre: str = ""             # insumo: parte de la identidad
+    turno: str = ""              # apu: parte de la identidad
+    texto: str
+
+
+class NotaEditarIn(BaseModel):
+    texto: str
+
+
 class ListaPreciosIn(BaseModel):
     nombre: str
 

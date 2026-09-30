@@ -6,6 +6,7 @@ import { TablaInsumos } from "./TablaInsumos";
 // COSTO INTERNO (es lo normal); si el precio es del IDU, se cambia en el selector.
 
 const aplicarCambios = vi.fn();
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ perfil: { rol: "editor" } }) }));
 vi.mock("@/api/insumos", () => ({
   getInsumo: () => Promise.resolve(null),
   aplicarCambios: (...a: unknown[]) => aplicarCambios(...a),

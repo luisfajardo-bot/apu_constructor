@@ -76,3 +76,59 @@ class NotasPg:
                 f"SELECT * FROM seguridad.nota{wsql} ORDER BY creada_en DESC, id DESC "
                 f"LIMIT %s OFFSET %s", params + [int(limit), int(offset)]).fetchall()
         return [_fila(r) for r in rows], int(total)
+
+    # ---- Fase 2: menciones (espejo de notas_db.py) ----
+    def set_menciones(self, conn, nota_id: int, user_ids: list[str],
+                      creada_en: str) -> list[str]:
+        actuales = {r["user_id"] for r in conn.execute(
+            "SELECT user_id FROM seguridad.nota_mencion WHERE nota_id=%s",
+            (int(nota_id),)).fetchall()}
+        deseados = list(dict.fromkeys(user_ids))
+        for u in actuales - set(deseados):
+            conn.execute("DELETE FROM seguridad.nota_mencion WHERE nota_id=%s AND user_id=%s",
+                         (int(nota_id), u))
+        nuevos = [u for u in deseados if u not in actuales]
+        for u in nuevos:
+            conn.execute("INSERT INTO seguridad.nota_mencion (nota_id, user_id, creada_en) "
+                         "VALUES (%s,%s,%s)", (int(nota_id), u, creada_en))
+        return nuevos
+
+    def menciones_de_notas(self, nota_ids: list[int]) -> dict[int, list[str]]:
+        if not nota_ids:
+            return {}
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT nota_id, user_id FROM seguridad.nota_mencion "
+                "WHERE nota_id = ANY(%s) ORDER BY nota_id, user_id",
+                ([int(i) for i in nota_ids],)).fetchall()
+        out: dict[int, list[str]] = {}
+        for r in rows:
+            out.setdefault(int(r["nota_id"]), []).append(r["user_id"])
+        return out
+
+    def contar_sin_leer(self, user_id: str) -> int:
+        with self.cx.connection() as conn:
+            return int(conn.execute(
+                "SELECT COUNT(*) AS n FROM seguridad.nota_mencion m "
+                "JOIN seguridad.nota n ON n.id = m.nota_id "
+                "WHERE m.user_id=%s AND m.leida_en IS NULL AND n.borrada=0",
+                (user_id,)).fetchone()["n"])
+
+    def listar_menciones(self, user_id: str,
+                         limit: int = 50) -> list[tuple[Nota, Optional[str]]]:
+        with self.cx.connection() as conn:
+            rows = conn.execute(
+                "SELECT n.*, m.leida_en AS mencion_leida_en FROM seguridad.nota_mencion m "
+                "JOIN seguridad.nota n ON n.id = m.nota_id "
+                "WHERE m.user_id=%s AND n.borrada=0 "
+                "ORDER BY m.creada_en DESC, n.id DESC LIMIT %s",
+                (user_id, int(limit))).fetchall()
+        return [(_fila(r), r["mencion_leida_en"]) for r in rows]
+
+    def marcar_leida(self, conn, user_id: str, nota_id: int, leida_en: str) -> None:
+        conn.execute("UPDATE seguridad.nota_mencion SET leida_en=%s WHERE user_id=%s "
+                     "AND nota_id=%s AND leida_en IS NULL", (leida_en, user_id, int(nota_id)))
+
+    def marcar_todas_leidas(self, conn, user_id: str, leida_en: str) -> None:
+        conn.execute("UPDATE seguridad.nota_mencion SET leida_en=%s WHERE user_id=%s "
+                     "AND leida_en IS NULL", (leida_en, user_id))

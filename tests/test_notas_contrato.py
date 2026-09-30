@@ -153,3 +153,66 @@ def test_notas_pg_cumple_el_protocolo():
 def test_ddl_pg_crea_la_tabla_nota():
     sql = (config.PROJECT_ROOT / "db" / "pg" / "seguridad.sql").read_text(encoding="utf-8")
     assert "CREATE TABLE IF NOT EXISTS seguridad.nota" in sql
+
+
+# ---- Fase 2: menciones ----
+
+def _mencionar(r, tx, nid, uids, ts="2026-09-30T10:00:00+00:00"):
+    return _escribir(tx, lambda c: r.set_menciones(c, nid, uids, ts))
+
+
+def test_set_menciones_sincroniza_y_devuelve_los_nuevos(repo):
+    r, tx = repo
+    nid = _crear(r, tx)
+    assert _mencionar(r, tx, nid, ["ana", "beto"]) == ["ana", "beto"]
+    assert sorted(r.menciones_de_notas([nid])[nid]) == ["ana", "beto"]
+    # editar: se va beto, llega caro; ana sigue y NO es "nueva"
+    assert _mencionar(r, tx, nid, ["ana", "caro"]) == ["caro"]
+    assert sorted(r.menciones_de_notas([nid])[nid]) == ["ana", "caro"]
+    assert _mencionar(r, tx, nid, []) == []
+    assert r.menciones_de_notas([nid]) == {}
+    assert r.menciones_de_notas([]) == {}
+
+
+def test_contar_listar_y_marcar_leidas(repo):
+    r, tx = repo
+    a = _crear(r, tx, texto="primera", ts="2026-09-30T10:00:00+00:00")
+    b = _crear(r, tx, texto="segunda", ts="2026-09-30T11:00:00+00:00")
+    _mencionar(r, tx, a, ["ana"], ts="2026-09-30T10:00:00+00:00")
+    _mencionar(r, tx, b, ["ana", "beto"], ts="2026-09-30T11:00:00+00:00")
+    assert r.contar_sin_leer("ana") == 2 and r.contar_sin_leer("beto") == 1
+    lista = r.listar_menciones("ana")
+    assert [(n.texto, leida) for n, leida in lista] == [("segunda", None), ("primera", None)]
+
+    _escribir(tx, lambda c: r.marcar_leida(c, "ana", a, "2026-09-30T12:00:00+00:00"))
+    assert r.contar_sin_leer("ana") == 1
+    assert dict((n.id, l) for n, l in r.listar_menciones("ana"))[a] == "2026-09-30T12:00:00+00:00"
+    # marcar otra vez no pisa la fecha de lectura
+    _escribir(tx, lambda c: r.marcar_leida(c, "ana", a, "2026-09-30T13:00:00+00:00"))
+    assert dict((n.id, l) for n, l in r.listar_menciones("ana"))[a] == "2026-09-30T12:00:00+00:00"
+
+    _escribir(tx, lambda c: r.marcar_todas_leidas(c, "ana", "2026-09-30T14:00:00+00:00"))
+    assert r.contar_sin_leer("ana") == 0 and r.contar_sin_leer("beto") == 1
+
+
+def test_una_nota_borrada_no_cuenta_ni_se_lista(repo):
+    r, tx = repo
+    nid = _crear(r, tx)
+    _mencionar(r, tx, nid, ["ana"])
+    _escribir(tx, lambda c: r.borrar(c, nid))
+    assert r.contar_sin_leer("ana") == 0
+    assert r.listar_menciones("ana") == []
+
+
+def test_listar_menciones_respeta_el_limite(repo):
+    r, tx = repo
+    for i in range(3):
+        nid = _crear(r, tx, texto=f"n{i}", ts=f"2026-09-30T1{i}:00:00+00:00")
+        _mencionar(r, tx, nid, ["ana"], ts=f"2026-09-30T1{i}:00:00+00:00")
+    assert [n.texto for n, _ in r.listar_menciones("ana", limit=2)] == ["n2", "n1"]
+
+
+def test_ddl_crea_nota_mencion_en_los_dos_backends():
+    for ruta in (("db", "seguridad.sql"), ("db", "pg", "seguridad.sql")):
+        sql = config.PROJECT_ROOT.joinpath(*ruta).read_text(encoding="utf-8")
+        assert "nota_mencion" in sql and "UNIQUE (nota_id, user_id)" in sql

@@ -43,3 +43,14 @@ CREATE TABLE IF NOT EXISTS nota (
 );
 CREATE INDEX IF NOT EXISTS idx_nota_duenio ON nota(entidad, clave);
 CREATE INDEX IF NOT EXISTS idx_nota_creada ON nota(creada_en);
+
+-- Menciones de la Fase 2: a quién avisa una nota. `leida_en` NULL = sin leer.
+-- Enlace blando a perfiles (user_id de Supabase Auth), sin FK, como autor_id de nota.
+CREATE TABLE IF NOT EXISTS nota_mencion (
+    nota_id   INTEGER NOT NULL,
+    user_id   TEXT NOT NULL,
+    creada_en TEXT NOT NULL,
+    leida_en  TEXT,
+    UNIQUE (nota_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mencion_user ON nota_mencion(user_id, leida_en);

@@ -41,3 +41,13 @@ CREATE TABLE IF NOT EXISTS seguridad.nota (
 );
 CREATE INDEX IF NOT EXISTS idx_nota_duenio ON seguridad.nota(entidad, clave);
 CREATE INDEX IF NOT EXISTS idx_nota_creada ON seguridad.nota(creada_en);
+
+-- Espejo de db/seguridad.sql::nota_mencion.
+CREATE TABLE IF NOT EXISTS seguridad.nota_mencion (
+    nota_id   BIGINT NOT NULL,
+    user_id   TEXT NOT NULL,
+    creada_en TEXT NOT NULL,
+    leida_en  TEXT,
+    UNIQUE (nota_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mencion_user ON seguridad.nota_mencion(user_id, leida_en);

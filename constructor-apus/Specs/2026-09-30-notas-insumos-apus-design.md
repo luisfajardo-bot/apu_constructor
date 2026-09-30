@@ -36,6 +36,7 @@ junto a `perfiles` y `auditoria`. No vive en `precios.db`/`apus.db` **a propósi
 | `id` | INTEGER PK | |
 | `entidad` | TEXT NOT NULL | `insumo` \| `apu` (CHECK) |
 | `clave` | TEXT NOT NULL | identidad estable del dueño (ver abajo) |
+| `etiqueta` | TEXT NOT NULL | cómo se muestra el dueño («4520 · DUCTO PVC…», «4859 · NOCTURNO · …»), fijada al crear |
 | `texto` | TEXT NOT NULL | no vacío tras `strip`; tope 4000 caracteres |
 | `autor_id` | TEXT NOT NULL | `user_id` |
 | `autor_email` | TEXT NOT NULL | desnormalizado (se lee sin cruzar perfiles) |
@@ -52,7 +53,8 @@ junto a `perfiles` y `auditoria`. No vive en `precios.db`/`apus.db` **a propósi
 - APU: `codigo + "|" + shift`. Diurno y nocturno (`4859` / `4859 N`) tienen notas propias.
 
 Una nota cuyo dueño desaparece (APU borrado) queda huérfana: no se ve en las tablas,
-sí en la pestaña Notas con el dueño marcado «(ya no existe)». No se borra nada solo.
+sí en la pestaña Notas con su `etiqueta`. No se borra nada solo. (No se marca «ya no
+existe»: exigiría cruzar cada página de notas contra ~8000 insumos; YAGNI.)
 
 **Borrado suave:** `DELETE` marca `borrada=1`. El texto queda en la fila y en Auditoría.
 Existe para la Fase 3: una nota borrada con respuestas se muestra «(nota borrada)» y sus

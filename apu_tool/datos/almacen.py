@@ -29,6 +29,7 @@ class Almacen:
             from apu_tool.datos.pg.corridas_pg import CorridasPg
             from apu_tool.datos.pg.perfiles_pg import PerfilesPg
             from apu_tool.datos.pg.auditoria_pg import AuditoriaPg
+            from apu_tool.datos.pg.notas_pg import NotasPg
             from apu_tool.datos.pg.carpetas_pg import CarpetasPg
             from apu_tool.datos.pg.composiciones_pg import ComposicionesPg
             self._cx = Conexion(config.database_url())
@@ -39,10 +40,12 @@ class Almacen:
             self.composiciones = ComposicionesPg(self._cx)
             self.perfiles = PerfilesPg(self._cx)
             self.auditoria = AuditoriaPg(self._cx)
+            self.notas = NotasPg(self._cx)
             self._paths = None
             self._seg_path = None
         else:
             from apu_tool.datos.auditoria_db import AuditoriaDB
+            from apu_tool.datos.notas_db import NotasDB
             from apu_tool.datos.perfiles_db import PerfilesDB
             self._seg_path = (Path(precios_path).parent / "seguridad.db"
                               if isinstance(precios_path, Path) else config.DATA_DIR / "seguridad.db")
@@ -53,6 +56,7 @@ class Almacen:
             self.composiciones = ComposicionesDB(corridas_path)
             self.perfiles = PerfilesDB(self._seg_path)
             self.auditoria = AuditoriaDB(self._seg_path)
+            self.notas = NotasDB(self._seg_path)
             self._paths = {"precios": Path(precios_path), "apus": Path(apus_path),
                            "corridas": Path(corridas_path), "seguridad": Path(self._seg_path)}
 

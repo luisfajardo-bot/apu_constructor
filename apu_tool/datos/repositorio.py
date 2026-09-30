@@ -11,7 +11,7 @@ from typing import Iterable, Optional, Protocol, runtime_checkable
 from apu_tool.nucleo.models import (
     AjusteProyecto, Apu, ApuComponent, Carpeta, ClaseTransporte, ComposicionRow,
     CorridaItemRow, CorridaMeta, DePricedApu, EventoAuditoria, Insumo, ListaPrecios,
-    ParametrosProyecto, Perfil,
+    Nota, ParametrosProyecto, Perfil,
 )
 
 
@@ -482,6 +482,41 @@ class RepositorioAuditoria(Protocol):
                limit: int = 100, offset: int = 0) -> tuple[list[dict], int]:
         """Lectura paginada (abre su propia conexión). antes/despues/contexto ya
         parseados a objetos Python (dict/None). Orden ts desc."""
+        ...
+
+
+@runtime_checkable
+class RepositorioNotas(Protocol):
+    """Notas de insumos y APUs (seguridad.nota). Las escrituras van SOBRE la conexión
+    de la unidad de trabajo (`alm.transaccion("seguridad")`), junto con su auditoría."""
+
+    def crear(self, conn, entidad: str, clave: str, etiqueta: str, texto: str,
+              autor_id: str, autor_email: str, creada_en: str) -> int: ...
+
+    def get(self, nota_id: int) -> Optional[Nota]:
+        """Incluye las borradas (el servicio decide qué hacer con ellas)."""
+        ...
+
+    def listar(self, entidad: str, clave: str) -> list[Nota]:
+        """No borradas, orden cronológico (id asc)."""
+        ...
+
+    def editar(self, conn, nota_id: int, texto: str, editada_en: str) -> None: ...
+
+    def borrar(self, conn, nota_id: int) -> None:
+        """Borrado suave: borrada = 1."""
+        ...
+
+    def resumen_por_claves(self, entidad: str, claves: list[str]) -> dict[str, str]:
+        """clave → texto de la última nota no borrada. UNA consulta para toda la lista;
+        las claves sin notas no aparecen."""
+        ...
+
+    def buscar(self, *, entidad: Optional[str] = None, autor_id: Optional[str] = None,
+               q: Optional[str] = None, limit: int = 100,
+               offset: int = 0) -> tuple[list[Nota], int]:
+        """No borradas; `q` busca en texto y etiqueta sin distinguir mayúsculas.
+        Orden: creada_en desc, id desc."""
         ...
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { ChevronDown, FileSpreadsheet, Layers, Package, ScrollText, Users } from "lucide-react";
+import { ChevronDown, FileSpreadsheet, Layers, MessageSquare, Package, ScrollText, Users } from "lucide-react";
 import { getStatus } from "@/api/corridas";
 import { getPresencia } from "@/api/presencia";
 import type { StatusResponse, UsuarioEnLinea } from "@/lib/tipos";
@@ -85,6 +85,7 @@ export default function Layout() {
       ? [
           { to: "/usuarios", label: "Usuarios", end: true, Icono: Users, admin: true },
           { to: "/auditoria", label: "Auditoría", end: true, Icono: ScrollText, admin: true },
+          { to: "/notas", label: "Notas", end: true, Icono: MessageSquare, admin: true },
         ]
       : []),
   ];

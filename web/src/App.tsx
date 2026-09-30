@@ -12,6 +12,7 @@ import Insumos from "@/pages/Insumos";
 import Apus from "@/pages/Apus";
 import Usuarios from "@/pages/Usuarios";
 import Auditoria from "@/pages/Auditoria";
+import Notas from "@/pages/Notas";
 import DistanciasProyecto from "@/pages/DistanciasProyecto";
 import ClasificacionTransporte from "@/pages/ClasificacionTransporte";
 
@@ -35,6 +36,7 @@ export default function App() {
             <Route element={<RequiereRol minimo="admin" />}>
               <Route path="usuarios" element={<Usuarios />} />
               <Route path="auditoria" element={<Auditoria />} />
+              <Route path="notas" element={<Notas />} />
             </Route>
           </Route>
         </Route>

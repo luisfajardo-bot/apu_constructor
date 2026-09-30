@@ -17,7 +17,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { listarApus, getApuDetalle, type ListarApusParams } from "@/api/autoria";
-import type { ApuResumen, ApuDetalle } from "@/lib/tipos";
+import type { ApuResumen, ApuDetalle, DuenoNota } from "@/lib/tipos";
+import { IconoNotas } from "@/components/notas/IconoNotas";
+import { DialogoNotas } from "@/components/notas/DialogoNotas";
 import { cop } from "@/lib/moneda";
 import { etiquetaCalidadCruce } from "@/lib/calidadCruce";
 import SubApuBadge from "@/components/SubApuBadge";
@@ -55,6 +57,7 @@ export default function Apus() {
   const [editarDetalle, setEditarDetalle] = useState<ApuDetalle | null>(null);
   const [duplicarDetalle, setDuplicarDetalle] = useState<ApuDetalle | null>(null);
   const [borrarDetalle, setBorrarDetalle] = useState<ApuDetalle | null>(null);
+  const [notasDe, setNotasDe] = useState<{ dueno: DuenoNota; etiqueta: string } | null>(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -113,7 +116,7 @@ export default function Apus() {
   const hasNext = offset + LIMIT < total;
   const page = Math.floor(offset / LIMIT) + 1;
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
-  const TOTAL_COLS = 8;
+  const TOTAL_COLS = 9;
 
   return (
     <div className="flex flex-col h-full">
@@ -189,6 +192,7 @@ export default function Apus() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-6 px-1" />
+              <TableHead className="w-7 px-1" aria-label="Notas" />
               <TableHead className="text-xs w-24">Código</TableHead>
               <TableHead className="text-xs w-20">Turno</TableHead>
               <TableHead className="text-xs">Nombre</TableHead>
@@ -227,6 +231,18 @@ export default function Apus() {
                           />
                         </svg>
                       </span>
+                    </TableCell>
+                    <TableCell className="w-7 px-1 py-1 text-center">
+                      <IconoNotas
+                        tiene={!!a.tiene_notas}
+                        ultima={a.ultima_nota ?? ""}
+                        onClick={() =>
+                          setNotasDe({
+                            dueno: { entidad: "apu", codigo: a.codigo, nombre: a.nombre, turno: a.turno },
+                            etiqueta: `${a.codigo} · ${a.turno} · ${a.nombre}`,
+                          })
+                        }
+                      />
                     </TableCell>
                     <TableCell className="text-xs font-mono">{a.codigo}</TableCell>
                     <TableCell className="text-xs">{a.turno}</TableCell>
@@ -288,6 +304,13 @@ export default function Apus() {
           </TableBody>
         </Table>
       </div>
+
+      <DialogoNotas
+        dueno={notasDe?.dueno ?? null}
+        etiqueta={notasDe?.etiqueta ?? ""}
+        onClose={() => setNotasDe(null)}
+        onCambio={() => cargar()}
+      />
 
       {puedeEditar && (
         <>

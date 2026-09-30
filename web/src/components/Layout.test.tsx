@@ -73,7 +73,14 @@ test("la navegación es un landmark, separada de las lecturas de estado", async 
   render(<MemoryRouter><Layout /></MemoryRouter>);
   const nav = screen.getByRole("navigation");
   const destinos = within(nav).getAllByRole("link").map((a) => a.textContent);
-  expect(destinos).toEqual(["Corridas", "Insumos", "APUs", "Usuarios", "Auditoría"]);
+  expect(destinos).toEqual(["Corridas", "Insumos", "APUs", "Usuarios", "Auditoría", "Notas"]);
+});
+
+test("la pestaña Notas no aparece para quien no es Admin", async () => {
+  rol = "editor";
+  render(<MemoryRouter><Layout /></MemoryRouter>);
+  const nav = screen.getByRole("navigation");
+  expect(within(nav).queryByRole("link", { name: "Notas" })).toBeNull();
 });
 
 test("la barra muestra cuánta gente está en línea, y quién", async () => {
@@ -158,7 +165,7 @@ test("el botón de secciones abre y cierra el panel", async () => {
   expect(boton.getAttribute("aria-expanded")).toBe("false");
 
   // El panel que el botón controla es el <nav>, no un menú aparte: un segundo menú
-  // duplicaría los links y rompería el guard de los 5 destinos.
+  // duplicaría los links y rompería el guard de los 6 destinos.
   expect(boton.getAttribute("aria-controls")).toBe(
     screen.getByRole("navigation").getAttribute("id")
   );

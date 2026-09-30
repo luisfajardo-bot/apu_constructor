@@ -34,6 +34,7 @@ from apu_tool.servicio import corridas as svc
 from apu_tool.servicio.carpetas import CarpetaInvalida, CarpetaNoVacia
 from apu_tool.servicio import insumos as insumos_svc
 from apu_tool.servicio import listas as listas_svc
+from apu_tool.servicio import notas as notas_svc
 from apu_tool.servicio import plantillas as plantillas_svc
 from apu_tool.servicio import presencia as presencia_svc
 from apu_tool.servicio import transporte as transporte_svc
@@ -46,7 +47,8 @@ from apu_tool.servicio.esquemas import (
     AgregarLineasIn, AjusteProyectoIn, ApuEditIn, ApuNuevoIn, BorrarLineasIn,
     CambiosIn, ClasificarIn, ComposicionAprobarIn, ComposicionEditarIn,
     ComposicionRechazarIn, ConfirmarIn, ConfirmarLoteIn, EstadoIn, IgualarCostoIn,
-    IgualarUmbralIn, InsumoNuevoIn, ListaPreciosIn, QuitarCostoManualIn,
+    IgualarUmbralIn, InsumoNuevoIn, ListaPreciosIn, NotaEditarIn, NotaNuevaIn,
+    QuitarCostoManualIn,
     RebuscarAplicarIn, RolIn, StatusOut,
     TransporteParamsIn, UsuarioInvitarIn)
 
@@ -110,6 +112,54 @@ def auditoria_listar(user_id: Optional[str] = None, accion: Optional[str] = None
     return auditoria_svc.listar(alm, user_id=user_id, accion=accion, entidad_tipo=entidad_tipo,
                                 desde=desde, hasta=hasta, lote_id=lote_id,
                                 limit=limit, offset=offset)
+
+
+# ---- notas de insumos y APUs ----
+def _http_notas(fn):
+    """Traduce los errores del servicio de notas a HTTP."""
+    try:
+        return fn()
+    except notas_svc.NotaNoEncontrada:
+        raise HTTPException(status_code=404, detail="Nota no encontrada.")
+    except notas_svc.SinPermiso as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/notas/todas")
+def notas_todas(entidad: Optional[str] = None, autor: Optional[str] = None,
+                q: Optional[str] = None, limit: int = Query(100, ge=1, le=500),
+                offset: int = Query(0, ge=0), alm: Almacen = Depends(get_almacen),
+                actor=Depends(requiere_rol("admin"))):
+    return notas_svc.todas(alm, actor, entidad, autor, q, limit, offset)
+
+
+@router.get("/notas")
+def notas_listar(entidad: str, codigo: str, nombre: str = "", turno: str = "",
+                 alm: Almacen = Depends(get_almacen),
+                 actor=Depends(requiere_rol("consulta"))):
+    return _http_notas(lambda: notas_svc.listar(alm, actor, entidad, codigo, nombre, turno))
+
+
+@router.post("/notas")
+def notas_crear(body: NotaNuevaIn, alm: Almacen = Depends(get_almacen),
+                actor=Depends(requiere_rol("editor"))):
+    return _http_notas(lambda: notas_svc.crear(alm, actor, body.entidad, body.codigo,
+                                               body.nombre, body.turno, body.texto))
+
+
+@router.patch("/notas/{nota_id}")
+def notas_editar(nota_id: int, body: NotaEditarIn, alm: Almacen = Depends(get_almacen),
+                 actor=Depends(requiere_rol("editor"))):
+    return _http_notas(lambda: notas_svc.editar(alm, actor, nota_id, body.texto))
+
+
+@router.delete("/notas/{nota_id}")
+def notas_borrar(nota_id: int, alm: Almacen = Depends(get_almacen),
+                 actor=Depends(requiere_rol("editor"))):
+    _http_notas(lambda: notas_svc.borrar(alm, actor, nota_id))
+    return {"borrada": nota_id}
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 

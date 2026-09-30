@@ -44,6 +44,7 @@ flowchart TD
 | `correcciones.py` | Correcciones de código aplicadas al semillar (normalización mínima). |
 | `corridas_db.py` | Acceso a corridas.db (SQLite): estado de aplicación de un armado en progreso. |
 | `migracion_pg.py` | Migración de catálogo SQLite → Postgres (Supabase). Corridas NO se migran. |
+| `notas_db.py` | Acceso SQLite a la tabla `nota` (vive en seguridad.db). Implementa RepositorioNotas. |
 | `perfiles_db.py` | Acceso SQLite a la tabla perfiles (identidad + rol). Implementa RepositorioPerfiles. |
 | `pg/apus_pg.py` | Backend Postgres de APUs. Implementa RepositorioApus. Port 1:1 de apus_db.py. |
 | `pg/auditoria_pg.py` | Backend Postgres de auditoría (seguridad.auditoria). Implementa RepositorioAuditoria. |
@@ -51,6 +52,7 @@ flowchart TD
 | `pg/composiciones_pg.py` | Backend Postgres del expediente de composición. Implementa RepositorioComposiciones. |
 | `pg/conexion.py` | Pool de conexiones Postgres (Supabase) para el backend de nube. |
 | `pg/corridas_pg.py` | Backend Postgres de corridas. Implementa RepositorioCorridas. Port de corridas_db.py. |
+| `pg/notas_pg.py` | Backend Postgres de notas (seguridad.nota). Espejo 1:1 de datos/notas_db.py. |
 | `pg/perfiles_pg.py` | Acceso Postgres a seguridad.perfiles. Implementa RepositorioPerfiles. Port de perfiles_db. |
 | `pg/precios_pg.py` | Backend Postgres de precios. Implementa RepositorioPrecios. |
 | `precios_db.py` | Acceso a precios.db (SQLite): catálogo de insumos y libro de precios. |
@@ -102,6 +104,7 @@ flowchart TD
 | `insumos_ocultos.py` | Migración: oculta (no borra) del catálogo de insumos los códigos que son un eco |
 | `limites.py` | Endurecimiento de tráfico: límite de tamaño de subida (aquí) y rate limiting (Task 6). |
 | `listas.py` | Lógica de servicio para las listas de precios (tarifas). |
+| `notas.py` | Notas humanas de insumos y APUs: dueño, permisos y auditoría. |
 | `plantillas.py` | Generación de plantillas .xlsx para los importadores (APUs, insumos, precios). |
 | `presencia.py` | Quién está usando la app ahora mismo. |
 | `rutas.py` | Endpoints de la API. Delgados: validan y delegan en apu_tool.servicio.corridas. |

@@ -51,6 +51,10 @@ _FORBIDDEN_KEYS = {
     # `origen_json` va por la MISMA razón que `plan_json`: lleva la conciliación
     # —o sea dinero— adentro, así que el objeto entero no puede cruzar la frontera.
     "origen_json",
+    # Notas humanas de insumos/APUs: texto libre que puede llevar montos
+    # («cotización a $45.000»). assert_no_money mira claves, no valores: prohibir la
+    # clave es la única forma de que un payload con notas FALLE en vez de filtrarse.
+    "nota", "notas", "ultima_nota",
 }
 
 
@@ -102,8 +106,8 @@ def assert_no_money(payload: Any) -> None:
 
     LIMITACIÓN REAL, léela antes de agregar un payload nuevo: el chequeo es por
     **nombre de clave**, no por valor. Un monto embebido en un string de texto
-    libre — `{"nota": "el m3 sale a $180.000"}` — pasa el guardián sin que salte
-    nada, porque `nota` no está en la denylist y nadie mira el contenido.
+    libre — `{"comentario": "el m3 sale a $180.000"}` — pasa el guardián sin que salte
+    nada, porque `comentario` no está en la denylist y nadie mira el contenido.
 
     De ahí la regla operativa: **nunca metas en un payload hacia la IA texto
     generado por el motor de costos** (mensajes de `alertas.py`, explicaciones de

@@ -307,6 +307,10 @@ export interface Insumo {
   // true = no hay tarifa en la lista consultada. Distinto de un $0 genuino, que
   // la regla de negocio prohíbe y hay que seguir mostrando como $0.
   sin_precio: boolean;
+  // Notas humanas de la fila (ver components/notas). Opcionales: otros endpoints
+  // devuelven este tipo sin ellos.
+  tiene_notas?: boolean;
+  ultima_nota?: string;
 }
 
 export interface HistorialPrecio {
@@ -593,6 +597,10 @@ export interface ApuResumen {
   grupo: string;
   n_componentes: number;
   costo_unitario: number;
+  // Notas humanas de la fila (ver components/notas). Opcionales: otros endpoints
+  // devuelven este tipo sin ellos.
+  tiene_notas?: boolean;
+  ultima_nota?: string;
 }
 
 export interface ApuDetalle {
@@ -839,4 +847,32 @@ export interface OrigenCorrida {
   confirmada_por?: string;
   capitulos?: number;
   actividades?: number;
+}
+
+export interface DuenoNota {
+  entidad: "insumo" | "apu";
+  codigo: string;
+  nombre: string;   // insumo: parte de la identidad
+  turno: string;    // apu: parte de la identidad
+}
+
+export interface Nota {
+  id: number;
+  entidad: "insumo" | "apu";
+  etiqueta: string;
+  texto: string;
+  autor_email: string;
+  creada_en: string;
+  editada_en: string | null;
+  es_mia: boolean;
+  puede_editar: boolean;
+  puede_borrar: boolean;
+  dueno: DuenoNota;
+}
+
+export interface NotasPagina {
+  items: Nota[];
+  total: number;
+  limit: number;
+  offset: number;
 }

@@ -12,6 +12,8 @@ interface Props {
   rows?: number;
   placeholder?: string;
   maxLength?: number;
+  /** Hacia dónde abre la lista: "abajo" para cajas dentro de una lista con scroll. */
+  abrirHacia?: "arriba" | "abajo";
 }
 
 const areaCls =
@@ -23,7 +25,7 @@ const MAX_SUGERENCIAS = 6;
  *  email contiene "be"; escoger uno escribe "@Nombre " y lo suma a los elegidos. Qué
  *  menciones valen al guardar lo decide `mencionesVigentes` (lo que siga escrito). */
 export function CajaConMenciones({ ariaLabel, valor, onValor, elegidos, onElegidos,
-                                   mencionables, rows = 3, placeholder, maxLength = 4000 }: Props) {
+                                   mencionables, rows = 3, placeholder, maxLength = 4000, abrirHacia = "arriba" }: Props) {
   const [consulta, setConsulta] = useState<{ inicio: number; cursor: number; q: string } | null>(null);
 
   const q = (consulta?.q ?? "").toLocaleLowerCase("es");
@@ -61,7 +63,7 @@ export function CajaConMenciones({ ariaLabel, valor, onValor, elegidos, onElegid
                 data-sugerencias={abiertas ? "si" : "no"} onBlur={() => setConsulta(null)}
                 onKeyDown={(e) => { if (e.key === "Escape" && consulta) { e.stopPropagation(); setConsulta(null); } }} />
       {abiertas && (
-        <div className="absolute bottom-full left-0 z-50 mb-1 w-64 rounded border border-border bg-background shadow">
+        <div className={(abrirHacia === "abajo" ? "top-full mt-1" : "bottom-full mb-1") + " absolute left-0 z-50 w-64 rounded border border-border bg-background shadow"}>
           {sugerencias.map((u) => (
             <button key={u.user_id} type="button" aria-label={`Mencionar a ${etiquetaDe(u)}`}
                     className="block w-full px-2 py-1 text-left text-xs hover:bg-muted"

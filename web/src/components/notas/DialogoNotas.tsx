@@ -158,7 +158,7 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
                                     onValor={(v) => setEditando((e) => (e ? { ...e, texto: v } : e))}
                                     elegidos={editando.elegidos}
                                     onElegidos={(el) => setEditando((e) => (e ? { ...e, elegidos: el } : e))}
-                                    mencionables={mencionables} />
+                                    mencionables={mencionables} abrirHacia="abajo" />
                   <div className="flex justify-end gap-1">
                     <Button size="xs" variant="outline" disabled={ocupado}
                             onClick={() => setEditando(null)}>

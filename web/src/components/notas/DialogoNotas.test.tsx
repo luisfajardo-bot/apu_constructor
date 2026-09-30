@@ -180,6 +180,21 @@ describe("DialogoNotas", () => {
     await waitFor(() => expect(editarNota).toHaveBeenCalledWith(1, expect.stringContaining("@Beto"), ["u-beto"]));
   });
 
+  it("la lista de sugerencias abre hacia abajo al editar y hacia arriba en la nota nueva", async () => {
+    montar();
+    fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
+    const arriba = screen.getByLabelText("Nueva nota") as HTMLTextAreaElement;
+    fireEvent.change(arriba, { target: { value: "@Be", selectionStart: 3, selectionEnd: 3 } });
+    const popupNueva = (await screen.findByRole("button", { name: "Mencionar a Beto" })).parentElement!;
+    expect(popupNueva.className).toContain("bottom-full");
+    fireEvent.change(arriba, { target: { value: "", selectionStart: 0, selectionEnd: 0 } });
+    const caja = screen.getByLabelText("Editar nota") as HTMLTextAreaElement;
+    fireEvent.change(caja, { target: { value: "@Be", selectionStart: 3, selectionEnd: 3 } });
+    const popupEdit = (await screen.findByRole("button", { name: "Mencionar a Beto" })).parentElement!;
+    expect(popupEdit.className).toContain("top-full");
+    expect(popupEdit.className).not.toContain("bottom-full");
+  });
+
   it("Escape con la lista abierta la cierra y no cierra el diálogo", async () => {
     const onClose = vi.fn();
     render(<DialogoNotas dueno={DUENO} etiqueta="4520 · DUCTO PVC" onClose={onClose} onCambio={() => {}} />);

@@ -7,11 +7,13 @@ const listarNotas = vi.fn();
 const crearNota = vi.fn();
 const editarNota = vi.fn();
 const borrarNota = vi.fn();
+const listarMencionables = vi.fn();
 vi.mock("@/api/notas", () => ({
   listarNotas: (...a: unknown[]) => listarNotas(...a),
   crearNota: (...a: unknown[]) => crearNota(...a),
   editarNota: (...a: unknown[]) => editarNota(...a),
   borrarNota: (...a: unknown[]) => borrarNota(...a),
+  listarMencionables: (...a: unknown[]) => listarMencionables(...a),
 }));
 let rol = "editor";
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ perfil: { rol } }) }));
@@ -20,7 +22,7 @@ const DUENO = { entidad: "insumo" as const, codigo: "4520", nombre: "DUCTO PVC",
 const nota = (over = {}) => ({
   id: 1, entidad: "insumo", etiqueta: "4520 · DUCTO PVC", texto: "cotización X",
   autor_email: "luis@obra.co", creada_en: "2026-09-30T10:00:00+00:00", editada_en: null,
-  es_mia: true, puede_editar: true, puede_borrar: true, dueno: DUENO, ...over,
+  es_mia: true, puede_editar: true, puede_borrar: true, dueno: DUENO, menciones: [], ...over,
 });
 
 function montar(onCambio = vi.fn()) {
@@ -31,7 +33,8 @@ function montar(onCambio = vi.fn()) {
 
 beforeEach(() => {
   rol = "editor";
-  [listarNotas, crearNota, editarNota, borrarNota].forEach((f) => f.mockReset());
+  [listarNotas, crearNota, editarNota, borrarNota, listarMencionables].forEach((f) => f.mockReset());
+  listarMencionables.mockResolvedValue([{ user_id: "u-beto", nombre: "Beto", email: "beto@obra.co" }]);
   listarNotas.mockResolvedValue([nota()]);
 });
 afterEach(() => vi.restoreAllMocks());
@@ -50,7 +53,7 @@ describe("DialogoNotas", () => {
     await screen.findByText("cotización X");
     fireEvent.change(screen.getByLabelText("Nueva nota"), { target: { value: "nueva" } });
     fireEvent.click(screen.getByRole("button", { name: "Agregar nota" }));
-    await waitFor(() => expect(crearNota).toHaveBeenCalledWith(DUENO, "nueva"));
+    await waitFor(() => expect(crearNota).toHaveBeenCalledWith(DUENO, "nueva", []));
     expect(onCambio).toHaveBeenCalled();
   });
 
@@ -60,7 +63,7 @@ describe("DialogoNotas", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
     fireEvent.change(screen.getByLabelText("Editar nota"), { target: { value: "corregida" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
-    await waitFor(() => expect(editarNota).toHaveBeenCalledWith(1, "corregida"));
+    await waitFor(() => expect(editarNota).toHaveBeenCalledWith(1, "corregida", []));
     expect(await screen.findByText("corregida")).toBeTruthy();
     expect(screen.getByText(/editada/)).toBeTruthy();
   });
@@ -119,6 +122,91 @@ describe("DialogoNotas", () => {
     expect(screen.queryByRole("button", { name: "Editar" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Borrar" })).toBeNull();
     expect(screen.queryByLabelText("Nueva nota")).toBeNull();
+    expect(listarMencionables).not.toHaveBeenCalled();
+  });
+
+  it("escribir @ ofrece usuarios y manda la mención al crear", async () => {
+    crearNota.mockResolvedValue(nota({ id: 2, texto: "@Beto mira", menciones: [{ user_id: "u-beto", nombre: "Beto" }] }));
+    montar();
+    await screen.findByText("cotización X");
+    const caja = screen.getByLabelText("Nueva nota") as HTMLTextAreaElement;
+    fireEvent.change(caja, { target: { value: "@Be", selectionStart: 3, selectionEnd: 3 } });
+    fireEvent.click(await screen.findByRole("button", { name: "Mencionar a Beto" }));
+    expect(caja.value).toBe("@Beto ");
+    fireEvent.change(caja, { target: { value: "@Beto mira", selectionStart: 10, selectionEnd: 10 } });
+    fireEvent.click(screen.getByRole("button", { name: "Agregar nota" }));
+    await waitFor(() => expect(crearNota).toHaveBeenCalledWith(DUENO, "@Beto mira", ["u-beto"]));
+  });
+
+  it("si borras el @Nombre del texto, no se manda la mención", async () => {
+    crearNota.mockResolvedValue(nota({ id: 2, texto: "nada" }));
+    montar();
+    await screen.findByText("cotización X");
+    const caja = screen.getByLabelText("Nueva nota") as HTMLTextAreaElement;
+    fireEvent.change(caja, { target: { value: "@Be", selectionStart: 3, selectionEnd: 3 } });
+    fireEvent.click(await screen.findByRole("button", { name: "Mencionar a Beto" }));
+    fireEvent.change(caja, { target: { value: "nada", selectionStart: 4, selectionEnd: 4 } });
+    fireEvent.click(screen.getByRole("button", { name: "Agregar nota" }));
+    await waitFor(() => expect(crearNota).toHaveBeenCalledWith(DUENO, "nada", []));
+  });
+
+  it("resalta los nombres mencionados en la nota", async () => {
+    listarNotas.mockResolvedValue([nota({ texto: "@Beto revisa", menciones: [{ user_id: "u-beto", nombre: "Beto" }] })]);
+    montar();
+    const resaltado = await screen.findByText("@Beto");
+    expect(resaltado.getAttribute("data-mencion")).toBe("si");
+  });
+
+  it("editar conserva y manda las menciones vigentes", async () => {
+    listarNotas.mockResolvedValue([nota({ texto: "@Beto revisa", menciones: [{ user_id: "u-beto", nombre: "Beto" }] })]);
+    editarNota.mockResolvedValue(nota({ texto: "@Beto revisa ya", menciones: [{ user_id: "u-beto", nombre: "Beto" }] }));
+    montar();
+    fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
+    fireEvent.change(screen.getByLabelText("Editar nota"),
+                     { target: { value: "@Beto revisa ya", selectionStart: 15, selectionEnd: 15 } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(editarNota).toHaveBeenCalledWith(1, "@Beto revisa ya", ["u-beto"]));
+  });
+
+  it("escoger una mención al editar conserva el texto y la mención", async () => {
+    editarNota.mockResolvedValue(nota({ texto: "@Beto " }));
+    montar();
+    fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
+    const caja = screen.getByLabelText("Editar nota") as HTMLTextAreaElement;
+    fireEvent.change(caja, { target: { value: "@Be", selectionStart: 3, selectionEnd: 3 } });
+    fireEvent.click(await screen.findByRole("button", { name: "Mencionar a Beto" }));
+    expect(caja.value).toBe("@Beto ");
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(editarNota).toHaveBeenCalledWith(1, expect.stringContaining("@Beto"), ["u-beto"]));
+  });
+
+  it("la lista de sugerencias abre hacia abajo al editar y hacia arriba en la nota nueva", async () => {
+    montar();
+    fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
+    const arriba = screen.getByLabelText("Nueva nota") as HTMLTextAreaElement;
+    fireEvent.change(arriba, { target: { value: "@Be", selectionStart: 3, selectionEnd: 3 } });
+    const popupNueva = (await screen.findByRole("button", { name: "Mencionar a Beto" })).parentElement!;
+    expect(popupNueva.className).toContain("bottom-full");
+    fireEvent.change(arriba, { target: { value: "", selectionStart: 0, selectionEnd: 0 } });
+    const caja = screen.getByLabelText("Editar nota") as HTMLTextAreaElement;
+    fireEvent.change(caja, { target: { value: "@Be", selectionStart: 3, selectionEnd: 3 } });
+    const popupEdit = (await screen.findByRole("button", { name: "Mencionar a Beto" })).parentElement!;
+    expect(popupEdit.className).toContain("top-full");
+    expect(popupEdit.className).not.toContain("bottom-full");
+  });
+
+  it("Escape con la lista abierta la cierra y no cierra el diálogo", async () => {
+    const onClose = vi.fn();
+    render(<DialogoNotas dueno={DUENO} etiqueta="4520 · DUCTO PVC" onClose={onClose} onCambio={() => {}} />);
+    await screen.findByText("cotización X");
+    const caja = screen.getByLabelText("Nueva nota") as HTMLTextAreaElement;
+    fireEvent.change(caja, { target: { value: "@Be", selectionStart: 3, selectionEnd: 3 } });
+    await screen.findByRole("button", { name: "Mencionar a Beto" });
+    caja.focus();
+    fireEvent.keyDown(caja, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "Mencionar a Beto" })).toBeNull();
+    expect(screen.getByText(/Notas · /)).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
 

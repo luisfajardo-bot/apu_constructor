@@ -8,6 +8,7 @@ vi.mock("@/api/notas", () => ({
   listarTodasNotas: (...a: unknown[]) => listarTodasNotas(...a),
   listarNotas: (...a: unknown[]) => listarNotas(...(a as [])),
   crearNota: vi.fn(), editarNota: vi.fn(), borrarNota: vi.fn(),
+  listarMencionables: vi.fn(async () => []),
 }));
 const listarUsuarios = vi.fn();
 vi.mock("@/api/usuarios", () => ({ listarUsuarios: () => listarUsuarios() }));

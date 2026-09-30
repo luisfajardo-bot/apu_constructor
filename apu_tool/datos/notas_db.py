@@ -94,3 +94,59 @@ class NotasDB:
                 f"SELECT * FROM nota{wsql} ORDER BY creada_en DESC, id DESC LIMIT ? OFFSET ?",
                 params + [int(limit), int(offset)]).fetchall()
         return [_fila(r) for r in rows], int(total)
+
+    # ---- Fase 2: menciones ----
+    def set_menciones(self, conn, nota_id: int, user_ids: list[str],
+                      creada_en: str) -> list[str]:
+        actuales = {r["user_id"] for r in conn.execute(
+            "SELECT user_id FROM nota_mencion WHERE nota_id=?", (int(nota_id),))}
+        deseados = list(dict.fromkeys(user_ids))            # dedup conservando el orden
+        for u in actuales - set(deseados):
+            conn.execute("DELETE FROM nota_mencion WHERE nota_id=? AND user_id=?",
+                         (int(nota_id), u))
+        nuevos = [u for u in deseados if u not in actuales]
+        for u in nuevos:
+            conn.execute("INSERT INTO nota_mencion (nota_id, user_id, creada_en) "
+                         "VALUES (?,?,?)", (int(nota_id), u, creada_en))
+        return nuevos
+
+    def reasignar_mencionado(self, conn, viejo: str, nuevo: str) -> None:
+        conn.execute("UPDATE nota_mencion SET user_id=? WHERE user_id=?", (nuevo, viejo))
+
+    def menciones_de_notas(self, nota_ids: list[int]) -> dict[int, list[str]]:
+        if not nota_ids:
+            return {}
+        marcas = ",".join("?" * len(nota_ids))
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"SELECT nota_id, user_id FROM nota_mencion WHERE nota_id IN ({marcas}) "
+                f"ORDER BY nota_id, user_id", [int(i) for i in nota_ids]).fetchall()
+        out: dict[int, list[str]] = {}
+        for r in rows:
+            out.setdefault(int(r["nota_id"]), []).append(r["user_id"])
+        return out
+
+    def contar_sin_leer(self, user_id: str) -> int:
+        with self.connect() as conn:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM nota_mencion m JOIN nota n ON n.id = m.nota_id "
+                "WHERE m.user_id=? AND m.leida_en IS NULL AND n.borrada=0",
+                (user_id,)).fetchone()[0])
+
+    def listar_menciones(self, user_id: str,
+                         limit: int = 50) -> list[tuple[Nota, Optional[str]]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT n.*, m.leida_en AS mencion_leida_en FROM nota_mencion m "
+                "JOIN nota n ON n.id = m.nota_id WHERE m.user_id=? AND n.borrada=0 "
+                "ORDER BY m.creada_en DESC, n.id DESC LIMIT ?",
+                (user_id, int(limit))).fetchall()
+        return [(_fila(r), r["mencion_leida_en"]) for r in rows]
+
+    def marcar_leida(self, conn, user_id: str, nota_id: int, leida_en: str) -> None:
+        conn.execute("UPDATE nota_mencion SET leida_en=? WHERE user_id=? AND nota_id=? "
+                     "AND leida_en IS NULL", (leida_en, user_id, int(nota_id)))
+
+    def marcar_todas_leidas(self, conn, user_id: str, leida_en: str) -> None:
+        conn.execute("UPDATE nota_mencion SET leida_en=? WHERE user_id=? "
+                     "AND leida_en IS NULL", (leida_en, user_id))

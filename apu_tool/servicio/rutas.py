@@ -87,13 +87,18 @@ def yo(usuario=Depends(requiere_rol("consulta"))):
 
 
 @router.get("/presencia")
-def presencia(usuario=Depends(requiere_rol("consulta"))):
-    """Quién está usando la app ahora. Pedirla te marca presente: el latido es el
-    poll del frontend (cada 45 s), no hay endpoint de latido aparte.
+def presencia(usuario=Depends(requiere_rol("consulta")),
+              alm: Almacen = Depends(get_almacen)):
+    """Quién está usando la app ahora, y cuántas menciones sin leer tiene el que
+    pregunta. Pedirla te marca presente: el latido es el poll del frontend (cada 45 s),
+    no hay endpoint de latido aparte.
 
-    No recibe el Almacen a propósito: esto no toca la DB."""
+    El conteo de menciones viaja aquí A PROPÓSITO: la barra ya late cada 45 s, y un
+    sondeo aparte para la campanita costaría las mismas consultas y el doble de
+    peticiones. Es un COUNT por latido; si falla, sale null y la presencia sigue."""
     presencia_svc.marcar(usuario)
-    return {"en_linea": presencia_svc.en_linea()}
+    return {"en_linea": presencia_svc.en_linea(),
+            "menciones_sin_leer": notas_svc.sin_leer(alm, usuario)}
 
 
 @router.get("/health")
@@ -146,13 +151,15 @@ def notas_listar(entidad: str, codigo: str, nombre: str = "", turno: str = "",
 def notas_crear(body: NotaNuevaIn, alm: Almacen = Depends(get_almacen),
                 actor=Depends(requiere_rol("editor"))):
     return _http_notas(lambda: notas_svc.crear(alm, actor, body.entidad, body.codigo,
-                                               body.nombre, body.turno, body.texto))
+                                               body.nombre, body.turno, body.texto,
+                                               body.menciones))
 
 
 @router.patch("/notas/{nota_id}")
 def notas_editar(nota_id: int, body: NotaEditarIn, alm: Almacen = Depends(get_almacen),
                  actor=Depends(requiere_rol("editor"))):
-    return _http_notas(lambda: notas_svc.editar(alm, actor, nota_id, body.texto))
+    return _http_notas(lambda: notas_svc.editar(alm, actor, nota_id, body.texto,
+                                                body.menciones))
 
 
 @router.delete("/notas/{nota_id}")
@@ -160,6 +167,32 @@ def notas_borrar(nota_id: int, alm: Almacen = Depends(get_almacen),
                  actor=Depends(requiere_rol("editor"))):
     _http_notas(lambda: notas_svc.borrar(alm, actor, nota_id))
     return {"borrada": nota_id}
+
+
+@router.get("/usuarios/mencionables")
+def usuarios_mencionables(alm: Almacen = Depends(get_almacen),
+                          actor=Depends(requiere_rol("editor"))):
+    return notas_svc.mencionables(alm, actor)
+
+
+@router.get("/menciones")
+def menciones_listar(alm: Almacen = Depends(get_almacen),
+                     actor=Depends(requiere_rol("consulta"))):
+    return notas_svc.bandeja(alm, actor)
+
+
+@router.post("/menciones/leidas")
+def menciones_todas_leidas(alm: Almacen = Depends(get_almacen),
+                           actor=Depends(requiere_rol("consulta"))):
+    notas_svc.marcar_todas_leidas(alm, actor)
+    return {"leidas": True}
+
+
+@router.post("/menciones/{nota_id}/leida")
+def menciones_leida(nota_id: int, alm: Almacen = Depends(get_almacen),
+                    actor=Depends(requiere_rol("consulta"))):
+    notas_svc.marcar_leida(alm, actor, nota_id)
+    return {"leida": nota_id}
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 

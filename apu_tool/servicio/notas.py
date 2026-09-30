@@ -83,7 +83,7 @@ def _puede_borrar(n: Nota, actor: Perfil) -> bool:
     return actor.user_id == n.autor_id or actor.rol == "admin"
 
 
-def _out(n: Nota, actor: Perfil) -> dict:
+def _out(n: Nota, actor: Perfil, menciones: list[dict]) -> dict:
     mia = actor.user_id == n.autor_id
     escribe = actor.rol in ("editor", "admin")
     return {"id": n.id, "entidad": n.entidad, "etiqueta": n.etiqueta, "texto": n.texto,
@@ -91,7 +91,36 @@ def _out(n: Nota, actor: Perfil) -> dict:
             "editada_en": n.editada_en, "es_mia": mia,
             "puede_editar": mia and escribe,
             "puede_borrar": escribe and _puede_borrar(n, actor),
-            "dueno": _dueno(n)}
+            "dueno": _dueno(n), "menciones": menciones}
+
+
+def _perfiles(alm: Almacen) -> dict[str, Perfil]:
+    """user_id → Perfil. La tabla de perfiles es chica (decenas): una lectura por request."""
+    return {p.user_id: p for p in alm.perfiles.listar()}
+
+
+def _nombre(p: Optional[Perfil], uid: str) -> str:
+    return (p.nombre or p.email) if p else uid
+
+
+def _menciones_validas(perfiles: dict[str, Perfil], actor: Perfil,
+                       pedidas: list[str]) -> list[str]:
+    """Solo perfiles activos, sin el propio autor, sin duplicados, en el orden pedido.
+    El cliente dice a quién quiere mencionar; el servidor decide a quién se puede."""
+    out: list[str] = []
+    for uid in pedidas or []:
+        p = perfiles.get(uid)
+        if p and p.estado == "activo" and uid != actor.user_id and uid not in out:
+            out.append(uid)
+    return out
+
+
+def _salidas(alm: Almacen, notas: list[Nota], actor: Perfil) -> list[dict]:
+    """Notas → JSON con sus menciones, en lote (una consulta para todas)."""
+    menc = alm.notas.menciones_de_notas([n.id for n in notas])
+    perfiles = _perfiles(alm) if menc else {}
+    return [_out(n, actor, [{"user_id": u, "nombre": _nombre(perfiles.get(u), u)}
+                            for u in menc.get(n.id, [])]) for n in notas]
 
 
 def _vigente(alm: Almacen, nota_id: int) -> Nota:
@@ -107,31 +136,51 @@ def listar(alm: Almacen, actor: Perfil, entidad: str, codigo: str, nombre: str =
         raise ValueError("La nota debe ser de un insumo o de un APU.")
     clave = (clave_insumo(codigo, nombre) if entidad == "insumo"
              else clave_apu(codigo, turno))
-    return [_out(n, actor) for n in alm.notas.listar(entidad, clave)]
+    return _salidas(alm, alm.notas.listar(entidad, clave), actor)
 
 
 def crear(alm: Almacen, actor: Perfil, entidad: str, codigo: str, nombre: str,
-          turno: str, texto: str) -> dict:
+          turno: str, texto: str, menciones: Optional[list[str]] = None) -> dict:
     t = _texto_valido(texto)
     clave, etiqueta = _resolver_dueno(alm, entidad, codigo, nombre, turno)
+    perfiles = _perfiles(alm)
+    uids = _menciones_validas(perfiles, actor, menciones or [])
+    ahora = _ahora()
     with alm.transaccion("seguridad") as conn:
         nid = alm.notas.crear(conn, entidad, clave, etiqueta, t, actor.user_id,
-                              actor.email, _ahora())
+                              actor.email, ahora)
+        alm.notas.set_menciones(conn, nid, uids, ahora)
+        despues = {"entidad": entidad, "clave": clave, "texto": t}
+        if uids:   # la auditoría es historia permanente: correos, no user_ids
+            despues["menciones"] = [perfiles[u].email for u in uids]
         registrar_auditoria(alm, conn, actor, "nota.crear", "nota", nid, antes=None,
-                            despues={"entidad": entidad, "clave": clave, "texto": t})
-    return _out(alm.notas.get(nid), actor)
+                            despues=despues)
+    return _salidas(alm, [alm.notas.get(nid)], actor)[0]
 
 
-def editar(alm: Almacen, actor: Perfil, nota_id: int, texto: str) -> dict:
+def editar(alm: Almacen, actor: Perfil, nota_id: int, texto: str,
+           menciones: Optional[list[str]] = None) -> dict:
+    """`menciones=None` deja las menciones como están; una lista (aun vacía) las
+    resincroniza: los nuevos reciben aviso, los quitados pierden el suyo."""
     n = _vigente(alm, nota_id)
     if actor.user_id != n.autor_id:
         raise SinPermiso("Solo quien escribió la nota puede editarla.")
     t = _texto_valido(texto)
+    perfiles = _perfiles(alm)
+    uids = (None if menciones is None else _menciones_validas(perfiles, actor, menciones))
+    ahora = _ahora()
     with alm.transaccion("seguridad") as conn:
-        alm.notas.editar(conn, n.id, t, _ahora())
+        # El UPDATE de `nota` va ANTES de set_menciones: su bloqueo de fila serializa dos
+        # ediciones concurrentes de la misma nota, por eso set_menciones no necesita ON CONFLICT.
+        alm.notas.editar(conn, n.id, t, ahora)
+        if uids is not None:
+            alm.notas.set_menciones(conn, n.id, uids, ahora)
+        despues = {"texto": t}
+        if uids:
+            despues["menciones"] = [perfiles[u].email for u in uids]
         registrar_auditoria(alm, conn, actor, "nota.editar", "nota", n.id,
-                            antes={"texto": n.texto}, despues={"texto": t})
-    return _out(alm.notas.get(n.id), actor)
+                            antes={"texto": n.texto}, despues=despues)
+    return _salidas(alm, [alm.notas.get(n.id)], actor)[0]
 
 
 def borrar(alm: Almacen, actor: Perfil, nota_id: int) -> None:
@@ -149,7 +198,7 @@ def todas(alm: Almacen, actor: Perfil, entidad: Optional[str] = None,
           limit: int = 100, offset: int = 0) -> dict:
     items, total = alm.notas.buscar(entidad=entidad or None, autor_id=autor or None,
                                     q=(q or "").strip() or None, limit=limit, offset=offset)
-    return {"items": [_out(n, actor) for n in items], "total": total,
+    return {"items": _salidas(alm, items, actor), "total": total,
             "limit": limit, "offset": offset}
 
 
@@ -157,3 +206,37 @@ def resumen(alm: Almacen, entidad: str, claves: list[str]) -> dict[str, str]:
     """clave → texto de la última nota, para pintar el ícono de TODA una página de un
     listado en UNA consulta (nunca una por fila: el N+1 que ya se pagó con Supabase)."""
     return alm.notas.resumen_por_claves(entidad, claves)
+
+
+def mencionables(alm: Almacen, actor: Perfil) -> list[dict]:
+    """A quién se puede mencionar: perfiles activos menos quien pregunta. Solo nombre,
+    email e id (la barra de presencia ya les muestra eso mismo a todos)."""
+    out = [{"user_id": p.user_id, "nombre": p.nombre or "", "email": p.email}
+           for p in alm.perfiles.listar()
+           if p.estado == "activo" and p.user_id != actor.user_id]
+    return sorted(out, key=lambda u: (u["nombre"] or u["email"]).lower())
+
+
+def bandeja(alm: Almacen, actor: Perfil, limit: int = 50) -> list[dict]:
+    return [{"nota_id": n.id, "etiqueta": n.etiqueta, "autor_email": n.autor_email,
+             "creada_en": n.creada_en, "texto": n.texto[:160], "leida": leida is not None,
+             "dueno": _dueno(n)}
+            for n, leida in alm.notas.listar_menciones(actor.user_id, limit)]
+
+
+def marcar_leida(alm: Almacen, actor: Perfil, nota_id: int) -> None:
+    with alm.transaccion("seguridad") as conn:
+        alm.notas.marcar_leida(conn, actor.user_id, nota_id, _ahora())
+
+
+def marcar_todas_leidas(alm: Almacen, actor: Perfil) -> None:
+    with alm.transaccion("seguridad") as conn:
+        alm.notas.marcar_todas_leidas(conn, actor.user_id, _ahora())
+
+
+def sin_leer(alm: Almacen, actor: Perfil) -> Optional[int]:
+    """Para la presencia: si la base falla, None; la presencia no se cae por esto."""
+    try:
+        return alm.notas.contar_sin_leer(actor.user_id)
+    except Exception:
+        return None

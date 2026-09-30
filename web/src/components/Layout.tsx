@@ -5,6 +5,7 @@ import { getStatus } from "@/api/corridas";
 import { getPresencia } from "@/api/presencia";
 import type { StatusResponse, UsuarioEnLinea } from "@/lib/tipos";
 import { useAuth } from "@/lib/auth";
+import { Campanita } from "@/components/notas/Campanita";
 import { puede } from "@/components/rutas";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -37,6 +38,7 @@ export default function Layout() {
   }, []);
 
   const [enLinea, setEnLinea] = useState<UsuarioEnLinea[] | null>(null);
+  const [sinLeer, setSinLeer] = useState<number | null>(null);
 
   // Presencia: un poll de 45 s contra una ventana de 90 s en el servidor (dos latidos
   // de margen, así una petición perdida no apaga el punto). El poll ES el latido.
@@ -48,7 +50,10 @@ export default function Layout() {
       if (document.hidden) return;
       getPresencia()
         .then((r) => {
-          if (vivo) setEnLinea(r.en_linea);
+          if (vivo) {
+            setEnLinea(r.en_linea);
+            setSinLeer(r.menciones_sin_leer ?? null);
+          }
         })
         .catch(() => {
           /* sin backend — silencioso, se conserva la última lista */
@@ -249,6 +254,8 @@ export default function Layout() {
                   </span>
                 </Lectura>
               </div>
+
+              <Campanita sinLeer={sinLeer} onSinLeer={setSinLeer} />
 
               <span className="flex items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">
                 <span className="@max-[1180px]:hidden">{perfil.email}</span>

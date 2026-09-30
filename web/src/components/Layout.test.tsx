@@ -18,7 +18,13 @@ vi.mock("@/api/presencia", () => ({
       { user_id: "u1", email: "a@obra.co", nombre: "Ana" },
       { user_id: "u2", email: "beto@obra.co", nombre: "Beto" },
     ],
+    menciones_sin_leer: 3,
   })),
+}));
+vi.mock("@/api/notas", () => ({
+  listarMenciones: vi.fn(async () => []), marcarMencionLeida: vi.fn(), marcarMencionesLeidas: vi.fn(),
+  listarNotas: vi.fn(async () => []), listarMencionables: vi.fn(async () => []),
+  crearNota: vi.fn(), editarNota: vi.fn(), borrarNota: vi.fn(),
 }));
 let rol = "consulta";
 vi.mock("@/lib/auth", () => ({
@@ -169,4 +175,10 @@ test("el botón de secciones abre y cierra el panel", async () => {
   expect(boton.getAttribute("aria-controls")).toBe(
     screen.getByRole("navigation").getAttribute("id")
   );
+});
+
+test("la campanita muestra las menciones sin leer que trae la presencia", async () => {
+  rol = "consulta";
+  render(<MemoryRouter><Layout /></MemoryRouter>);
+  expect(await screen.findByRole("button", { name: "Menciones (3 sin leer)" })).not.toBeNull();
 });

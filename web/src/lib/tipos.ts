@@ -384,6 +384,7 @@ export interface UsuarioEnLinea {
 
 export interface PresenciaResponse {
   en_linea: UsuarioEnLinea[];
+  menciones_sin_leer?: number | null;
 }
 
 export interface CorridaCreada {
@@ -867,6 +868,28 @@ export interface Nota {
   es_mia: boolean;
   puede_editar: boolean;
   puede_borrar: boolean;
+  dueno: DuenoNota;
+  menciones: MencionNota[];
+}
+
+export interface MencionNota {
+  user_id: string;
+  nombre: string;
+}
+
+export interface Mencionable {
+  user_id: string;
+  nombre: string;
+  email: string;
+}
+
+export interface Mencion {
+  nota_id: number;
+  etiqueta: string;
+  autor_email: string;
+  creada_en: string;
+  texto: string;
+  leida: boolean;
   dueno: DuenoNota;
 }
 

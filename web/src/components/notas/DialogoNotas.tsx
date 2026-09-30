@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { borrarNota, crearNota, editarNota, listarNotas } from "@/api/notas";
-import type { DuenoNota, Nota } from "@/lib/tipos";
+import { borrarNota, crearNota, editarNota, listarMencionables, listarNotas } from "@/api/notas";
+import type { DuenoNota, Mencionable, MencionNota, Nota } from "@/lib/tipos";
+import { mencionesVigentes } from "@/lib/menciones";
+import { CajaConMenciones } from "./CajaConMenciones";
+import { TextoConMenciones } from "./TextoConMenciones";
 import { useAuth } from "@/lib/auth";
 import { puede } from "@/components/rutas";
 
@@ -14,10 +17,6 @@ interface Props {
   onCambio: () => void;      // hubo alta/edición/borrado: la tabla repinta el ícono
 }
 
-const areaCls =
-  "w-full rounded border border-border bg-transparent px-2 py-1 text-xs outline-none " +
-  "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40";
-
 const fecha = (iso: string) => new Date(iso).toLocaleString("es-CO");
 const msg = (e: unknown, respaldo: string) => (e instanceof Error ? e.message : respaldo);
 
@@ -26,7 +25,9 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
   const escribe = puede(perfil?.rol, "editor");
   const [notas, setNotas] = useState<Nota[] | null>(null);
   const [nueva, setNueva] = useState("");
-  const [editando, setEditando] = useState<{ id: number; texto: string } | null>(null);
+  const [editando, setEditando] = useState<{ id: number; texto: string; elegidos: MencionNota[] } | null>(null);
+  const [mencionables, setMencionables] = useState<Mencionable[]>([]);
+  const [elegidosNueva, setElegidosNueva] = useState<MencionNota[]>([]);
   const [ocupado, setOcupado] = useState(false);
 
   // Clave estable del dueño: un objeto nuevo con los mismos campos no recarga nada.
@@ -44,6 +45,12 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
     setNotas(null);
     setNueva("");
     setEditando(null);
+    setElegidosNueva([]);
+    if (escribe) {
+      listarMencionables()
+        .then((u) => { if (!cancelado) setMencionables(u); })
+        .catch(() => {});   // sin la lista igual se puede escribir
+    }
     listarNotas(d)
       .then((r) => { if (!cancelado) setNotas(r); })
       .catch((e) => {
@@ -52,17 +59,18 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
         setNotas([]);
       });
     return () => { cancelado = true; };
-  }, [claveDueno]);
+  }, [claveDueno, escribe]);
 
   async function agregar() {
     if (!dueno || !nueva.trim()) return;
     const clave = claveDueno;
     setOcupado(true);
     try {
-      const n = await crearNota(dueno, nueva);
+      const n = await crearNota(dueno, nueva, mencionesVigentes(nueva, elegidosNueva));
       if (clave === claveVigente.current) {
         setNotas((prev) => [...(prev ?? []), n]);
         setNueva("");
+        setElegidosNueva([]);
       }
       onCambio();
     } catch (e) {
@@ -77,7 +85,7 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
     const clave = claveDueno;
     setOcupado(true);
     try {
-      const n = await editarNota(editando.id, editando.texto);
+      const n = await editarNota(editando.id, editando.texto, mencionesVigentes(editando.texto, editando.elegidos));
       if (clave === claveVigente.current) {
         setNotas((prev) => (prev ?? []).map((x) => (x.id === n.id ? n : x)));
         setEditando(null);
@@ -109,7 +117,10 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
 
   return (
     <Dialog open={dueno !== null} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg" onEscapeKeyDown={(e) => {
+        // Con la lista de menciones abierta, Escape solo la cierra (Radix escucha en el document).
+        if ((document.activeElement as HTMLElement | null)?.dataset.sugerencias === "si") e.preventDefault();
+      }}>
         <DialogHeader>
           <DialogTitle className="text-sm">Notas · {etiqueta}</DialogTitle>
         </DialogHeader>
@@ -129,7 +140,7 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
                 <span className="ml-auto flex gap-1">
                   {n.puede_editar && editando?.id !== n.id && (
                     <Button size="xs" variant="ghost" disabled={ocupado}
-                            onClick={() => setEditando({ id: n.id, texto: n.texto })}>
+                            onClick={() => setEditando({ id: n.id, texto: n.texto, elegidos: n.menciones })}>
                       Editar
                     </Button>
                   )}
@@ -143,9 +154,11 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
               </div>
               {editando?.id === n.id ? (
                 <div className="mt-1 space-y-1">
-                  <textarea aria-label="Editar nota" rows={3} className={areaCls}
-                            value={editando.texto} maxLength={4000}
-                            onChange={(e) => setEditando({ id: n.id, texto: e.target.value })} />
+                  <CajaConMenciones ariaLabel="Editar nota" valor={editando.texto}
+                                    onValor={(v) => setEditando((e) => (e ? { ...e, texto: v } : e))}
+                                    elegidos={editando.elegidos}
+                                    onElegidos={(el) => setEditando((e) => (e ? { ...e, elegidos: el } : e))}
+                                    mencionables={mencionables} abrirHacia="abajo" />
                   <div className="flex justify-end gap-1">
                     <Button size="xs" variant="outline" disabled={ocupado}
                             onClick={() => setEditando(null)}>
@@ -158,7 +171,7 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
                   </div>
                 </div>
               ) : (
-                <p className="mt-1 whitespace-pre-wrap">{n.texto}</p>
+                <TextoConMenciones texto={n.texto} nombres={n.menciones.map((m) => m.nombre)} />
               )}
             </div>
           ))}
@@ -166,9 +179,11 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
 
         {escribe && (
           <div className="space-y-1">
-            <textarea aria-label="Nueva nota" rows={3} className={areaCls} value={nueva}
-                      maxLength={4000} placeholder="Ej.: Precio extraído de la cotización de…"
-                      onChange={(e) => setNueva(e.target.value)} />
+            <CajaConMenciones ariaLabel="Nueva nota" valor={nueva} onValor={setNueva}
+                              elegidos={elegidosNueva} onElegidos={setElegidosNueva}
+                              mencionables={mencionables}
+                              placeholder={"Ej.: Precio extraído de la cotización de… " +
+                                           "(usa @ para avisarle a alguien)"} />
             <div className="flex justify-end">
               <Button size="sm" disabled={ocupado || !nueva.trim()} onClick={agregar}>
                 Agregar nota

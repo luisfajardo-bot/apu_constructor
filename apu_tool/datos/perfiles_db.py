@@ -35,7 +35,7 @@ class PerfilesDB:
         with self.connect() as conn:
             # auditoria y nota comparten este archivo con perfiles: un reset completo
             # las limpia también (igual que el DROP SCHEMA seguridad del espejo Postgres).
-            for t in ("auditoria", "nota", "perfiles"):
+            for t in ("auditoria", "nota_mencion", "nota", "perfiles"):
                 conn.execute(f"DROP TABLE IF EXISTS {t}")
             conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
 

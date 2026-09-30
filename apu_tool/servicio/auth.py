@@ -178,6 +178,9 @@ def _adoptar_por_email(alm: Almacen, user_id: str, email: str,
             # y la puerta deniega, fail-closed, en vez de fabricar un Perfil o dejar
             # una fila de auditoría de un vínculo que no ocurrió.
             return None
+        # Mismo `conn` => misma transacción de `seguridad`: perfil y menciones se mueven
+        # juntos (las notas viven en esa misma base, en los dos backends).
+        alm.notas.reasignar_mencionado(conn, viejo.user_id, user_id)
         registrar_auditoria(alm, conn, None, "usuario.vincular_identidad", "usuario",
                             user_id, antes={"user_id": viejo.user_id, "email": viejo.email},
                             despues={"user_id": user_id, "email": viejo.email,

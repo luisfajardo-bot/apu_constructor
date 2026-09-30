@@ -1,5 +1,5 @@
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/api/client";
-import type { DuenoNota, Nota, NotasPagina } from "@/lib/tipos";
+import type { DuenoNota, Mencion, Mencionable, Nota, NotasPagina } from "@/lib/tipos";
 
 function qs(p: Record<string, string | number | undefined>): string {
   const s = new URLSearchParams();
@@ -10,11 +10,20 @@ function qs(p: Record<string, string | number | undefined>): string {
 export const listarNotas = (d: DuenoNota) =>
   apiGet<Nota[]>(`/notas?${qs({ ...d })}`);
 
-export const crearNota = (d: DuenoNota, texto: string) =>
-  apiPost<Nota>("/notas", { ...d, texto });
+export const crearNota = (d: DuenoNota, texto: string, menciones: string[] = []) =>
+  apiPost<Nota>("/notas", { ...d, texto, menciones });
 
-export const editarNota = (id: number, texto: string) =>
-  apiPatch<Nota>(`/notas/${id}`, { texto });
+export const editarNota = (id: number, texto: string, menciones?: string[]) =>
+  apiPatch<Nota>(`/notas/${id}`, menciones === undefined ? { texto } : { texto, menciones });
+
+export const listarMencionables = () => apiGet<Mencionable[]>("/usuarios/mencionables");
+
+export const listarMenciones = () => apiGet<Mencion[]>("/menciones");
+
+export const marcarMencionLeida = (notaId: number) =>
+  apiPost<{ leida: number }>(`/menciones/${notaId}/leida`);
+
+export const marcarMencionesLeidas = () => apiPost<{ leidas: boolean }>("/menciones/leidas");
 
 export const borrarNota = (id: number) => apiDelete(`/notas/${id}`);
 

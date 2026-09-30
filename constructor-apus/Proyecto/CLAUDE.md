@@ -381,8 +381,18 @@ matching, modelo de IA, clasificación de precios.
   (`resumen_por_claves`). Leer: consulta; escribir: editor; editar: solo el autor; borrar:
   autor o Admin; la pestaña Notas (`/api/notas/todas`, filtros por tipo, autor y texto) es
   de Admin. En producción, el RLS de la tabla es un paso manual
-  (`supabase/migrations/0007_notas_rls.sql`). Fases 2 (menciones) y 3 (respuestas) en el
-  spec `docs/superpowers/specs/2026-09-30-notas-insumos-apus-design.md`.
+  (`supabase/migrations/0007_notas_rls.sql`).
+  **Menciones (Fase 2):** tabla `nota_mencion` (mismo schema, mismo repo `alm.notas`).
+  El cliente manda `menciones: [user_id]`; el servidor las valida contra perfiles
+  activos, saca al propio autor y deduplica — **no** las deduce del texto. En la web,
+  las que se mandan son las que siguen escritas (`lib/menciones.ts`, un solo matcher con
+  límite de palabra: `@Ana` no casa dentro de `@Anabel`). Editar resincroniza
+  (`menciones` omitido en el PATCH = no tocar). El conteo sin leer viaja en
+  `GET /api/presencia` (`menciones_sin_leer`, `null` si falla): la barra ya late cada
+  45 s, así que la campanita **no** agrega sondeo; la lista se pide al abrirla.
+  `GET /api/usuarios/mencionables` es de editor y solo expone id, nombre y email. RLS
+  manual en prod: `supabase/migrations/0008_menciones_rls.sql`. La Fase 3 (respuestas)
+  sigue en el spec `docs/superpowers/specs/2026-09-30-notas-insumos-apus-design.md`.
 - **Salidas:** `salidas/` (cuadros) y `ejemplos/` (licitaciones de ejemplo).
 - Fuentes de precio: `PRECIO IDU` se trata como **público**; el resto
   (`COSTO INTERNO`, `COMPRAS…`, etc.) como **interno/confidencial**
@@ -459,6 +469,8 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   («cotización a $45.000»); `nota`, `notas` y `ultima_nota` están en `_FORBIDDEN_KEYS`
   para que el intento **falle**. Y no calcules el ícono de notas fila por fila: el
   resumen es por página.
+  Tampoco saques el conteo de menciones de la presencia a un sondeo propio: sería el
+  mismo COUNT con el doble de peticiones.
 - No metas una `Advertencia` del parser en un payload hacia la IA. Su `detalle` es texto
   libre y lleva **montos adentro** («El Excel dice 67.153 y el recálculo da 67.154»);
   `assert_no_money` mira nombres de clave, no valores. Misma trampa que las alertas de

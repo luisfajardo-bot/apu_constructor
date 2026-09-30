@@ -519,6 +519,37 @@ class RepositorioNotas(Protocol):
         Orden: creada_en desc, id desc."""
         ...
 
+    # ---- Fase 2: menciones (tabla nota_mencion) ----
+    def set_menciones(self, conn, nota_id: int, user_ids: list[str],
+                      creada_en: str) -> list[str]:
+        """Deja exactamente esas menciones para la nota (sobre la conexión de la UdT).
+        Devuelve los user_id NUEVOS; los que ya estaban conservan su estado de lectura."""
+        ...
+
+    def reasignar_mencionado(self, conn, viejo: str, nuevo: str) -> None:
+        """Re-clava las menciones de `viejo` a `nuevo` (adopción de identidad: el invitado
+        mencionado antes de su primer login no pierde sus avisos)."""
+        ...
+
+    def menciones_de_notas(self, nota_ids: list[int]) -> dict[int, list[str]]:
+        """nota_id → user_ids mencionados. UNA consulta; sin menciones = ausente."""
+        ...
+
+    def contar_sin_leer(self, user_id: str) -> int:
+        """Menciones sin leer de `user_id` en notas no borradas."""
+        ...
+
+    def listar_menciones(self, user_id: str,
+                         limit: int = 50) -> list[tuple[Nota, Optional[str]]]:
+        """(nota, leida_en) de notas no borradas, la mención más reciente primero."""
+        ...
+
+    def marcar_leida(self, conn, user_id: str, nota_id: int, leida_en: str) -> None:
+        """Solo si estaba sin leer (no pisa la fecha de una lectura anterior)."""
+        ...
+
+    def marcar_todas_leidas(self, conn, user_id: str, leida_en: str) -> None: ...
+
 
 @runtime_checkable
 class RepositorioComposiciones(Protocol):

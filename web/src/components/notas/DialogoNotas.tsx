@@ -117,7 +117,10 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
 
   return (
     <Dialog open={dueno !== null} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg" onEscapeKeyDown={(e) => {
+        // Con la lista de menciones abierta, Escape solo la cierra (Radix escucha en el document).
+        if ((document.activeElement as HTMLElement | null)?.dataset.sugerencias === "si") e.preventDefault();
+      }}>
         <DialogHeader>
           <DialogTitle className="text-sm">Notas · {etiqueta}</DialogTitle>
         </DialogHeader>
@@ -152,9 +155,9 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
               {editando?.id === n.id ? (
                 <div className="mt-1 space-y-1">
                   <CajaConMenciones ariaLabel="Editar nota" valor={editando.texto}
-                                    onValor={(v) => setEditando({ ...editando, texto: v })}
+                                    onValor={(v) => setEditando((e) => (e ? { ...e, texto: v } : e))}
                                     elegidos={editando.elegidos}
-                                    onElegidos={(e) => setEditando({ ...editando, elegidos: e })}
+                                    onElegidos={(el) => setEditando((e) => (e ? { ...e, elegidos: el } : e))}
                                     mencionables={mencionables} />
                   <div className="flex justify-end gap-1">
                     <Button size="xs" variant="outline" disabled={ocupado}

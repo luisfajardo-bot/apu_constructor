@@ -29,6 +29,19 @@ describe("menciones", () => {
     expect(mencionesVigentes("nadie", elegidos)).toEqual([]);
   });
 
+  it("mencionesVigentes respeta los límites del nombre", () => {
+    const ana = { user_id: "u1", nombre: "Ana" };
+    const ruiz = { user_id: "u2", nombre: "Ana Ruiz" };
+    expect(mencionesVigentes("@Ana Ruiz", [ana, ruiz])).toEqual(["u2"]);
+    expect(mencionesVigentes("@Anabel hola", [ana])).toEqual([]);
+    expect(mencionesVigentes("@Ana, ven", [ana])).toEqual(["u1"]);
+    expect(mencionesVigentes("@ hola", [{ user_id: "u3", nombre: "" }])).toEqual([]);
+  });
+
+  it("partesConMenciones no corta un nombre más largo", () => {
+    expect(partesConMenciones("@Anabel", ["Ana"])).toEqual([{ texto: "@Anabel", mencion: false }]);
+  });
+
   it("partesConMenciones separa los @Nombre para resaltarlos", () => {
     expect(partesConMenciones("hola @Ana Ruiz, mira", ["Ana Ruiz"])).toEqual([
       { texto: "hola ", mencion: false },

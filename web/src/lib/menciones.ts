@@ -24,24 +24,27 @@ export function insertarMencion(texto: string, inicio: number, cursor: number,
   return { texto: texto.slice(0, inicio) + puesto + texto.slice(cursor), cursor: inicio + puesto.length };
 }
 
-/** Los elegidos cuyo "@Nombre" sigue escrito: borrar el nombre del texto quita la mención. */
+/** Los elegidos cuyo "@Nombre" sigue escrito: borrar el nombre del texto quita la mención.
+ *  Usa el mismo buscador que el resaltado, así "@Ana Ruiz" no avisa a "Ana". */
 export function mencionesVigentes(texto: string, elegidos: MencionNota[]): string[] {
-  const out: string[] = [];
-  for (const e of elegidos) {
-    if (texto.includes(`@${e.nombre}`) && !out.includes(e.user_id)) out.push(e.user_id);
-  }
-  return out.sort();
+  const porMarca = new Map(elegidos.filter((e) => e.nombre).map((e) => [`@${e.nombre}`, e.user_id]));
+  const ids = partesConMenciones(texto, elegidos.map((e) => e.nombre))
+    .filter((p) => p.mencion)
+    .map((p) => porMarca.get(p.texto) as string);
+  return [...new Set(ids)].sort();
 }
 
 /** Parte el texto para resaltar los "@Nombre". Prueba primero los nombres más largos,
- *  para que "@Ana Ruiz" no se corte en "@Ana". */
+ *  para que "@Ana Ruiz" no se corte en "@Ana"; y el nombre debe terminar ahí (después
+ *  no sigue una letra ni un dígito), para que "@Anabel" no cuente como "@Ana". */
 export function partesConMenciones(texto: string, nombres: string[]): { texto: string; mencion: boolean }[] {
   const marcas = [...new Set(nombres.filter(Boolean))].sort((a, b) => b.length - a.length).map((n) => `@${n}`);
+  const termina = (i: number) => i >= texto.length || !/[\p{L}\p{N}]/u.test(texto[i]);
   const partes: { texto: string; mencion: boolean }[] = [];
   let resto = "";
   let i = 0;
   while (i < texto.length) {
-    const m = marcas.find((x) => texto.startsWith(x, i));
+    const m = marcas.find((x) => texto.startsWith(x, i) && termina(i + x.length));
     if (m) {
       if (resto) partes.push({ texto: resto, mencion: false });
       partes.push({ texto: m, mencion: true });

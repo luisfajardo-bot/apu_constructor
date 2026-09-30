@@ -52,13 +52,16 @@ export function CajaConMenciones({ ariaLabel, valor, onValor, elegidos, onElegid
     setConsulta(null);
   }
 
+  const abiertas = sugerencias.length > 0;
+
   return (
     <div className="relative">
       <textarea aria-label={ariaLabel} rows={rows} className={areaCls} value={valor}
                 maxLength={maxLength} placeholder={placeholder} onChange={cambiar}
+                data-sugerencias={abiertas ? "si" : "no"} onBlur={() => setConsulta(null)}
                 onKeyDown={(e) => { if (e.key === "Escape" && consulta) { e.stopPropagation(); setConsulta(null); } }} />
-      {sugerencias.length > 0 && (
-        <div className="absolute left-0 z-50 mt-1 w-64 rounded border border-border bg-background shadow">
+      {abiertas && (
+        <div className="absolute bottom-full left-0 z-50 mb-1 w-64 rounded border border-border bg-background shadow">
           {sugerencias.map((u) => (
             <button key={u.user_id} type="button" aria-label={`Mencionar a ${etiquetaDe(u)}`}
                     className="block w-full px-2 py-1 text-left text-xs hover:bg-muted"

@@ -167,6 +167,32 @@ describe("DialogoNotas", () => {
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(editarNota).toHaveBeenCalledWith(1, "@Beto revisa ya", ["u-beto"]));
   });
+
+  it("escoger una mención al editar conserva el texto y la mención", async () => {
+    editarNota.mockResolvedValue(nota({ texto: "@Beto " }));
+    montar();
+    fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
+    const caja = screen.getByLabelText("Editar nota") as HTMLTextAreaElement;
+    fireEvent.change(caja, { target: { value: "@Be", selectionStart: 3, selectionEnd: 3 } });
+    fireEvent.click(await screen.findByRole("button", { name: "Mencionar a Beto" }));
+    expect(caja.value).toBe("@Beto ");
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(editarNota).toHaveBeenCalledWith(1, expect.stringContaining("@Beto"), ["u-beto"]));
+  });
+
+  it("Escape con la lista abierta la cierra y no cierra el diálogo", async () => {
+    const onClose = vi.fn();
+    render(<DialogoNotas dueno={DUENO} etiqueta="4520 · DUCTO PVC" onClose={onClose} onCambio={() => {}} />);
+    await screen.findByText("cotización X");
+    const caja = screen.getByLabelText("Nueva nota") as HTMLTextAreaElement;
+    fireEvent.change(caja, { target: { value: "@Be", selectionStart: 3, selectionEnd: 3 } });
+    await screen.findByRole("button", { name: "Mencionar a Beto" });
+    caja.focus();
+    fireEvent.keyDown(caja, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "Mencionar a Beto" })).toBeNull();
+    expect(screen.getByText(/Notas · /)).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
 
 describe("IconoNotas", () => {

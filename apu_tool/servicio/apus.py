@@ -13,6 +13,7 @@ from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio.pricing import PricingEngine
 from apu_tool.nucleo.texto import normalizar
+from apu_tool.servicio import notas as notas_svc
 
 
 def listar(alm: Almacen, q: Optional[str] = None, grupo: Optional[str] = None,
@@ -25,13 +26,18 @@ def listar(alm: Almacen, q: Optional[str] = None, grupo: Optional[str] = None,
     # `lista_id` (None = Principal). Ve dinero como el cuadro, pero NUNCA lo pasa
     # a la IA (Invariante #1).
     eng = PricingEngine(alm, lista_id=lista_id)
+    # El ícono de notas de toda la página en UNA consulta (nunca una por fila).
+    claves = [notas_svc.clave_apu(a.codigo, a.shift) for a in items]
+    notas = notas_svc.resumen(alm, "apu", claves)
     out = []
-    for a in items:
+    for a, k in zip(items, claves):
         _comp, costo = eng.cost_apu(a.codigo, a.shift)
         out.append({"codigo": a.codigo, "turno": a.shift, "nombre": a.nombre,
                     "unidad": a.unidad, "grupo": a.grupo,
                     "n_componentes": counts.get((a.codigo, a.shift), 0),
-                    "costo_unitario": costo})
+                    "costo_unitario": costo,
+                    "tiene_notas": k in notas,
+                    "ultima_nota": notas.get(k, "")[:120]})
     return {"items": out, "total": total, "limit": limit, "offset": offset}
 
 

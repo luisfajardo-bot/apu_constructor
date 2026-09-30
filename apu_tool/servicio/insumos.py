@@ -12,6 +12,7 @@ from typing import Optional
 
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
+from apu_tool.servicio import notas as notas_svc
 from apu_tool.servicio.auditoria import nuevo_lote, registrar_auditoria
 
 MSG_PRECIO_POSITIVO = ("El precio debe ser mayor que 0. Usa 1 si el ítem no tiene "
@@ -34,8 +35,16 @@ def listar(alm: Almacen, q: Optional[str] = None, grupo: Optional[str] = None,
            lista_id: Optional[int] = None, sin_precio: bool = False) -> dict:
     items, total = alm.precios.list_insumos(q, grupo, fuente, clasificacion, limit, offset,
                                             lista_id, sin_precio)
-    return {"items": [_insumo_out(i) for i in items], "total": total,
-            "limit": limit, "offset": offset}
+    # El ícono de notas de toda la página en UNA consulta (nunca una por fila).
+    claves = [notas_svc.clave_insumo(i.codigo, i.nombre) for i in items]
+    notas = notas_svc.resumen(alm, "insumo", claves)
+    out = []
+    for i, k in zip(items, claves):
+        fila = _insumo_out(i)
+        fila["tiene_notas"] = k in notas
+        fila["ultima_nota"] = notas.get(k, "")[:120]
+        out.append(fila)
+    return {"items": out, "total": total, "limit": limit, "offset": offset}
 
 
 def detalle(alm: Almacen, insumo_id: int, lista_id: Optional[int] = None) -> Optional[dict]:

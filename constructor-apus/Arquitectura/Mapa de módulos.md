@@ -44,6 +44,7 @@ flowchart TD
 | `correcciones.py` | Correcciones de código aplicadas al semillar (normalización mínima). |
 | `corridas_db.py` | Acceso a corridas.db (SQLite): estado de aplicación de un armado en progreso. |
 | `migracion_pg.py` | Migración de catálogo SQLite → Postgres (Supabase). Corridas NO se migran. |
+| `notas_db.py` | Acceso SQLite a la tabla `nota` (vive en seguridad.db). Implementa RepositorioNotas. |
 | `perfiles_db.py` | Acceso SQLite a la tabla perfiles (identidad + rol). Implementa RepositorioPerfiles. |
 | `pg/apus_pg.py` | Backend Postgres de APUs. Implementa RepositorioApus. Port 1:1 de apus_db.py. |
 | `pg/auditoria_pg.py` | Backend Postgres de auditoría (seguridad.auditoria). Implementa RepositorioAuditoria. |

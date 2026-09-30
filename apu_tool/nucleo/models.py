@@ -206,6 +206,25 @@ class EventoAuditoria:
     contexto: Optional[dict] = None
 
 
+@dataclass(frozen=True)
+class Nota:
+    """Una nota humana pegada a un insumo o a un APU (tabla seguridad.nota).
+
+    Texto libre: puede llevar montos («cotización a $45.000»), así que NUNCA va en un
+    payload hacia la IA (Invariante #1; `nota`/`notas` están en _FORBIDDEN_KEYS)."""
+    id: int
+    entidad: str                     # insumo | apu
+    clave: str                       # insumo: codigo|nombre_norm · apu: codigo|TURNO
+    etiqueta: str                    # cómo se muestra el dueño, fijada al crear
+    texto: str
+    autor_id: str
+    autor_email: str
+    creada_en: str                   # ISO 8601 UTC
+    editada_en: Optional[str] = None
+    borrada: bool = False
+    responde_a: Optional[int] = None
+
+
 # ---------------------------------------------------------------------------
 # Vistas SIN dinero — lo único que la IA puede ver
 # ---------------------------------------------------------------------------

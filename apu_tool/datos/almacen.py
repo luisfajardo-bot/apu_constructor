@@ -43,6 +43,7 @@ class Almacen:
             self._seg_path = None
         else:
             from apu_tool.datos.auditoria_db import AuditoriaDB
+            from apu_tool.datos.notas_db import NotasDB
             from apu_tool.datos.perfiles_db import PerfilesDB
             self._seg_path = (Path(precios_path).parent / "seguridad.db"
                               if isinstance(precios_path, Path) else config.DATA_DIR / "seguridad.db")
@@ -53,6 +54,7 @@ class Almacen:
             self.composiciones = ComposicionesDB(corridas_path)
             self.perfiles = PerfilesDB(self._seg_path)
             self.auditoria = AuditoriaDB(self._seg_path)
+            self.notas = NotasDB(self._seg_path)
             self._paths = {"precios": Path(precios_path), "apus": Path(apus_path),
                            "corridas": Path(corridas_path), "seguridad": Path(self._seg_path)}
 

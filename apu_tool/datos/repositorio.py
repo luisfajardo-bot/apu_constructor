@@ -526,6 +526,11 @@ class RepositorioNotas(Protocol):
         Devuelve los user_id NUEVOS; los que ya estaban conservan su estado de lectura."""
         ...
 
+    def reasignar_mencionado(self, conn, viejo: str, nuevo: str) -> None:
+        """Re-clava las menciones de `viejo` a `nuevo` (adopción de identidad: el invitado
+        mencionado antes de su primer login no pierde sus avisos)."""
+        ...
+
     def menciones_de_notas(self, nota_ids: list[int]) -> dict[int, list[str]]:
         """nota_id → user_ids mencionados. UNA consulta; sin menciones = ausente."""
         ...

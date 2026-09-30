@@ -143,15 +143,18 @@ def crear(alm: Almacen, actor: Perfil, entidad: str, codigo: str, nombre: str,
           turno: str, texto: str, menciones: Optional[list[str]] = None) -> dict:
     t = _texto_valido(texto)
     clave, etiqueta = _resolver_dueno(alm, entidad, codigo, nombre, turno)
-    uids = _menciones_validas(_perfiles(alm), actor, menciones or [])
+    perfiles = _perfiles(alm)
+    uids = _menciones_validas(perfiles, actor, menciones or [])
     ahora = _ahora()
     with alm.transaccion("seguridad") as conn:
         nid = alm.notas.crear(conn, entidad, clave, etiqueta, t, actor.user_id,
                               actor.email, ahora)
         alm.notas.set_menciones(conn, nid, uids, ahora)
+        despues = {"entidad": entidad, "clave": clave, "texto": t}
+        if uids:   # la auditoría es historia permanente: correos, no user_ids
+            despues["menciones"] = [perfiles[u].email for u in uids]
         registrar_auditoria(alm, conn, actor, "nota.crear", "nota", nid, antes=None,
-                            despues={"entidad": entidad, "clave": clave, "texto": t,
-                                     "menciones": uids})
+                            despues=despues)
     return _salidas(alm, [alm.notas.get(nid)], actor)[0]
 
 
@@ -163,14 +166,18 @@ def editar(alm: Almacen, actor: Perfil, nota_id: int, texto: str,
     if actor.user_id != n.autor_id:
         raise SinPermiso("Solo quien escribió la nota puede editarla.")
     t = _texto_valido(texto)
-    uids = (None if menciones is None
-            else _menciones_validas(_perfiles(alm), actor, menciones))
+    perfiles = _perfiles(alm)
+    uids = (None if menciones is None else _menciones_validas(perfiles, actor, menciones))
     ahora = _ahora()
     with alm.transaccion("seguridad") as conn:
+        # El UPDATE de `nota` va ANTES de set_menciones: su bloqueo de fila serializa dos
+        # ediciones concurrentes de la misma nota, por eso set_menciones no necesita ON CONFLICT.
         alm.notas.editar(conn, n.id, t, ahora)
         if uids is not None:
             alm.notas.set_menciones(conn, n.id, uids, ahora)
-        despues = {"texto": t} if uids is None else {"texto": t, "menciones": uids}
+        despues = {"texto": t}
+        if uids:
+            despues["menciones"] = [perfiles[u].email for u in uids]
         registrar_auditoria(alm, conn, actor, "nota.editar", "nota", n.id,
                             antes={"texto": n.texto}, despues=despues)
     return _salidas(alm, [alm.notas.get(n.id)], actor)[0]

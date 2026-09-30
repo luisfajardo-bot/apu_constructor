@@ -110,6 +110,9 @@ class NotasDB:
                          "VALUES (?,?,?)", (int(nota_id), u, creada_en))
         return nuevos
 
+    def reasignar_mencionado(self, conn, viejo: str, nuevo: str) -> None:
+        conn.execute("UPDATE nota_mencion SET user_id=? WHERE user_id=?", (nuevo, viejo))
+
     def menciones_de_notas(self, nota_ids: list[int]) -> dict[int, list[str]]:
         if not nota_ids:
             return {}

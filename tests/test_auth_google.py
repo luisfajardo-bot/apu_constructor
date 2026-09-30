@@ -154,3 +154,17 @@ def test_usuario_actual_pasa_la_senal_a_resolver_perfil(tmp_path, monkeypatch):
     assert total == 1
     assert items[0]["contexto"]["senal"] == "amr:oauth"
     assert items[0]["contexto"]["email_sesion"] == "ana@obra.co"
+
+
+def test_adopcion_mueve_las_menciones_del_invitado(tmp_path, monkeypatch):
+    """Lo mencionaron antes de su primer login con Google: no pierde esos avisos."""
+    alm = _alm(tmp_path, monkeypatch)
+    alm.perfiles.upsert(Perfil("viejo", "ana@obra.co", "editor", "activo", "Ana"))
+    with alm.transaccion("seguridad") as conn:
+        nid = alm.notas.crear(conn, "insumo", "1|X", "1 · X", "hola", "autor",
+                              "autor@obra.co", "2026-09-30T10:00:00+00:00")
+        alm.notas.set_menciones(conn, nid, ["viejo"], "2026-09-30T10:00:00+00:00")
+    assert alm.notas.contar_sin_leer("viejo") == 1
+    resolver_perfil(alm, "nuevo-de-google", "ana@obra.co", True)
+    assert alm.notas.contar_sin_leer("nuevo-de-google") == 1
+    assert alm.notas.contar_sin_leer("viejo") == 0

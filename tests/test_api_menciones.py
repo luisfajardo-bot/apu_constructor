@@ -117,4 +117,7 @@ def test_auditoria_de_crear_guarda_las_menciones(tmp_path):
     app, alm = _app(tmp_path)
     _como(app, ANA).post("/api/notas", json={**INS, "texto": "x", "menciones": ["u-beto"]})
     items, _ = alm.auditoria.listar(entidad_tipo="nota")
-    assert items[0]["despues"]["menciones"] == ["u-beto"]
+    assert items[0]["despues"]["menciones"] == ["beto@obra.co"]   # correo, no user_id
+    _como(app, ANA).post("/api/notas", json={**INS, "texto": "sin menciones"})
+    items, _ = alm.auditoria.listar(entidad_tipo="nota")
+    assert "menciones" not in items[0]["despues"]

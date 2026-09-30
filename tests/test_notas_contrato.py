@@ -216,3 +216,30 @@ def test_ddl_crea_nota_mencion_en_los_dos_backends():
     for ruta in (("db", "seguridad.sql"), ("db", "pg", "seguridad.sql")):
         sql = config.PROJECT_ROOT.joinpath(*ruta).read_text(encoding="utf-8")
         assert "nota_mencion" in sql and "UNIQUE (nota_id, user_id)" in sql
+
+
+def test_reasignar_mencionado_mueve_las_menciones(repo):
+    r, tx = repo
+    a = _crear(r, tx, texto="a")
+    b = _crear(r, tx, texto="b", ts="2026-09-30T11:00:00+00:00")
+    _mencionar(r, tx, a, ["viejo", "ana"])
+    _mencionar(r, tx, b, ["viejo"])
+    _escribir(tx, lambda c: r.reasignar_mencionado(c, "viejo", "nuevo"))
+    assert r.contar_sin_leer("viejo") == 0 and r.contar_sin_leer("nuevo") == 2
+    assert r.contar_sin_leer("ana") == 1
+
+
+def test_mencion_que_se_queda_conserva_su_lectura(repo):
+    r, tx = repo
+    nid = _crear(r, tx)
+    _mencionar(r, tx, nid, ["ana", "beto"])
+    _escribir(tx, lambda c: r.marcar_leida(c, "ana", nid, "2026-09-30T12:00:00+00:00"))
+    assert _mencionar(r, tx, nid, ["ana", "caro"]) == ["caro"]
+    leidas = {u: dict((n.id, l) for n, l in r.listar_menciones(u))[nid]
+              for u in ("ana", "caro")}
+    assert leidas == {"ana": "2026-09-30T12:00:00+00:00", "caro": None}
+    assert r.listar_menciones("beto") == []
+    # quitarla y volverla a poner es una mención nueva: vuelve a estar sin leer
+    _mencionar(r, tx, nid, ["caro"])
+    _mencionar(r, tx, nid, ["ana", "caro"])
+    assert r.contar_sin_leer("ana") == 1

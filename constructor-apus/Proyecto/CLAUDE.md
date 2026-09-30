@@ -90,6 +90,7 @@ matching, modelo de IA, clasificación de precios.
 | `corridas_db.py`  | SQLite de `corridas.db` (estado de corridas en curso) |
 | `composiciones_db.py` | SQLite del expediente de composición (vive en `corridas.db`, repo aparte por dominio, como `carpetas_db.py`) |
 | `auditoria_db.py` | SQLite de auditoría (`seguridad.db`) |
+| `notas_db.py`     | SQLite de notas de insumos/APUs (vive en `seguridad.db`, sobrevive a `seed --force`) |
 | `perfiles_db.py`  | SQLite de perfiles (identidad + rol) |
 | `almacen.py`      | fachada que agrupa los repos SQLite/Postgres |
 | `seed.py`         | ingesta Excel histórico → bases |
@@ -146,6 +147,7 @@ matching, modelo de IA, clasificación de precios.
 | `ajustes.py`           | ajustes puntuales de composición por proyecto |
 | `usuarios.py`          | gestión de usuarios (solo Admin) |
 | `auditoria.py`         | servicio de auditoría (registro + lectura paginada) |
+| `notas.py`             | notas de insumos y APUs: dueño por identidad, permisos (autor edita, autor o Admin borra), auditoría, resumen por página para los listados |
 | `supabase_admin.py`    | cliente de la Admin API de Supabase Auth |
 | `plantillas.py`        | plantillas `.xlsx` para importadores |
 | `presencia.py`         | quién está usando la app ahora (dict en memoria, sin DB) |
@@ -370,6 +372,17 @@ matching, modelo de IA, clasificación de precios.
   Ojo: el costo interno **no lleva AIU**, así que la diferencia contra el contractual
   incluye el A.I.U. Medido sobre el archivo de referencia (1939 actividades):
   158.456.072.140 con AIU, 123.871.215.068 sin AIU.
+- **Notas de insumos y APUs.** Tabla `nota` en `seguridad.db` / schema `seguridad`, y
+  no en precios/apus **a propósito**: `seed --force` reescribe esas dos bases. El dueño es
+  un enlace blando por identidad (insumo `codigo|nombre_norm`, APU `codigo|TURNO`), nunca
+  el `id`; diurno y nocturno tienen notas propias. Cada nota guarda una `etiqueta` legible
+  del dueño fijada al crear (la pestaña Notas no cruza el catálogo). Borrado suave. Los
+  listados traen `tiene_notas`/`ultima_nota` con UNA consulta por página
+  (`resumen_por_claves`). Leer: consulta; escribir: editor; editar: solo el autor; borrar:
+  autor o Admin; la pestaña Notas (`/api/notas/todas`, filtros por tipo, autor y texto) es
+  de Admin. En producción, el RLS de la tabla es un paso manual
+  (`supabase/migrations/0007_notas_rls.sql`). Fases 2 (menciones) y 3 (respuestas) en el
+  spec `docs/superpowers/specs/2026-09-30-notas-insumos-apus-design.md`.
 - **Salidas:** `salidas/` (cuadros) y `ejemplos/` (licitaciones de ejemplo).
 - Fuentes de precio: `PRECIO IDU` se trata como **público**; el resto
   (`COSTO INTERNO`, `COMPRAS…`, etc.) como **interno/confidencial**
@@ -442,6 +455,10 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
 - No le inventes reglas de formato a Metro, INVÍAS ni a las demás entidades. Están en el
   registro de `dominio/entrada.py` apuntando al importador genérico **a propósito**: no
   hay un archivo real medido que justifique otra cosa.
+- No metas una nota en un payload hacia la IA. Es texto libre y lleva montos
+  («cotización a $45.000»); `nota`, `notas` y `ultima_nota` están en `_FORBIDDEN_KEYS`
+  para que el intento **falle**. Y no calcules el ícono de notas fila por fila: el
+  resumen es por página.
 - No metas una `Advertencia` del parser en un payload hacia la IA. Su `detalle` es texto
   libre y lleva **montos adentro** («El Excel dice 67.153 y el recálculo da 67.154»);
   `assert_no_money` mira nombres de clave, no valores. Misma trampa que las alertas de

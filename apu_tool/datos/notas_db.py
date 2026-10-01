@@ -38,11 +38,12 @@ class NotasDB:
             conn.close()
 
     def crear(self, conn, entidad: str, clave: str, etiqueta: str, texto: str,
-              autor_id: str, autor_email: str, creada_en: str) -> int:
+              autor_id: str, autor_email: str, creada_en: str,
+              responde_a: Optional[int] = None) -> int:
         cur = conn.execute(
-            "INSERT INTO nota (entidad, clave, etiqueta, texto, autor_id, autor_email, creada_en) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (entidad, clave, etiqueta, texto, autor_id, autor_email, creada_en))
+            "INSERT INTO nota (entidad, clave, etiqueta, texto, autor_id, autor_email, "
+            "creada_en, responde_a) VALUES (?,?,?,?,?,?,?,?)",
+            (entidad, clave, etiqueta, texto, autor_id, autor_email, creada_en, responde_a))
         return int(cur.lastrowid)
 
     def get(self, nota_id: int) -> Optional[Nota]:
@@ -50,10 +51,11 @@ class NotasDB:
             r = conn.execute("SELECT * FROM nota WHERE id=?", (int(nota_id),)).fetchone()
         return _fila(r) if r else None
 
-    def listar(self, entidad: str, clave: str) -> list[Nota]:
+    def listar(self, entidad: str, clave: str, incluir_borradas: bool = False) -> list[Nota]:
+        filtro = "" if incluir_borradas else " AND borrada=0"
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM nota WHERE entidad=? AND clave=? AND borrada=0 ORDER BY id",
+                f"SELECT * FROM nota WHERE entidad=? AND clave=?{filtro} ORDER BY id",
                 (entidad, clave)).fetchall()
         return [_fila(r) for r in rows]
 

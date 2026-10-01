@@ -20,12 +20,14 @@ class NotasPg:
         self.cx = cx
 
     def crear(self, conn, entidad: str, clave: str, etiqueta: str, texto: str,
-              autor_id: str, autor_email: str, creada_en: str) -> int:
+              autor_id: str, autor_email: str, creada_en: str,
+              responde_a: Optional[int] = None) -> int:
         r = conn.execute(
             "INSERT INTO seguridad.nota "
-            "(entidad, clave, etiqueta, texto, autor_id, autor_email, creada_en) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-            (entidad, clave, etiqueta, texto, autor_id, autor_email, creada_en)).fetchone()
+            "(entidad, clave, etiqueta, texto, autor_id, autor_email, creada_en, responde_a) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            (entidad, clave, etiqueta, texto, autor_id, autor_email, creada_en,
+             responde_a)).fetchone()
         return int(r["id"])
 
     def get(self, nota_id: int) -> Optional[Nota]:
@@ -34,11 +36,12 @@ class NotasPg:
                              (int(nota_id),)).fetchone()
         return _fila(r) if r else None
 
-    def listar(self, entidad: str, clave: str) -> list[Nota]:
+    def listar(self, entidad: str, clave: str, incluir_borradas: bool = False) -> list[Nota]:
+        filtro = "" if incluir_borradas else " AND borrada=0"
         with self.cx.connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM seguridad.nota WHERE entidad=%s AND clave=%s AND borrada=0 "
-                "ORDER BY id", (entidad, clave)).fetchall()
+                f"SELECT * FROM seguridad.nota WHERE entidad=%s AND clave=%s{filtro} "
+                f"ORDER BY id", (entidad, clave)).fetchall()
         return [_fila(r) for r in rows]
 
     def editar(self, conn, nota_id: int, texto: str, editada_en: str) -> None:

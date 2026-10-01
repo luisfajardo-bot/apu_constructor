@@ -243,3 +243,18 @@ def test_mencion_que_se_queda_conserva_su_lectura(repo):
     _mencionar(r, tx, nid, ["caro"])
     _mencionar(r, tx, nid, ["ana", "caro"])
     assert r.contar_sin_leer("ana") == 1
+
+
+# ---- Fase 3: respuestas ----
+
+def test_crear_respuesta_y_listar_con_borradas(repo):
+    r, tx = repo
+    raiz = _crear(r, tx, texto="raíz")
+    resp = _escribir(tx, lambda c: r.crear(c, "insumo", "4520|DUCTO PVC", "4520 · DUCTO PVC",
+                                           "respuesta", "u2", "u2@obra.co",
+                                           "2026-09-30T11:00:00+00:00", responde_a=raiz))
+    assert r.get(resp).responde_a == raiz and r.get(raiz).responde_a is None
+    _escribir(tx, lambda c: r.borrar(c, raiz))
+    assert [n.id for n in r.listar("insumo", "4520|DUCTO PVC")] == [resp]
+    todas = r.listar("insumo", "4520|DUCTO PVC", incluir_borradas=True)
+    assert [(n.id, n.borrada) for n in todas] == [(raiz, True), (resp, False)]

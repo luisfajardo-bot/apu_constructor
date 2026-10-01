@@ -110,9 +110,18 @@ def create_app(almacen: Optional[Almacen] = None) -> FastAPI:
         # ({full_path:path}), cualquier ruta /api/* o de FastAPI (/docs,
         # /openapi.json) añadida DESPUES de este decorador quedaría ensombrecida
         # y devolvería index.html en lugar de su handler real.
+        raiz_dist = WEB_DIST.resolve()
+
         @app.get("/{full_path:path}")
         def spa(full_path: str):
-            return FileResponse(WEB_DIST / "index.html")
+            # Los archivos reales de la raíz de dist (favicon.ico, favicon-32.png,
+            # apple-touch-icon.png…) se sirven tal cual: antes salía index.html y el
+            # navegador mostraba el ícono por defecto. Todo lo demás es una ruta de la
+            # app y recibe index.html. `is_relative_to` impide salirse de dist con "../".
+            archivo = (raiz_dist / full_path).resolve()
+            if full_path and archivo.is_file() and archivo.is_relative_to(raiz_dist):
+                return FileResponse(archivo)
+            return FileResponse(raiz_dist / "index.html")
     return app
 
 

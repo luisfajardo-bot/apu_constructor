@@ -163,7 +163,14 @@ def _raiz_para_responder(alm: Almacen, responde_a: int, entidad: str, clave: str
         raise ValueError("La nota a la que respondes ya no existe.")
     if padre.entidad != entidad or padre.clave != clave:
         raise ValueError("Solo puedes responder notas del mismo insumo o APU.")
-    return padre.responde_a or padre.id
+    if padre.responde_a is not None:
+        # Respondiendo a una respuesta: cuelga de su raíz, y esa raíz también tiene que
+        # estar viva (la pantalla no ofrece «Responder» bajo una nota borrada).
+        raiz = alm.notas.get(padre.responde_a)
+        if raiz is None or raiz.borrada:
+            raise ValueError("La nota a la que respondes ya no existe.")
+        return raiz.id
+    return padre.id
 
 
 def crear(alm: Almacen, actor: Perfil, entidad: str, codigo: str, nombre: str,

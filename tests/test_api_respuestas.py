@@ -100,3 +100,23 @@ def test_consulta_no_responde(tmp_path):
     lector = Perfil(user_id="u-l", email="l@obra.co", rol="consulta", estado="activo", nombre="L")
     r = _como(app, lector).post("/api/notas", json={**INS, "texto": "x", "responde_a": raiz})
     assert r.status_code == 403
+
+
+def test_el_marcador_no_se_edita_ni_se_borra(tmp_path):
+    app, _ = _app(tmp_path)
+    raiz = _como(app, ANA).post("/api/notas", json={**INS, "texto": "raíz"}).json()["id"]
+    _como(app, BETO).post("/api/notas", json={**INS, "texto": "r", "responde_a": raiz})
+    _como(app, ANA).delete(f"/api/notas/{raiz}")
+    assert _como(app, ANA).patch(f"/api/notas/{raiz}", json={"texto": "revivo"}).status_code == 404
+    assert _como(app, ADMIN).delete(f"/api/notas/{raiz}").status_code == 404
+
+
+def test_no_se_responde_bajo_una_raiz_borrada_ni_via_una_respuesta(tmp_path):
+    """La pantalla no ofrece «Responder» en una raíz borrada; la API tampoco lo deja
+    colar respondiendo a una de sus respuestas vivas."""
+    app, _ = _app(tmp_path)
+    raiz = _como(app, ANA).post("/api/notas", json={**INS, "texto": "raíz"}).json()["id"]
+    resp = _como(app, BETO).post("/api/notas", json={**INS, "texto": "r", "responde_a": raiz}).json()["id"]
+    _como(app, ANA).delete(f"/api/notas/{raiz}")
+    r = _como(app, BETO).post("/api/notas", json={**INS, "texto": "x", "responde_a": resp})
+    assert r.status_code == 400 and "ya no existe" in r.json()["detail"]

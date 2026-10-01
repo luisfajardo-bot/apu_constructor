@@ -41,7 +41,7 @@ class NotasPg:
         with self.cx.connection() as conn:
             rows = conn.execute(
                 f"SELECT * FROM seguridad.nota WHERE entidad=%s AND clave=%s{filtro} "
-                f"ORDER BY id", (entidad, clave)).fetchall()
+                "ORDER BY id", (entidad, clave)).fetchall()
         return [_fila(r) for r in rows]
 
     def editar(self, conn, nota_id: int, texto: str, editada_en: str) -> None:

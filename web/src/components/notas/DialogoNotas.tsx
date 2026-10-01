@@ -126,15 +126,24 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
     setOcupado(true);
     try {
       await borrarNota(id);
-      // Una raíz con respuestas pasa a marcador: lo decide el servidor, así que se recarga.
+    } catch (e) {
+      toast.error(msg(e, "No se pudo borrar la nota"));
+      setOcupado(false);
+      return;
+    }
+    onCambio();
+    // Una raíz con respuestas pasa a marcador: lo decide el servidor, así que se recarga.
+    try {
       const d = duenoRef.current;
       if (d && clave === claveVigente.current) {
         const r = await listarNotas(d);
         if (clave === claveVigente.current) setNotas(r);
       }
-      onCambio();
-    } catch (e) {
-      toast.error(msg(e, "No se pudo borrar la nota"));
+    } catch {
+      if (clave === claveVigente.current) {
+        setNotas((prev) => (prev ?? []).filter((x) => x.id !== id));
+        toast.error("Se borró, pero no se pudo actualizar la lista.");
+      }
     } finally {
       setOcupado(false);
     }
@@ -150,49 +159,49 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
       );
     }
     return (
-    <div key={n.id} className="text-xs">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        <span>{n.autor_email}</span>
-        <span>·</span>
-        <span>{fecha(n.creada_en)}</span>
-        {n.editada_en && <span>(editada)</span>}
-        <span className="ml-auto flex gap-1">
-          {n.puede_editar && editando?.id !== n.id && (
-            <Button size="xs" variant="ghost" disabled={ocupado}
-                    onClick={() => setEditando({ id: n.id, texto: n.texto, elegidos: n.menciones })}>
-              Editar
-            </Button>
-          )}
-          {n.puede_borrar && (
-            <Button size="xs" variant="ghost" disabled={ocupado}
-                    onClick={() => borrar(n.id)}>
-              Borrar
-            </Button>
-          )}
-        </span>
-      </div>
-      {editando?.id === n.id ? (
-        <div className="mt-1 space-y-1">
-          <CajaConMenciones ariaLabel="Editar nota" valor={editando.texto}
-                            onValor={(v) => setEditando((e) => (e ? { ...e, texto: v } : e))}
-                            elegidos={editando.elegidos}
-                            onElegidos={(el) => setEditando((e) => (e ? { ...e, elegidos: el } : e))}
-                            mencionables={mencionables} abrirHacia="abajo" />
-          <div className="flex justify-end gap-1">
-            <Button size="xs" variant="outline" disabled={ocupado}
-                    onClick={() => setEditando(null)}>
-              Cancelar
-            </Button>
-            <Button size="xs" disabled={ocupado || !editando.texto.trim()}
-                    onClick={guardarEdicion}>
-              Guardar
-            </Button>
-          </div>
+      <div key={n.id} className="text-xs">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <span>{n.autor_email}</span>
+          <span>·</span>
+          <span>{fecha(n.creada_en)}</span>
+          {n.editada_en && <span>(editada)</span>}
+          <span className="ml-auto flex gap-1">
+            {n.puede_editar && editando?.id !== n.id && (
+              <Button size="xs" variant="ghost" disabled={ocupado}
+                      onClick={() => setEditando({ id: n.id, texto: n.texto, elegidos: n.menciones })}>
+                Editar
+              </Button>
+            )}
+            {n.puede_borrar && (
+              <Button size="xs" variant="ghost" disabled={ocupado}
+                      onClick={() => borrar(n.id)}>
+                Borrar
+              </Button>
+            )}
+          </span>
         </div>
-      ) : (
-        <TextoConMenciones texto={n.texto} nombres={n.menciones.map((m) => m.nombre)} />
-      )}
-    </div>
+        {editando?.id === n.id ? (
+          <div className="mt-1 space-y-1">
+            <CajaConMenciones ariaLabel="Editar nota" valor={editando.texto}
+                              onValor={(v) => setEditando((e) => (e ? { ...e, texto: v } : e))}
+                              elegidos={editando.elegidos}
+                              onElegidos={(el) => setEditando((e) => (e ? { ...e, elegidos: el } : e))}
+                              mencionables={mencionables} abrirHacia="abajo" />
+            <div className="flex justify-end gap-1">
+              <Button size="xs" variant="outline" disabled={ocupado}
+                      onClick={() => setEditando(null)}>
+                Cancelar
+              </Button>
+              <Button size="xs" disabled={ocupado || !editando.texto.trim()}
+                      onClick={guardarEdicion}>
+                Guardar
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <TextoConMenciones texto={n.texto} nombres={n.menciones.map((m) => m.nombre)} />
+        )}
+      </div>
     );
   }
 
@@ -219,7 +228,7 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
                   {respuestas.map((r) => renderNota(r))}
                 </div>
               )}
-              {escribe && !raiz.borrada && (respondiendo?.raizId === raiz.id ? (
+              {escribe && !raiz.borrada && raiz.responde_a === null && (respondiendo?.raizId === raiz.id ? (
                 <div className="ml-4 space-y-1">
                   <CajaConMenciones ariaLabel="Responder nota" valor={respondiendo.texto}
                                     onValor={(v) => setRespondiendo((x) => (x ? { ...x, texto: v } : x))}

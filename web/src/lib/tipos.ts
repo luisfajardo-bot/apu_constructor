@@ -870,6 +870,8 @@ export interface Nota {
   puede_borrar: boolean;
   dueno: DuenoNota;
   menciones: MencionNota[];
+  responde_a: number | null;
+  borrada: boolean;
 }
 
 export interface MencionNota {

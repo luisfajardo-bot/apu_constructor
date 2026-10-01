@@ -27,7 +27,7 @@ beforeEach(() => {
     items: [{ id: 7, entidad: "apu", etiqueta: "4859 · NOCTURNO · EXCAVACION",
               texto: "rendimiento medido en obra", autor_email: "ana@obra.co",
               creada_en: "2026-09-30T10:00:00+00:00", editada_en: null, es_mia: false,
-              puede_editar: false, puede_borrar: true, dueno: DUENO }],
+              puede_editar: false, puede_borrar: true, dueno: DUENO, responde_a: null, borrada: false }],
     total: 1, limit: 100, offset: 0,
   });
 });
@@ -66,7 +66,7 @@ describe("Notas", () => {
     const nota = (id: number, texto: string) => ({
       items: [{ id, entidad: "apu", etiqueta: "x", texto, autor_email: "a@b.co",
                 creada_en: "2026-09-30T10:00:00+00:00", editada_en: null, es_mia: false,
-                puede_editar: false, puede_borrar: true, dueno: DUENO }],
+                puede_editar: false, puede_borrar: true, dueno: DUENO, responde_a: null, borrada: false }],
       total: 1, limit: 100, offset: 0,
     });
     let soltarPrimera!: (v: unknown) => void;

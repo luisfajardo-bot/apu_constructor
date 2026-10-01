@@ -102,7 +102,9 @@ export default function Notas() {
                 <td className="truncate px-2 py-1">{n.autor_email}</td>
                 <td className="px-2 py-1">{n.entidad === "apu" ? "APU" : "Insumo"}</td>
                 <td className="max-w-[20rem] truncate px-2 py-1" title={n.etiqueta}>{n.etiqueta}</td>
-                <td className="max-w-[32rem] truncate px-2 py-1" title={n.texto}>{n.texto}</td>
+                <td className="max-w-[32rem] truncate px-2 py-1" title={n.texto}>
+                  {n.responde_a !== null && <span className="text-muted-foreground">↳ </span>}{n.texto}
+                </td>
               </tr>
             ))}
             {items.length === 0 && !error && (

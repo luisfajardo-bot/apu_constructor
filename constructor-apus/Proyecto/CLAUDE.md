@@ -391,8 +391,14 @@ matching, modelo de IA, clasificación de precios.
   `GET /api/presencia` (`menciones_sin_leer`, `null` si falla): la barra ya late cada
   45 s, así que la campanita **no** agrega sondeo; la lista se pide al abrirla.
   `GET /api/usuarios/mencionables` es de editor y solo expone id, nombre y email. RLS
-  manual en prod: `supabase/migrations/0008_menciones_rls.sql`. La Fase 3 (respuestas)
-  sigue en el spec `docs/superpowers/specs/2026-09-30-notas-insumos-apus-design.md`.
+  manual en prod: `supabase/migrations/0008_menciones_rls.sql`.
+  **Respuestas (Fase 3):** una respuesta es otra fila de `nota` con `responde_a` = la
+  raíz (misma `entidad`/`clave`, si no 400); responder a una respuesta cuelga de su raíz
+  (un solo nivel). Una raíz borrada con respuestas vivas se lista como marcador
+  (`borrada: true`, sin texto ni acciones); sin respuestas, desaparece. Tras borrar, la
+  web **recarga** el hilo en vez de filtrar local: el marcador lo decide el servidor.
+  Responder no avisa solo: se menciona con `@`. Spec:
+  `docs/superpowers/specs/2026-09-30-notas-insumos-apus-design.md`.
 - **Salidas:** `salidas/` (cuadros) y `ejemplos/` (licitaciones de ejemplo).
 - Fuentes de precio: `PRECIO IDU` se trata como **público**; el resto
   (`COSTO INTERNO`, `COMPRAS…`, etc.) como **interno/confidencial**

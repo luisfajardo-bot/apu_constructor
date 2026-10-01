@@ -86,12 +86,21 @@ def _puede_borrar(n: Nota, actor: Perfil) -> bool:
 def _out(n: Nota, actor: Perfil, menciones: list[dict]) -> dict:
     mia = actor.user_id == n.autor_id
     escribe = actor.rol in ("editor", "admin")
+    if n.borrada:
+        # Marcador de una raíz borrada que todavía tiene respuestas: sostiene el hilo
+        # sin mostrar lo que se borró.
+        return {"id": n.id, "entidad": n.entidad, "etiqueta": n.etiqueta, "texto": "",
+                "autor_email": n.autor_email, "creada_en": n.creada_en,
+                "editada_en": n.editada_en, "es_mia": mia, "puede_editar": False,
+                "puede_borrar": False, "dueno": _dueno(n), "menciones": [],
+                "responde_a": n.responde_a, "borrada": True}
     return {"id": n.id, "entidad": n.entidad, "etiqueta": n.etiqueta, "texto": n.texto,
             "autor_email": n.autor_email, "creada_en": n.creada_en,
             "editada_en": n.editada_en, "es_mia": mia,
             "puede_editar": mia and escribe,
             "puede_borrar": escribe and _puede_borrar(n, actor),
-            "dueno": _dueno(n), "menciones": menciones}
+            "dueno": _dueno(n), "menciones": menciones,
+            "responde_a": n.responde_a, "borrada": False}
 
 
 def _perfiles(alm: Almacen) -> dict[str, Perfil]:
@@ -130,27 +139,57 @@ def _vigente(alm: Almacen, nota_id: int) -> Nota:
     return n
 
 
+def _hilo(notas: list[Nota]) -> list[Nota]:
+    """Las vivas, más las raíces borradas que todavía tienen respuestas vivas (como
+    marcador). Una respuesta borrada no se muestra. Orden por id (cronológico)."""
+    con_respuesta = {n.responde_a for n in notas if n.responde_a is not None and not n.borrada}
+    return [n for n in notas
+            if not n.borrada or (n.responde_a is None and n.id in con_respuesta)]
+
+
 def listar(alm: Almacen, actor: Perfil, entidad: str, codigo: str, nombre: str = "",
            turno: str = "") -> list[dict]:
     if entidad not in ENTIDADES:
         raise ValueError("La nota debe ser de un insumo o de un APU.")
     clave = (clave_insumo(codigo, nombre) if entidad == "insumo"
              else clave_apu(codigo, turno))
-    return _salidas(alm, alm.notas.listar(entidad, clave), actor)
+    return _salidas(alm, _hilo(alm.notas.listar(entidad, clave, incluir_borradas=True)), actor)
+
+
+def _raiz_para_responder(alm: Almacen, responde_a: int, entidad: str, clave: str) -> int:
+    """Valida el padre y aplana a un nivel: responder a una respuesta cuelga de su raíz."""
+    padre = alm.notas.get(responde_a)
+    if padre is None or padre.borrada:
+        raise ValueError("La nota a la que respondes ya no existe.")
+    if padre.entidad != entidad or padre.clave != clave:
+        raise ValueError("Solo puedes responder notas del mismo insumo o APU.")
+    if padre.responde_a is not None:
+        # Respondiendo a una respuesta: cuelga de su raíz, y esa raíz también tiene que
+        # estar viva (la pantalla no ofrece «Responder» bajo una nota borrada).
+        raiz = alm.notas.get(padre.responde_a)
+        if raiz is None or raiz.borrada:
+            raise ValueError("La nota a la que respondes ya no existe.")
+        return raiz.id
+    return padre.id
 
 
 def crear(alm: Almacen, actor: Perfil, entidad: str, codigo: str, nombre: str,
-          turno: str, texto: str, menciones: Optional[list[str]] = None) -> dict:
+          turno: str, texto: str, menciones: Optional[list[str]] = None,
+          responde_a: Optional[int] = None) -> dict:
     t = _texto_valido(texto)
     clave, etiqueta = _resolver_dueno(alm, entidad, codigo, nombre, turno)
+    raiz = (None if responde_a is None
+            else _raiz_para_responder(alm, responde_a, entidad, clave))
     perfiles = _perfiles(alm)
     uids = _menciones_validas(perfiles, actor, menciones or [])
     ahora = _ahora()
     with alm.transaccion("seguridad") as conn:
         nid = alm.notas.crear(conn, entidad, clave, etiqueta, t, actor.user_id,
-                              actor.email, ahora)
+                              actor.email, ahora, responde_a=raiz)
         alm.notas.set_menciones(conn, nid, uids, ahora)
         despues = {"entidad": entidad, "clave": clave, "texto": t}
+        if raiz is not None:
+            despues["responde_a"] = raiz
         if uids:   # la auditoría es historia permanente: correos, no user_ids
             despues["menciones"] = [perfiles[u].email for u in uids]
         registrar_auditoria(alm, conn, actor, "nota.crear", "nota", nid, antes=None,

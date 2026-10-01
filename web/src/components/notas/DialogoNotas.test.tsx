@@ -22,7 +22,7 @@ const DUENO = { entidad: "insumo" as const, codigo: "4520", nombre: "DUCTO PVC",
 const nota = (over = {}) => ({
   id: 1, entidad: "insumo", etiqueta: "4520 · DUCTO PVC", texto: "cotización X",
   autor_email: "luis@obra.co", creada_en: "2026-09-30T10:00:00+00:00", editada_en: null,
-  es_mia: true, puede_editar: true, puede_borrar: true, dueno: DUENO, menciones: [], ...over,
+  es_mia: true, puede_editar: true, puede_borrar: true, dueno: DUENO, menciones: [], responde_a: null, borrada: false, ...over,
 });
 
 function montar(onCambio = vi.fn()) {
@@ -68,13 +68,15 @@ describe("DialogoNotas", () => {
     expect(screen.getByText(/editada/)).toBeTruthy();
   });
 
-  it("borra con confirmación", async () => {
+  it("borra con confirmación y recarga desde el servidor", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     borrarNota.mockResolvedValue(undefined);
+    listarNotas.mockResolvedValueOnce([nota()]).mockResolvedValueOnce([]);
     const onCambio = montar();
     fireEvent.click(await screen.findByRole("button", { name: "Borrar" }));
     await waitFor(() => expect(borrarNota).toHaveBeenCalledWith(1));
-    expect(screen.queryByText("cotización X")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("cotización X")).toBeNull());
+    expect(listarNotas).toHaveBeenCalledTimes(2);
     expect(onCambio).toHaveBeenCalled();
   });
 
@@ -122,6 +124,7 @@ describe("DialogoNotas", () => {
     expect(screen.queryByRole("button", { name: "Editar" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Borrar" })).toBeNull();
     expect(screen.queryByLabelText("Nueva nota")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Responder" })).toBeNull();
     expect(listarMencionables).not.toHaveBeenCalled();
   });
 
@@ -193,6 +196,109 @@ describe("DialogoNotas", () => {
     const popupEdit = (await screen.findByRole("button", { name: "Mencionar a Beto" })).parentElement!;
     expect(popupEdit.className).toContain("top-full");
     expect(popupEdit.className).not.toContain("bottom-full");
+  });
+
+  it("muestra las respuestas bajo su nota y permite responder", async () => {
+    listarNotas.mockResolvedValue([
+      nota({ id: 1, texto: "raíz" }),
+      nota({ id: 2, texto: "una respuesta", responde_a: 1, es_mia: false, puede_editar: false, puede_borrar: false }),
+    ]);
+    crearNota.mockResolvedValue(nota({ id: 3, texto: "otra respuesta", responde_a: 1 }));
+    const onCambio = montar();
+    const respuesta = await screen.findByText("una respuesta");
+    expect(respuesta.closest("[data-respuesta='si']")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Responder" }));
+    fireEvent.change(screen.getByLabelText("Responder nota"),
+                     { target: { value: "otra respuesta", selectionStart: 14, selectionEnd: 14 } });
+    fireEvent.click(screen.getByRole("button", { name: "Enviar respuesta" }));
+    await waitFor(() => expect(crearNota).toHaveBeenCalledWith(DUENO, "otra respuesta", [], 1));
+    expect(await screen.findByText("otra respuesta")).toBeTruthy();
+    expect(onCambio).toHaveBeenCalled();
+  });
+
+  it("una respuesta no tiene botón Responder (un solo nivel)", async () => {
+    listarNotas.mockResolvedValue([nota({ id: 1, texto: "raíz" }), nota({ id: 2, texto: "r", responde_a: 1 })]);
+    montar();
+    await screen.findByText("r");
+    expect(screen.getAllByRole("button", { name: "Responder" })).toHaveLength(1);
+  });
+
+  it("una raíz borrada con respuestas se ve como (nota borrada)", async () => {
+    listarNotas.mockResolvedValue([
+      nota({ id: 1, texto: "", borrada: true, puede_editar: false, puede_borrar: false }),
+      nota({ id: 2, texto: "sigue aquí", responde_a: 1 }),
+    ]);
+    montar();
+    expect(await screen.findByText("(nota borrada)")).toBeTruthy();
+    expect(screen.getByText("sigue aquí")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Responder" })).toBeNull();
+  });
+
+  it("borrar una raíz con respuestas recarga el hilo desde el servidor", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    borrarNota.mockResolvedValue(undefined);
+    listarNotas
+      .mockResolvedValueOnce([nota({ id: 1, texto: "raíz" }), nota({ id: 2, texto: "r", responde_a: 1 })])
+      .mockResolvedValueOnce([nota({ id: 1, texto: "", borrada: true, puede_editar: false, puede_borrar: false }),
+                              nota({ id: 2, texto: "r", responde_a: 1 })]);
+    montar();
+    await screen.findByText("raíz");
+    fireEvent.click(screen.getAllByRole("button", { name: "Borrar" })[0]);
+    expect(await screen.findByText("(nota borrada)")).toBeTruthy();
+    expect(listarNotas).toHaveBeenCalledTimes(2);
+  });
+
+  it("si borrar funciona y la recarga falla, avisa el cambio y quita la nota", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    borrarNota.mockResolvedValue(undefined);
+    listarNotas.mockResolvedValueOnce([nota()]).mockRejectedValueOnce(new Error("sin red"));
+    const onCambio = montar();
+    fireEvent.click(await screen.findByRole("button", { name: "Borrar" }));
+    await waitFor(() => expect(onCambio).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText("cotización X")).toBeNull());
+  });
+
+  it("una respuesta manda sus menciones", async () => {
+    crearNota.mockResolvedValue(nota({ id: 3, texto: "@Beto ya", responde_a: 1 }));
+    montar();
+    await screen.findByText("cotización X");
+    fireEvent.click(screen.getByRole("button", { name: "Responder" }));
+    const caja = screen.getByLabelText("Responder nota") as HTMLTextAreaElement;
+    fireEvent.change(caja, { target: { value: "@Be", selectionStart: 3, selectionEnd: 3 } });
+    fireEvent.click(await screen.findByRole("button", { name: "Mencionar a Beto" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enviar respuesta" }));
+    await waitFor(() => expect(crearNota).toHaveBeenCalledWith(
+      DUENO, expect.stringContaining("@Beto"), ["u-beto"], 1));
+  });
+
+  it("una respuesta huérfana (su raíz no vino) no ofrece Responder", async () => {
+    listarNotas.mockResolvedValue([nota({ id: 2, texto: "huérfana", responde_a: 1 })]);
+    montar();
+    await screen.findByText("huérfana");
+    expect(screen.queryByRole("button", { name: "Responder" })).toBeNull();
+  });
+
+  it("la recarga tardía tras borrar no pisa la lista de otro dueño", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    borrarNota.mockResolvedValue(undefined);
+    const OTRO = { ...DUENO, codigo: "9999", nombre: "OTRO" };
+    let resolverRecarga: (v: unknown) => void = () => {};
+    let llamadasA = 0;
+    listarNotas.mockImplementation((d: { codigo: string }) => {
+      if (d.codigo !== "4520") return Promise.resolve([nota({ id: 7, texto: "nota de B" })]);
+      llamadasA += 1;
+      return llamadasA === 1 ? Promise.resolve([nota()])
+                             : new Promise((r) => { resolverRecarga = r; });
+    });
+    const props = { etiqueta: "x", onClose: () => {}, onCambio: () => {} };
+    const { rerender } = render(<DialogoNotas dueno={DUENO} {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Borrar" }));
+    await waitFor(() => expect(llamadasA).toBe(2));
+    rerender(<DialogoNotas dueno={OTRO} {...props} />);
+    expect(await screen.findByText("nota de B")).toBeTruthy();
+    await act(async () => { resolverRecarga([nota({ id: 1, texto: "nota de A" })]); });
+    expect(screen.queryByText("nota de A")).toBeNull();
+    expect(screen.getByText("nota de B")).toBeTruthy();
   });
 
   it("Escape con la lista abierta la cierra y no cierra el diálogo", async () => {

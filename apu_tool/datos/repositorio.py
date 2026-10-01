@@ -491,14 +491,16 @@ class RepositorioNotas(Protocol):
     de la unidad de trabajo (`alm.transaccion("seguridad")`), junto con su auditoría."""
 
     def crear(self, conn, entidad: str, clave: str, etiqueta: str, texto: str,
-              autor_id: str, autor_email: str, creada_en: str) -> int: ...
+              autor_id: str, autor_email: str, creada_en: str,
+              responde_a: Optional[int] = None) -> int: ...
 
     def get(self, nota_id: int) -> Optional[Nota]:
         """Incluye las borradas (el servicio decide qué hacer con ellas)."""
         ...
 
-    def listar(self, entidad: str, clave: str) -> list[Nota]:
-        """No borradas, orden cronológico (id asc)."""
+    def listar(self, entidad: str, clave: str, incluir_borradas: bool = False) -> list[Nota]:
+        """Sin borradas por defecto; `incluir_borradas=True` las trae todas (para armar
+        el hilo). Orden cronológico (id asc)."""
         ...
 
     def editar(self, conn, nota_id: int, texto: str, editada_en: str) -> None: ...

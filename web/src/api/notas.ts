@@ -10,8 +10,10 @@ function qs(p: Record<string, string | number | undefined>): string {
 export const listarNotas = (d: DuenoNota) =>
   apiGet<Nota[]>(`/notas?${qs({ ...d })}`);
 
-export const crearNota = (d: DuenoNota, texto: string, menciones: string[] = []) =>
-  apiPost<Nota>("/notas", { ...d, texto, menciones });
+export const crearNota = (d: DuenoNota, texto: string, menciones: string[] = [], respondeA?: number) =>
+  apiPost<Nota>("/notas", respondeA === undefined
+    ? { ...d, texto, menciones }
+    : { ...d, texto, menciones, responde_a: respondeA });
 
 export const editarNota = (id: number, texto: string, menciones?: string[]) =>
   apiPatch<Nota>(`/notas/${id}`, menciones === undefined ? { texto } : { texto, menciones });

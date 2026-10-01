@@ -93,6 +93,7 @@ class NotaNuevaIn(BaseModel):
     turno: str = ""              # apu: parte de la identidad
     texto: str
     menciones: list[str] = []    # user_id de los mencionados (los valida el servidor)
+    responde_a: Optional[int] = None   # id de la nota a la que responde (una raíz o una respuesta)
 
 
 class NotaEditarIn(BaseModel):

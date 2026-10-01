@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { borrarNota, crearNota, editarNota, listarMencionables, listarNotas } from "@/api/notas";
 import type { DuenoNota, Mencionable, MencionNota, Nota } from "@/lib/tipos";
 import { mencionesVigentes } from "@/lib/menciones";
+import { agruparHilos } from "@/lib/hilos";
 import { CajaConMenciones } from "./CajaConMenciones";
 import { TextoConMenciones } from "./TextoConMenciones";
 import { useAuth } from "@/lib/auth";
@@ -26,6 +27,7 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
   const [notas, setNotas] = useState<Nota[] | null>(null);
   const [nueva, setNueva] = useState("");
   const [editando, setEditando] = useState<{ id: number; texto: string; elegidos: MencionNota[] } | null>(null);
+  const [respondiendo, setRespondiendo] = useState<{ raizId: number; texto: string; elegidos: MencionNota[] } | null>(null);
   const [mencionables, setMencionables] = useState<Mencionable[]>([]);
   const [elegidosNueva, setElegidosNueva] = useState<MencionNota[]>([]);
   const [ocupado, setOcupado] = useState(false);
@@ -45,6 +47,7 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
     setNotas(null);
     setNueva("");
     setEditando(null);
+    setRespondiendo(null);
     setElegidosNueva([]);
     if (escribe) {
       listarMencionables()
@@ -98,21 +101,108 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
     }
   }
 
+  async function responder() {
+    if (!dueno || !respondiendo || !respondiendo.texto.trim()) return;
+    const clave = claveDueno;
+    const r = respondiendo;
+    setOcupado(true);
+    try {
+      const n = await crearNota(dueno, r.texto, mencionesVigentes(r.texto, r.elegidos), r.raizId);
+      if (clave === claveVigente.current) {
+        setNotas((prev) => [...(prev ?? []), n]);
+        setRespondiendo(null);
+      }
+      onCambio();
+    } catch (e) {
+      toast.error(msg(e, "No se pudo guardar la respuesta"));   // lo escrito se conserva
+    } finally {
+      setOcupado(false);
+    }
+  }
+
   async function borrar(id: number) {
     if (!window.confirm("¿Borrar esta nota?")) return;
     const clave = claveDueno;
     setOcupado(true);
     try {
       await borrarNota(id);
-      if (clave === claveVigente.current) {
-        setNotas((prev) => (prev ?? []).filter((x) => x.id !== id));
-      }
-      onCambio();
     } catch (e) {
       toast.error(msg(e, "No se pudo borrar la nota"));
+      setOcupado(false);
+      return;
+    }
+    onCambio();
+    // Una raíz con respuestas pasa a marcador: lo decide el servidor, así que se recarga.
+    try {
+      const d = duenoRef.current;
+      if (d && clave === claveVigente.current) {
+        const r = await listarNotas(d);
+        if (clave === claveVigente.current) setNotas(r);
+      }
+    } catch {
+      if (clave === claveVigente.current) {
+        setNotas((prev) => (prev ?? []).filter((x) => x.id !== id));
+        toast.error("Se borró, pero no se pudo actualizar la lista.");
+      }
     } finally {
       setOcupado(false);
     }
+  }
+
+  // Una nota (raíz o respuesta). Un marcador de raíz borrada con respuestas no tiene acciones.
+  function renderNota(n: Nota) {
+    if (n.borrada) {
+      return (
+        <div key={n.id} className="text-xs">
+          <p className="mt-1 italic text-muted-foreground">(nota borrada)</p>
+        </div>
+      );
+    }
+    return (
+      <div key={n.id} className="text-xs">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <span>{n.autor_email}</span>
+          <span>·</span>
+          <span>{fecha(n.creada_en)}</span>
+          {n.editada_en && <span>(editada)</span>}
+          <span className="ml-auto flex gap-1">
+            {n.puede_editar && editando?.id !== n.id && (
+              <Button size="xs" variant="ghost" disabled={ocupado}
+                      onClick={() => setEditando({ id: n.id, texto: n.texto, elegidos: n.menciones })}>
+                Editar
+              </Button>
+            )}
+            {n.puede_borrar && (
+              <Button size="xs" variant="ghost" disabled={ocupado}
+                      onClick={() => borrar(n.id)}>
+                Borrar
+              </Button>
+            )}
+          </span>
+        </div>
+        {editando?.id === n.id ? (
+          <div className="mt-1 space-y-1">
+            <CajaConMenciones ariaLabel="Editar nota" valor={editando.texto}
+                              onValor={(v) => setEditando((e) => (e ? { ...e, texto: v } : e))}
+                              elegidos={editando.elegidos}
+                              onElegidos={(el) => setEditando((e) => (e ? { ...e, elegidos: el } : e))}
+                              mencionables={mencionables} abrirHacia="abajo" />
+            <div className="flex justify-end gap-1">
+              <Button size="xs" variant="outline" disabled={ocupado}
+                      onClick={() => setEditando(null)}>
+                Cancelar
+              </Button>
+              <Button size="xs" disabled={ocupado || !editando.texto.trim()}
+                      onClick={guardarEdicion}>
+                Guardar
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <TextoConMenciones texto={n.texto} nombres={n.menciones.map((m) => m.nombre)} />
+        )}
+      </div>
+    );
   }
 
   return (
@@ -130,49 +220,38 @@ export function DialogoNotas({ dueno, etiqueta, onClose, onCambio }: Props) {
           {notas?.length === 0 && (
             <p className="text-xs text-muted-foreground">Todavía no hay notas.</p>
           )}
-          {notas?.map((n) => (
-            <div key={n.id} className="border-b border-border pb-2 text-xs">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <span>{n.autor_email}</span>
-                <span>·</span>
-                <span>{fecha(n.creada_en)}</span>
-                {n.editada_en && <span>(editada)</span>}
-                <span className="ml-auto flex gap-1">
-                  {n.puede_editar && editando?.id !== n.id && (
-                    <Button size="xs" variant="ghost" disabled={ocupado}
-                            onClick={() => setEditando({ id: n.id, texto: n.texto, elegidos: n.menciones })}>
-                      Editar
-                    </Button>
-                  )}
-                  {n.puede_borrar && (
-                    <Button size="xs" variant="ghost" disabled={ocupado}
-                            onClick={() => borrar(n.id)}>
-                      Borrar
-                    </Button>
-                  )}
-                </span>
-              </div>
-              {editando?.id === n.id ? (
-                <div className="mt-1 space-y-1">
-                  <CajaConMenciones ariaLabel="Editar nota" valor={editando.texto}
-                                    onValor={(v) => setEditando((e) => (e ? { ...e, texto: v } : e))}
-                                    elegidos={editando.elegidos}
-                                    onElegidos={(el) => setEditando((e) => (e ? { ...e, elegidos: el } : e))}
+          {notas && agruparHilos(notas).map(({ raiz, respuestas }) => (
+            <div key={raiz.id} className="space-y-1 border-b border-border pb-2">
+              {renderNota(raiz)}
+              {respuestas.length > 0 && (
+                <div data-respuesta="si" className="ml-4 space-y-1 border-l border-border pl-3">
+                  {respuestas.map((r) => renderNota(r))}
+                </div>
+              )}
+              {escribe && !raiz.borrada && raiz.responde_a === null && (respondiendo?.raizId === raiz.id ? (
+                <div className="ml-4 space-y-1">
+                  <CajaConMenciones ariaLabel="Responder nota" valor={respondiendo.texto}
+                                    onValor={(v) => setRespondiendo((x) => (x ? { ...x, texto: v } : x))}
+                                    elegidos={respondiendo.elegidos}
+                                    onElegidos={(el) => setRespondiendo((x) => (x ? { ...x, elegidos: el } : x))}
                                     mencionables={mencionables} abrirHacia="abajo" />
                   <div className="flex justify-end gap-1">
                     <Button size="xs" variant="outline" disabled={ocupado}
-                            onClick={() => setEditando(null)}>
+                            onClick={() => setRespondiendo(null)}>
                       Cancelar
                     </Button>
-                    <Button size="xs" disabled={ocupado || !editando.texto.trim()}
-                            onClick={guardarEdicion}>
-                      Guardar
+                    <Button size="xs" disabled={ocupado || !respondiendo.texto.trim()}
+                            onClick={responder}>
+                      Enviar respuesta
                     </Button>
                   </div>
                 </div>
               ) : (
-                <TextoConMenciones texto={n.texto} nombres={n.menciones.map((m) => m.nombre)} />
-              )}
+                <Button size="xs" variant="ghost" disabled={ocupado}
+                        onClick={() => setRespondiendo({ raizId: raiz.id, texto: "", elegidos: [] })}>
+                  Responder
+                </Button>
+              ))}
             </div>
           ))}
         </div>

@@ -152,7 +152,7 @@ def notas_crear(body: NotaNuevaIn, alm: Almacen = Depends(get_almacen),
                 actor=Depends(requiere_rol("editor"))):
     return _http_notas(lambda: notas_svc.crear(alm, actor, body.entidad, body.codigo,
                                                body.nombre, body.turno, body.texto,
-                                               body.menciones))
+                                               body.menciones, body.responde_a))
 
 
 @router.patch("/notas/{nota_id}")

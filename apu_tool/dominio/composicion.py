@@ -259,6 +259,12 @@ def _hipotesis_desde(v: Any) -> dict[str, Any]:
     vez de copiarse acá justamente para que el filtro y el guardián no se separen.
     """
     from apu_tool.dominio.privacy import _FORBIDDEN_KEYS
+    if isinstance(v, list):
+        # Forma del modelo: lista de pares {clave, valor} (el esquema de salida
+        # estructurada no admite un dict de claves libres). Lo guardado y lo que
+        # edita una persona siguen siendo dict.
+        v = {p.get("clave"): p.get("valor") for p in v
+             if isinstance(p, dict) and isinstance(p.get("clave"), str) and p["clave"].strip()}
     if not isinstance(v, dict):
         return {}
     # El tope de 20 se aplica ANTES de filtrar, como antes: acota lo que mandó el

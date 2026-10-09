@@ -106,11 +106,12 @@ Reglas estrictas:
 - Cuando derives un rendimiento de una hipótesis de producción, escribe la fórmula en
   `calculo`: la aritmética la verifica un programa y su resultado manda sobre el tuyo;
   esfuérzate en la hipótesis, no en la cuenta.
-- `hipotesis` es el razonamiento productivo detrás del rendimiento, en pares
-  clave-valor: por ejemplo {"horas_jornada": 8, "produccion_por_jornada": 96,
-  "unidad_produccion": "m3/dia"}. No se valida, se le muestra a un ingeniero de costos
-  para que pueda discutir el criterio y no solo el número. Si el rendimiento viene
-  copiado de un antecedente y no de una hipótesis propia, manda {}.
+- `hipotesis` es el razonamiento productivo detrás del rendimiento, como lista de
+  pares clave-valor (el valor siempre como texto): por ejemplo [{"clave": "horas_jornada", "valor": "8"},
+  {"clave": "produccion_por_jornada", "valor": "96"},
+  {"clave": "unidad_produccion", "valor": "m3/dia"}]. No se valida, se le muestra a un
+  ingeniero de costos para que pueda discutir el criterio y no solo el número. Si el
+  rendimiento viene copiado de un antecedente y no de una hipótesis propia, manda [].
 - `funcion` es el ROL del insumo dentro del APU, del vocabulario cerrado. No es el
   nombre de la actividad; eso va en `justificacion`.
 - `origen` dice de dónde sale el rendimiento, y es lo que la plataforma usa para
@@ -170,7 +171,19 @@ _ESQUEMA_COMPOSICION = {
                             "additionalProperties": False,
                         },
                     },
-                    "hipotesis": {"type": "object", "additionalProperties": True},
+                    # Pares y no un dict abierto: la salida estructurada exige objetos
+                    # CERRADOS (un dict de claves libres da 400). `_hipotesis_desde`
+                    # lo convierte en dict al leerlo; lo guardado y la UI no cambian.
+                    "hipotesis": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"clave": {"type": "string"},
+                                           "valor": {"type": "string"}},
+                            "required": ["clave", "valor"],
+                            "additionalProperties": False,
+                        },
+                    },
                     "calculo": {
                         "type": ["object", "null"],
                         "properties": {

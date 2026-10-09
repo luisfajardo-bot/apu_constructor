@@ -40,10 +40,29 @@ from apu_tool.nucleo.models import CorridaItemRow, DePricedApu
 # Filas por llamada del barrido. Bajarlo mejora el foco de la IA y SUBE el costo: el
 # índice de la corrida entera viaja en CADA lote, así que el gasto en índice crece como
 # O(n²/TAM_LOTE) — subirlo reduce copias del índice a cambio de foco. Es la palanca si
-# al barrido se le escapan objeciones; si el costo llegara a doler, la palanca
-# siguiente no es este número sino `cache_control: {"type": "ephemeral"}` sobre el
-# bloque del índice, que es idéntico en todos los lotes.
+# al barrido se le escapan objeciones. Las copias del índice ya van cacheadas (ver
+# `_contenido`), así que bajar este número para ganar foco ya no dispara el costo.
 TAM_LOTE = 25
+
+
+def _contenido(payload: dict) -> str | list[dict]:
+    """El mensaje del usuario para la IA. Si el payload trae el `indice` de la corrida,
+    va en un bloque APARTE con `cache_control`: es idéntico en todos los lotes del
+    barrido, así que desde el segundo lote ese prefijo (instrucciones + índice) se cobra
+    como lectura de caché, ~10 % del precio normal. Las filas del lote, que cambian,
+    van en el bloque siguiente. Por debajo del mínimo cacheable del modelo (corridas
+    chicas) la API simplemente no cachea: no hay error que manejar.
+
+    Los dos bloques pasan por `privacy.safe_json`: la garantía de no mandar dinero
+    (invariante #1) es la misma con o sin caché."""
+    if "indice" not in payload:
+        return privacy.safe_json(payload)
+    resto = {k: v for k, v in payload.items() if k != "indice"}
+    return [
+        {"type": "text", "text": privacy.safe_json({"indice": payload["indice"]}),
+         "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": privacy.safe_json(resto)},
+    ]
 
 # Vocabulario del VEREDICTO final (paso 2). El del barrido es otro (`ok | revisar`)
 # y no se mezclan: "revisar" tría, nunca dictamina.
@@ -253,7 +272,7 @@ class Revisor:
                 self.enabled = False
                 raise IANoDisponible(
                     "La revisión con IA necesita el SDK de anthropic.") from exc
-        contenido = privacy.safe_json(payload)   # garantía dura: sin dinero
+        contenido = _contenido(payload)
         try:
             resp = self._pedir_al_sdk(system, schema, contenido, effort)
         except Exception as exc:
@@ -276,7 +295,7 @@ class Revisor:
         # y reventarían el `.get` del llamador. Que caigan por el mismo camino.
         return data if isinstance(data, dict) else {}
 
-    def _pedir_al_sdk(self, system: str, schema: dict, contenido: str, effort: str):
+    def _pedir_al_sdk(self, system: str, schema: dict, contenido: str | list, effort: str):
         """La llamada pelada al SDK, aparte para que el `try` de arriba envuelva SOLO
         la red y no el parseo de la respuesta."""
         return self._client.messages.create(

@@ -690,3 +690,35 @@ def test_sin_saldo_no_se_disfraza_de_fila_sin_respuesta():
              "go to Plans & Billing to upgrade or purchase credits."))
     with pytest.raises(revision.IANoDisponible, match="saldo"):
         _barrer(r, [_fila(0, "EXCAVACION MANUAL", "100")])
+
+
+def test_el_indice_va_en_su_propio_bloque_cacheado():
+    """El índice de la corrida es idéntico en todos los lotes del barrido: va en un
+    bloque aparte con `cache_control`, así a partir del segundo lote se cobra como
+    lectura de caché (~10 %). Las filas del lote cambian y van en el bloque siguiente."""
+    cliente = _ClienteFalso(texto='{"filas": []}')
+    r = _revisor_con_cliente(cliente)
+    filas = [_fila(0, "EXCAVACION MANUAL", "100"), _fila(1, "CONCRETO", "200")]
+    r.barrer_lote(filas[:1], revision.indice_corrida(filas))
+    contenido = cliente.visto["messages"][0]["content"]
+    assert isinstance(contenido, list) and len(contenido) == 2
+    indice, lote = contenido
+    assert indice["cache_control"] == {"type": "ephemeral"}
+    assert '"indice"' in indice["text"] and '"filas"' not in indice["text"]
+    assert '"filas"' in lote["text"] and '"indice"' not in lote["text"]
+    assert "cache_control" not in lote
+
+
+def test_sin_indice_el_contenido_sigue_siendo_un_solo_texto():
+    """La profundización no lleva índice: nada que cachear, el pedido no cambia."""
+    cliente = _ClienteFalso(texto='{"dictamen": "ok"}')
+    r = _revisor_con_cliente(cliente)
+    r._pedir("sistema", {}, {"fila": {"seq": 0}}, "medium")
+    assert isinstance(cliente.visto["messages"][0]["content"], str)
+
+
+def test_el_bloque_cacheado_del_indice_tambien_pasa_la_frontera_de_privacidad():
+    """Separar el índice en su propio bloque no puede abrir un hueco al invariante #1."""
+    r = _revisor_con_cliente(_ClienteFalso())
+    with pytest.raises(privacy.PrivacyViolation):
+        r._pedir("sistema", {}, {"indice": [{"seq": 0, "precio": 1000}], "filas": []}, "low")

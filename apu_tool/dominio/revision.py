@@ -232,7 +232,9 @@ _ESQUEMA_PROFUNDO = {
         "dictamen": {"type": "string", "enum": list(DICTAMENES)},
         "apu_sugerido": {"type": ["string", "null"]},
         "turno_sugerido": {"type": ["string", "null"]},
-        "confianza": {"type": "number", "minimum": 0, "maximum": 1},
+        # Sin minimum/maximum: la salida estructurada no los soporta (400); el
+        # rango 0..1 se impone al leer (ver el min/max de `conf`).
+        "confianza": {"type": "number"},
         "justificacion": {"type": "string"},
     },
     "required": ["dictamen", "apu_sugerido", "turno_sugerido", "confianza",

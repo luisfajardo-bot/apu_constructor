@@ -218,7 +218,9 @@ _ESQUEMA_COMPOSICION = {
                 "additionalProperties": False,
             },
         },
-        "incertidumbre_declarada": {"type": "number", "minimum": 0, "maximum": 1},
+        # Sin minimum/maximum: la salida estructurada no los soporta (400). El
+        # rango 0..1 lo promete el prompt y lo impone el parseo (composicion.py).
+        "incertidumbre_declarada": {"type": "number"},
         "justificacion": {"type": "string"},
     },
     "required": ["componentes", "supuestos", "incertidumbre_declarada",

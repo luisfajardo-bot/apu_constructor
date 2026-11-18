@@ -6,6 +6,9 @@
 > Diseño: `docs/superpowers/specs/2026-09-10-agente-composicion-design.md`.
 > Plan de implementación: `docs/superpowers/plans/2026-09-10-agente-composicion.md`.
 
+> **2026-11-18:** chat con el agente en la mesa — diseño en
+> `docs/superpowers/specs/2026-11-18-chat-agente-composicion-design.md`.
+
 Este documento es el backlog vivo de la feature. Lo que ya está hecho no se repite acá:
 para eso está el diseño.
 

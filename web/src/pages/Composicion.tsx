@@ -34,6 +34,7 @@ import { puede } from "@/components/rutas";
 import type {
   CambioAgente,
   ComponentePropuesto,
+  EntradaCatalogo,
   Hallazgo,
   VistaComposicion,
 } from "@/lib/tipos";
@@ -92,6 +93,13 @@ function componenteNuevo(codigo: string, nombre = ""): ComponentePropuesto {
     nivel_evidencia: "bajo",
     ref_shift: "",
   };
+}
+
+/** Lo que el selector muestra como elegido: lo que la fila ya dice, y si no coincide con
+ *  ninguna opción pero el backend sí lo resolvió (aproximado), el nombre de la ficha. */
+function valorSelector(ficha: EntradaCatalogo, nombre: string): string {
+  return ficha.opciones && sinResolver(ficha.opciones, nombre) && ficha.nombre
+    ? ficha.nombre : nombre;
 }
 
 export default function Composicion() {
@@ -186,11 +194,10 @@ export default function Composicion() {
         || JSON.stringify(componentes) !== JSON.stringify(propuesta.componentes));
 
   // Un código compartido sin escoger: el expediente viejo guardó `valido` antes de
-  // que existiera CODIGO_COMPARTIDO, y el error recién saldría al guardar o aprobar.
-  const hayCompartidoSinEscoger = filas.some((f) => {
-    const o = catalogo[f.c.codigo]?.opciones;
-    return !!o && sinResolver(o, f.c.nombre ?? "");
-  });
+  // que existiera CODIGO_COMPARTIDO, y el error recién saldría al aprobar. Sale de la
+  // ficha PERSISTIDA (`nombre: ""` = el backend no pudo resolverlo), no de la tabla
+  // local: aprobar aprueba la versión guardada, no las ediciones sin guardar.
+  const hayCompartidoSinEscoger = Object.values(catalogo).some((e) => e.opciones && !e.nombre);
 
   const hallazgosDe = (codigo: string): Hallazgo[] => [
     ...(validacion?.errores ?? []).filter((h) => h.componente === codigo),
@@ -555,7 +562,7 @@ export default function Composicion() {
                           <SelectorCompartido
                             codigo={f.c.codigo}
                             opciones={ficha.opciones}
-                            valor={f.c.nombre ?? ""}
+                            valor={valorSelector(ficha, f.c.nombre ?? "")}
                             deshabilitado={soloLectura}
                             onElegir={(o) => setFilas((prev) => prev.map((x) =>
                               x.uid === f.uid ? { ...x, c: { ...x.c, nombre: o.nombre } } : x))}
@@ -631,7 +638,8 @@ export default function Composicion() {
                                 ES el insumo, no el tooltip nativo. */}
                             {ficha && (
                               <span className="font-medium text-foreground">
-                                {f.c.nombre || ficha.nombre}
+                                {opcionElegida(ficha.opciones ?? [], f.c.nombre ?? "")?.nombre
+                                  || ficha.nombre}
                               </span>
                             )}
                             {f.c.justificacion && <span>{f.c.justificacion}</span>}
@@ -749,10 +757,11 @@ export default function Composicion() {
                   size="sm"
                   disabled={!validacion?.valido || hayCompartidoSinEscoger}
                   title={hayCompartidoSinEscoger
-                    ? "Escoge cuál insumo va en los códigos compartidos antes de aprobar."
+                    ? ("Escoge cuál insumo va en los códigos compartidos"
+                      + (hayCambios ? " y guarda los cambios" : "") + " antes de aprobar.")
                     : validacion?.valido
                       ? "Crea el APU con el alta de siempre y lo asigna a esta línea."
-                      : "Hay errores bloqueantes: corregilos antes de aprobar."}
+                      : "Hay errores bloqueantes: corrígelos antes de aprobar."}
                   onClick={() => setIdentidad(true)}
                 >
                   Aprobar y crear APU

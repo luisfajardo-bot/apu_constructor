@@ -660,24 +660,53 @@ test("un código compartido muestra el selector y escoger se guarda con el nombr
     1, 3, 2, [{ ...COMPONENTE, nombre: "CUADRILLA OFICIAL MAS AYUDANTES" }], false));
 });
 
-test("Aprobar queda deshabilitado mientras un código compartido no tenga nombre escogido", async () => {
+test("Aprobar sigue bloqueado tras escoger SIN guardar: aprueba la versión guardada", async () => {
   // Un expediente guardado antes de la feature dice `valido`: el error
-  // CODIGO_COMPARTIDO recién saldría al guardar o aprobar.
+  // CODIGO_COMPARTIDO recién saldría al aprobar. El candado sale de la ficha
+  // persistida, no de la tabla local.
   getComposicion.mockResolvedValueOnce(vista(version(), CATALOGO_COMPARTIDO));
+  const resuelto = { ...CATALOGO, "4279": { nombre: OPCIONES_4279[0].nombre, unidad: "HR",
+    grupo: "MO", opciones: OPCIONES_4279 } };
+  guardarComposicion.mockResolvedValueOnce(vista(version(), resuelto));
   montar();
   await screen.findByLabelText("Insumo del código 4279");
   const aprobar = boton(/Aprobar y crear APU/);
   expect(aprobar.disabled).toBe(true);
   expect(aprobar.title).toMatch(/Escoge cuál insumo va en los códigos compartidos/);
-  fireEvent.change(screen.getByLabelText("Insumo del código 4279"), { target: { value: "1" } });
+  fireEvent.change(screen.getByLabelText("Insumo del código 4279"), { target: { value: "0" } });
+  expect(boton(/Aprobar y crear APU/).disabled).toBe(true);
+  expect(boton(/Aprobar y crear APU/).title).toMatch(/guarda/i);
+  fireEvent.click(boton(/Guardar cambios/));
+  await waitFor(() => expect(boton(/Aprobar y crear APU/).disabled).toBe(false));
+});
+
+test("escoger una opción cambia la unidad de la fila a la de esa opción", async () => {
+  getComposicion.mockResolvedValueOnce(vista(version(), CATALOGO_COMPARTIDO));
+  montar();
+  const sel = await screen.findByLabelText("Insumo del código 4279");
+  expect(screen.queryByText("ML")).toBeNull();
+  fireEvent.change(sel, { target: { value: "1" } });
+  expect(screen.getByText("ML")).toBeTruthy();
+});
+
+test("si la ficha ya resolvió el nombre por aproximación, Aprobar queda habilitado y el selector muestra esa opción", async () => {
+  // El `nombre` de Componer viene crudo del modelo; el backend lo resolvió por
+  // aproximación y la ficha trae el nombre resuelto.
+  const v = version();
+  v.propuesta.componentes = [{ ...COMPONENTE, nombre: "CUADRILLA OFICIAL Y AYUDANTES" }];
+  getComposicion.mockResolvedValueOnce(vista(v, { ...CATALOGO, "4279": {
+    nombre: OPCIONES_4279[0].nombre, unidad: "HR", grupo: "MO", opciones: OPCIONES_4279 } }));
+  montar();
+  const sel = await screen.findByLabelText("Insumo del código 4279") as HTMLSelectElement;
+  expect(sel.value).toBe("0");
   expect(boton(/Aprobar y crear APU/).disabled).toBe(false);
 });
 
-test("Aprobar sigue habilitado si el nombre guardado ya coincide con una opción", async () => {
+test("el desplegable de un código de un solo insumo muestra el nombre del catálogo, no el crudo del modelo", async () => {
   const v = version();
-  v.propuesta.componentes = [{ ...COMPONENTE, nombre: "cuadrilla oficial mas ayudantes" }];
-  getComposicion.mockResolvedValueOnce(vista(v, CATALOGO_COMPARTIDO));
+  v.propuesta.componentes = [{ ...COMPONENTE, nombre: "NOMBRE CRUDO DEL MODELO" }];
+  getComposicion.mockResolvedValueOnce(vista(v));
   montar();
-  await screen.findByLabelText("Insumo del código 4279");
-  expect(boton(/Aprobar y crear APU/).disabled).toBe(false);
+  fireEvent.click(await screen.findByLabelText("Ver supuestos de 4279"));
+  expect(screen.queryByText("NOMBRE CRUDO DEL MODELO")).toBeNull();
 });

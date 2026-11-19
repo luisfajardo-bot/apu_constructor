@@ -28,7 +28,7 @@ import {
   hayRendimientoInvalido,
 } from "@/lib/validacionApu";
 import BuscadorApu from "@/components/corrida/BuscadorApu";
-import SelectorCompartido from "@/components/SelectorCompartido";
+import SelectorCompartido, { sinResolver } from "@/components/SelectorCompartido";
 import SubApuBadge from "@/components/SubApuBadge";
 
 interface DialogoAgregarApuProps {
@@ -130,7 +130,8 @@ export function DialogoAgregarApu({
   const [grupos, setGrupos] = useState<string[]>([]);
   const [conflicto, setConflicto] = useState<ConflictoAlta | null>(null);
   // Códigos que el backend no pudo resolver (422 `conflictos`): código -> opciones.
-  // Se limpia la entrada de un código cuando el ingeniero escoge.
+  // Se reemplaza en cada 422 y se limpia al cerrar; la fila muestra el selector mientras
+  // su nombre no coincida con ninguna opción (un código puede estar en varias filas).
   const [dudas, setDudas] = useState<Record<string, OpcionInsumo[]>>({});
 
   // Precarga la cabecera y la composición desde `inicial`. La usan los tres modos:
@@ -296,19 +297,23 @@ export function DialogoAgregarApu({
   }
 
   async function elegirOpcion(uid: number, codigo: string, o: OpcionInsumo) {
-    setFila(uid, { insumo_nombre: o.nombre, unidad: o.unidad });
-    setDudas((prev) => {
-      const { [codigo]: _quitado, ...resto } = prev;
-      return resto;
-    });
-    // El 422 no trae dinero a propósito: el precio de la fila sale del listado.
+    // Sin precio hasta saber el de ESTA fila: dejar el de la otra (o el que traía) haría
+    // que el campo Costo recalcule el rendimiento con un precio equivocado.
+    setFila(uid, { insumo_nombre: o.nombre, unidad: o.unidad, precio: 0 });
+    // El 422 no trae dinero a propósito: el precio sale del listado. Ese listado no
+    // trae los insumos ocultos (el selector sí los ofrece) y puede fallar: en ambos
+    // casos la fila queda sin precio ("—"), nunca con uno inventado.
+    let precio = 0;
     try {
       const res = await listarInsumos({ q: codigo, limit: 15 });
-      const ins = res.items.find((x) => x.codigo === codigo && x.nombre === o.nombre);
-      if (ins) setFila(uid, { precio: ins.precio });
+      precio = res.items.find((x) => x.codigo === codigo && x.nombre === o.nombre)?.precio ?? 0;
     } catch {
-      /* sin precio: el costo de la fila se ve desactualizado hasta guardar */
+      /* queda en 0 */
     }
+    // Guardia contra la carrera: solo si la fila sigue siendo esta elección.
+    setFilas((prev) => prev.map((f) => (
+      f.uid === uid && f.insumo_codigo === codigo && f.insumo_nombre === o.nombre
+        ? { ...f, precio } : f)));
   }
 
   function quitarFila(uid: number) {
@@ -557,11 +562,12 @@ export function DialogoAgregarApu({
                               })
                             }
                           />
-                        ) : dudas[f.insumo_codigo] ? (
+                        ) : dudas[f.insumo_codigo]
+                          && sinResolver(dudas[f.insumo_codigo], f.insumo_nombre) ? (
                           <SelectorCompartido
                             codigo={f.insumo_codigo}
                             opciones={dudas[f.insumo_codigo]}
-                            valor=""
+                            valor={f.insumo_nombre}
                             onElegir={(o) => elegirOpcion(f.uid, f.insumo_codigo, o)}
                           />
                         ) : (

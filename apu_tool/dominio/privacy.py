@@ -240,5 +240,57 @@ def payload_composicion(item, insumos, ejemplos, observados) -> dict[str, Any]:
     }
 
 
+def _rendimiento_o_none(v: Any) -> Optional[float]:
+    try:
+        x = float(v)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return round(x, 6) if math.isfinite(x) else None
+
+
+def componente_mesa_to_dict(c: dict, catalogo: dict) -> dict[str, Any]:
+    """Un componente de la mesa tal como lo ve el agente del chat.
+
+    Los componentes los manda el CLIENTE (la tabla tal como está en pantalla), así que
+    se copian clave por clave y SOLO los campos estructurados. `justificacion` e
+    `hipotesis` NO viajan: son texto libre que una persona pudo editar, y un monto
+    adentro pasaría por `assert_no_money` sin que nada salte. Nombre y unidad salen del
+    catálogo (`catalogo`, ya filtrado a nombre/unidad/grupo), no del cliente.
+    `funcion` y `origen` solo viajan si son del vocabulario cerrado del contrato, y un
+    `codigo` que dispare el detector de dinero viaja vacío.
+    """
+    # Import local, como hace `composicion._hipotesis_desde` en la otra dirección: el
+    # contrato no depende de nada a nivel de módulo y así no hay ciclo posible.
+    from apu_tool.dominio.composicion import FUNCIONES, ORIGENES
+    cod = str(c.get("codigo", "") or "")[:40]
+    if texto_con_dinero(cod):
+        cod = ""
+    info = catalogo.get(cod) or {}
+    funcion = str(c.get("funcion", "") or "")
+    origen = str(c.get("origen", "") or "")
+    return {"codigo": cod, "nombre": info.get("nombre", ""),
+            "unidad": info.get("unidad", ""),
+            "funcion": funcion if funcion in FUNCIONES else "",
+            "rendimiento": _rendimiento_o_none(c.get("rendimiento")),
+            "origen": origen if origen in ORIGENES else ""}
+
+
+def payload_chat(item, componentes: list, catalogo: dict) -> dict[str, Any]:
+    """El contexto que acompaña cada mensaje del chat de composición: la actividad
+    (sin `precio_contractual`) y la composición que la persona ve en pantalla."""
+    return {"actividad": licitacion_item_to_dict(item),
+            "composicion_actual": [componente_mesa_to_dict(c, catalogo)
+                                   for c in componentes if isinstance(c, dict)]}
+
+
+def insumo_encontrado_to_dict(ins, observado=None) -> dict[str, Any]:
+    """Un resultado de `buscar_insumos`. `ins` es un `Insumo`, que LLEVA `precio` y
+    `fuente_precio`: por eso se copia campo por campo y nunca se vuelca."""
+    return {"insumo_codigo": ins.codigo, "insumo_nombre": ins.nombre,
+            "unidad": ins.unidad, "grupo": ins.grupo,
+            "rendimientos_observados": (rendimiento_observado_to_dict(observado)
+                                        if observado is not None else None)}
+
+
 class PrivacyViolation(RuntimeError):
     """Se intentó enviar un valor monetario a la IA."""

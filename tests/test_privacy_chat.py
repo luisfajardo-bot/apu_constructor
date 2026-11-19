@@ -73,3 +73,49 @@ def test_el_motivo_dice_como_escribir_una_cantidad_fisica():
 def test_el_motivo_cita_el_fragmento_para_que_la_persona_lo_encuentre():
     motivo = texto_con_dinero("agrega el oficial, nos cobra 90.000 de tarifa diaria")
     assert "tarifa" in motivo or "cobra" in motivo
+
+
+ITEM = LicitacionItem("1.3", "EXCAVACION MANUAL", "M3", 120.0, 180000.0, "DIURNO")
+CATALOGO = {"4279": {"nombre": "CUADRILLA", "unidad": "HR", "grupo": "MO"}}
+COMP = {"codigo": "4279", "tipo": "insumo", "funcion": "mano_de_obra",
+        "rendimiento": 0.62, "origen": "copiado_de_antecedente",
+        "referencias": [], "hipotesis": {"costo_m3": "45000"}, "calculo": None,
+        "justificacion": "nos lo cobran a $45.000", "nivel_evidencia": "alto",
+        "ref_shift": ""}
+
+
+def test_payload_chat_no_lleva_dinero_ni_texto_libre_de_la_mesa():
+    p = privacy.payload_chat(ITEM, [COMP], CATALOGO)
+    privacy.assert_no_money(p)
+    texto = json.dumps(p, ensure_ascii=False)
+    assert "180000" not in texto          # precio_contractual
+    assert "45000" not in texto           # hipotesis y justificacion: no viajan
+    assert p["composicion_actual"] == [{
+        "codigo": "4279", "nombre": "CUADRILLA", "unidad": "HR",
+        "funcion": "mano_de_obra", "rendimiento": 0.62,
+        "origen": "copiado_de_antecedente"}]
+
+
+def test_un_rendimiento_ilegible_viaja_como_null():
+    p = privacy.payload_chat(ITEM, [dict(COMP, rendimiento="abc")], CATALOGO)
+    assert p["composicion_actual"][0]["rendimiento"] is None
+
+
+def test_los_campos_libres_del_cliente_no_cuelan_texto():
+    """`funcion` y `origen` solo viajan si son del vocabulario; un `codigo` con
+    pinta de monto viaja vacío. Lo explota solo un cliente hostil, pero es gratis."""
+    raro = dict(COMP, funcion="cuesta $45.000", origen="cotizado a 45000",
+                codigo="$45.000")
+    c = privacy.payload_chat(ITEM, [raro], CATALOGO)["composicion_actual"][0]
+    assert (c["funcion"], c["origen"], c["codigo"]) == ("", "", "")
+
+
+def test_insumo_encontrado_copia_campo_por_campo_sin_precio():
+    ins = Insumo("4279", "CUADRILLA", "HR", "SUELDOS Y JORNALES", 40000, "COSTO INTERNO")
+    obs = RendimientoObservado("4279", "HR", 14, 0.4, 0.62, 1.1)
+    d = privacy.insumo_encontrado_to_dict(ins, obs)
+    privacy.assert_no_money(d)
+    assert "40000" not in json.dumps(d)
+    assert d["insumo_codigo"] == "4279" and d["grupo"] == "SUELDOS Y JORNALES"
+    assert d["rendimientos_observados"]["mediana"] == 0.62
+    assert privacy.insumo_encontrado_to_dict(ins, None)["rendimientos_observados"] is None

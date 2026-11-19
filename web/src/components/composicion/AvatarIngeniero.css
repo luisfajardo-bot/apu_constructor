@@ -1,0 +1,75 @@
+/* Avatar del agente de composición. Un estado por `data-estado`; cada uno con su
+   gesto. Colores propios del dibujo (casco amarillo, chaleco naranja): se leen igual
+   en tema claro y oscuro. */
+.avatar-ing {
+  --av-piel: #e0a878;
+  --av-casco: #f2b705;
+  --av-chaleco: #f97316;
+  --av-trazo: #374151;
+  flex-shrink: 0;
+  overflow: visible;
+}
+.avatar-ing * { transform-box: fill-box; transform-origin: center; }
+.avatar-ing .av-piel { fill: var(--av-piel); }
+.avatar-ing .av-casco { fill: var(--av-casco); }
+.avatar-ing .av-casco-cresta { fill: var(--av-casco); filter: brightness(0.9); }
+.avatar-ing .av-chaleco { fill: var(--av-chaleco); }
+.avatar-ing .av-franja { fill: #e5e7eb; }
+.avatar-ing .av-ojos circle { fill: #1f2937; }
+.avatar-ing .av-boca { fill: none; stroke: #7c4a2d; stroke-width: 1.4; stroke-linecap: round; }
+.avatar-ing .av-manga { fill: none; stroke: var(--av-chaleco); stroke-width: 6; stroke-linecap: round; }
+.avatar-ing .av-lupa circle { fill: rgba(255, 255, 255, 0.35); stroke: var(--av-trazo); stroke-width: 2.4; }
+.avatar-ing .av-lupa line { stroke: var(--av-trazo); stroke-width: 3; stroke-linecap: round; }
+
+/* Las partes de cada gesto solo existen en su estado. */
+.avatar-ing .av-mano-barbilla,
+.avatar-ing .av-pulgar,
+.avatar-ing .av-lupa { display: none; }
+.avatar-ing[data-estado="pensando"] .av-mano-barbilla { display: inline; }
+.avatar-ing[data-estado="lista"] .av-pulgar { display: inline; }
+.avatar-ing[data-estado="buscando"] .av-lupa { display: inline; }
+
+/* espera: respira y parpadea */
+.avatar-ing[data-estado="espera"] .av-cuerpo,
+.avatar-ing[data-estado="espera"] .av-cabeza { animation: av-respira 3.2s ease-in-out infinite; }
+.avatar-ing .av-ojos { animation: av-parpadea 4s infinite; }
+
+/* pensando: ojos arriba y un balanceo lento */
+.avatar-ing[data-estado="pensando"] .av-ojos { transform: translateY(-1.6px); animation: none; }
+.avatar-ing[data-estado="pensando"] .av-cabeza { animation: av-ladea 2.4s ease-in-out infinite; }
+
+/* buscando: la lupa barre y los ojos la siguen */
+.avatar-ing[data-estado="buscando"] .av-lupa { animation: av-barre 1.4s ease-in-out infinite; }
+.avatar-ing[data-estado="buscando"] .av-ojos { animation: av-mira 1.4s ease-in-out infinite; }
+
+/* lista: pulgar arriba, una vez */
+.avatar-ing[data-estado="lista"] .av-pulgar { animation: av-pulgar 0.9s ease-out 1 both; }
+
+/* error: niega con la cabeza dos veces; casco en alerta */
+.avatar-ing[data-estado="error"] { --av-casco: #dc2626; }
+.avatar-ing[data-estado="error"] .av-cabeza { animation: av-niega 0.7s ease-in-out 2; }
+
+/* deshabilitado: quieto y en gris */
+.avatar-ing[data-estado="deshabilitado"] { filter: grayscale(1); opacity: 0.55; }
+.avatar-ing[data-estado="deshabilitado"] * { animation: none !important; }
+
+@keyframes av-respira { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+@keyframes av-parpadea { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(0.1); } }
+@keyframes av-ladea { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-4deg); } }
+@keyframes av-barre { 0%, 100% { transform: translateX(-7px) rotate(-8deg); } 50% { transform: translateX(3px) rotate(8deg); } }
+@keyframes av-mira { 0%, 100% { transform: translateX(-1px); } 50% { transform: translateX(1.5px); } }
+@keyframes av-pulgar {
+  0% { transform: translateY(10px); opacity: 0; }
+  40% { transform: translateY(-2px); opacity: 1; }
+  70% { transform: translateY(1px); }
+  100% { transform: translateY(0); }
+}
+@keyframes av-niega {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-9deg); }
+  75% { transform: rotate(9deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar-ing * { animation: none !important; }
+}

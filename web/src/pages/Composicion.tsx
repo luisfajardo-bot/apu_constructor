@@ -210,7 +210,7 @@ export default function Composicion() {
    *  guardar los pierde, así que se avisa. */
   function volver() {
     if (hayCambios && !window.confirm(
-      "Tenés cambios sin guardar en esta propuesta. Si volvés se pierden. ¿Seguir?")) {
+      "Tienes cambios sin guardar en esta propuesta. Si vuelves se pierden. ¿Seguir?")) {
       return;
     }
     navigate(`/corridas/${corridaId}`);
@@ -373,7 +373,7 @@ export default function Composicion() {
         <p className="border-l-2 border-info bg-info-surface px-2 py-1.5 text-xs text-info">
           Esta corrida está <span className="font-semibold">congelada</span>: es una
           foto fija y esta mesa quedó de solo lectura, aunque el expediente se sigue
-          viendo entero. Si querés componer o editar esta propuesta, activá la
+          viendo entero. Si quieres componer o editar esta propuesta, activa la
           corrida desde su vista.
         </p>
       )}

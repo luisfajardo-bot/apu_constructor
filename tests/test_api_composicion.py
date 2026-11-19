@@ -172,6 +172,18 @@ def test_put_guarda_una_version_nueva_y_revalida(app_alm, corrida):
     assert r.json()["vigente"]["estado"] == "editada"
 
 
+def test_put_conserva_el_nombre_del_componente(app_alm, corrida):
+    """Sin `nombre` en el esquema del PUT, Pydantic lo bota y el selector de la mesa
+    nunca se guarda."""
+    app, alm = app_alm
+    _sembrar(alm, corrida, version=1)
+    comps = [dict(COMPONENTES[0], nombre="CUADRILLA")]
+    r = cliente(app, "editor").put(f"/api/corridas/{corrida}/composicion/1",
+                                   json={"version_base": 1, "componentes": comps})
+    assert r.status_code == 200
+    assert r.json()["vigente"]["propuesta"]["componentes"][0]["nombre"] == "CUADRILLA"
+
+
 def test_put_con_una_version_vieja_es_409(app_alm, corrida):
     app, alm = app_alm
     _sembrar(alm, corrida, version=1)

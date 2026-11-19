@@ -215,6 +215,7 @@ class ComponenteComposicionIn(BaseModel):
     justificacion: str = ""
     nivel_evidencia: str = "bajo"
     ref_shift: str = ""
+    nombre: str = ""
 
 
 class ComposicionEditarIn(BaseModel):

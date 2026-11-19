@@ -111,6 +111,9 @@ class ComponentePropuesto:
     justificacion: str = ""
     nivel_evidencia: str = "bajo"
     ref_shift: str = ""           # turno del sub-APU cuando tipo == "apu"
+    # Nombre del insumo en el catálogo. Un código puede ser de DOS insumos (652 en el
+    # catálogo real): sin el nombre, el alta no sabe cuál. "" en las versiones viejas.
+    nombre: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {"codigo": self.codigo, "tipo": self.tipo, "funcion": self.funcion,
@@ -120,7 +123,7 @@ class ComponentePropuesto:
                 "calculo": self.calculo.to_dict() if self.calculo else None,
                 "justificacion": self.justificacion,
                 "nivel_evidencia": self.nivel_evidencia,
-                "ref_shift": self.ref_shift}
+                "ref_shift": self.ref_shift, "nombre": self.nombre}
 
 
 @dataclass(frozen=True)
@@ -159,10 +162,11 @@ class Propuesta:
 #
 # Medido contra las bases reales del repo: el código más largo del catálogo tiene 7
 # caracteres ("10016 N") y el `shift` más largo 8 ("NOCTURNO"), así que 40 sobra.
-# OJO con _MAX_TEXTO si algún día se parsea un NOMBRE de insumo o de APU: los reales
-# llegan a 830 caracteres (`insumos.nombre`) y este tope los cortaría. Hoy no pasa
-# ninguno por acá — el modelo manda códigos y el nombre lo pone el catálogo.
+# Los NOMBRES de insumo reales llegan a 830 caracteres (`insumos.nombre`): por eso el
+# `nombre` de un componente tiene tope propio (`_MAX_NOMBRE`). Recortarlo a `_MAX_TEXTO`
+# lo haría imposible de cruzar EXACTO con el catálogo, que es justo para lo que viaja.
 _MAX_TEXTO = 500
+_MAX_NOMBRE = 1000
 _MAX_CODIGO = 40
 
 
@@ -227,6 +231,7 @@ def _componente_desde(v: Any) -> Optional[ComponentePropuesto]:
         nivel_evidencia=_del_vocabulario(v.get("nivel_evidencia"),
                                          NIVELES_EVIDENCIA, "bajo"),
         ref_shift=_texto(v.get("ref_shift"), _MAX_CODIGO).upper(),
+        nombre=_texto(v.get("nombre"), _MAX_NOMBRE),
     )
 
 

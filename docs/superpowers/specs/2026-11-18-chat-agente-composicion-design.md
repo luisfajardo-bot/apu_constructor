@@ -49,8 +49,10 @@ Request:
 ### Antes de llamar a la IA
 
 1. `privacy.texto_con_dinero(texto) -> Optional[str]` revisa **todos** los mensajes
-   del usuario del historial, no solo el último: el historial lo manda el cliente y el
-   cliente puede mentir. Si encuentra dinero → evento `bloqueado` y el SDK **no se
+   del historial, no solo el último: el historial lo manda el cliente y el cliente puede
+   mentir. Un mensaje del usuario con dinero bloquea; uno «del agente» con dinero se
+   reemplaza por `[mensaje omitido]` antes de viajar (bloquear por él envenenaría el
+   chat: la persona no puede sacarlo del hilo). Si encuentra dinero → evento `bloqueado` y el SDK **no se
    llama**.
 2. Se topa el historial a los últimos 20 mensajes de 1000 caracteres cada uno (lo que
    sobra se recorta en el servidor, no se rechaza).
@@ -71,7 +73,7 @@ Herramientas, todas de solo lectura y des-monetizadas:
 
 | Herramienta | Devuelve |
 |---|---|
-| `buscar_insumos(texto, grupo?)` | hasta 15: código, nombre, unidad, grupo y rendimientos observados (`rendimientos_observados`). Sin ocultos. |
+| `buscar_insumos(texto)` | hasta 15: código, nombre, unidad, grupo y rendimientos observados (`rendimientos_observados`). Sin ocultos. Sin filtro por grupo: los grupos del catálogo son texto libre ("SUELDOS Y JORNALES") y un filtro mal adivinado quemaría una búsqueda. |
 | `buscar_apus(texto)` | hasta 5 APUs de referencia con su composición (`DePricedApu`). |
 
 - Cada resultado se convierte a tipos sin precio y pasa por `assert_no_money` antes de
@@ -109,7 +111,7 @@ Respuesta final estructurada:
 |---|---|---|
 | `pensando` | `{}` | pensando |
 | `buscando` | `{herramienta, consulta}` | buscando |
-| `respuesta` | `{texto, cambios, descartados, modelo, prompt_version}` | lista |
+| `respuesta` | `{texto, cambios, descartados, catalogo, modelo, prompt_version}` (`catalogo` = nombre/unidad/grupo de los códigos de los cambios, para pintar el diff) | lista |
 | `bloqueado` | `{motivo}` | error |
 | `error` | `{detail}` | error |
 
@@ -117,15 +119,15 @@ Respuesta final estructurada:
 
 El navegador aplica los cambios a la tabla y guarda con el `PUT` existente
 (`servicio/composicion.py::guardar_edicion`), que ya revalida sin IA y amplía la lista
-blanca con lo que se agregó (la lista blanca solo crece). Tres campos opcionales
-nuevos en el body:
-
-- `instruccion` → se guarda como `motivo = "chat: <instrucción>"`.
-- `modelo`, `prompt_version` (`"chat/v1"`) → se guardan en sus columnas.
+blanca con lo que se agregó (la lista blanca solo crece). Un campo opcional nuevo en el
+body: `instruccion` → se guarda como
+`motivo = "chat: <instrucción>"`. `modelo` (`config.AI_MODEL`) y `prompt_version`
+(`"chat/v1"`) los pone el **servidor** cuando hay instrucción: son etiquetas del
+reporte de correcciones y el cliente no las dicta.
 
 Sin columnas nuevas. La versión queda `editada`, y `prompt_version="chat/v1"` la
 distingue de una edición a mano para el futuro reporte de correcciones. Sin esos
-campos, el `PUT` se comporta **exactamente** igual que hoy.
+campo, el `PUT` se comporta **exactamente** igual que hoy.
 
 El texto de `instruccion` ya pasó por el detector de dinero, porque es el mismo
 mensaje que se mandó al agente, y se vuelve a pasar por él en el `PUT`: el expediente
@@ -222,7 +224,7 @@ Con TDD y el SDK falso, igual que las pruebas de composición.
 - Un mensaje con monto en **cualquier** posición del historial → `bloqueado` y el SDK
   falso no recibe ninguna llamada.
 - El detector: una tabla de casos que deben bloquearse (`$45.000`, "cotizaron a 45000",
-  "vale 3 millones", "COP 1200") y casos que deben pasar ("8 horas", "0,125",
+  "vale 3 millones", "COP 1200"), montos pegados ("precio:45000", "45k", "pagamos 90.000 el jornal"); un mensaje "del agente" con cifras se omite, no bloquea, y casos que deben pasar ("8 horas", "0,125",
   "1,05 m3", "rendimiento de 12 m2 por jornada").
 - Los resultados de las herramientas pasan `assert_no_money`; las búsquedas no
   devuelven insumos ocultos.
@@ -254,9 +256,7 @@ búsquedas usó por mensaje y el `usage` de cada mensaje.
 - Que el modelo por defecto (`config.AI_MODEL`) acepte herramientas + salida
   estructurada + pensamiento adaptativo en la misma llamada. Si no, la respuesta final
   pasa a ser una herramienta `responder` con el esquema como `input_schema`.
-- Qué primitiva de búsqueda de insumos usar (`search_insumos` o
-  `search_insumos_por_palabras`, que tiene un N+1 anotado en
-  `docs/pendientes-agente-composicion.md`) y cómo excluir los ocultos.
+- Resuelto: `buscar_insumos` usa `precios.list_insumos(texto, limit=15)` (AND de palabras, sin ocultos, rankeado, 2 consultas).
 
 ## Fuera de alcance
 

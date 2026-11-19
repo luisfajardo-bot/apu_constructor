@@ -171,14 +171,23 @@ def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
     # ponytail: solo el NOMBRE se corrige con la fila visible; `unidad` y `grupo` siguen
     # saliendo de `cands[0]` (ver `_catalogo`). Upgrade: `oculto` en `get_candidatos_bulk`.
     visibles = set()
+    # Código compartido por dos o más insumos VISIBLES (586 en el catálogo real). El
+    # contrato solo lleva el código, y el alta (`autoria._componentes_de`) resuelve
+    # con el primero por id: en el smoke real, «7406 SEÑAL VERTICAL SR 90x30» quedó
+    # como «7406 REDUCCION HD 12x10». Hasta que el nombre viaje con el código (fix
+    # aparte), un alta así se DESCARTA diciendo los nombres, no se adivina.
+    compartidos: dict[str, list[str]] = {}
     for cod in {cod for c, cod in zip(crudos, codigos)
                 if c.get("op") == "agregar" and cod}:
-        for k, nombre, oculto in almacen.precios.identidades_en_conflicto(cod, ""):
-            if k == cod and not oculto:
-                visibles.add(cod)
-                if cod in catalogo:
-                    catalogo[cod]["nombre"] = nombre
-                break
+        nombres = [n for k, n, oculto in
+                   almacen.precios.identidades_en_conflicto(cod, "")
+                   if k == cod and not oculto]
+        if nombres:
+            visibles.add(cod)
+            if cod in catalogo:
+                catalogo[cod]["nombre"] = nombres[0]
+        if len(nombres) > 1:
+            compartidos[cod] = nombres
     cambios, descartados = [], []
     for c, cod in zip(crudos, codigos):
         op = c.get("op")
@@ -188,6 +197,13 @@ def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
         if op == "agregar" and (cod not in catalogo or cod not in visibles):
             descartados.append({"codigo": cod,
                                 "motivo": "No está en el catálogo (o está oculto)."})
+            continue
+        if op == "agregar" and cod in compartidos:
+            nombres = " / ".join(f"«{n[:60]}»" for n in compartidos[cod])
+            descartados.append({"codigo": cod, "motivo": (
+                f"Código compartido por {len(compartidos[cod])} insumos del catálogo "
+                f"({nombres}): por código no se sabe cuál es. Usa otro código "
+                "equivalente si existe.")})
             continue
         comp = None
         if op != "quitar":

@@ -265,7 +265,7 @@ matching, modelo de IA, clasificación de precios.
   (`buscar_insumos`, `buscar_apus`, tope de 4 por mensaje) y **propone** cambios
   (agregar/modificar/quitar); la persona los aplica y eso es el `PUT` de siempre con
   `instruccion`, que deja `motivo="chat: …"`, `modelo=config.AI_MODEL` y
-  `prompt_version=PROMPT_VERSION_CHAT` (hoy `"chat/v2"`; los pone el servidor). El chat **no persiste nada** y su
+  `prompt_version=PROMPT_VERSION_CHAT` (hoy `"chat/v3"`; los pone el servidor). El chat **no persiste nada** y su
   historial vive en el navegador; por eso el servidor revisa **todos** los mensajes con
   `privacy.texto_con_dinero`: uno del usuario con dinero responde `bloqueado` sin llamar
   a la IA, y uno "del agente" con cifras se reemplaza por `[mensaje omitido]` (bloquear

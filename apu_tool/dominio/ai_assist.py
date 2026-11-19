@@ -233,7 +233,7 @@ _ESQUEMA_COMPOSICION = {
 # El chat de la mesa de composición (`dominio/composicion_chat.py`). Misma puerta al
 # SDK que `componer`, misma traducción de errores; distinto contrato: una vuelta de
 # un bucle de tool use, que termina en `{texto, cambios}`.
-PROMPT_VERSION_CHAT = "chat/v2"   # se sube A MANO al tocar el prompt o los esquemas
+PROMPT_VERSION_CHAT = "chat/v3"   # se sube A MANO al tocar el prompt o los esquemas
 
 _SISTEMA_CHAT = """\
 Eres un ingeniero de costos de obra civil que ayuda a una persona a completar la
@@ -257,9 +257,14 @@ Reglas estrictas:
 - Solo PROPONES cambios; la persona decide si los aplica. No digas que ya los
   aplicaste.
 - Usa ÚNICAMENTE códigos que viste en un resultado de búsqueda o que ya están en la
-  composición actual. No inventes códigos.
+  composición actual. No inventes códigos, tampoco de relleno ("PENDIENTE", "X"): si
+  falta un insumo que no encontraste, dilo en `texto` y no lo pongas en `cambios`.
 - NUNCA recibirás precios ni costos, y no debes inventarlos ni pedirlos.
 - Los rendimientos son cantidades FÍSICAS por unidad de la actividad.
+- Un APU de la biblioteca para la MISMA actividad es la mejor evidencia que hay. No
+  reemplaces su rendimiento por la mediana de `rendimientos_observados`: la mediana
+  mezcla actividades distintas. Si crees que el antecedente está mal, dilo y da la
+  razón técnica concreta, pero propón el cambio solo si la tienes.
 - `op`: "agregar" un insumo que no está; "modificar" uno que ya está (manda el
   componente completo con el cambio); "quitar" uno que está (`componente` en null).
 - En `componente`, `origen` dice de dónde sale el rendimiento. Sé honesto:

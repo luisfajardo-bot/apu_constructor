@@ -157,7 +157,7 @@ def test_busca_y_responde_con_los_eventos_en_orden(alm):
     assert resp["cambios"][0]["codigo"] == "7001"
     assert resp["cambios"][0]["componente"]["rendimiento"] == 0.1
     assert resp["catalogo"]["7001"]["nombre"] == "OFICIAL SOLDADOR CERTIFICADO"
-    assert resp["prompt_version"] == "chat/v2" and resp["modelo"] == "falso"
+    assert resp["prompt_version"] == "chat/v3" and resp["modelo"] == "falso"
     # la segunda vuelta lleva el resultado de la herramienta, sin precios
     resultado = a.llamadas[1]["mensajes"][-1]["content"][0]
     assert resultado["type"] == "tool_result" and resultado["tool_use_id"] == "t0"
@@ -195,6 +195,28 @@ def test_respeta_el_tope_de_busquedas(alm):
     pasada = a.llamadas[-1]["mensajes"][-1]["content"][0]
     assert pasada.get("is_error") is True
     assert evs[-1][0] == "respuesta"
+
+
+def test_descarta_un_alta_con_codigo_compartido_por_dos_insumos(alm):
+    """Smoke real 2026-11-19: el agente propuso «7406 SEÑAL VERTICAL SR 90x30» y la
+    tabla mostró «7406 REDUCCION HD 12x10»: el código es de los dos insumos y la
+    plataforma tomó el primero. Por código no se pueden distinguir: se descarta y se
+    dicen los dos nombres."""
+    alm.precios.insert_insumos([
+        Insumo("8001", "REDUCCION HD E.L. D=12 x 10", "UN", "ACCESORIOS", 1000,
+               "PRECIO IDU"),
+        Insumo("8001", "SEÑAL VERTICAL SR 90X30 INCLUYE POSTE", "UN", "SEÑALIZACION",
+               2000, "PRECIO IDU"),
+    ])
+    a = AdvisorGuion([resp_final("Te agrego la señal.", [
+        {"op": "agregar", "codigo": "8001", "componente": componente("8001")},
+        {"op": "agregar", "codigo": "6092", "componente": componente("6092")},
+    ])])
+    resp = correr(alm, a, charla("agrega la señal"))[-1][1]
+    assert [c["codigo"] for c in resp["cambios"]] == ["6092"]
+    (d,) = resp["descartados"]
+    assert d["codigo"] == "8001" and "compartido" in d["motivo"]
+    assert "REDUCCION" in d["motivo"] and "SEÑAL VERTICAL" in d["motivo"]
 
 
 def test_descarta_codigos_inexistentes_y_ocultos(alm):

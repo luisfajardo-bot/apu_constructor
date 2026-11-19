@@ -215,8 +215,20 @@ test("accesibilidad: el hilo es un log, el aviso es una alerta y el fallo se dic
   expect(screen.getByRole("log")).toBeTruthy();
   escribirYEnviar("cuesta $45.000");
   expect((await screen.findByRole("alert")).textContent).toMatch(/parece traer un monto/);
-  expect(screen.getByText("No pude responder")).toBeTruthy();
+  // Bloqueado no es una falla del agente: el mensaje nunca le llegó.
+  expect(screen.getByText("Mensaje bloqueado: trae un monto")).toBeTruthy();
   expect(screen.queryByText("Listo para ayudarte")).toBeNull();
+});
+
+test("un error del agente se dice como tal, distinto de un bloqueo", async () => {
+  chatComposicionStream.mockImplementation(
+    async (_i: number, _s: number, _c: unknown, onEvent: OnEv) => {
+      onEvent({ event: "error", data: { detail: "No pude responder, vuelve a intentar." } });
+    });
+  montar();
+  escribirYEnviar("agrega un oficial");
+  expect((await screen.findByRole("alert")).textContent).toMatch(/vuelve a intentar/);
+  expect(screen.getByText("No pude responder")).toBeTruthy();
 });
 
 test("el resumen de lo propuesto va primero: el servidor recorta lo que pasa de 1000", async () => {

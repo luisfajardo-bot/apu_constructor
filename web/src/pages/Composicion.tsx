@@ -277,10 +277,15 @@ export default function Composicion() {
     cambios: CambioAgente[], instruccion: string,
   ): Promise<string[]> {
     const { componentes: nuevos, conflictos } = aplicarCambios(componentesDe(filas), cambios);
+    // Si todo chocó y no hay ediciones propias, guardar solo gastaría una versión del
+    // expediente (y la instrucción quedaría como rastro de algo que no pasó).
+    if (conflictos.length === cambios.length && !hayCambios) return conflictos;
     const v = await guardarComposicion(
       corridaId, linea, vigente?.version ?? 0, nuevos, supuestosOk, instruccion);
     if (montado.current) adoptar(v);
-    toast.success("Cambios del agente aplicados. La propuesta se revalidó sin IA.");
+    toast.success(
+      "Cambios del agente aplicados. La propuesta se revalidó sin IA."
+      + (hayCambios ? " También se guardaron tus ediciones sin guardar." : ""));
     return conflictos;
   }
 
@@ -291,9 +296,13 @@ export default function Composicion() {
         ? "La corrida está congelada: el agente no puede proponer cambios."
         : !puedeEditar
           ? "Tu rol no permite cambiar esta composición."
-          : vigente?.estado === "aprobada"
-            ? "Esta composición ya se aprobó: el APU está en la biblioteca."
-            : null;
+          : etapa !== null
+            // Un Aplicar a mitad de la generación ocuparía su número de versión y la
+            // propuesta pagada se perdería.
+            ? "Se está generando una propuesta: espera a que termine."
+            : vigente?.estado === "aprobada"
+              ? "Esta composición ya se aprobó: el APU está en la biblioteca."
+              : null;
 
   // ─── render ────────────────────────────────────────────────────────────────
 
@@ -731,6 +740,7 @@ export default function Composicion() {
       </div>
 
       <PanelAgente
+        key={`${corridaId}/${linea}`}
         corridaId={corridaId}
         seq={linea}
         componentes={componentes}

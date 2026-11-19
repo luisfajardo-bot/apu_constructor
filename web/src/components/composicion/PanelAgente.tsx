@@ -58,7 +58,9 @@ function paraHistorial(e: Entrada): MensajeChat {
     .join("; ");
   const destino = e.estado === "aplicado" ? "aplicado"
     : e.estado === "descartado" ? "descartado" : "sin decidir";
-  return { rol: "agente", texto: `${e.texto}\n(Propuse: ${cambios} — ${destino})` };
+  // El resumen va PRIMERO: el servidor recorta cada mensaje a MAX_TEXTO y, si el
+  // texto del agente es largo, lo que va al final se pierde.
+  return { rol: "agente", texto: `(Propuse: ${cambios} — ${destino})\n${e.texto}` };
 }
 
 let proximoId = 1;
@@ -76,10 +78,13 @@ export default function PanelAgente({
   const [plegado, setPlegado] = useState(false);
   const montado = useRef(true);
   const temporizador = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelar = useRef<AbortController | null>(null);
   useEffect(() => {
     montado.current = true;
     return () => {
       montado.current = false;
+      // La IA se paga por token: si la persona se fue, no se sigue consumiendo.
+      cancelar.current?.abort();
       if (temporizador.current) clearTimeout(temporizador.current);
     };
   }, []);
@@ -97,9 +102,11 @@ export default function PanelAgente({
     // Sin esto, el "lista → espera" de la respuesta anterior puede caer en plena
     // petición, rehabilitar la caja y permitir un doble envío.
     if (temporizador.current) clearTimeout(temporizador.current);
-    const previo = hilo;
-    const conMensaje: Entrada[] = [...hilo, { id: proximoId++, rol: "usuario", texto: t }];
+    const idUsuario = proximoId++;
+    const conMensaje: Entrada[] = [...hilo, { id: idUsuario, rol: "usuario", texto: t }];
     setHilo(conMensaje);
+    const control = new AbortController();
+    cancelar.current = control;
     setTexto("");
     setAviso(null);
     setEstado("pensando");
@@ -126,7 +133,8 @@ export default function PanelAgente({
           } else if (ev.event === "bloqueado" || ev.event === "error") {
             res.fallo = d.motivo ?? d.detail ?? "No pude responder, vuelve a intentar.";
           }
-        });
+        },
+        control.signal);
     } catch (e) {
       res.fallo = e instanceof Error ? e.message : "No pude responder, vuelve a intentar.";
     }
@@ -134,7 +142,9 @@ export default function PanelAgente({
     setLinea("");
     const r = res.respuesta;
     if (r) {
-      setHilo([...conMensaje, {
+      // Funcional: mientras el agente pensaba, la persona pudo aplicar o descartar una
+      // propuesta anterior, y una copia vieja del hilo la devolvería a «pendiente».
+      setHilo((h) => [...h, {
         id: proximoId++, rol: "agente", texto: r.texto, respuesta: r, instruccion: t,
         estado: r.cambios.length > 0 ? "pendiente" : undefined,
       }]);
@@ -145,9 +155,10 @@ export default function PanelAgente({
     } else {
       // El mensaje vuelve a la caja para corregirlo: no se queda en el hilo un
       // mensaje que el agente nunca recibió.
-      setHilo(previo);
+      setHilo((h) => h.filter((x) => x.id !== idUsuario));
       setTexto(t);
       setAviso(res.fallo ?? "El agente no respondió. Vuelve a intentar.");
+      setLinea("No pude responder");
       setEstado("error");
     }
   }
@@ -196,7 +207,7 @@ export default function PanelAgente({
             </p>
           )}
 
-          <div className="flex max-h-[55vh] flex-col gap-2 overflow-y-auto">
+          <div role="log" className="flex max-h-[55vh] flex-col gap-2 overflow-y-auto">
             {hilo.length === 0 && !deshabilitado && (
               <p className="text-xs text-muted-foreground">
                 {"Cuéntame qué lleva esta actividad o qué quieres cambiar de la tabla. "
@@ -272,7 +283,7 @@ export default function PanelAgente({
           </div>
 
           {aviso && (
-            <p className="border-l-2 border-destructive bg-destructive-surface px-2 py-1 text-xs text-destructive">
+            <p role="alert" className="border-l-2 border-destructive bg-destructive-surface px-2 py-1 text-xs text-destructive">
               {aviso}
             </p>
           )}

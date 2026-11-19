@@ -83,6 +83,7 @@ export function chatComposicionStream(
   seq: number,
   cuerpo: { mensajes: MensajeChat[]; componentes: ComponentePropuesto[] },
   onEvent: (e: EventoComposicion) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   return consumirSse(
     `/corridas/${id}/composicion/${seq}/chat`,
@@ -90,6 +91,7 @@ export function chatComposicionStream(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(cuerpo),
+      signal,
     },
     onEvent,
   );

@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, expect, test, vi } from "vitest";
 import Composicion from "./Composicion";
+import { toast } from "sonner";
 import type { EventoComposicion } from "@/api/composicion";
 
 // `@testing-library/user-event` y `jest-dom` no son dependencias de este repo: se
@@ -591,4 +592,50 @@ test("mesa vacía: aplicar arranca en la versión 0", async () => {
   fireEvent.click(await screen.findByRole("button", { name: /^aplicar$/i }));
   await waitFor(() => expect(guardarComposicion).toHaveBeenCalledWith(
     1, 3, 0, [nuevo], false, "arma una cuadrilla"));
+});
+
+test("si todos los cambios del agente chocan y no hay ediciones, no se guarda nada", async () => {
+  getComposicion.mockResolvedValue({ ...vista(version()), ia_disponible: true });
+  // 4279 ya está en la tabla: «agregar» choca.
+  chatComposicionStream.mockImplementation(
+    respuestaCon({ op: "agregar", codigo: "4279", componente: COMPONENTE }));
+  montar();
+  const caja = await screen.findByRole("textbox", { name: /mensaje para el agente/i });
+  fireEvent.change(caja, { target: { value: "agrega la cuadrilla" } });
+  fireEvent.click(boton(/enviar/i));
+  fireEvent.click(await screen.findByRole("button", { name: /^aplicar$/i }));
+  expect(await screen.findByText(/ya estaba en la tabla/)).toBeTruthy();
+  expect(guardarComposicion).not.toHaveBeenCalled();
+});
+
+test("si aplicar guarda también ediciones sin guardar, el aviso lo dice", async () => {
+  getComposicion.mockResolvedValue({ ...vista(version()), ia_disponible: true });
+  guardarComposicion.mockResolvedValue({ ...vista(version()), ia_disponible: true });
+  const nuevo = { ...COMPONENTE, codigo: "8801", rendimiento: 0.5 };
+  chatComposicionStream.mockImplementation(
+    respuestaCon({ op: "agregar", codigo: "8801", componente: nuevo }));
+  montar();
+  fireEvent.change(await screen.findByLabelText("Rendimiento de 4279"),
+                   { target: { value: "0.9" } });
+  const caja = screen.getByRole("textbox", { name: /mensaje para el agente/i });
+  fireEvent.change(caja, { target: { value: "agrega un oficial" } });
+  fireEvent.click(boton(/enviar/i));
+  fireEvent.click(await screen.findByRole("button", { name: /^aplicar$/i }));
+  await waitFor(() => expect(guardarComposicion).toHaveBeenCalled());
+  await waitFor(() => expect(toast.success).toHaveBeenCalledWith(
+    expect.stringMatching(/ediciones sin guardar/)));
+});
+
+test("mientras se genera una propuesta el agente queda apagado", async () => {
+  getComposicion.mockResolvedValue({ ...vista(null, {}), ia_disponible: true });
+  let terminar: () => void = () => {};
+  generarComposicionStream.mockImplementation(
+    () => new Promise<void>((res) => { terminar = res; }));
+  montar();
+  fireEvent.click(await screen.findByRole("button", { name: /Generar propuesta/ }));
+  expect(await screen.findByText(/Se está generando una propuesta/)).toBeTruthy();
+  expect((screen.getByRole("textbox", { name: /mensaje para el agente/i }) as
+    HTMLTextAreaElement).disabled).toBe(true);
+  terminar();
+  await waitFor(() => expect(screen.queryByText(/Se está generando una propuesta/)).toBeNull());
 });

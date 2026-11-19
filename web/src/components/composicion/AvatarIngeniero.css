@@ -9,6 +9,8 @@
   flex-shrink: 0;
   overflow: visible;
 }
+/* Tema oscuro (clase `.dark`, ver index.css): el trazo gris oscuro de la lupa se pierde. */
+.dark .avatar-ing { --av-trazo: #d1d5db; }
 .avatar-ing * { transform-box: fill-box; transform-origin: center; }
 .avatar-ing .av-piel { fill: var(--av-piel); }
 .avatar-ing .av-casco { fill: var(--av-casco); }

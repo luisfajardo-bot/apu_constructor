@@ -29,6 +29,9 @@ def test_pide_herramientas_salida_estructurada_y_esfuerzo_bajo():
     assert visto["thinking"] == {"type": "adaptive"}
     assert visto["output_config"]["effort"] == "low"
     assert visto["output_config"]["format"]["type"] == "json_schema"
+    # Caché automática: cada vuelta del bucle reenvía todo lo anterior, y con esto esa
+    # parte se cobra a 0,1x (smoke real 2026-11-19: 94 % de los tokens eran entrada).
+    assert visto["cache_control"] == {"type": "ephemeral"}
 
 
 def test_en_el_tope_apaga_las_herramientas_sin_forzar_ninguna():

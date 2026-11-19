@@ -65,6 +65,25 @@ def test_herramienta_desconocida_devuelve_error_y_no_revienta(alm):
     assert "error" in r
 
 
+def test_pocos_resultados_traen_el_total_y_una_sugerencia(alm):
+    """Smoke real: buscó «tuberia pvc sanitaria 12», la palabra «sanitaria» dejó
+    afuera los tubos de 12" que SÍ estaban, y el agente no reformuló."""
+    r = Herramientas(alm, "DIURNO").ejecutar("buscar_insumos", {"texto": "soldador"})
+    assert r["encontrados"] == 1
+    assert "menos palabras" in r["sugerencia"]
+    nada = Herramientas(alm, "DIURNO").ejecutar("buscar_insumos",
+                                                {"texto": "tuberia sanitaria 12"})
+    assert nada["encontrados"] == 0 and "menos palabras" in nada["sugerencia"]
+
+
+def test_con_resultados_suficientes_no_hay_sugerencia(alm, monkeypatch):
+    insumo = alm.precios.list_insumos("cuadrilla", limit=1)[0][0]
+    monkeypatch.setattr(alm.precios, "list_insumos",
+                        lambda *a, **k: ([insumo] * 5, 40))
+    r = Herramientas(alm, "DIURNO").ejecutar("buscar_insumos", {"texto": "cuadrilla"})
+    assert r["encontrados"] == 40 and "sugerencia" not in r
+
+
 def test_una_busqueda_sin_palabras_utiles_devuelve_vacio(alm):
     r = Herramientas(alm, "DIURNO").ejecutar("buscar_insumos", {"texto": "de la"})
     assert r["insumos"] == []
@@ -138,7 +157,7 @@ def test_busca_y_responde_con_los_eventos_en_orden(alm):
     assert resp["cambios"][0]["codigo"] == "7001"
     assert resp["cambios"][0]["componente"]["rendimiento"] == 0.1
     assert resp["catalogo"]["7001"]["nombre"] == "OFICIAL SOLDADOR CERTIFICADO"
-    assert resp["prompt_version"] == "chat/v1" and resp["modelo"] == "falso"
+    assert resp["prompt_version"] == "chat/v2" and resp["modelo"] == "falso"
     # la segunda vuelta lleva el resultado de la herramienta, sin precios
     resultado = a.llamadas[1]["mensajes"][-1]["content"][0]
     assert resultado["type"] == "tool_result" and resultado["tool_use_id"] == "t0"

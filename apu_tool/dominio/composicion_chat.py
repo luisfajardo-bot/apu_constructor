@@ -27,6 +27,10 @@ from apu_tool.nucleo.relevancia import _tokens
 logger = logging.getLogger(__name__)
 
 MAX_RESULTADOS_INSUMOS = 15
+MIN_RESULTADOS_SIN_SUGERENCIA = 3
+SUGERENCIA_POCOS = ("Pocos resultados: la búsqueda exige todas las palabras. Prueba "
+                    "con menos palabras: quita adjetivos («sanitaria», «corrugada») y "
+                    "deja lo esencial, con el diámetro como 12\".")
 MAX_RESULTADOS_APUS = 5
 
 
@@ -54,12 +58,20 @@ class Herramientas:
         # ocultos, rankeada por relevancia, 2 consultas. NO `search_insumos_por_palabras`:
         # hace OR con LIMIT 60 sin orden ("tuberia pvc" casa 1451 insumos en el
         # catálogo real y se rankeaban 60 al azar) y es N+1.
-        ordenados, _total = self.alm.precios.list_insumos(
+        ordenados, total = self.alm.precios.list_insumos(
             texto, limit=MAX_RESULTADOS_INSUMOS)
         obs = rendimientos_observados(self.alm, [i.codigo for i in ordenados])
-        return {"consulta": texto,
-                "insumos": [privacy.insumo_encontrado_to_dict(i, obs.get(i.codigo))
-                            for i in ordenados]}
+        out = {"consulta": texto, "encontrados": total,
+               "insumos": [privacy.insumo_encontrado_to_dict(i, obs.get(i.codigo))
+                           for i in ordenados]}
+        # `encontrados` y no `total`: `total` está en `_FORBIDDEN_KEYS` (es dinero en
+        # este repo) y `assert_no_money` volaría el payload — lo atajó un test.
+        # La búsqueda exige TODAS las palabras. En el smoke real «tuberia pvc
+        # sanitaria 12» dejó afuera los tubos de 12" que sí estaban (por «sanitaria»)
+        # y el agente no reformuló. Con pocos resultados se lo decimos explícito.
+        if total < MIN_RESULTADOS_SIN_SUGERENCIA:
+            out["sugerencia"] = SUGERENCIA_POCOS
+        return out
 
     def buscar_apus(self, texto: str) -> dict:
         if self._matcher is None:

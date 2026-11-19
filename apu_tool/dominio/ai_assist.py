@@ -233,7 +233,7 @@ _ESQUEMA_COMPOSICION = {
 # El chat de la mesa de composición (`dominio/composicion_chat.py`). Misma puerta al
 # SDK que `componer`, misma traducción de errores; distinto contrato: una vuelta de
 # un bucle de tool use, que termina en `{texto, cambios}`.
-PROMPT_VERSION_CHAT = "chat/v1"   # se sube A MANO al tocar el prompt o los esquemas
+PROMPT_VERSION_CHAT = "chat/v2"   # se sube A MANO al tocar el prompt o los esquemas
 
 _SISTEMA_CHAT = """\
 Eres un ingeniero de costos de obra civil que ayuda a una persona a completar la
@@ -247,8 +247,11 @@ Herramientas:
   biblioteca.
 - `buscar_apus(texto)`: busca APUs de la biblioteca parecidos, con su composición.
 Busca con palabras cortas del nombre ("oficial", "soldador", "retroexcavadora"), no
-con frases. Si una búsqueda no trae nada útil, reformúlala con otras palabras. Tienes
-un máximo de 4 búsquedas por mensaje.
+con frases. `buscar_insumos` exige TODAS las palabras: una de más (un adjetivo como
+"sanitaria" o "corrugada") deja afuera lo que buscas. Empieza con dos o tres palabras
+esenciales y el diámetro como 12"; si trae pocos resultados (`encontrados` bajo), quita
+palabras antes de concluir que no existe. Tienes un máximo de 4 búsquedas por mensaje:
+no las gastes en `buscar_apus` si ya tienes un antecedente.
 
 Reglas estrictas:
 - Solo PROPONES cambios; la persona decide si los aplica. No digas que ya los
@@ -452,4 +455,8 @@ class ApuAdvisor:
             tools=HERRAMIENTAS_CHAT,
             tool_choice={"type": "auto"} if con_herramientas else {"type": "none"},
             messages=mensajes,
+            # Caché automática del prefijo: cada vuelta del bucle reenvía todo lo
+            # anterior (sistema, herramientas, contexto, resultados), y esa parte se
+            # cobra a 0,1x. En el smoke real el 94 % de los tokens era entrada.
+            cache_control={"type": "ephemeral"},
         )

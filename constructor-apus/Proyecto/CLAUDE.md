@@ -267,14 +267,14 @@ matching, modelo de IA, clasificación de precios.
   (`buscar_insumos`, `buscar_apus`, tope de 4 por mensaje) y **propone** cambios
   (agregar/modificar/quitar); la persona los aplica y eso es el `PUT` de siempre con
   `instruccion`, que deja `motivo="chat: …"`, `modelo=config.AI_MODEL` y
-  `prompt_version="chat/v1"` (los pone el servidor). El chat **no persiste nada** y su
+  `prompt_version=PROMPT_VERSION_CHAT` (hoy `"chat/v2"`; los pone el servidor). El chat **no persiste nada** y su
   historial vive en el navegador; por eso el servidor revisa **todos** los mensajes con
   `privacy.texto_con_dinero`: uno del usuario con dinero responde `bloqueado` sin llamar
   a la IA, y uno "del agente" con cifras se reemplaza por `[mensaje omitido]` (bloquear
   por él envenenaría el chat). Con la mesa vacía, el primer `PUT` va con
   `version_base = 0` y crea la versión siguiente al historial crudo (el seq se reusa).
   Ojo para el reporte de correcciones: una edición a mano POSTERIOR a un Aplicar del chat
-  hereda `modelo` y `prompt_version="chat/v1"` (los hereda `_sello` de la versión base), y
+  hereda `modelo` y el `prompt_version` del chat (los hereda `_sello` de la versión base), y
   solo el `motivo` (`None` vs `"chat: …"`) distingue una de otra. Riesgo residual del
   detector: un número suelto sin palabra de dinero cerca («45000 el jornal») pasa, por
   diseño, porque «8 horas» y «3000 psi» tienen que pasar; y una especificación con punto

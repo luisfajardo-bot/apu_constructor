@@ -52,13 +52,17 @@ export default function AvatarIngeniero({
       </g>
       {/* pensando: mano en la barbilla */}
       <g className="av-mano-barbilla">
-        <path className="av-manga" d="M46 64 L43 52 Q41 45 36 42" />
-        <circle className="av-piel" cx="35" cy="41.5" r="3.2" />
+        {/* Antebrazo que sube del pecho a la barbilla. Arranca DENTRO del chaleco:
+            un trazo diagonal desde el hombro se leía como una banda (verificado en el
+            navegador). */}
+        <path className="av-manga" d="M39.5 60 L37 46" />
+        <circle className="av-piel av-mano" cx="36.4" cy="43" r="3.6" />
       </g>
-      {/* lista: pulgar arriba */}
-      <g className="av-pulgar">
-        <rect className="av-piel" x="47" y="41" width="7.5" height="8" rx="2" />
-        <rect className="av-piel" x="49.2" y="35" width="3.2" height="7.5" rx="1.6" />
+      {/* lista: un visto bueno al lado. Era un pulgar arriba, pero dibujado con dos
+          rectángulos se leía como otro dedo (verificado en el navegador). */}
+      <g className="av-visto">
+        <circle cx="50" cy="40" r="7" />
+        <path d="M46.6 40.2 L49 42.7 L53.6 37.7" />
       </g>
       {/* buscando: lupa */}
       <g className="av-lupa">

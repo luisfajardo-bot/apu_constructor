@@ -113,8 +113,8 @@ export default function PanelAgente({
     setLinea("Pensando…");
     // Un objeto y no dos `let`: TypeScript no ve las asignaciones dentro del callback
     // y estrecharía las variables a `null` después del `await`.
-    const res: { respuesta: RespuestaAgente | null; fallo: string | null } =
-      { respuesta: null, fallo: null };
+    const res: { respuesta: RespuestaAgente | null; fallo: string | null; bloqueado: boolean } =
+      { respuesta: null, fallo: null, bloqueado: false };
     try {
       await chatComposicionStream(
         corridaId, seq,
@@ -132,6 +132,7 @@ export default function PanelAgente({
             res.respuesta = ev.data as RespuestaAgente;
           } else if (ev.event === "bloqueado" || ev.event === "error") {
             res.fallo = d.motivo ?? d.detail ?? "No pude responder, vuelve a intentar.";
+            res.bloqueado = ev.event === "bloqueado";
           }
         },
         control.signal);
@@ -158,7 +159,8 @@ export default function PanelAgente({
       setHilo((h) => h.filter((x) => x.id !== idUsuario));
       setTexto(t);
       setAviso(res.fallo ?? "El agente no respondió. Vuelve a intentar.");
-      setLinea("No pude responder");
+      // Bloqueado no es una falla del agente: el mensaje nunca le llegó.
+      setLinea(res.bloqueado ? "Mensaje bloqueado: trae un monto" : "No pude responder");
       setEstado("error");
     }
   }
@@ -179,7 +181,7 @@ export default function PanelAgente({
   return (
     <aside
       aria-label="Agente de composición"
-      className="flex flex-col gap-2 border-l pl-3 lg:sticky lg:top-3"
+      className="flex flex-col gap-2 border-t pt-3 lg:sticky lg:top-3 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-3"
     >
       <div className="flex items-center gap-2">
         <AvatarIngeniero estado={visible} />

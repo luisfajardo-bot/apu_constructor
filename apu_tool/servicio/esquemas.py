@@ -223,6 +223,9 @@ class ComposicionEditarIn(BaseModel):
     version_base: int
     componentes: list[ComponenteComposicionIn]
     supuestos_confirmados: bool = False
+    # La instrucción del chat que originó estos cambios (Aplicar en el panel del
+    # agente). Deja rastro en el expediente; sin ella, el PUT es el de siempre.
+    instruccion: Optional[str] = Field(default=None, max_length=4000)
 
 
 class ComposicionAprobarIn(BaseModel):

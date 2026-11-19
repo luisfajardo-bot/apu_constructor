@@ -45,7 +45,8 @@ from apu_tool.servicio import limites
 from pydantic import BaseModel
 from apu_tool.servicio.esquemas import (
     AgregarLineasIn, AjusteProyectoIn, ApuEditIn, ApuNuevoIn, BorrarLineasIn,
-    CambiosIn, ClasificarIn, ComposicionAprobarIn, ComposicionEditarIn,
+    CambiosIn, ChatComposicionIn, ClasificarIn, ComposicionAprobarIn,
+    ComposicionEditarIn,
     ComposicionRechazarIn, ConfirmarIn, ConfirmarLoteIn, EstadoIn, IgualarCostoIn,
     IgualarUmbralIn, InsumoNuevoIn, ListaPreciosIn, NotaEditarIn, NotaNuevaIn,
     QuitarCostoManualIn,
@@ -399,9 +400,10 @@ def revisar_corrida(cid: int, alm: Almacen = Depends(get_almacen),
 
 
 # ---- composición asistida (el expediente de una fila sin APU) ----
-# Cinco endpoints sobre la MISMA fila: leer el expediente, generar (SSE), guardar la
-# edición humana, aprobar y rechazar. `consulta` lee; los cuatro que escriben piden
-# `editor`, incluido aprobar: da de alta un APU en la biblioteca.
+# Seis endpoints sobre la MISMA fila: leer el expediente, generar (SSE), conversar con
+# el agente (SSE), guardar la edición humana, aprobar y rechazar. `consulta` lee; los
+# que escriben o gastan IA piden `editor`, incluido aprobar: da de alta un APU en la
+# biblioteca.
 def _composicion_o_error(llamada):
     """Traduce al contrato HTTP lo que levanta `servicio/composicion.py`.
 
@@ -441,6 +443,26 @@ def componer_composicion(cid: int, seq: int, alm: Almacen = Depends(get_almacen)
         # Valida ANTES de devolver el generador, igual que la revisión: con el stream
         # ya abierto, el error saldría dentro de un 200 que muere solo.
         gen = composicion_svc.generar_stream(alm, cid, seq, actor)
+    except svc.CorridaCongelada:
+        raise HTTPException(status_code=409,
+                            detail="La corrida está congelada; actívala para componer.")
+    except svc.IANoDisponible as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if gen is None:
+        raise HTTPException(status_code=404, detail="Fila no encontrada.")
+    return StreamingResponse(_event_stream(gen),
+                             media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
+
+
+@router.post("/corridas/{cid}/composicion/{seq}/chat")
+def chat_composicion(cid: int, seq: int, body: ChatComposicionIn,
+                     alm: Almacen = Depends(get_almacen),
+                     actor=Depends(requiere_rol("editor"))):
+    """Conversa con el agente sobre la composición de esta fila. Propone cambios;
+    no escribe nada (aplicar es el PUT de la mesa)."""
+    try:
+        gen = composicion_svc.chat_stream(alm, cid, seq, body.model_dump(), actor)
     except svc.CorridaCongelada:
         raise HTTPException(status_code=409,
                             detail="La corrida está congelada; actívala para componer.")

@@ -77,3 +77,71 @@ def test_mesa_vacia_sobre_un_expediente_de_otra_actividad_sigue_la_numeracion(
         "version_base": 0, "componentes": COMPONENTES})
     assert r.status_code == 200
     assert alm.composiciones.vigente(corrida, 1).version == 2
+
+
+# --- POST .../chat (SSE) -----------------------------------------------------
+CHAT = "/api/corridas/{cid}/composicion/{seq}/chat"
+CUERPO = {"mensajes": [{"rol": "usuario", "texto": "agrega herramienta menor"}],
+          "componentes": COMPONENTES}
+
+
+def _con_guion(monkeypatch, respuestas):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    a = AdvisorGuion(respuestas)
+    monkeypatch.setattr(composicion_svc, "ApuAdvisor", lambda: a)
+    return a
+
+
+def test_chat_responde_por_sse_y_no_persiste_nada(app_alm, corrida, monkeypatch):
+    app, alm = app_alm
+    _con_guion(monkeypatch, [resp_final("Te propongo esto.", [
+        {"op": "agregar", "codigo": "6092", "componente": componente("6092")}])])
+    r = cliente(app, "editor").post(CHAT.format(cid=corrida, seq=1), json=CUERPO)
+    assert r.status_code == 200
+    assert "event: respuesta" in r.text and "6092" in r.text
+    assert alm.composiciones.historial(corrida, 1) == []
+
+
+def test_chat_con_dinero_responde_bloqueado_sin_llamar(app_alm, corrida, monkeypatch):
+    app, _ = app_alm
+    a = _con_guion(monkeypatch, [])
+    cuerpo = dict(CUERPO, mensajes=[{"rol": "usuario", "texto": "cuesta $45.000"}])
+    r = cliente(app, "editor").post(CHAT.format(cid=corrida, seq=1), json=cuerpo)
+    assert "event: bloqueado" in r.text
+    assert a.llamadas == []
+
+
+def test_chat_con_rol_consulta_es_403(app_alm, corrida, monkeypatch):
+    app, _ = app_alm
+    _con_guion(monkeypatch, [])
+    r = cliente(app, "consulta").post(CHAT.format(cid=corrida, seq=1), json=CUERPO)
+    assert r.status_code == 403
+
+
+def test_chat_sin_credencial_es_503(app_alm, corrida, monkeypatch):
+    app, _ = app_alm
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    r = cliente(app, "editor").post(CHAT.format(cid=corrida, seq=1), json=CUERPO)
+    assert r.status_code == 503
+
+
+def test_chat_en_corrida_congelada_es_409(app_alm, corrida, monkeypatch):
+    app, alm = app_alm
+    _con_guion(monkeypatch, [])
+    alm.corridas.set_modo(corrida, "congelada")
+    r = cliente(app, "editor").post(CHAT.format(cid=corrida, seq=1), json=CUERPO)
+    assert r.status_code == 409
+
+
+def test_chat_de_una_fila_inexistente_es_404(app_alm, corrida, monkeypatch):
+    app, _ = app_alm
+    _con_guion(monkeypatch, [])
+    r = cliente(app, "editor").post(CHAT.format(cid=corrida, seq=99), json=CUERPO)
+    assert r.status_code == 404
+
+
+def test_la_vista_dice_si_la_ia_esta_disponible(app_alm, corrida, monkeypatch):
+    app, _ = app_alm
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    v = cliente(app, "consulta").get(URL.format(cid=corrida)).json()
+    assert v["ia_disponible"] is True

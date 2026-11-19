@@ -187,7 +187,10 @@ def vista(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
             # un costo puesto a mano en 0 (o NaN) no dispare el aviso de más abajo.
             # La mesa lo necesita para avisar ANTES de aprobar que un APU real borra
             # este costo declarado (`actualizar_eleccion` lo hace solo).
-            "costo_a_mano": (row.costo_manual or 0) > 0}
+            "costo_a_mano": (row.costo_manual or 0) > 0,
+            # Para que el panel del agente se apague ANTES del primer mensaje en vez
+            # de contestar 503. Misma condición que el botón "Componer".
+            "ia_disponible": config.ai_available()}
 
 
 def _catalogo_de(alm: Almacen, v: Optional[ComposicionRow]) -> dict[str, dict]:
@@ -305,6 +308,27 @@ def _eventos(alm: Almacen, corrida_id: int, row: CorridaItemRow, advisor,
                 logger.warning("No se pudo registrar el error de composición %s/%s",
                                corrida_id, row.seq)   # el evento igual va al cliente
         yield (evento, payload)
+
+
+# ----------------------------------------------------------------------- chat
+def chat_stream(alm: Almacen, corrida_id: int, seq: int, datos: dict, actor=None):
+    """El generador de eventos del chat, o None si la corrida o la fila no existen.
+
+    Igual que `generar_stream`: todo lo que puede fallar antes de empezar se valida
+    acá, con el stream cerrado. Lanza CorridaCongelada (409) e IANoDisponible (503).
+    NO persiste nada: el chat propone, y aplicar pasa por `guardar_edicion`.
+    """
+    if _exigir_activa(alm, corrida_id) is None:
+        return None
+    row = alm.corridas.get_item(corrida_id, seq)
+    if row is None:
+        return None
+    if not config.ai_available():
+        raise IANoDisponible(
+            "Conversar con el agente necesita ANTHROPIC_API_KEY en el servidor.")
+    return composicion_chat.conversar(
+        alm, row.item, datos.get("componentes") or [], datos.get("mensajes") or [],
+        ApuAdvisor())
 
 
 # ------------------------------------------------------------ edición humana

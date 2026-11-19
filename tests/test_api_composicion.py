@@ -79,12 +79,14 @@ def _sembrar(alm, cid, *, version=1, estado="propuesta", valido=True,
 
 
 # --- GET -------------------------------------------------------------------
-def test_get_sin_composicion_devuelve_vacio(app_alm, corrida):
+def test_get_sin_composicion_devuelve_vacio(app_alm, corrida, monkeypatch):
     app, _ = app_alm
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     r = cliente(app, "consulta").get(f"/api/corridas/{corrida}/composicion/1")
     assert r.status_code == 200
     assert r.json() == {"vigente": None, "historial": [], "catalogo": {},
-                        "corrida_modo": "activa", "costo_a_mano": False}
+                        "corrida_modo": "activa", "costo_a_mano": False,
+                        "ia_disponible": False}
 
 
 def test_la_vista_dice_si_la_corrida_esta_congelada(app_alm, corrida):

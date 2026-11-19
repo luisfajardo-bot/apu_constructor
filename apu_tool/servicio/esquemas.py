@@ -1,7 +1,7 @@
 """DTOs del contrato HTTP. Las respuestas de cuadro/ítems se devuelven como dict."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -242,3 +242,18 @@ class ComposicionAprobarIn(BaseModel):
 class ComposicionRechazarIn(BaseModel):
     version_base: int
     motivo: str = ""
+
+
+class MensajeChatIn(BaseModel):
+    rol: Literal["usuario", "agente"]
+    # Tope holgado: el servidor recorta a 1000 caracteres por mensaje antes de mandarlo
+    # a la IA. Esto solo ataja cuerpos absurdos.
+    texto: str = Field(max_length=4000)
+
+
+class ChatComposicionIn(BaseModel):
+    """El historial del chat (efímero: lo guarda el navegador) y la tabla tal como
+    está en pantalla, sin guardar incluido. Nada de esto se persiste."""
+    mensajes: list[MensajeChatIn] = Field(max_length=100)
+    componentes: list[ComponenteComposicionIn] = Field(default_factory=list,
+                                                       max_length=80)

@@ -1,3 +1,4 @@
+from apu_tool.dominio import cruce
 from apu_tool.dominio.cruce import resolver, CalidadCruce
 from apu_tool.nucleo.models import Insumo
 
@@ -35,8 +36,6 @@ def test_un_solo_candidato_nombre_lejano_es_ambiguo():
 
 
 # ---- elección por nombre (códigos compartidos) ----
-from apu_tool.dominio import cruce
-
 
 def _i(cod, nom, unidad="UN", grupo="G", oculto=False):
     return Insumo(cod, nom, unidad, grupo, 100, "PRECIO IDU", id=1, oculto=oculto)

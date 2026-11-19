@@ -237,11 +237,19 @@ def _mapas_de_componentes(
     return previos, hist
 
 
-def _hist_de(hist: dict, cod: str, nombre: str, compartido: bool) -> float:
+def _hist_de(hist: dict, cod: str, nombre: str, compartido: bool,
+             nombre_in: str = "") -> float:
     """El histórico heredado para (código, nombre). Un código NO compartido cae al
     respaldo por código (el contrato viejo: hay llamadores que pasan `{codigo: valor}`);
-    uno compartido NO, porque sería el histórico de otro insumo."""
+    uno compartido NO, porque sería el histórico de otro insumo.
+
+    `nombre` es el canónico de la fila elegida; `nombre_in`, el que llegó. Si el que
+    llegó era una variante APROXIMADA, el histórico quedó guardado con ese nombre: un
+    `nombre_in` que resolvió a ESTA fila habla del mismo insumo, así que se prueba
+    también."""
     h = hist.get((cod, normalizar(nombre)))
+    if h is None and nombre_in:
+        h = hist.get((cod, normalizar(nombre_in)))
     if h is None and not compartido:
         h = hist.get(cod)
         if h is None:
@@ -306,7 +314,7 @@ def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str,
         comps.append(ApuComponent(
             apu_codigo="", shift=shift, insumo_codigo=cod, insumo_nombre=nombre,
             unidad=unidad, rendimiento=rend,
-            precio_unitario_hist=_hist_de(hist, cod, nombre, compartido),
+            precio_unitario_hist=_hist_de(hist, cod, nombre, compartido, nombre_in),
             tipo=tipo, ref_shift=ref_shift))
     if dudas:
         raise CodigoCompartido(dudas)

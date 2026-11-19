@@ -1,6 +1,11 @@
 """Códigos compartidos: un código del catálogo que es de dos insumos distintos."""
+import pytest
+
 from apu_tool.datos.almacen import Almacen
-from apu_tool.nucleo.models import Insumo
+from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
+from apu_tool.servicio import autoria
+from apu_tool.servicio.app import create_app
+from tests.conftest import cliente
 
 
 def _alm(tmp_path):
@@ -25,13 +30,6 @@ def test_los_candidatos_traen_si_estan_ocultos(tmp_path):
     assert [c.oculto for c in alm.precios.get_candidatos_bulk(["7406"])["7406"]] == [True, False]
     items, _ = alm.precios.list_insumos(q="SEÑAL VERTICAL")
     assert items and items[0].oculto is False
-
-import pytest
-
-from apu_tool.nucleo.models import Apu, ApuComponent
-from apu_tool.servicio import autoria
-from apu_tool.servicio.app import create_app
-from tests.conftest import cliente
 
 SENAL = "SEÑAL VERTICAL SR 90X30 INCLUYE POSTE"
 REDUCCION = "REDUCCION HD E.L. D=12 x 10"
@@ -152,3 +150,23 @@ def test_editar_responde_422_con_las_opciones(tmp_path):
         "nombre": "X", "unidad": "UN", "grupo": "G",
         "componentes": [{"insumo_codigo": "7406", "insumo_nombre": "", "rendimiento": 1}]})
     assert r.status_code == 422 and r.json()["detail"]["conflictos"][0]["codigo"] == "7406"
+
+
+def test_editar_un_nombre_aproximado_conserva_el_historico(tmp_path):
+    """El nombre guardado es una variante del catálogo: al editar resuelve a la fila
+    canónica y el histórico del componente NO se pierde (no cae a PISO_HIST)."""
+    catalogo = "TARIFA DIA - ALQUILER DE VEHICULO: CAMPERO, PICK-UP, CAMIONETA. INCLUYE CONDUCTOR"
+    guardado = "TARIFA DIA - ALQUILER DE VEHICULO: CAMPERO, PICK-UP, CAMIONETA"
+    alm = _alm(tmp_path)
+    alm.precios.insert_insumos([
+        Insumo("8324", catalogo, "DIA", "EQ", 1, "PRECIO IDU"),
+        Insumo("8324", "EMPATE ORTOGONAL PVC-PVC 12X8 INCLUYE SUMINISTRO", "UN", "REDES", 1,
+               "PRECIO IDU")])
+    alm.apus.insert_apus([Apu("5225", "VEHICULO", "DIA", "DIURNO", "EQ")])
+    alm.apus.insert_components([ApuComponent("5225", "DIURNO", "8324", guardado, "DIA", 1.0, 350000)])
+    autoria.editar_apu(alm, "5225", "DIURNO", {
+        "nombre": "VEHICULO", "unidad": "DIA", "grupo": "EQ",
+        "componentes": [{"insumo_codigo": "8324", "insumo_nombre": guardado, "rendimiento": 1.0}]})
+    (c,) = alm.apus.get_components("5225", "DIURNO")
+    assert c.insumo_nombre == catalogo
+    assert c.precio_unitario_hist == 350000

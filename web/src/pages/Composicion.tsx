@@ -18,6 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { BuscadorInsumo } from "@/components/autoria/DialogoAgregarApu";
+import SelectorCompartido, { opcionElegida, sinResolver } from "@/components/SelectorCompartido";
 import PanelAgente from "@/components/composicion/PanelAgente";
 import { aplicarCambios } from "@/lib/cambiosAgente";
 import { getGruposApu } from "@/api/autoria";
@@ -76,9 +77,10 @@ function componentesDe(filas: Fila[]): ComponentePropuesto[] {
 
 /** Componente agregado a mano: sin antecedente ni cálculo, y lo dice. El validador
  *  del servidor decide si pasa; acá no se adivina nada por él. */
-function componenteNuevo(codigo: string): ComponentePropuesto {
+function componenteNuevo(codigo: string, nombre = ""): ComponentePropuesto {
   return {
     codigo,
+    nombre,
     tipo: "insumo",
     funcion: "",
     rendimiento: 0,
@@ -182,6 +184,13 @@ export default function Composicion() {
     propuesta !== null
     && (supuestosOk
         || JSON.stringify(componentes) !== JSON.stringify(propuesta.componentes));
+
+  // Un código compartido sin escoger: el expediente viejo guardó `valido` antes de
+  // que existiera CODIGO_COMPARTIDO, y el error recién saldría al guardar o aprobar.
+  const hayCompartidoSinEscoger = filas.some((f) => {
+    const o = catalogo[f.c.codigo]?.opciones;
+    return !!o && sinResolver(o, f.c.nombre ?? "");
+  });
 
   const hallazgosDe = (codigo: string): Hallazgo[] => [
     ...(validacion?.errores ?? []).filter((h) => h.componente === codigo),
@@ -539,8 +548,19 @@ export default function Composicion() {
                           lo parte en muchas líneas, el peor lugar para el campo que
                           dice QUÉ ES el insumo. Dos formas de leer lo mismo, y una
                           mala, es una de más. */}
-                      <TableCell className="max-w-[22rem] truncate text-xs align-top">
-                        {ficha ? (
+                      <TableCell
+                        className={"max-w-[22rem] text-xs align-top"
+                          + (ficha?.opciones ? "" : " truncate")}>
+                        {ficha?.opciones ? (
+                          <SelectorCompartido
+                            codigo={f.c.codigo}
+                            opciones={ficha.opciones}
+                            valor={f.c.nombre ?? ""}
+                            deshabilitado={soloLectura}
+                            onElegir={(o) => setFilas((prev) => prev.map((x) =>
+                              x.uid === f.uid ? { ...x, c: { ...x.c, nombre: o.nombre } } : x))}
+                          />
+                        ) : ficha ? (
                           <span>{ficha.nombre}</span>
                         ) : (
                           <span className="font-medium text-destructive">
@@ -555,7 +575,8 @@ export default function Composicion() {
                         )}
                       </TableCell>
                       <TableCell className="text-xs font-mono text-muted-foreground align-top">
-                        {ficha?.unidad || "—"}
+                        {(ficha?.opciones && opcionElegida(ficha.opciones, f.c.nombre ?? "")?.unidad)
+                          || ficha?.unidad || "—"}
                       </TableCell>
                       <TableCell className="text-xs text-right align-top">
                         {!soloLectura ? (
@@ -609,7 +630,9 @@ export default function Composicion() {
                                 entera — el lugar cómodo para el campo que dice qué
                                 ES el insumo, no el tooltip nativo. */}
                             {ficha && (
-                              <span className="font-medium text-foreground">{ficha.nombre}</span>
+                              <span className="font-medium text-foreground">
+                                {f.c.nombre || ficha.nombre}
+                              </span>
                             )}
                             {f.c.justificacion && <span>{f.c.justificacion}</span>}
                             {f.c.calculo && (
@@ -661,7 +684,7 @@ export default function Composicion() {
                 codigo=""
                 nombre=""
                 onElegir={(ins) => setFilas((prev) => [
-                  ...prev, ...filasDe([componenteNuevo(ins.codigo)]),
+                  ...prev, ...filasDe([componenteNuevo(ins.codigo, ins.nombre)]),
                 ])}
               />
             </div>
@@ -724,10 +747,12 @@ export default function Composicion() {
               <div className="ml-auto">
                 <Button
                   size="sm"
-                  disabled={!validacion?.valido}
-                  title={validacion?.valido
-                    ? "Crea el APU con el alta de siempre y lo asigna a esta línea."
-                    : "Hay errores bloqueantes: corregilos antes de aprobar."}
+                  disabled={!validacion?.valido || hayCompartidoSinEscoger}
+                  title={hayCompartidoSinEscoger
+                    ? "Escoge cuál insumo va en los códigos compartidos antes de aprobar."
+                    : validacion?.valido
+                      ? "Crea el APU con el alta de siempre y lo asigna a esta línea."
+                      : "Hay errores bloqueantes: corregilos antes de aprobar."}
                   onClick={() => setIdentidad(true)}
                 >
                   Aprobar y crear APU

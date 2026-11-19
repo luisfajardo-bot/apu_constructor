@@ -419,6 +419,7 @@ test("agregar un componente lo suma a lo que se guarda", async () => {
     expect(enviados.length).toBe(2);
     expect(enviados[1].codigo).toBe("8801");
     expect(enviados[1].rendimiento).toBe(0.25);
+    expect(enviados[1].nombre).toBe("OFICIAL DE OBRA");
   });
 });
 
@@ -638,4 +639,45 @@ test("mientras se genera una propuesta el agente queda apagado", async () => {
     HTMLTextAreaElement).disabled).toBe(true);
   terminar();
   await waitFor(() => expect(screen.queryByText(/Se está generando una propuesta/)).toBeNull());
+});
+
+const OPCIONES_4279 = [
+  { nombre: "CUADRILLA OFICIAL MAS AYUDANTES", unidad: "HR", oculto: false },
+  { nombre: "TUBERIA PVC", unidad: "ML", oculto: false },
+];
+const CATALOGO_COMPARTIDO = {
+  ...CATALOGO,
+  "4279": { nombre: "", unidad: "", grupo: "", opciones: OPCIONES_4279 },
+};
+
+test("un código compartido muestra el selector y escoger se guarda con el nombre", async () => {
+  getComposicion.mockResolvedValueOnce(vista(version(), CATALOGO_COMPARTIDO));
+  montar();
+  const sel = await screen.findByLabelText("Insumo del código 4279") as HTMLSelectElement;
+  fireEvent.change(sel, { target: { value: "0" } });
+  fireEvent.click(boton(/Guardar cambios/));
+  await waitFor(() => expect(guardarComposicion).toHaveBeenCalledWith(
+    1, 3, 2, [{ ...COMPONENTE, nombre: "CUADRILLA OFICIAL MAS AYUDANTES" }], false));
+});
+
+test("Aprobar queda deshabilitado mientras un código compartido no tenga nombre escogido", async () => {
+  // Un expediente guardado antes de la feature dice `valido`: el error
+  // CODIGO_COMPARTIDO recién saldría al guardar o aprobar.
+  getComposicion.mockResolvedValueOnce(vista(version(), CATALOGO_COMPARTIDO));
+  montar();
+  await screen.findByLabelText("Insumo del código 4279");
+  const aprobar = boton(/Aprobar y crear APU/);
+  expect(aprobar.disabled).toBe(true);
+  expect(aprobar.title).toMatch(/Escoge cuál insumo va en los códigos compartidos/);
+  fireEvent.change(screen.getByLabelText("Insumo del código 4279"), { target: { value: "1" } });
+  expect(boton(/Aprobar y crear APU/).disabled).toBe(false);
+});
+
+test("Aprobar sigue habilitado si el nombre guardado ya coincide con una opción", async () => {
+  const v = version();
+  v.propuesta.componentes = [{ ...COMPONENTE, nombre: "cuadrilla oficial mas ayudantes" }];
+  getComposicion.mockResolvedValueOnce(vista(v, CATALOGO_COMPARTIDO));
+  montar();
+  await screen.findByLabelText("Insumo del código 4279");
+  expect(boton(/Aprobar y crear APU/).disabled).toBe(false);
 });

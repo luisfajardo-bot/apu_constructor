@@ -8,6 +8,11 @@ function indiceDe(opciones: OpcionInsumo[], valor: string): number {
   return opciones.findIndex((o) => normalizarNombre(o.nombre) === v);
 }
 
+/** La opción que coincide con `valor`, o undefined. */
+export function opcionElegida(opciones: OpcionInsumo[], valor: string): OpcionInsumo | undefined {
+  return opciones[indiceDe(opciones, valor)];
+}
+
 /** ¿El nombre de la fila no coincide con ninguna opción? (= falta escoger). */
 export function sinResolver(opciones: OpcionInsumo[], valor: string): boolean {
   return indiceDe(opciones, valor) < 0;

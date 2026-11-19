@@ -186,6 +186,36 @@ export interface VistaComposicion {
    *  de que desaparezca en silencio. Mismo criterio que `seqs_sin_apu`: > 0, no
    *  `!= null`. */
   costo_a_mano: boolean;
+  /** ¿Hay ANTHROPIC_API_KEY en el servidor? Apaga el panel del agente antes del
+   *  primer mensaje. Opcional: los expedientes de tests viejos no lo traen. */
+  ia_disponible?: boolean;
+}
+
+/** Un mensaje del chat con el agente. El historial vive en el navegador (el chat es
+ *  efímero); el servidor lo revisa entero contra montos antes de mandarlo a la IA. */
+export interface MensajeChat {
+  rol: "usuario" | "agente";
+  texto: string;
+}
+
+export type OpCambioAgente = "agregar" | "modificar" | "quitar";
+
+/** Un cambio propuesto por el agente. `componente` es null solo en `quitar`. */
+export interface CambioAgente {
+  op: OpCambioAgente;
+  codigo: string;
+  componente: ComponentePropuesto | null;
+}
+
+/** El evento `respuesta` del chat. `descartados` son cambios que la plataforma no
+ *  dejó pasar (código inexistente u oculto): se muestran, nunca se pierden callados. */
+export interface RespuestaAgente {
+  texto: string;
+  cambios: CambioAgente[];
+  descartados: { codigo: string; motivo: string }[];
+  catalogo: Record<string, EntradaCatalogo>;
+  modelo: string;
+  prompt_version: string;
 }
 
 /** Un APU distinto por fila para aplicar sugerencias de la IA en un solo recosteo. */

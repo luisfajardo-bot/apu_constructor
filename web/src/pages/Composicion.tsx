@@ -18,6 +18,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { BuscadorInsumo } from "@/components/autoria/DialogoAgregarApu";
+import PanelAgente from "@/components/composicion/PanelAgente";
+import { aplicarCambios } from "@/lib/cambiosAgente";
 import { getGruposApu } from "@/api/autoria";
 import {
   aprobarComposicion,
@@ -29,6 +31,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { puede } from "@/components/rutas";
 import type {
+  CambioAgente,
   ComponentePropuesto,
   Hallazgo,
   VistaComposicion,
@@ -266,6 +269,41 @@ export default function Composicion() {
     navigate(`/corridas/${corridaId}`);
   }
 
+  /** Aplica una propuesta del agente: la tabla de AHORA (con lo que hayas editado
+   *  sin guardar, que es lo que vio el agente) más los cambios, guardada por el PUT
+   *  de siempre con la instrucción como rastro. Sin expediente (mesa vacía) arranca
+   *  en la versión 0. Devuelve los conflictos para que el panel los muestre. */
+  async function aplicarDelAgente(
+    cambios: CambioAgente[], instruccion: string,
+  ): Promise<string[]> {
+    const { componentes: nuevos, conflictos } = aplicarCambios(componentesDe(filas), cambios);
+    // Si todo chocó y no hay ediciones propias, guardar solo gastaría una versión del
+    // expediente (y la instrucción quedaría como rastro de algo que no pasó).
+    if (conflictos.length === cambios.length && !hayCambios) return conflictos;
+    const v = await guardarComposicion(
+      corridaId, linea, vigente?.version ?? 0, nuevos, supuestosOk, instruccion);
+    if (montado.current) adoptar(v);
+    toast.success(
+      "Cambios del agente aplicados. La propuesta se revalidó sin IA."
+      + (hayCambios ? " También se guardaron tus ediciones sin guardar." : ""));
+    return conflictos;
+  }
+
+  const motivoSinAgente: string | null =
+    !vista?.ia_disponible
+      ? "El agente necesita ANTHROPIC_API_KEY en el servidor."
+      : congelada
+        ? "La corrida está congelada: el agente no puede proponer cambios."
+        : !puedeEditar
+          ? "Tu rol no permite cambiar esta composición."
+          : etapa !== null
+            // Un Aplicar a mitad de la generación ocuparía su número de versión y la
+            // propuesta pagada se perdería.
+            ? "Se está generando una propuesta: espera a que termine."
+            : vigente?.estado === "aprobada"
+              ? "Esta composición ya se aprobó: el APU está en la biblioteca."
+              : null;
+
   // ─── render ────────────────────────────────────────────────────────────────
 
   if (cargando) {
@@ -305,6 +343,11 @@ export default function Composicion() {
           </p>
         </div>
       </div>
+
+      {/* La mesa a la izquierda y el agente a la derecha; en pantallas angostas el
+          agente pasa debajo. */}
+      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="flex min-w-0 flex-col gap-3">
 
       {/* Tono `info` (azul) y no `destructive`/`revisar`: esto no es un error de la
           propuesta, es el estado de la corrida — no debe competir visualmente con
@@ -694,6 +737,17 @@ export default function Composicion() {
           )}
         </>
       )}
+      </div>
+
+      <PanelAgente
+        key={`${corridaId}/${linea}`}
+        corridaId={corridaId}
+        seq={linea}
+        componentes={componentes}
+        deshabilitado={motivoSinAgente}
+        onAplicar={aplicarDelAgente}
+      />
+      </div>
 
       {identidad && actividad && (
         <DialogoIdentidad

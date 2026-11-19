@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 63 planes, 70 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 64 planes, 71 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -33,6 +33,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 63 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-11-18 | [[Specs/2026-11-18-chat-agente-composicion-design|Chat con el agente en la mesa de composición — diseño]] |
 | 2026-09-30 | [[Specs/2026-09-30-notas-insumos-apus-design|Notas en insumos y APUs (con menciones y respuestas)]] |
 | 2026-09-29 | [[Specs/2026-09-29-fuente-dos-opciones-design|Fuente de precio: solo dos opciones]] |
 | 2026-09-21 | [[Specs/2026-09-21-umbral-igualar-contractual-design|Igualar por umbral de total contractual]] |
@@ -108,6 +109,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 63 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-11-19 | [[Planes/2026-11-19-chat-agente-composicion|Chat con el agente en la mesa de composición — plan de implementación]] |
 | 2026-09-30 | [[Planes/2026-09-30-notas-fase-3-respuestas|Notas — Fase 3: respuestas — Implementation Plan]] |
 | 2026-09-30 | [[Planes/2026-09-30-notas-fase-2-menciones|Notas — Fase 2: menciones y campanita — Implementation Plan]] |
 | 2026-09-30 | [[Planes/2026-09-30-notas-fase-1|Notas en insumos y APUs — Fase 1 — Implementation Plan]] |

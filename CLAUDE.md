@@ -60,9 +60,10 @@ lista licitación ────────────────────�
 corrida armada ──► revisión con IA (sin dinero) ──► propone veredicto ──► confirma usuario
 fila sin APU ──► composición con IA (sin dinero) ──► validación determinística
                                     └─► confianza calculada ──► aprueba usuario ──► autoria.crear_apu
+mesa de composición ──► chat con el agente (busca, sin dinero) ──► propone cambios ──► aplica usuario (PUT de la mesa)
 
 Interfaces sobre el mismo pipeline (dominio/pipeline.py):
-  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 72 endpoints) + web/ (React) para multiusuario
+  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 73 endpoints) + web/ (React) para multiusuario
 ```
 
 `apu_tool/config.py` es transversal, fuera de cualquier paquete: rutas, umbrales de
@@ -111,6 +112,7 @@ matching, modelo de IA, clasificación de precios.
 | `privacy.py`             | frontera de precios para la IA (invariante #1) |
 | `ai_assist.py`           | IA acotada (Anthropic SDK): propone una composición a pedido (no compone; el usuario aprueba) |
 | `composicion_agente.py`  | orquestador del agente de composición (hermano de `revision.py`): `recuperar()`, `evaluar()`, `componer()` (eventos SSE) |
+| `composicion_chat.py`    | chat con el agente en la mesa de composición: herramientas de búsqueda (solo lectura, sin dinero) y bucle de tool use con tope; propone, no escribe |
 | `revision.py`            | revisión con IA de una corrida ya armada (propone, no aplica) |
 | `assemble.py`            | orquestador por ítem |
 | `pricing.py`             | motor de costos (**ÚNICO** que ve dinero) |
@@ -258,6 +260,24 @@ matching, modelo de IA, clasificación de precios.
   `aprobada` con el `apu_codigo` creado — dos archivos SQLite sin transacción común, así
   que si el sellado falla después de crear el APU, la fila queda sin asignarlo (mensaje
   accionable, nunca silencio).
+  **Chat con el agente (2026-11).** En la mesa hay un panel de chat (`dominio/composicion_chat.py`,
+  `POST .../composicion/{seq}/chat`, rol `editor`, SSE). El agente busca en el catálogo
+  (`buscar_insumos`, `buscar_apus`, tope de 4 por mensaje) y **propone** cambios
+  (agregar/modificar/quitar); la persona los aplica y eso es el `PUT` de siempre con
+  `instruccion`, que deja `motivo="chat: …"`, `modelo=config.AI_MODEL` y
+  `prompt_version=PROMPT_VERSION_CHAT` (hoy `"chat/v4"`; los pone el servidor). El chat **no persiste nada** y su
+  historial vive en el navegador; por eso el servidor revisa **todos** los mensajes con
+  `privacy.texto_con_dinero`: uno del usuario con dinero responde `bloqueado` sin llamar
+  a la IA, y uno "del agente" con cifras se reemplaza por `[mensaje omitido]` (bloquear
+  por él envenenaría el chat). Con la mesa vacía, el primer `PUT` va con
+  `version_base = 0` y crea la versión siguiente al historial crudo (el seq se reusa).
+  Ojo para el reporte de correcciones: una edición a mano POSTERIOR a un Aplicar del chat
+  hereda `modelo` y el `prompt_version` del chat (los hereda `_sello` de la versión base), y
+  solo el `motivo` (`None` vs `"chat: …"`) distingue una de otra. Riesgo residual del
+  detector: un número suelto sin palabra de dinero cerca («45000 el jornal») pasa, por
+  diseño, porque «8 horas» y «3000 psi» tienen que pasar; y una especificación con punto
+  de miles («3.000 psi») se bloquea a propósito, y el motivo le dice a la persona cómo
+  escribirla.
 - **Costo puesto a mano.** `corrida_item.costo_manual` (los dos backends) es el costo
   unitario que declaró una persona para una fila: lo escribe el botón "Igualar costo al
   contractual", que copia el `precio_contractual` de las filas marcadas. Es para los
@@ -578,3 +598,21 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   candado que `agregar_items`/`borrar_items` y que `_exigir_rebuscable`
   (`servicio/corridas.py::_exigir_editable`, que usan `igualar_costo_al_contractual`,
   `igualar_por_umbral` y `quitar_costo_manual`).
+- No le mandes al agente del chat texto libre de la mesa (`justificacion`, `hipotesis`):
+  una persona pudo escribir un monto ahí. `privacy.componente_mesa_to_dict` copia solo los
+  campos estructurados, a propósito.
+- No le quites al detector de dinero del chat (`privacy.texto_con_dinero`) los mensajes
+  "del agente": el historial lo manda el cliente. Pero tampoco hagas que BLOQUEEN: se
+  omiten, porque la persona no puede sacar una respuesta del agente del hilo. Y no le
+  agregues "vale" (es "de acuerdo" en Colombia) ni "peso" en singular (es peso físico).
+- No uses `search_insumos_por_palabras` para las búsquedas del agente: OR con LIMIT 60
+  sin orden (y N+1). `buscar_insumos` usa `list_insumos`, la búsqueda del buscador de la
+  mesa.
+- No dejes que el chat agregue un código compartido (586 en el catálogo) sin mirar el
+  `nombre` que manda el agente: el alta (`autoria._componentes_de`) guarda
+  `get_candidatos(cod)[0]`, el de id menor, oculto o no. Pasa SOLO si el agente nombra
+  justo ese (`composicion_chat._motivo_compartido`); si no, se descarta diciendo qué se
+  guardaría. Bloquearlos todos dejaba sin HERRAMIENTA MENOR (6092, en 904 APUs) a cada
+  composición. El fix de raíz (que el nombre viaje hasta el alta) está pendiente.
+- No cierres el bucle del chat con `tool_choice` forzado: los modelos nuevos lo rechazan
+  con 400. El tope apaga las herramientas con `{"type": "none"}` sin sacarlas de `tools`.

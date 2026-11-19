@@ -21,7 +21,7 @@ from typing import Optional
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.datos.repositorio import CorridaEliminada, VersionYaExiste
-from apu_tool.dominio import composicion_agente, privacy
+from apu_tool.dominio import composicion_agente, composicion_chat, privacy
 # Re-exportadas por el orquestador de dominio a propósito: ningún módulo de
 # `servicio/` importa la fachada del SDK: lo fija `tests/test_servicio_privacidad`
 # buscando el nombre de ese módulo como TEXTO en cada archivo de `servicio/`, así
@@ -187,7 +187,10 @@ def vista(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
             # un costo puesto a mano en 0 (o NaN) no dispare el aviso de más abajo.
             # La mesa lo necesita para avisar ANTES de aprobar que un APU real borra
             # este costo declarado (`actualizar_eleccion` lo hace solo).
-            "costo_a_mano": (row.costo_manual or 0) > 0}
+            "costo_a_mano": (row.costo_manual or 0) > 0,
+            # Para que el panel del agente se apague ANTES del primer mensaje en vez
+            # de contestar 503. Misma condición que el botón "Componer".
+            "ia_disponible": config.ai_available()}
 
 
 def _catalogo_de(alm: Almacen, v: Optional[ComposicionRow]) -> dict[str, dict]:
@@ -224,7 +227,8 @@ def _catalogo_de(alm: Almacen, v: Optional[ComposicionRow]) -> dict[str, dict]:
 
 def _expediente(alm: Almacen, corrida_id: int, seq: int):
     """(fila, historial, vigente-de-esta-línea) para los caminos que escriben.
-    Cualquiera de los tres en None significa 404 para el endpoint."""
+    Fila None = 404; vigente None = 404 salvo la mesa vacía de `guardar_edicion`, que
+    arranca en `version_base = 0`."""
     row = alm.corridas.get_item(corrida_id, seq)
     if row is None:
         return None, [], None
@@ -307,13 +311,55 @@ def _eventos(alm: Almacen, corrida_id: int, row: CorridaItemRow, advisor,
         yield (evento, payload)
 
 
+# ----------------------------------------------------------------------- chat
+def chat_stream(alm: Almacen, corrida_id: int, seq: int, datos: dict, actor=None):
+    """El generador de eventos del chat, o None si la corrida o la fila no existen.
+
+    Igual que `generar_stream`: todo lo que puede fallar antes de empezar se valida
+    acá, con el stream cerrado. Lanza CorridaCongelada (409) e IANoDisponible (503).
+    NO persiste nada: el chat propone, y aplicar pasa por `guardar_edicion`.
+    """
+    if _exigir_activa(alm, corrida_id) is None:
+        return None
+    row = alm.corridas.get_item(corrida_id, seq)
+    if row is None:
+        return None
+    if not config.ai_available():
+        raise IANoDisponible(
+            "Conversar con el agente necesita ANTHROPIC_API_KEY en el servidor.")
+    return composicion_chat.conversar(
+        alm, row.item, datos.get("componentes") or [], datos.get("mensajes") or [],
+        ApuAdvisor())
+
+
 # ------------------------------------------------------------ edición humana
+def _rastro_chat(datos: dict) -> dict:
+    """Los campos del expediente que deja un Aplicar del chat, o {} si no viene de
+    ahí. `modelo` y `prompt_version` los pone el SERVIDOR: son etiquetas para el
+    reporte de correcciones y el cliente no las dicta.
+
+    La instrucción ya pasó por el detector de dinero (es el mismo mensaje que se le
+    mandó al agente), pero se vuelve a pasar: el cliente puede mandar otra, y el
+    expediente tiene que seguir siendo una fila que se pueda reinyectar.
+    """
+    instr = (datos.get("instruccion") or "").strip()
+    if not instr:
+        return {}
+    motivo = privacy.texto_con_dinero(instr)
+    if motivo:
+        raise ValueError(motivo)
+    return {"motivo": f"chat: {instr[:1000]}", "modelo": config.AI_MODEL,
+            "prompt_version": composicion_chat.PROMPT_VERSION_CHAT}
+
+
 def guardar_edicion(alm: Almacen, corrida_id: int, seq: int, datos: dict,
                     actor=None) -> Optional[dict]:
     """Guarda la propuesta que dejó una persona y la REVALIDA sin IA.
 
-    Devuelve None si la corrida, la fila o el expediente de esta línea no existen.
-    Lanza CorridaCongelada (409) y VersionYaExiste (409).
+    Devuelve None si la corrida o la fila no existen, o si no hay expediente de esta
+    línea y `version_base` no es 0 (la mesa vacía arranca en 0). Lanza
+    CorridaCongelada (409) y VersionYaExiste (409), y ValueError (422) si la
+    `instruccion` del chat trae dinero.
 
     La lista blanca sale de `_lista_blanca` (la persistida, más lo que agregó la
     persona) y NO del `recuperar` fresco, cuyo `codigos_permitidos` se descarta. El
@@ -322,13 +368,24 @@ def guardar_edicion(alm: Almacen, corrida_id: int, seq: int, datos: dict,
     """
     if _exigir_activa(alm, corrida_id) is None:
         return None
-    row, _, vig = _expediente(alm, corrida_id, seq)
-    if row is None or vig is None:
+    row, hist, vig = _expediente(alm, corrida_id, seq)
+    if row is None:
         return None
-    _exigir_version(vig, datos["version_base"])
+    if vig is None:
+        # Mesa vacía: la fila no tiene expediente (o el que hay es de otra actividad,
+        # porque el seq se reusa). Solo se arranca desde `version_base = 0`, y la
+        # versión sigue la numeración del historial CRUDO, igual que `generar_stream`:
+        # el índice único no sabe de qué actividad hablaba la otra.
+        if int(datos["version_base"]) != 0:
+            return None
+        version = (hist[-1].version + 1) if hist else 1
+    else:
+        _exigir_version(vig, datos["version_base"])
+        version = vig.version + 1
+    rastro = _rastro_chat(datos)        # antes de escribir nada: 422 sin efectos
 
     comps = [dict(c) for c in datos.get("componentes", []) or []]
-    previa = vig.propuesta or {}
+    previa = (vig.propuesta if vig else None) or {}
     # Se reusa el parser del contrato (`propuesta_desde_json`) en vez de construir los
     # dataclasses a mano: la edición humana pasa por el MISMO acotado de textos y la
     # misma degradación conservadora de campos ilegibles que la respuesta del modelo.
@@ -346,7 +403,7 @@ def guardar_edicion(alm: Almacen, corrida_id: int, seq: int, datos: dict,
         cruda, _con_lista_blanca(alm, ctx.validacion, blanca))
 
     fila = _sello(
-        corrida_id, row, vig, version=vig.version + 1, estado="editada",
+        corrida_id, row, vig, version=version, estado="editada",
         autor=_email(actor), propuesta=propuesta.to_dict(),
         validacion=validacion.to_dict(), confianza=confianza.nivel,
         confianza_motivos=[m.to_dict() for m in confianza.motivos],
@@ -354,13 +411,15 @@ def guardar_edicion(alm: Almacen, corrida_id: int, seq: int, datos: dict,
         # ampliada (no una re-derivada de un retrieve nuevo) y los APUs de referencia
         # de la generación. Es lo que la próxima edición va a leer como base.
         antecedentes={"codigos_permitidos": sorted(blanca),
-                      "apus_referencia": (vig.antecedentes or {}).get(
-                          "apus_referencia", [])})
+                      "apus_referencia": ((vig.antecedentes if vig else None)
+                                          or {}).get("apus_referencia", [])},
+        **rastro)
     alm.composiciones.agregar(fila)
     return vista(alm, corrida_id, seq)
 
 
-def _lista_blanca(vigente: ComposicionRow, componentes: list[dict]) -> frozenset[str]:
+def _lista_blanca(vigente: Optional[ComposicionRow],
+                  componentes: list[dict]) -> frozenset[str]:
     """La lista blanca de esta composición: la de la generación, más lo que agregó
     una persona.
 
@@ -374,8 +433,12 @@ def _lista_blanca(vigente: ComposicionRow, componentes: list[dict]) -> frozenset
     La lista existe para que el MODELO no invente códigos. Una persona que elige del
     buscador del catálogo no está inventando: para ella el guardián es
     CODIGO_INEXISTENTE, que sí mira el catálogo de verdad.
+
+    Sin vigente —la mesa vacía que se arma desde el chat— la lista es solo lo que se
+    agregó.
     """
-    previos = set((vigente.antecedentes or {}).get("codigos_permitidos", []))
+    previos = set(((vigente.antecedentes if vigente else None) or {})
+                  .get("codigos_permitidos", []))
     return frozenset(previos | {str(c.get("codigo", "")) for c in componentes})
 
 

@@ -1,6 +1,6 @@
 import { apiGet, apiPost, apiPut } from "./client";
 import { consumirSse } from "./corridas";
-import type { ComponentePropuesto, VistaComposicion } from "@/lib/tipos";
+import type { ComponentePropuesto, MensajeChat, VistaComposicion } from "@/lib/tipos";
 
 /** La versión vigente y el historial. Es lo que hace que recargar la página
  *  funcione: la propuesta vive en la base, no en el estado del navegador. */
@@ -9,18 +9,24 @@ export function getComposicion(id: number, seq: number): Promise<VistaComposicio
 }
 
 /** Guarda la edición humana. `versionBase` es la versión sobre la que se trabajó:
- *  si alguien se adelantó, el servidor devuelve 409 en vez de pisarla. */
+ *  si alguien se adelantó, el servidor devuelve 409 en vez de pisarla. Sin
+ *  expediente todavía (mesa vacía), `versionBase` es 0.
+ *
+ *  `instruccion` llega solo desde el panel del agente: es el mensaje que originó los
+ *  cambios y queda como rastro en el expediente ("chat: …"). */
 export function guardarComposicion(
   id: number,
   seq: number,
   versionBase: number,
   componentes: ComponentePropuesto[],
   supuestosConfirmados: boolean,
+  instruccion?: string,
 ): Promise<VistaComposicion> {
   return apiPut<VistaComposicion>(`/corridas/${id}/composicion/${seq}`, {
     version_base: versionBase,
     componentes,
     supuestos_confirmados: supuestosConfirmados,
+    ...(instruccion ? { instruccion } : {}),
   });
 }
 
@@ -67,4 +73,26 @@ export function generarComposicionStream(
 ): Promise<void> {
   return consumirSse(
     `/corridas/${id}/composicion/${seq}/stream`, { method: "POST" }, onEvent);
+}
+
+/** Conversa con el agente (SSE). Eventos: `pensando`, `buscando` {herramienta,
+ *  consulta}, `respuesta` (RespuestaAgente), `bloqueado` {motivo}, `error` {detail}.
+ *  No persiste nada: aplicar es `guardarComposicion` con la instrucción. */
+export function chatComposicionStream(
+  id: number,
+  seq: number,
+  cuerpo: { mensajes: MensajeChat[]; componentes: ComponentePropuesto[] },
+  onEvent: (e: EventoComposicion) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return consumirSse(
+    `/corridas/${id}/composicion/${seq}/chat`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cuerpo),
+      signal,
+    },
+    onEvent,
+  );
 }

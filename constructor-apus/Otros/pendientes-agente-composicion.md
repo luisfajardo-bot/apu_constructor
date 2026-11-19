@@ -6,6 +6,11 @@
 > Diseño: `docs/superpowers/specs/2026-09-10-agente-composicion-design.md`.
 > Plan de implementación: `docs/superpowers/plans/2026-09-10-agente-composicion.md`.
 
+> **2026-11-19:** chat con el agente en la mesa — implementado en la rama
+> `feat/chat-agente-composicion`. Diseño: `docs/superpowers/specs/2026-11-18-chat-agente-composicion-design.md`.
+> Plan: `docs/superpowers/plans/2026-11-19-chat-agente-composicion.md`. Falta: navegador
+> y smoke con la API real (mismo bloqueo que el punto 1).
+
 Este documento es el backlog vivo de la feature. Lo que ya está hecho no se repite acá:
 para eso está el diseño.
 

@@ -229,6 +229,116 @@ _ESQUEMA_COMPOSICION = {
 }
 
 
+# --------------------------------------------------------------------- chat
+# El chat de la mesa de composición (`dominio/composicion_chat.py`). Misma puerta al
+# SDK que `componer`, misma traducción de errores; distinto contrato: una vuelta de
+# un bucle de tool use, que termina en `{texto, cambios}`.
+PROMPT_VERSION_CHAT = "chat/v4"   # se sube A MANO al tocar el prompt o los esquemas
+
+_SISTEMA_CHAT = """\
+Eres un ingeniero de costos de obra civil que ayuda a una persona a completar la
+composición de un APU (análisis de precios unitarios) en una mesa de revisión. Con
+cada mensaje recibes la ACTIVIDAD y la COMPOSICIÓN ACTUAL de la mesa (lo que la
+persona ve en pantalla) y su instrucción.
+
+Herramientas:
+- `buscar_insumos(texto)`: busca en el catálogo por palabras del nombre. Devuelve
+  código, nombre, unidad, grupo y con qué rendimientos aparece el insumo en la
+  biblioteca.
+- `buscar_apus(texto)`: busca APUs de la biblioteca parecidos, con su composición.
+Busca con palabras cortas del nombre ("oficial", "soldador", "retroexcavadora"), no
+con frases. `buscar_insumos` exige TODAS las palabras: una de más (un adjetivo como
+"sanitaria" o "corrugada") deja afuera lo que buscas. Empieza con dos o tres palabras
+esenciales y el diámetro como 12"; si trae pocos resultados (`encontrados` bajo), quita
+palabras antes de concluir que no existe. Tienes un máximo de 4 búsquedas por mensaje:
+no las gastes en `buscar_apus` si ya tienes un antecedente.
+
+Reglas estrictas:
+- Solo PROPONES cambios; la persona decide si los aplica. No digas que ya los
+  aplicaste.
+- Usa ÚNICAMENTE códigos que viste en un resultado de búsqueda o que ya están en la
+  composición actual. No inventes códigos, tampoco de relleno ("PENDIENTE", "X"): si
+  falta un insumo que no encontraste, dilo en `texto` y no lo pongas en `cambios`.
+- NUNCA recibirás precios ni costos, y no debes inventarlos ni pedirlos.
+- Los rendimientos son cantidades FÍSICAS por unidad de la actividad.
+- Un APU de la biblioteca para la MISMA actividad es la mejor evidencia que hay. No
+  reemplaces su rendimiento por la mediana de `rendimientos_observados`: la mediana
+  mezcla actividades distintas. Si crees que el antecedente está mal, dilo y da la
+  razón técnica concreta, pero propón el cambio solo si la tienes.
+- `op`: "agregar" un insumo que no está; "modificar" uno que ya está (manda el
+  componente completo con el cambio); "quitar" uno que está (`componente` en null).
+- En cada cambio manda `nombre`: el nombre del insumo copiado tal como lo viste en la
+  búsqueda o en el APU de referencia. Varios insumos distintos comparten código, y sin
+  el nombre la plataforma no sabe cuál quieres.
+- En `componente`, `origen` dice de dónde sale el rendimiento. Sé honesto:
+  "copiado_de_antecedente" o "ajustado_de_antecedente" solo si sale de un APU que
+  viste en `buscar_apus` (cítalo en `referencias`); "calculado_desde_produccion" si
+  hiciste una cuenta (escríbela en `calculo`); "supuesto_tecnico" si es criterio;
+  "sin_evidencia" si no tienes en qué apoyarte.
+- `hipotesis` va como lista de pares clave-valor (el valor como texto), o [].
+- Si la persona pregunta algo y no pide cambios, responde en `texto` y deja
+  `cambios` vacío.
+- `texto` es lo que lee la persona: corto, en español de Colombia y tuteando.
+
+Responde EXCLUSIVAMENTE con un JSON válido con el esquema pedido.
+"""
+
+# El componente es EL MISMO de `componer`, acotado igual (tipo solo `insumo`, sin
+# `sub_apu`): lo parsea el mismo `propuesta_desde_json`. Nullable porque `quitar` no
+# lleva componente.
+_COMPONENTE_ESQUEMA = _ESQUEMA_COMPOSICION["properties"]["componentes"]["items"]
+OPS_CHAT = ("agregar", "modificar", "quitar")
+
+_ESQUEMA_CHAT = {
+    "type": "object",
+    "properties": {
+        "texto": {"type": "string"},
+        "cambios": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "op": {"type": "string", "enum": list(OPS_CHAT)},
+                    "codigo": {"type": "string"},
+                    # Varios insumos comparten código (586 en el catálogo real): con
+                    # el nombre la plataforma sabe cuál quiso decir el agente.
+                    "nombre": {"type": "string"},
+                    "componente": {**_COMPONENTE_ESQUEMA,
+                                   "type": ["object", "null"]},
+                },
+                "required": ["op", "codigo", "nombre", "componente"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["texto", "cambios"],
+    "additionalProperties": False,
+}
+
+
+def _herramienta(nombre: str, descripcion: str, campo: str) -> dict:
+    return {"name": nombre, "description": descripcion, "strict": True,
+            "input_schema": {"type": "object",
+                             "properties": {"texto": {"type": "string",
+                                                      "description": campo}},
+                             "required": ["texto"], "additionalProperties": False}}
+
+
+HERRAMIENTAS_CHAT = [
+    _herramienta("buscar_insumos",
+                 "Busca insumos del catálogo por palabras de su nombre. Devuelve hasta "
+                 "15 con código, nombre, unidad, grupo y los rendimientos con que "
+                 "aparecen en la biblioteca. No devuelve precios.",
+                 "Palabras cortas del nombre del insumo, p. ej. 'oficial soldador'."),
+    _herramienta("buscar_apus",
+                 "Busca APUs de la biblioteca parecidos a un texto. Devuelve hasta 5 "
+                 "con su composición (insumos, unidades y rendimientos). No devuelve "
+                 "precios.",
+                 "Descripción corta de la actividad, p. ej. 'excavación manual'."),
+]
+MAX_TOKENS_CHAT = 16000
+
+
 class ApuAdvisor:
     """Fachada sobre la IA. Sin credenciales, `componer` levanta `IANoDisponible`."""
 
@@ -309,4 +419,55 @@ class ApuAdvisor:
             output_config={"effort": effort,
                            "format": {"type": "json_schema", "schema": schema}},
             messages=[{"role": "user", "content": contenido}],
+        )
+
+    def turno_chat(self, mensajes: list, *, con_herramientas: bool):
+        """UNA vuelta del bucle del chat. Devuelve la respuesta cruda del SDK.
+
+        El bucle (ejecutar herramientas, cortar en el tope) vive en
+        `dominio/composicion_chat.py`; acá solo se habla con el modelo y se traducen
+        los errores de configuración, igual que en `componer`.
+
+        `con_herramientas=False` apaga las herramientas con `tool_choice: none` SIN
+        sacarlas de `tools`: el historial ya trae bloques `tool_use` que las nombran.
+        No se usa `tool_choice` forzado: los modelos nuevos lo rechazan con 400.
+        """
+        if not self.enabled or self._client is None:
+            if getattr(self, "_sdk_ausente", False):
+                raise IANoDisponible(
+                    "Conversar con el agente necesita el SDK de anthropic instalado "
+                    "en el servidor.")
+            raise IANoDisponible(
+                "Conversar con el agente necesita ANTHROPIC_API_KEY en el servidor.")
+        # FUERA del try, como en `componer`: el invariante #1 nunca se traga. Los
+        # bloques del SDK (no-dict) no se recorren; lo que armamos nosotros, sí.
+        privacy.assert_no_money(mensajes)
+        try:
+            return self._pedir_chat_al_sdk(mensajes, con_herramientas)
+        except Exception as exc:
+            if credencial_invalida(exc):
+                raise IANoDisponible(MSG_CREDENCIAL) from exc
+            if sin_saldo(exc):
+                raise IANoDisponible(MSG_SIN_SALDO) from exc
+            raise
+
+    def _pedir_chat_al_sdk(self, mensajes: list, con_herramientas: bool):
+        """La llamada pelada. Aparte para que los tests la sustituyan sin simular el
+        cliente, igual que `_pedir_al_sdk`."""
+        return self._client.messages.create(
+            model=self.model,
+            max_tokens=MAX_TOKENS_CHAT,
+            system=_SISTEMA_CHAT,
+            thinking={"type": "adaptive"},
+            # `low`: una instrucción puntual no necesita el razonamiento de una
+            # composición entera, y el pensamiento es la parte que domina el costo.
+            output_config={"effort": "low",
+                           "format": {"type": "json_schema", "schema": _ESQUEMA_CHAT}},
+            tools=HERRAMIENTAS_CHAT,
+            tool_choice={"type": "auto"} if con_herramientas else {"type": "none"},
+            messages=mensajes,
+            # Caché automática del prefijo: cada vuelta del bucle reenvía todo lo
+            # anterior (sistema, herramientas, contexto, resultados), y esa parte se
+            # cobra a 0,1x. En el smoke real el 94 % de los tokens era entrada.
+            cache_control={"type": "ephemeral"},
         )

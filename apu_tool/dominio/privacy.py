@@ -13,7 +13,9 @@ es por nombre de clave, NO por valor — ver la limitación en su docstring.
 from __future__ import annotations
 
 import json
-from typing import Any
+import math
+import re
+from typing import Any, Optional
 
 from apu_tool.nucleo.models import DePricedApu, DePricedComponent, LicitacionItem
 
@@ -136,6 +138,69 @@ def safe_json(payload: Any) -> str:
     salga hacia la IA."""
     assert_no_money(payload)
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+# --------------------------------------------------- texto libre (chat del agente)
+# `assert_no_money` mira NOMBRES de clave. El chat de la mesa de composición es el
+# primer payload hacia la IA armado con texto libre escrito por personas, así que los
+# VALORES necesitan su propio detector. Preferimos fallar a filtrar: un falso positivo
+# cuesta reescribir el mensaje; un falso negativo le muestra un precio a la IA.
+#
+# Lo que NO está, a propósito:
+#   - "vale": en Colombia es "de acuerdo" ("vale, agrega 2 ayudantes"); "vale 3
+#     millones" igual cae por "millones".
+#   - "peso" en singular: es también peso físico ("peso específico 2,4 t/m3").
+# Falsos positivos ACEPTADOS: "pon el valor en 0,5", "el rendimiento sale en 0,5". El
+# motivo le dice a la persona cómo decirlo para que no salte.
+_SENAL_MONEDA = re.compile(
+    r"\$|€|\b(cop|usd|eur|euros?|pesos|d[oó]lares?|lucas)\b", re.IGNORECASE)
+# Un número con separador de miles con punto ("45.000", "1.250.000") es dinero en este
+# dominio: los rendimientos llevan coma decimal ("0,125") y las especificaciones van
+# sin separador ("3000 psi"). Empieza en 1-9 para que "0.125" (decimal con punto) pase.
+_MILES = re.compile(r"\b[1-9]\d{0,2}(?:\.\d{3})+\b")
+_RAIZ_DINERO = re.compile(
+    r"(precios?|costos?|costar|cuesta|cuestan|valor(es)?|tarifas?|cotiz\w*|"
+    r"presupuest\w*|mill[oó]n|millones|mil|k|plata|cobra\w*|pag\w+|compr\w+|"
+    r"factur\w+|sale|sali[oó]|salen)", re.IGNORECASE)
+# Palabras y números por separado: "precio:45000" y "45k" quedan como dos tokens. Con
+# `split()` la palabra quedaba pegada al número y la raíz no casaba.
+_TOKEN = re.compile(r"[^\W\d_]+|\d[\d.,]*")
+_VENTANA_DINERO = 3        # tokens a cada lado de la raíz donde se busca un número
+
+
+def _motivo_dinero(fragmento: str) -> str:
+    frag = fragmento.strip()[:60]
+    return (f"El mensaje parece traer un monto («{frag}»). La IA no puede ver "
+            "precios: quítalo y vuelve a enviarlo. Si es una cantidad física, "
+            "nómbrala así: «rendimiento 0,5», «8 horas».")
+
+
+def _alrededor(t: str, m: re.Match) -> str:
+    return t[max(0, m.start() - 20):m.end() + 20]
+
+
+def texto_con_dinero(texto: str) -> Optional[str]:
+    """El motivo para bloquear `texto` si parece traer dinero, o None si no.
+
+    Bloquea si hay un símbolo o una moneda (`$`, `€`, COP, USD, pesos…), un número con
+    separador de miles con punto ("45.000"), o una palabra de dinero (precio, costo,
+    valor, tarifa, cotiz-, pag-, sale, mil, k…) con un número a menos de
+    `_VENTANA_DINERO` tokens. Deja pasar las cantidades físicas ("8 horas",
+    "0,125 HH/m3"): sin palabra de dinero cerca, un número es un rendimiento.
+    """
+    t = texto or ""
+    for patron in (_SENAL_MONEDA, _MILES):
+        m = patron.search(t)
+        if m:
+            return _motivo_dinero(_alrededor(t, m))
+    tokens = _TOKEN.findall(t)
+    for i, tok in enumerate(tokens):
+        if not _RAIZ_DINERO.fullmatch(tok):
+            continue
+        vecinos = tokens[max(0, i - _VENTANA_DINERO): i + _VENTANA_DINERO + 1]
+        if any(ch.isdigit() for v in vecinos for ch in v):
+            return _motivo_dinero(" ".join(vecinos))
+    return None
 
 
 def rendimiento_observado_to_dict(o) -> dict[str, Any]:

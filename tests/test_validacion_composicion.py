@@ -457,3 +457,40 @@ def test_la_validacion_no_lleva_dinero():
     from apu_tool.dominio import privacy
     _, v = validar(Propuesta(componentes=(comp(),)), ctx())
     privacy.assert_no_money(v.to_dict())
+
+
+# --- código compartido por dos insumos --------------------------------------
+COMPARTIDOS = {"6092": (("HERRAMIENTA MENOR", "GLB"),
+                        ("RELOCALIZACION DE MEDIDOR DE ACUEDUCTO", "UN"))}
+
+
+def _herramienta(**kw):
+    return comp(codigo="6092", funcion="herramienta", rendimiento=1.0, **kw)
+
+
+def test_un_codigo_compartido_sin_nombre_es_error():
+    _, v = validar(Propuesta(componentes=(_herramienta(nombre=""),)),
+                   ctx(candidatos_compartidos=COMPARTIDOS))
+    assert "CODIGO_COMPARTIDO" in codigos(v.errores)
+    assert v.valido is False
+
+
+def test_un_codigo_compartido_con_nombre_que_resuelve_no_es_error():
+    _, v = validar(Propuesta(componentes=(_herramienta(nombre="HERRAMIENTA MENOR"),)),
+                   ctx(candidatos_compartidos=COMPARTIDOS))
+    assert "CODIGO_COMPARTIDO" not in codigos(v.errores)
+
+
+def test_sin_compartidos_en_el_contexto_no_cambia_nada():
+    _, v = validar(Propuesta(componentes=(comp(),)), ctx())
+    assert "CODIGO_COMPARTIDO" not in codigos(v.errores)
+
+
+def test_la_unidad_se_compara_contra_la_fila_que_eligio_el_nombre():
+    """6092 en el catálogo mide GLB (primera fila) pero el nombre elige la segunda (UN):
+    comparar contra la primera daría un SIN_ANTECEDENTES de unidad que no existe."""
+    obs = {"6092": RendimientoObservado("6092", "UN", 14, 0.5, 1.0, 2.0)}
+    p = Propuesta(componentes=(_herramienta(
+        nombre="RELOCALIZACION DE MEDIDOR DE ACUEDUCTO"),))
+    _, v = validar(p, ctx(candidatos_compartidos=COMPARTIDOS, observados=obs))
+    assert not any("el catálogo lo mide" in a.mensaje for a in v.advertencias)

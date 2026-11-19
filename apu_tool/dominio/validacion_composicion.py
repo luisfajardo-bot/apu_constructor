@@ -34,6 +34,7 @@ from apu_tool import config
 from apu_tool.dominio.compose import RendimientoObservado
 from apu_tool.dominio.composicion import (_MAX_CODIGO, ComponentePropuesto,
                                           Propuesta)
+from apu_tool.dominio.cruce import elegir
 from apu_tool.nucleo.texto import normalizar
 
 # Orígenes que AFIRMAN un respaldo. Cada uno lo afirma de una forma distinta y por eso
@@ -134,6 +135,11 @@ class ContextoValidacion:
     # `unidad_de_antecedentes` de la confianza (tarea 4): un antecedente que mide en
     # ML no respalda una actividad que se paga por M3, por parecido que sea el nombre.
     unidades_de_apu: dict[tuple[str, str], str] = field(default_factory=dict)
+    # (nombre, unidad) de cada código del catálogo que es de DOS o más insumos, en
+    # orden de id. Solo nombres: el validador no ve `Insumo` (lleva precio). Vacío =
+    # nadie lo armó (contextos viejos de tests): no se valida, como antes.
+    candidatos_compartidos: dict[str, tuple[tuple[str, str], ...]] = field(
+        default_factory=dict)
 
 
 # --------------------------------------------------------------- recálculo
@@ -208,6 +214,16 @@ def _cierra_ciclo(codigo: str, turno: str, propio: str, turno_propio: str,
 
 
 # ------------------------------------------------------- reglas por componente
+def _fila_compartida(c: ComponentePropuesto, ctx: ContextoValidacion
+                     ) -> tuple[bool, Optional[str]]:
+    """(es_compartido, unidad de la fila elegida o None si el nombre no resuelve)."""
+    opciones = ctx.candidatos_compartidos.get(c.codigo)
+    if not opciones:
+        return False, None
+    i, _calidad, _score = elegir([n for n, _u in opciones], c.nombre)
+    return True, (opciones[i][1] if i is not None else None)
+
+
 def _validar_componente(c: ComponentePropuesto, ctx: ContextoValidacion,
                         hay_supuestos: bool
                         ) -> tuple[list[Hallazgo], list[Hallazgo], int]:
@@ -240,6 +256,17 @@ def _validar_componente(c: ComponentePropuesto, ctx: ContextoValidacion,
         if c.codigo not in ctx.unidades_catalogo:
             err.append(Hallazgo("CODIGO_INEXISTENTE",
                                 f"El insumo {cod} no está en el catálogo.", cod))
+        compartido, unidad_fila = _fila_compartida(c, ctx)
+        if compartido:
+            reglas += 1
+            if unidad_fila is None:
+                # Destrabable en la mesa (la persona escoge cuál): pasa la prueba de
+                # CLAUDE.md para ser error. Sin esto, aprobar guardaría una fila del
+                # código que nadie eligió.
+                err.append(Hallazgo(
+                    "CODIGO_COMPARTIDO",
+                    f"El código {cod} es de varios insumos distintos y el nombre no "
+                    f"dice cuál: escoge cuál va en la fila.", cod))
 
     reglas += 1
     if c.funcion == "sub_apu" and c.tipo != "apu":
@@ -304,7 +331,11 @@ def _validar_componente(c: ComponentePropuesto, ctx: ContextoValidacion,
     if c.tipo != "apu":
         reglas += 1
         obs = ctx.observados.get(c.codigo)
-        unidad_cat = ctx.unidades_catalogo.get(c.codigo)
+        compartido, unidad_fila = _fila_compartida(c, ctx)
+        # Código compartido: la unidad es la de la fila que eligió el nombre, no la de
+        # la primera fila del código (sería la de otro insumo).
+        unidad_cat = (unidad_fila if compartido and unidad_fila is not None
+                      else ctx.unidades_catalogo.get(c.codigo))
         # Normalizadas de los dos lados: "HR" contra " hr " no es una divergencia, y
         # tomarla por tal se llevaría puesto el RENDIMIENTO_ATIPICO del componente.
         u_obs = (obs.unidad or "").strip().upper() if obs is not None else ""

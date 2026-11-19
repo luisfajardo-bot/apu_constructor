@@ -227,7 +227,8 @@ def _catalogo_de(alm: Almacen, v: Optional[ComposicionRow]) -> dict[str, dict]:
 
 def _expediente(alm: Almacen, corrida_id: int, seq: int):
     """(fila, historial, vigente-de-esta-línea) para los caminos que escriben.
-    Cualquiera de los tres en None significa 404 para el endpoint."""
+    Fila None = 404; vigente None = 404 salvo la mesa vacía de `guardar_edicion`, que
+    arranca en `version_base = 0`."""
     row = alm.corridas.get_item(corrida_id, seq)
     if row is None:
         return None, [], None

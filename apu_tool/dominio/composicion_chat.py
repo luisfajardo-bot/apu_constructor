@@ -112,6 +112,10 @@ def _catalogo(almacen: Almacen, codigos) -> dict[str, dict]:
     if not cods:
         return {}
     out = {}
+    # ponytail: `unidad` y `grupo` salen de `cands[0]`, que puede ser un homónimo oculto
+    # (`get_candidatos_bulk` no filtra ocultos e `Insumo` no trae `oculto`). Hoy no pasa
+    # en los datos reales. Upgrade: que `get_candidatos_bulk` exponga `oculto` y elegir
+    # el primer candidato visible.
     for cod, cands in almacen.precios.get_candidatos_bulk(cods).items():
         if cands:
             out[cod] = {"nombre": cands[0].nombre, "unidad": cands[0].unidad,
@@ -152,6 +156,8 @@ def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
     # respuesta, y el egress de Supabase ya fue un problema. Se pasa nombre "" y se
     # filtran las filas de ESE código (la consulta es "código O nombre"). Una consulta
     # por código distinto, no por cambio.
+    # ponytail: solo el NOMBRE se corrige con la fila visible; `unidad` y `grupo` siguen
+    # saliendo de `cands[0]` (ver `_catalogo`). Upgrade: `oculto` en `get_candidatos_bulk`.
     visibles = set()
     for cod in {cod for c, cod in zip(crudos, codigos)
                 if c.get("op") == "agregar" and cod}:

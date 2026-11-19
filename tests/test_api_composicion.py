@@ -539,3 +539,65 @@ def test_un_expediente_viejo_sin_codigo_sugerido_no_rompe(app_alm, corrida):
     r = cliente(app, "consulta").get(f"/api/corridas/{corrida}/composicion/1")
     assert r.status_code == 200
     assert "codigo_sugerido" not in r.json()["vigente"]["actividad"]
+
+
+# --- códigos compartidos por dos insumos ------------------------------------
+def _homonimo(alm):
+    alm.precios.insert_insumos([Insumo("6092", "RELOCALIZACION DE MEDIDOR DE ACUEDUCTO",
+                                       "UN", "REDES", 9, "PRECIO IDU")])
+
+
+HERRAMIENTA = dict(COMPONENTES[0], codigo="6092", funcion="herramienta", rendimiento=1.0,
+                   origen="supuesto_tecnico", referencias=[])
+
+
+def test_la_ficha_de_un_codigo_compartido_trae_las_opciones(app_alm, corrida):
+    app, alm = app_alm
+    _homonimo(alm)
+    _sembrar(alm, corrida, version=1, componentes=COMPONENTES + [HERRAMIENTA])
+    d = cliente(app, "consulta").get(f"/api/corridas/{corrida}/composicion/1").json()
+    f = d["catalogo"]["6092"]
+    assert f["nombre"] == "" and len(f["opciones"]) == 2
+    assert "precio" not in str(f)
+
+
+def test_put_de_un_codigo_compartido_sin_nombre_es_error_y_con_nombre_no(app_alm, corrida):
+    app, alm = app_alm
+    _homonimo(alm)
+    _sembrar(alm, corrida, version=1)
+    c = cliente(app, "editor")
+    r = c.put(f"/api/corridas/{corrida}/composicion/1",
+              json={"version_base": 1, "componentes": COMPONENTES + [HERRAMIENTA]})
+    errores = {e["codigo"] for e in r.json()["vigente"]["validacion"]["errores"]}
+    assert "CODIGO_COMPARTIDO" in errores
+    con_nombre = dict(HERRAMIENTA, nombre="HERRAMIENTA MENOR")
+    r = c.put(f"/api/corridas/{corrida}/composicion/1",
+              json={"version_base": 2, "componentes": COMPONENTES + [con_nombre]})
+    errores = {e["codigo"] for e in r.json()["vigente"]["validacion"]["errores"]}
+    assert "CODIGO_COMPARTIDO" not in errores
+    assert r.json()["catalogo"]["6092"]["nombre"] == "HERRAMIENTA MENOR"
+
+
+def test_aprobar_guarda_la_fila_que_dice_el_nombre(app_alm, corrida):
+    """Nombra la SEGUNDA fila del código (la de id mayor): sin el arreglo, el alta
+    guardaba la primera (HERRAMIENTA MENOR) y este test falla."""
+    app, alm = app_alm
+    _homonimo(alm)
+    _sembrar(alm, corrida, version=1, componentes=COMPONENTES + [
+        dict(HERRAMIENTA, nombre="RELOCALIZACION DE MEDIDOR DE ACUEDUCTO")])
+    r = cliente(app, "editor").post(f"/api/corridas/{corrida}/composicion/1/aprobar",
+                                    json=APROBAR)
+    assert r.status_code == 200, r.text
+    nombres = {c.insumo_codigo: c.insumo_nombre
+               for c in alm.apus.get_components("9001", "DIURNO")}
+    assert nombres["6092"] == "RELOCALIZACION DE MEDIDOR DE ACUEDUCTO"
+
+
+def test_aprobar_un_codigo_compartido_sin_nombre_es_422(app_alm, corrida):
+    app, alm = app_alm
+    _homonimo(alm)
+    _sembrar(alm, corrida, version=1, componentes=COMPONENTES + [HERRAMIENTA])
+    r = cliente(app, "editor").post(f"/api/corridas/{corrida}/composicion/1/aprobar",
+                                    json=APROBAR)
+    assert r.status_code == 422
+    assert alm.apus.get_apu("9001", "DIURNO") is None

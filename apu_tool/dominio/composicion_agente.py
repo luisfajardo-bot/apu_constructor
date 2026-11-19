@@ -22,6 +22,7 @@ from apu_tool.dominio import privacy
 # `tests/test_servicio_privacidad.py::test_servicio_no_importa_ai_assist`), así que la
 # capa de servicio construye la fachada a través de su orquestador de dominio y no
 # tocando la puerta al SDK. Ese test es lo que mantiene el borde en un solo lugar.
+from apu_tool.dominio import cruce
 from apu_tool.dominio.ai_assist import PROMPT_VERSION, ApuAdvisor, IANoDisponible
 from apu_tool.dominio.compose import InsumoRetriever, rendimientos_observados
 from apu_tool.dominio.composicion import Propuesta
@@ -50,10 +51,14 @@ def recuperar(almacen: Almacen, item, *, apu_codigo_propio: str = "",
     codigos = [i.codigo for i in insumos]
 
     catalogo = almacen.precios.get_candidatos_bulk(codigos)
+    nombre_de = {i.codigo: i.nombre for i in insumos}
     grupos, unidades = {}, {}
     for cod, cands in catalogo.items():
         if cands:
-            grupos[cod] = cands[0].grupo or ""
+            # Código compartido: el grupo es el de la fila que el candidato nombra
+            # (la que vio el modelo), no el de la primera fila del código.
+            fila = cruce.elegir_fila(cands, nombre_de.get(cod, "")) or cands[0]
+            grupos[cod] = fila.grupo or ""
             unidades[cod] = cands[0].unidad or ""
     insumos = tuple(replace(i, grupo=grupos.get(i.codigo, "")) for i in insumos)
 
@@ -91,6 +96,7 @@ def recuperar(almacen: Almacen, item, *, apu_codigo_propio: str = "",
         componentes_de_apu=componentes,
         observados=rendimientos_observados(almacen, codigos),
         unidades_de_apu={(a.codigo, a.shift): a.unidad or "" for a in apus},
+        candidatos_compartidos=cruce.compartidos(catalogo),
         apu_codigo_propio=apu_codigo_propio,
         supuestos_confirmados=supuestos_confirmados)
     return ContextoComposicion(tuple(insumos), tuple(ejemplos), ctx)

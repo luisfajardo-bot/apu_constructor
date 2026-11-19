@@ -30,6 +30,8 @@ import pytest
 
 from apu_tool.nucleo.models import Apu, ApuComponent
 from apu_tool.servicio import autoria
+from apu_tool.servicio.app import create_app
+from tests.conftest import cliente
 
 SENAL = "SEÑAL VERTICAL SR 90X30 INCLUYE POSTE"
 REDUCCION = "REDUCCION HD E.L. D=12 x 10"
@@ -127,3 +129,26 @@ def test_un_nombre_aproximado_resuelve_a_su_fila(tmp_path):
     _crear(alm, [{"insumo_codigo": "8324", "insumo_nombre": guardado, "rendimiento": 1}])
     (c,) = alm.apus.get_components("N1", "DIURNO")
     assert c.insumo_nombre == catalogo
+
+
+def test_la_ruta_responde_422_con_las_opciones(tmp_path):
+    alm = _alm(tmp_path)
+    cli = cliente(create_app(almacen=alm), rol="admin")
+    r = cli.post("/api/apus/crear", json={
+        "codigo": "N1", "turno": "DIURNO", "nombre": "APU N1", "unidad": "UN", "grupo": "G",
+        "componentes": [{"insumo_codigo": "7406", "rendimiento": 1}]})
+    assert r.status_code == 422, r.text
+    d = r.json()["detail"]
+    assert "escoge" in d["mensaje"]
+    assert [o["nombre"] for o in d["conflictos"][0]["opciones"]] == [REDUCCION, SENAL]
+    assert "precio" not in r.text
+
+
+def test_editar_responde_422_con_las_opciones(tmp_path):
+    alm = _alm(tmp_path)
+    alm.apus.insert_apus([Apu("A1", "X", "UN", "DIURNO", "G")])
+    cli = cliente(create_app(almacen=alm), rol="admin")
+    r = cli.put("/api/apus/A1/DIURNO", json={
+        "nombre": "X", "unidad": "UN", "grupo": "G",
+        "componentes": [{"insumo_codigo": "7406", "insumo_nombre": "", "rendimiento": 1}]})
+    assert r.status_code == 422 and r.json()["detail"]["conflictos"][0]["codigo"] == "7406"

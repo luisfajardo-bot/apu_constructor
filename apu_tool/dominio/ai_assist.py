@@ -239,7 +239,7 @@ _ESQUEMA_COMPOSICION = {
 # El chat de la mesa de composición (`dominio/composicion_chat.py`). Misma puerta al
 # SDK que `componer`, misma traducción de errores; distinto contrato: una vuelta de
 # un bucle de tool use, que termina en `{texto, cambios}`.
-PROMPT_VERSION_CHAT = "chat/v4"   # se sube A MANO al tocar el prompt o los esquemas
+PROMPT_VERSION_CHAT = "chat/v5"   # se sube A MANO al tocar el prompt o los esquemas
 
 _SISTEMA_CHAT = """\
 Eres un ingeniero de costos de obra civil que ayuda a una persona a completar la

@@ -47,7 +47,7 @@
 | `web/src/lib/cambiosAgente.ts` | `modificar` conserva el nombre |
 | `CLAUDE.md` | reglas nuevas |
 
-Nota sobre el spec: el prompt del chat **no** cambia (ya pide `nombre` y no menciona el candado), así que `PROMPT_VERSION_CHAT` se queda en `"chat/v4"`; solo cambia la lógica del servidor.
+Nota sobre el spec: el prompt del chat **no** cambia (ya pide `nombre` y no menciona el candado), pero el esquema del componente del chat se deriva del de Componer y ahora exige `nombre`, así que `PROMPT_VERSION_CHAT` pasa a `"chat/v5"`.
 
 ---
 

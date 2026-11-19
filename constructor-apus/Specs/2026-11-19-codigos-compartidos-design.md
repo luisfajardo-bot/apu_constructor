@@ -51,12 +51,26 @@ Para cada componente con `tipo != "apu"`:
 | 2+ y `cruce.resolver(cands, insumo_nombre)` da EXACTO o APROXIMADO | se guarda **esa** fila (nombre y unidad del catálogo) |
 | 2+ y da AMBIGUO, o `insumo_nombre` vacío | **duda**: no se guarda |
 
+La elección por nombre sale de **una sola función** nueva en `dominio/cruce.py`,
+`elegir(nombres: list[str], objetivo: str) -> int | None` (índice de la fila, o `None` si es
+ambiguo), con la lógica que hoy tiene `resolver` (exacto normalizado, luego difuso con
+`CRUCE_UMBRAL`/`CRUCE_MARGEN`). `resolver` pasa a usarla, sin cambio de comportamiento. Hace
+falta porque `resolver` recibe `Insumo`, que exige `precio`, y el validador de composición
+solo tiene nombres.
+
 Las dudas se juntan **todas** (no se corta en la primera) y al final se lanza
 `CodigoCompartido(conflictos)`, con
-`conflictos = [{"codigo": str, "opciones": [{"nombre": str, "unidad": str}]}]`. Las opciones
-salen en el orden del catálogo (id) e **incluyen los ocultos**: ocultar no es borrar, y si el
-ingeniero escoge uno lo hace a sabiendas. Solo nombre y unidad: `Insumo` lleva `precio` y el
+`conflictos = [{"codigo": str, "opciones": [{"nombre": str, "unidad": str, "oculto": bool}]}]`.
+Las opciones salen en el orden del catálogo (id) e **incluyen los ocultos, marcados**: ocultar
+no es borrar, y si el ingeniero escoge uno lo hace a sabiendas (el selector lo dice). `oculto`
+se lee con `identidades_en_conflicto`, que ya lo trae. Nada más: `Insumo` lleva `precio` y el
 error viaja por la API, así que se copian campo por campo (misma regla que `_catalogo_de`).
+
+**Histórico de respaldo.** `hist` (precio histórico heredado del APU de origen o del propio)
+pasa a indexarse por `(codigo, normalizar(nombre))` en vez de solo por código. El selector
+permite cambiar de fila dentro del mismo código, y heredar el histórico de la otra fila sería
+un respaldo con el precio de otro insumo. Sin coincidencia cae a `PISO_HIST`, como hoy.
+`previos` (marcas de sub-APU) sigue por código: es de los componentes `tipo == "apu"`.
 
 Los componentes `tipo == "apu"` (sub-APU) no cambian: se resuelven contra la biblioteca, no
 contra el catálogo de insumos.
@@ -67,14 +81,23 @@ que ya atrapan `ValueError` no se rompan) con el atributo `conflictos`. Las ruta
 atrapan **antes** y responden **422** con `detail = {"mensaje": str, "conflictos": [...]}`. El
 mensaje dice qué hacer: «El código 7406 es de 2 insumos distintos: escoge cuál va en la fila».
 
-`aprobar` de composición la deja subir como `ComposicionInvalida` (422), con los mismos
-`conflictos`, aunque en la práctica no debería llegar: el validador la frena antes (§2).
+En `aprobar` de composición no se envuelve: `_composicion_o_error` (`rutas.py`) hoy hace
+`detail=str(e)` para `ComposicionInvalida` y `ValueError`, y perdería los `conflictos`. Se le
+agrega una rama `CodigoCompartido` **antes**, con el mismo `detail` dict. En la práctica no
+debería llegar: el validador la frena antes (§2). El cliente web ya tolera un `detail` dict
+(`mensajeDeError` lee `detail.mensaje`, `ErrorApi` conserva el `detail`).
 
 ### 2. Composición
 
 **Contrato.** `ComponentePropuesto` gana `nombre: str = ""` (en `to_dict` y en el parseo
-tolerante, recortado con el mismo tope que las demás cadenas). Las versiones viejas del
-expediente, sin `nombre`, siguen cargando: el expediente es append-only y no se migra.
+tolerante) con **tope propio `_MAX_NOMBRE = 1000`**, no `_MAX_TEXTO = 500`: hay nombres reales
+de 830 caracteres, y uno recortado nunca da EXACTO (el comentario de `composicion.py` ya avisa
+esta trampa; se actualiza). El `PUT` de la mesa también: `ComponenteComposicionIn`
+(`servicio/esquemas.py`) gana `nombre: str = ""` y el tipo TS del componente lo mismo — sin
+eso Pydantic bota el campo y el selector nunca se guarda. Las versiones viejas del expediente,
+sin `nombre`, siguen cargando: el expediente es append-only y no se migra. Una vigente vieja
+con un código compartido no queda trabada: la ficha muestra el selector y el validador da
+`CODIGO_COMPARTIDO`, así que Aprobar queda deshabilitado hasta escoger (ver §3).
 
 **Generación.** El esquema JSON de "Componer" (`ai_assist`) agrega `nombre` como `required`
 (el nombre exacto del insumo tal como lo devolvió el catálogo), y el prompt lo pide. Se sube
@@ -82,10 +105,19 @@ expediente, sin `nombre`, siguen cargando: el expediente es append-only y no se 
 
 **Validador** (`validacion_composicion`). Error nuevo `CODIGO_COMPARTIDO` para un componente
 `tipo == "insumo"` cuyo código tiene 2+ filas en el catálogo y cuyo `nombre` no resuelve con
-`cruce.resolver`. Pasa la prueba de CLAUDE.md: el ingeniero lo destraba escogiendo en la mesa.
+`cruce.elegir`. Pasa la prueba de CLAUDE.md: el ingeniero lo destraba escogiendo en la mesa.
 El contexto del validador necesita los nombres por código: se agrega
-`candidatos_compartidos: dict[codigo, tuple[nombre, ...]]` (solo los códigos con 2+ filas, sin
-dinero), armado en lote con `get_candidatos_bulk`, igual que `unidades_catalogo`.
+`candidatos_compartidos: dict[codigo, tuple[(nombre, unidad), ...]]` (solo los códigos con 2+
+filas, sin dinero), armado en lote con `get_candidatos_bulk` en los **dos** lugares donde hoy
+se arma `unidades_catalogo`: `composicion_agente.py` (contexto inicial) y
+`servicio/composicion.py::_con_lista_blanca` (códigos agregados por una persona; sin esto un
+código del buscador no se valida). La unidad de un código compartido sale de la fila que
+resuelve el nombre, no de `cands[0]`: si no, `UNIDAD_INCOHERENTE` compararía contra la otra
+fila.
+
+**Candidatos para el modelo** (`dominio/compose.py`). Hoy se deduplican por código, así que el
+modelo ve un solo nombre por código compartido (el del antecedente, que es el correcto para
+ese caso). Se deja así: con `nombre` en el esquema, el modelo devuelve el nombre que vio.
 
 **Aprobar.** `_componentes_para_autoria` pasa `insumo_nombre = c.get("nombre", "")`.
 
@@ -97,8 +129,12 @@ propuesta no lleva el mismo código dos veces (la mesa y `cambiosAgente.ts` ya l
 
 **Chat.** Se borra `composicion_chat._motivo_compartido` y su descarte. El `nombre` que manda
 el agente se copia al componente propuesto y lo juzga el validador como cualquier otro: si
-resuelve, entra; si no, entra a la mesa con `CODIGO_COMPARTIDO` y el ingeniero escoge. Se quita
-del prompt la regla del código compartido y se sube `PROMPT_VERSION_CHAT` a `"chat/v5"`.
+resuelve, entra; si no, entra a la mesa con `CODIGO_COMPARTIDO` y el ingeniero escoge. Los
+puntos del chat que hoy toman `cands[0]` (`_catalogo` y la tarjeta de la propuesta) resuelven
+con el `nombre` del componente, y lo que se muestra o se le reenvía al agente es **siempre el
+nombre del catálogo**, nunca el que mandó el cliente (es texto libre: podría traer un monto).
+Se quita del prompt la regla del código compartido y se sube `PROMPT_VERSION_CHAT` a
+`"chat/v5"`.
 
 ### 3. Interfaz
 
@@ -126,9 +162,10 @@ El selector es un solo componente reusado en los dos lugares.
 
 ## Fuera de alcance
 
-- `previos` y `hist` de `_componentes_de` (marcas de sub-APU y precio histórico) siguen
-  indexados solo por código. Fallaría solo con un APU que use **las dos** filas del mismo
-  código a la vez; no existe en producción.
+- Un APU que use **las dos** filas del mismo código a la vez: la mesa y `cambiosAgente.ts`
+  indexan por código y no lo permiten; no existe en producción.
+- Otros caminos de escritura: revisados y limpios. El importador de APUs y el seed guardan el
+  nombre del Excel (sin `cands[0]`); subapus, transporte y ajustes no reescriben la identidad.
 - Renumerar los ítems de obra del IDU: son códigos oficiales.
 - Reparar datos: no hay nada dañado.
 
@@ -142,6 +179,12 @@ Rojo primero:
   `detail.conflictos`.
 - Dos códigos ambiguos en el mismo APU → un solo error con los dos.
 - Un código de un solo insumo sigue igual aunque el nombre no coincida.
+- Los 4 casos aproximados de producción (5225/5241 D y N, TARIFA DIA/MES) resuelven a la
+  fila correcta y quedan guardados con el nombre canónico.
+- `hist`: cambiar de fila dentro del mismo código no hereda el histórico de la otra.
+- `PUT` de la mesa conserva `nombre`; un nombre de 830 caracteres no se recorta.
+- `aprobar` con conflicto responde 422 con `detail.conflictos` (no un string).
+- `cruce.resolver` sin cambio de comportamiento tras extraer `elegir`.
 
 Además: `CODIGO_COMPARTIDO` en el validador (y que no salga si el nombre resuelve); aprobar una
 composición con `nombre` guarda la fila correcta; parseo de una versión vieja sin `nombre`;

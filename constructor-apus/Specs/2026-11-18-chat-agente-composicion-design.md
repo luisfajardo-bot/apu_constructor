@@ -67,6 +67,9 @@ palabras de un número. Deja pasar las cantidades físicas ("8 horas", "0,125 HH
 *preferimos fallar a filtrar*. Vive en `dominio/privacy.py`, que es la frontera, y no
 tiene espejo en el frontend: la autoridad es el servidor.
 
+**Riesgo residual explícito:** un número suelto sin palabra de dinero cerca
+("45000 el jornal") pasa, por diseño, porque "8 horas" y "3000 psi" tienen que pasar.
+
 ### Orquestador: `dominio/composicion_chat.py`
 
 Hermano de `composicion_agente.py`. Un generador de eventos, como `componer`.
@@ -128,7 +131,7 @@ body: `instruccion` → se guarda como
 reporte de correcciones y el cliente no las dicta.
 
 Sin columnas nuevas. La versión queda `editada`, y `prompt_version="chat/v1"` la
-distingue de una edición a mano para el futuro reporte de correcciones. Sin esos
+distingue de una edición a mano para el futuro reporte de correcciones. Sin ese
 campo, el `PUT` se comporta **exactamente** igual que hoy.
 
 El texto de `instruccion` ya pasó por el detector de dinero, porque es el mismo

@@ -153,14 +153,26 @@ def safe_json(payload: Any) -> str:
 # Falsos positivos ACEPTADOS: "pon el valor en 0,5", "el rendimiento sale en 0,5". El
 # motivo le dice a la persona cómo decirlo para que no salte.
 _SENAL_MONEDA = re.compile(
-    r"\$|€|\b(cop|usd|eur|euros?|pesos|d[oó]lares?|lucas)\b", re.IGNORECASE)
+    # Sin \b: "COP1200" y "1200COP" tienen la moneda pegada al número (los dígitos son
+    # \w). El lookaround solo exige que no haya una LETRA al lado, así "copiar" pasa.
+    r"\$|€|(?<![^\W\d_])(cop|usd|eur|euros?|pesos|d[oó]lares?|lucas)(?![^\W\d_])",
+    re.IGNORECASE)
 # Un número con separador de miles con punto ("45.000", "1.250.000") es dinero en este
-# dominio: los rendimientos llevan coma decimal ("0,125") y las especificaciones van
-# sin separador ("3000 psi"). Empieza en 1-9 para que "0.125" (decimal con punto) pase.
+# dominio: los rendimientos llevan coma decimal ("0,125"). La premisa de que las
+# especificaciones van sin separador NO siempre se cumple: el catálogo real trae
+# "PESO 60.000 KG". Ese falso positivo se acepta (preferimos fallar a filtrar) y el
+# motivo le explica a la persona cómo escribirlo ("3000 psi"). Empieza en 1-9 para que
+# "0.125" (decimal con punto) pase.
 _MILES = re.compile(r"\b[1-9]\d{0,2}(?:\.\d{3})+\b")
+# Miles con coma: solo con dos o más grupos ("1,250,000"). Con uno ("45,000") es
+# ambiguo con el decimal ("0,125"), y ahí gana el decimal.
+_MILES_COMA = re.compile(r"\b[1-9]\d{0,2}(?:,\d{3}){2,}\b")
+# Los verbos de plata se listan conjugados y no como `cost\w*`: eso rompería "costal" y
+# "costado". "costo" ya lo cubre `costos?`; que se repita en `cost(?:o…)` no estorba.
 _RAIZ_DINERO = re.compile(
-    r"(precios?|costos?|costar|cuesta|cuestan|valor(es)?|tarifas?|cotiz\w*|"
-    r"presupuest\w*|mill[oó]n|millones|mil|k|plata|cobra\w*|pag\w+|compr\w+|"
+    r"(precios?|costos?|costar|cuesta|cuestan|cost(?:ó|o|aba|aban|ará|arán|aría|arían)|"
+    r"val[ií]a|gast\w+|valor(es)?|tarifas?|cotiz\w*|"
+    r"presupuest\w*|mill[oó]n|millones|mil|k|plata|cobra\w*|pag\w+|compr(?!es)\w+|"
     r"factur\w+|sale|sali[oó]|salen)", re.IGNORECASE)
 # Palabras y números por separado: "precio:45000" y "45k" quedan como dos tokens. Con
 # `split()` la palabra quedaba pegada al número y la raíz no casaba.
@@ -172,7 +184,8 @@ def _motivo_dinero(fragmento: str) -> str:
     frag = fragmento.strip()[:60]
     return (f"El mensaje parece traer un monto («{frag}»). La IA no puede ver "
             "precios: quítalo y vuelve a enviarlo. Si es una cantidad física, "
-            "nómbrala así: «rendimiento 0,5», «8 horas».")
+            "nómbrala así: «rendimiento 0,5», «8 horas». "
+            "Para especificaciones, sin punto de miles: «3000 psi».")
 
 
 def _alrededor(t: str, m: re.Match) -> str:
@@ -189,7 +202,7 @@ def texto_con_dinero(texto: str) -> Optional[str]:
     "0,125 HH/m3"): sin palabra de dinero cerca, un número es un rendimiento.
     """
     t = texto or ""
-    for patron in (_SENAL_MONEDA, _MILES):
+    for patron in (_SENAL_MONEDA, _MILES, _MILES_COMA):
         m = patron.search(t)
         if m:
             return _motivo_dinero(_alrededor(t, m))

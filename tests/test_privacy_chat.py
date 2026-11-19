@@ -37,6 +37,16 @@ from apu_tool.nucleo.models import Insumo, LicitacionItem
     "sale en 45 mil",
     "45k por hora",
     "€45",
+    # revisión 2: verbos conjugados, moneda pegada, miles con coma
+    "nos costó 45000",
+    "costaba 45000",
+    "valía 45000",
+    "gastamos 45000",
+    "compramos a 45000",
+    "COP1200",
+    "USD45",
+    "1200COP",
+    "1,250,000",
 ])
 def test_bloquea_un_monto(texto):
     motivo = texto_con_dinero(texto)
@@ -59,6 +69,13 @@ def test_bloquea_un_monto(texto):
     "rendimiento 0.125",
     "Propuse: + 7001 OFICIAL SOLDADOR HR 0,1 (aplicado)",
     "",
+    "costal de 50 kg",
+    "el costado de 2 m",
+    "copiar 3 componentes",
+    "agrega un compresor de 185 cfm",
+    "resistencia a la compresión de 21 MPa",
+    "45,000",
+    "0,125",
 ])
 def test_deja_pasar_cantidades_fisicas(texto):
     assert texto_con_dinero(texto) is None
@@ -68,6 +85,13 @@ def test_el_motivo_dice_como_escribir_una_cantidad_fisica():
     """«pon el valor en 0,5» se bloquea (falso positivo aceptado): el motivo le dice
     a la persona cómo decirlo sin que salte."""
     assert "rendimiento 0,5" in texto_con_dinero("pon el valor en 0,5")
+
+
+def test_el_motivo_dice_como_escribir_una_especificacion():
+    """«concreto de 3.000 psi» se bloquea (los miles con punto son dinero); el motivo
+    explica cómo escribirla."""
+    motivo = texto_con_dinero("concreto de 3.000 psi")
+    assert motivo is not None and "3000 psi" in motivo
 
 
 def test_el_motivo_cita_el_fragmento_para_que_la_persona_lo_encuentre():

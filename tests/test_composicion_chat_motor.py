@@ -232,3 +232,42 @@ def test_la_privacy_violation_sube(alm, monkeypatch):
     monkeypatch.setattr(privacy, "payload_chat", lambda *a, **k: {"precio": 1})
     with pytest.raises(privacy.PrivacyViolation):
         correr(alm, AdvisorGuion([resp_final()]), charla("x"))
+
+
+def test_la_privacy_violation_dentro_del_bucle_sube(alm, monkeypatch):
+    """Parchear `payload_chat` (arriba) corre ANTES del `try`: no protege el
+    `except PrivacyViolation: raise` del bucle. Este sí: la herramienta devuelve un
+    campo monetario y `safe_json` tiene que reventar, no convertirse en `error`."""
+    monkeypatch.setattr(privacy, "insumo_encontrado_to_dict",
+                        lambda *a, **k: {"precio": 1})
+    a = AdvisorGuion([resp_herramienta(("buscar_insumos", "soldador")), resp_final()])
+    with pytest.raises(privacy.PrivacyViolation):
+        correr(alm, a, charla("busca un soldador"))
+
+
+def test_el_nombre_de_un_alta_es_el_del_insumo_visible_no_el_del_oculto(alm):
+    """Dos insumos con el mismo código: el de id menor está oculto. El catálogo de la
+    respuesta tiene que traer el nombre del VISIBLE."""
+    alm.precios.insert_insumos([
+        Insumo("8000", "NOMBRE VIEJO OCULTO", "UN", "EQ", 10, "COSTO INTERNO"),
+        Insumo("8000", "NOMBRE VISIBLE", "UN", "EQ", 10, "COSTO INTERNO"),
+    ])
+    alm.precios.set_oculto(alm.precios.search_insumos("NOMBRE VIEJO OCULTO")[0].id, True)
+    a = AdvisorGuion([resp_final("Ahí va.", [
+        {"op": "agregar", "codigo": "8000", "componente": componente("8000")}])])
+    resp = correr(alm, a, charla("agrega el 8000"))[-1][1]
+    assert [c["codigo"] for c in resp["cambios"]] == ["8000"]
+    assert resp["catalogo"]["8000"]["nombre"] == "NOMBRE VISIBLE"
+
+
+def test_las_altas_repetidas_consultan_la_visibilidad_una_vez_por_codigo(alm, monkeypatch):
+    llamadas = []
+    original = alm.precios.identidades_en_conflicto
+    monkeypatch.setattr(alm.precios, "identidades_en_conflicto",
+                        lambda c, n: llamadas.append(c) or original(c, n))
+    a = AdvisorGuion([resp_final("Ok.", [
+        {"op": "agregar", "codigo": "6092", "componente": componente("6092")},
+        {"op": "agregar", "codigo": "6092", "componente": componente("6092", 2.0)},
+    ])])
+    correr(alm, a, charla("agrega"))
+    assert llamadas == ["6092"]

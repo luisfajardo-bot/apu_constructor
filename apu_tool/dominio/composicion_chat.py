@@ -65,6 +65,10 @@ class Herramientas:
         if self._matcher is None:
             self._matcher = Matcher(self.alm.apus.apu_index())
         apus = []
+        # ponytail: sin APUs del turno pedido el `Matcher` cae a todos los turnos, pero
+        # `MatchCandidate` no trae el turno del candidato y acá se pide el turno original:
+        # el APU de otro turno no se devuelve. Techo aceptado (la biblioteca real tiene
+        # ambos turnos); si molesta, `candidates` tendría que devolver el turno.
         for c in self._matcher.candidates(texto, self.shift,
                                           top_n=MAX_RESULTADOS_APUS):
             dp = self.alm.apus.get_depriced_apu(c.apu_codigo, self.shift)
@@ -142,14 +146,21 @@ def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
     crudos = [c for c in (data.get("cambios") or []) if isinstance(c, dict)]
     codigos = [str(c.get("codigo", "") or "").strip()[:40] for c in crudos]
     catalogo = _catalogo(almacen, codigos)
-    # `get_candidatos_bulk` no filtra ocultos: la visibilidad se mira por código, solo
-    # para las altas. NO `todos_no_ocultos()`: trae el catálogo entero (7167 filas)
-    # por respuesta, y el egress de Supabase ya fue un problema. Se pasa nombre ""
-    # y se filtran las filas de ESE código (la consulta es "código O nombre").
-    visibles = {cod for c, cod in zip(crudos, codigos)
-                if c.get("op") == "agregar" and cod and any(
-                    k == cod and not oculto for k, _n, oculto in
-                    almacen.precios.identidades_en_conflicto(cod, ""))}
+    # `get_candidatos_bulk` no filtra ocultos (y `cands[0]` puede ser un homónimo
+    # oculto): para las altas, la visibilidad y el NOMBRE salen de la fila visible de
+    # ese código. NO `todos_no_ocultos()`: trae el catálogo entero (7167 filas) por
+    # respuesta, y el egress de Supabase ya fue un problema. Se pasa nombre "" y se
+    # filtran las filas de ESE código (la consulta es "código O nombre"). Una consulta
+    # por código distinto, no por cambio.
+    visibles = set()
+    for cod in {cod for c, cod in zip(crudos, codigos)
+                if c.get("op") == "agregar" and cod}:
+        for k, nombre, oculto in almacen.precios.identidades_en_conflicto(cod, ""):
+            if k == cod and not oculto:
+                visibles.add(cod)
+                if cod in catalogo:
+                    catalogo[cod]["nombre"] = nombre
+                break
     cambios, descartados = [], []
     for c, cod in zip(crudos, codigos):
         op = c.get("op")

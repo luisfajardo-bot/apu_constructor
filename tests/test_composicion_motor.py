@@ -100,6 +100,26 @@ def test_aprobar_si_lo_lee(alm):
     assert ("A1", "DIURNO") in ctx.validacion.componentes_de_apu
 
 
+def test_recuperar_arma_los_candidatos_compartidos_y_el_validador_los_exige(alm):
+    """Camino de la GENERACIÓN: un código del retriever que es de dos insumos. Sin
+    `candidatos_compartidos` en el contexto, el validador no ve la duda y aprobar
+    guardaría una fila que nadie eligió."""
+    alm.precios.insert_insumos([Insumo("6092", "RELOCALIZACION DE MEDIDOR DE ACUEDUCTO",
+                                       "UN", "REDES", 9, "PRECIO IDU")])
+    ctx = recuperar(alm, ITEM)
+    assert "6092" in ctx.validacion.codigos_permitidos
+    assert [n for n, _u in ctx.validacion.candidatos_compartidos["6092"]] == [
+        "HERRAMIENTA MENOR", "RELOCALIZACION DE MEDIDOR DE ACUEDUCTO"]
+    assert "4279" not in ctx.validacion.candidatos_compartidos
+    herramienta = dict(codigo="6092", funcion="herramienta", rendimiento=1.0)
+    _, sin, _ = evaluar(Propuesta(componentes=(comp(), comp(**herramienta))),
+                        ctx.validacion)
+    assert "CODIGO_COMPARTIDO" in {h.codigo for h in sin.errores}
+    _, con, _ = evaluar(Propuesta(componentes=(
+        comp(), comp(nombre="HERRAMIENTA MENOR", **herramienta))), ctx.validacion)
+    assert "CODIGO_COMPARTIDO" not in {h.codigo for h in con.errores}
+
+
 # --- evaluar (el camino del PUT) -------------------------------------------
 def test_evaluar_no_llama_a_la_ia(alm):
     """Guardar una edición humana no vuelve a pagar una generación."""

@@ -352,3 +352,64 @@ def test_la_respuesta_consulta_el_catalogo_una_sola_vez(alm, monkeypatch):
         {"op": "agregar", "codigo": "6092", "componente": componente("6092", 2.0)},
     ]}, "m")
     assert llamadas == [["6092"]]
+
+
+def _dos_8001(alm):
+    alm.precios.insert_insumos([
+        Insumo("8001", "REDUCCION HD E.L. D=12 x 10", "UN", "ACCESORIOS", 1000,
+               "PRECIO IDU"),
+        Insumo("8001", "SEÑAL VERTICAL SR 90X30 INCLUYE POSTE", "UN", "SEÑALIZACION",
+               2000, "PRECIO IDU"),
+    ])
+
+
+SENAL = "SEÑAL VERTICAL SR 90X30 INCLUYE POSTE"
+
+
+def test_un_modificar_sin_nombre_conserva_la_fila_que_ya_escogio_la_mesa(alm):
+    """Defensa del servidor: el agente cambia el rendimiento y no repite el nombre; el
+    componente no puede volver a quedar sin nombre (y la persona a escoger de nuevo)."""
+    _dos_8001(alm)
+    mesa = [dict(componente("8001"), nombre=SENAL)]
+    a = AdvisorGuion([resp_final("Ajustado.", [
+        {"op": "modificar", "codigo": "8001", "componente": componente("8001", 3.0)}])])
+    resp = correr(alm, a, charla("sube el rendimiento"), tabla=mesa)[-1][1]
+    (c,) = resp["cambios"]
+    assert c["componente"]["nombre"] == SENAL and c["componente"]["rendimiento"] == 3.0
+
+
+def test_un_modificar_hereda_el_nombre_del_catalogo_no_el_texto_del_cliente(alm):
+    """El nombre de la mesa lo manda el cliente (texto libre): solo sirve para ESCOGER
+    la fila; lo que se guarda es el del catálogo."""
+    _dos_8001(alm)
+    mesa = [dict(componente("8001"), nombre="señal vertical sr 90x30 incluye poste")]
+    a = AdvisorGuion([resp_final("Ok.", [
+        {"op": "modificar", "codigo": "8001", "componente": componente("8001", 3.0)}])])
+    (c,) = correr(alm, a, charla("sube"), tabla=mesa)[-1][1]["cambios"]
+    assert c["componente"]["nombre"] == SENAL
+
+
+def test_un_modificar_con_mesa_sin_nombre_sigue_sin_nombre(alm):
+    _dos_8001(alm)
+    a = AdvisorGuion([resp_final("Ok.", [
+        {"op": "modificar", "codigo": "8001", "componente": componente("8001", 3.0)}])])
+    (c,) = correr(alm, a, charla("sube"), tabla=[componente("8001")])[-1][1]["cambios"]
+    assert c["componente"]["nombre"] == ""
+
+
+def test_el_contexto_del_agente_muestra_la_fila_que_nombra_el_componente(alm):
+    """`_catalogo` resuelve con el nombre del componente: sin eso, un código compartido
+    le llegaba al agente con el nombre de la primera fila."""
+    _dos_8001(alm)
+    a = AdvisorGuion([resp_final()])
+    correr(alm, a, charla("¿qué le falta?"), tabla=[dict(componente("8001"), nombre=SENAL)])
+    contexto = a.llamadas[0]["mensajes"][-1]["content"][0]["text"]
+    assert SENAL in contexto and "REDUCCION" not in contexto
+
+
+def test_catalogo_trae_la_ficha_de_la_fila_que_dice_el_nombre(alm):
+    from apu_tool.dominio import composicion_chat
+    _dos_8001(alm)
+    f = composicion_chat._catalogo(alm, [dict(componente("8001"), nombre=SENAL)])["8001"]
+    assert f["nombre"] == SENAL and f["unidad"] == "UN" and f["grupo"] == "SEÑALIZACION"
+    assert len(f["opciones"]) == 2 and "precio" not in str(f)

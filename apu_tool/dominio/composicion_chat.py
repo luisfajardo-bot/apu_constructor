@@ -148,7 +148,7 @@ def _mensajes_api(mensajes: list[dict], contexto: str) -> list[dict]:
     return api
 
 
-def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
+def _respuesta(almacen: Almacen, data, modelo: str, componentes=()) -> dict:
     """La respuesta final, con los cambios filtrados por la plataforma.
 
     Un `agregar` cuyo código no existe, o cuya fila está oculta, se DESCARTA antes de
@@ -159,7 +159,9 @@ def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
 
     Código compartido por dos insumos: lo decide el NOMBRE (`cruce.elegir_fila`), igual
     que en el alta. Si el nombre no alcanza el componente entra sin nombre y la mesa le
-    pide a la persona que escoja (`CODIGO_COMPARTIDO`); ya no se descarta.
+    pide a la persona que escoja (`CODIGO_COMPARTIDO`); ya no se descarta. Un `modificar`
+    cuyo nombre no resuelve hereda la fila que la mesa (`componentes`) ya tenía
+    escogida: cambiar un rendimiento no puede borrarle la elección a la persona.
     """
     data = data if isinstance(data, dict) else {}
     crudos = [c for c in (data.get("cambios") or []) if isinstance(c, dict)]
@@ -169,6 +171,10 @@ def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
     validos = sorted({c for c in codigos if c})
     bulk = almacen.precios.get_candidatos_bulk(validos) if validos else {}
     catalogo: dict[str, dict] = {}
+    # Nombre con el que la mesa tiene cada código. Solo sirve para ESCOGER la fila: lo
+    # que se guarda es el del catálogo.
+    en_mesa = {str(m.get("codigo", "")): str(m.get("nombre", "") or "")
+               for m in componentes if isinstance(m, dict)}
     cambios, descartados = [], []
     for c, cod in zip(crudos, codigos):
         op = c.get("op")
@@ -178,6 +184,8 @@ def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
         cands = bulk.get(cod) or []
         nombre = str(c.get("nombre", "") or "")
         fila = cruce.elegir_fila(cands, nombre)
+        if fila is None and op == "modificar":
+            fila = cruce.elegir_fila(cands, en_mesa.get(cod, ""))
         if op == "agregar":
             if not cands or all(x.oculto for x in cands):
                 descartados.append({"codigo": cod,
@@ -189,7 +197,7 @@ def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
                                               "catálogo."})
                 continue
         if cands:
-            catalogo[cod] = cruce.ficha(cands, nombre)
+            catalogo[cod] = cruce.ficha(cands, fila.nombre if fila else nombre)
         comp = None
         if op != "quitar":
             p = propuesta_desde_json({"componentes": [c.get("componente")]})
@@ -299,7 +307,7 @@ def conversar(almacen: Almacen, item, componentes: list, mensajes: list, advisor
             except ValueError:
                 yield ("error", {"detail": MSG_REINTENTAR})
                 return
-            yield ("respuesta", _respuesta(almacen, data, advisor.model))
+            yield ("respuesta", _respuesta(almacen, data, advisor.model, componentes))
             return
         yield ("error", {"detail": MSG_REINTENTAR})
     except privacy.PrivacyViolation:

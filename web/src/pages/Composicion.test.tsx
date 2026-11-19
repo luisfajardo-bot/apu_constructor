@@ -12,6 +12,7 @@ const guardarComposicion = vi.fn();
 const aprobarComposicion = vi.fn();
 const rechazarComposicion = vi.fn();
 const generarComposicionStream = vi.fn();
+const chatComposicionStream = vi.fn();
 
 vi.mock("@/api/composicion", () => ({
   getComposicion: (...a: unknown[]) => getComposicion(...a),
@@ -19,6 +20,7 @@ vi.mock("@/api/composicion", () => ({
   aprobarComposicion: (...a: unknown[]) => aprobarComposicion(...a),
   rechazarComposicion: (...a: unknown[]) => rechazarComposicion(...a),
   generarComposicionStream: (...a: unknown[]) => generarComposicionStream(...a),
+  chatComposicionStream: (...a: unknown[]) => chatComposicionStream(...a),
 }));
 // La mesa importa el buscador de insumos desde el alta de APUs, que arrastra
 // @/api/autoria y @/api/insumos -> @/lib/supabase (se cae sin envs reales).
@@ -135,6 +137,7 @@ beforeEach(() => {
   aprobarComposicion.mockReset();
   rechazarComposicion.mockReset();
   generarComposicionStream.mockReset();
+  chatComposicionStream.mockReset();
   getComposicion.mockResolvedValue(vista(version()));
   guardarComposicion.mockResolvedValue(vista(version()));
   aprobarComposicion.mockResolvedValue(vista(version()));
@@ -542,4 +545,50 @@ test("sin costo a mano no aparece ese aviso", async () => {
   montar();
   await screen.findByText("EXCAVACION MANUAL EN MATERIAL COMUN");
   expect(screen.queryByText(/contractual como\s+referencia/)).toBeNull();
+});
+
+type OnEvento = (e: { event: string; data: unknown }) => void;
+
+function respuestaCon(cambio: unknown, texto = "Listo.") {
+  return async (_i: number, _s: number, _c: unknown, onEvent: OnEvento) => {
+    onEvent({ event: "respuesta", data: {
+      texto, cambios: [cambio], descartados: [], catalogo: {}, modelo: "m",
+      prompt_version: "chat/v1" } });
+  };
+}
+
+test("aplicar desde el agente guarda la tabla con el cambio y la instrucción", async () => {
+  getComposicion.mockResolvedValue({ ...vista(version()), ia_disponible: true });
+  guardarComposicion.mockResolvedValue({ ...vista(version()), ia_disponible: true });
+  const nuevo = { ...COMPONENTE, codigo: "8801", rendimiento: 0.5 };
+  chatComposicionStream.mockImplementation(
+    respuestaCon({ op: "agregar", codigo: "8801", componente: nuevo }));
+  montar();
+  const caja = await screen.findByRole("textbox", { name: /mensaje para el agente/i });
+  fireEvent.change(caja, { target: { value: "agrega un oficial" } });
+  fireEvent.click(boton(/enviar/i));
+  fireEvent.click(await screen.findByRole("button", { name: /^aplicar$/i }));
+  await waitFor(() => expect(guardarComposicion).toHaveBeenCalledWith(
+    1, 3, 2, [COMPONENTE, nuevo], false, "agrega un oficial"));
+});
+
+test("sin IA en el servidor el panel queda apagado con el motivo", async () => {
+  getComposicion.mockResolvedValue({ ...vista(version()), ia_disponible: false });
+  montar();
+  expect(await screen.findByText(/ANTHROPIC_API_KEY/)).toBeTruthy();
+});
+
+test("mesa vacía: aplicar arranca en la versión 0", async () => {
+  getComposicion.mockResolvedValue({ ...vista(null, {}), ia_disponible: true });
+  guardarComposicion.mockResolvedValue({ ...vista(version()), ia_disponible: true });
+  const nuevo = { ...COMPONENTE, codigo: "8801" };
+  chatComposicionStream.mockImplementation(
+    respuestaCon({ op: "agregar", codigo: "8801", componente: nuevo }));
+  montar();
+  const caja = await screen.findByRole("textbox", { name: /mensaje para el agente/i });
+  fireEvent.change(caja, { target: { value: "arma una cuadrilla" } });
+  fireEvent.click(boton(/enviar/i));
+  fireEvent.click(await screen.findByRole("button", { name: /^aplicar$/i }));
+  await waitFor(() => expect(guardarComposicion).toHaveBeenCalledWith(
+    1, 3, 0, [nuevo], false, "arma una cuadrilla"));
 });

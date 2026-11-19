@@ -27,8 +27,12 @@
 Estas tres se descubrieron leyendo el código; la Tarea 1 actualiza la spec para que no se contradigan:
 
 1. **`buscar_insumos(texto)` sin `grupo`.** Los grupos del catálogo real son texto libre ("SUELDOS Y JORNALES", "REDES ACUEDUCTO"…); un filtro `grupo="mano de obra"` no casaría con nada y quemaría una de las 4 búsquedas. El grupo viaja en cada resultado.
-2. **El detector revisa TODOS los mensajes del historial, también los del agente.** El historial lo manda el cliente; un mensaje "del agente" es tan poco confiable como uno del usuario.
+2. **El detector revisa TODOS los mensajes del historial, pero solo los del usuario bloquean.** El historial lo manda el cliente, así que un mensaje "del agente" no es confiable; pero bloquear por él envenena el chat (una respuesta legítima como "cambié el valor a 0,62" dispararía el detector en cada turno siguiente y la persona no tiene cómo sacarla). Un mensaje `agente` que dispare el detector se REEMPLAZA por `"[mensaje omitido: traía cifras que la IA no puede ver]"` antes de viajar. El invariante se mantiene: ese texto no llega a la IA.
 3. **El `PUT` recibe solo `instruccion`.** `modelo` y `prompt_version` los pone el servidor (`config.AI_MODEL` y `PROMPT_VERSION_CHAT`): son etiquetas para el reporte de correcciones y no tiene sentido dejarlas en manos del cliente.
+4. **`buscar_insumos` usa `precios.list_insumos(texto, limit=15)`**, la misma búsqueda del `BuscadorInsumo` de la mesa (AND de palabras, filtra ocultos, rankea por relevancia, 2 consultas). `search_insumos_por_palabras` hace OR con `LIMIT 60` sin orden: medido sobre el catálogo real, "tuberia pvc" casa 1451 insumos y se rankeaban 60 arbitrarios; además es N+1.
+5. **La visibilidad de un alta se mira por código** con `precios.identidades_en_conflicto(cod, "")` (filtrando las filas de ese código), no con `todos_no_ocultos()`, que trae el catálogo entero (7167 filas) por respuesta: el egress de Supabase ya fue un problema.
+
+(Revisión del plan con Fable, 2026-11-19: se aplicó el plan completo sobre una copia del repo — 1744 tests backend y 523 vitest en verde, `old_string`s verificados. Los cambios de arriba y los de las tareas 2, 3, 5, 6, 12 y 14 salen de esa revisión.)
 
 ## Mapa de archivos
 
@@ -70,7 +74,8 @@ Hacer estos cuatro reemplazos:
 ```
 | `buscar_insumos(texto)` | hasta 15: código, nombre, unidad, grupo y rendimientos observados (`rendimientos_observados`). Sin ocultos. Sin filtro por grupo: los grupos del catálogo son texto libre ("SUELDOS Y JORNALES") y un filtro mal adivinado quemaría una búsqueda. |
 ```
-2. En "Antes de llamar a la IA", punto 1, reemplazar "revisa **todos** los mensajes del usuario del historial, no solo el último: el historial lo manda el cliente y el cliente puede mentir." por "revisa **todos** los mensajes del historial —también los del agente— y no solo el último: el historial lo manda el cliente y el cliente puede mentir."
+2. En "Antes de llamar a la IA", punto 1, reemplazar "revisa **todos** los mensajes del usuario del historial, no solo el último: el historial lo manda el cliente y el cliente puede mentir." por "revisa **todos** los mensajes del historial, no solo el último: el historial lo manda el cliente y el cliente puede mentir. Un mensaje del usuario con dinero bloquea; uno «del agente» con dinero se reemplaza por `[mensaje omitido]` antes de viajar (bloquear por él envenenaría el chat: la persona no puede sacarlo del hilo)."
+   Y en la tabla de eventos SSE, la fila de `respuesta`: `{texto, cambios, descartados, catalogo, modelo, prompt_version}` (`catalogo` = nombre/unidad/grupo de los códigos de los cambios, para pintar el diff).
 3. En "Aplicar: el `PUT` de siempre", reemplazar el párrafo que empieza "Tres campos opcionales" y sus dos viñetas por:
 ```
 Un campo opcional nuevo en el body: `instruccion` → se guarda como
@@ -78,7 +83,8 @@ Un campo opcional nuevo en el body: `instruccion` → se guarda como
 (`"chat/v1"`) los pone el **servidor** cuando hay instrucción: son etiquetas del
 reporte de correcciones y el cliente no las dicta.
 ```
-4. En "Pruebas → Backend", la viñeta del detector: después de `"COP 1200")` agregar `, un monto escondido en un mensaje "del agente"`.
+4. En "Pruebas → Backend", la viñeta del detector: después de `"COP 1200")` agregar `, montos pegados ("precio:45000", "45k", "pagamos 90.000 el jornal"); un mensaje "del agente" con cifras se omite, no bloquea`.
+5. En "Por verificar al empezar el plan", reemplazar la viñeta de la primitiva de búsqueda por: "Resuelto: `buscar_insumos` usa `precios.list_insumos(texto, limit=15)` (AND de palabras, sin ocultos, rankeado, 2 consultas)."
 
 - [ ] **Step 2: Commit**
 
@@ -131,6 +137,16 @@ from apu_tool.nucleo.models import Insumo, LicitacionItem
     "45 USD",
     "son 200 pesos",
     "valor 80.000",
+    # pegados al número o con verbos de plata (revisión del plan, ejecutados)
+    "precio:45000",
+    "costo=45000",
+    "precio/und 45000",
+    "el cemento nos salió en 45.000",
+    "el m3 sale a 320.000",
+    "pagamos 90.000 el jornal",
+    "sale en 45 mil",
+    "45k por hora",
+    "€45",
 ])
 def test_bloquea_un_monto(texto):
     motivo = texto_con_dinero(texto)
@@ -148,10 +164,20 @@ def test_bloquea_un_monto(texto):
     "el valor del rendimiento no me cuadra",
     "cuadrilla de 1 oficial y 2 ayudantes",
     "peso específico 2,4 t/m3",
+    "pon el rendimiento en 0,5",
+    "concreto de 3000 psi",
+    "rendimiento 0.125",
+    "Propuse: + 7001 OFICIAL SOLDADOR HR 0,1 (aplicado)",
     "",
 ])
 def test_deja_pasar_cantidades_fisicas(texto):
     assert texto_con_dinero(texto) is None
+
+
+def test_el_motivo_dice_como_escribir_una_cantidad_fisica():
+    """«pon el valor en 0,5» se bloquea (falso positivo aceptado): el motivo le dice
+    a la persona cómo decirlo sin que salte."""
+    assert "rendimiento 0,5" in texto_con_dinero("pon el valor en 0,5")
 
 
 def test_el_motivo_cita_el_fragmento_para_que_la_persona_lo_encuentre():
@@ -179,34 +205,50 @@ En `apu_tool/dominio/privacy.py`: agregar `import math` e `import re` a los impo
 #   - "vale": en Colombia es "de acuerdo" ("vale, agrega 2 ayudantes"); "vale 3
 #     millones" igual cae por "millones".
 #   - "peso" en singular: es también peso físico ("peso específico 2,4 t/m3").
-_SENAL_MONEDA = re.compile(r"\$|\b(cop|usd|pesos|d[oó]lares?)\b", re.IGNORECASE)
+# Falsos positivos ACEPTADOS: "pon el valor en 0,5", "el rendimiento sale en 0,5". El
+# motivo le dice a la persona cómo decirlo para que no salte.
+_SENAL_MONEDA = re.compile(
+    r"\$|€|\b(cop|usd|eur|euros?|pesos|d[oó]lares?|lucas)\b", re.IGNORECASE)
+# Un número con separador de miles con punto ("45.000", "1.250.000") es dinero en este
+# dominio: los rendimientos llevan coma decimal ("0,125") y las especificaciones van
+# sin separador ("3000 psi"). Empieza en 1-9 para que "0.125" (decimal con punto) pase.
+_MILES = re.compile(r"\b[1-9]\d{0,2}(?:\.\d{3})+\b")
 _RAIZ_DINERO = re.compile(
     r"(precios?|costos?|costar|cuesta|cuestan|valor(es)?|tarifas?|cotiz\w*|"
-    r"presupuest\w*|mill[oó]n|millones|plata|cobra\w*)", re.IGNORECASE)
-_VENTANA_DINERO = 3        # palabras a cada lado de la raíz donde se busca un número
+    r"presupuest\w*|mill[oó]n|millones|mil|k|plata|cobra\w*|pag\w+|compr\w+|"
+    r"factur\w+|sale|sali[oó]|salen)", re.IGNORECASE)
+# Palabras y números por separado: "precio:45000" y "45k" quedan como dos tokens. Con
+# `split()` la palabra quedaba pegada al número y la raíz no casaba.
+_TOKEN = re.compile(r"[^\W\d_]+|\d[\d.,]*")
+_VENTANA_DINERO = 3        # tokens a cada lado de la raíz donde se busca un número
 
 
 def _motivo_dinero(fragmento: str) -> str:
     frag = fragmento.strip()[:60]
     return (f"El mensaje parece traer un monto («{frag}»). La IA no puede ver "
-            "precios: quítalo y vuelve a enviarlo.")
+            "precios: quítalo y vuelve a enviarlo. Si es una cantidad física, "
+            "nómbrala así: «rendimiento 0,5», «8 horas».")
+
+
+def _alrededor(t: str, m: re.Match) -> str:
+    return t[max(0, m.start() - 20):m.end() + 20]
 
 
 def texto_con_dinero(texto: str) -> Optional[str]:
     """El motivo para bloquear `texto` si parece traer dinero, o None si no.
 
-    Bloquea si hay un símbolo o una moneda (`$`, COP, USD, pesos, dólares) en
-    cualquier parte, o una palabra de dinero (precio, costo, valor, tarifa, cotiz-,
-    millones…) con un número a menos de `_VENTANA_DINERO` palabras. Deja pasar las
-    cantidades físicas ("8 horas", "0,125 HH/m3"): sin palabra de dinero cerca, un
-    número es un rendimiento.
+    Bloquea si hay un símbolo o una moneda (`$`, `€`, COP, USD, pesos…), un número con
+    separador de miles con punto ("45.000"), o una palabra de dinero (precio, costo,
+    valor, tarifa, cotiz-, pag-, sale, mil, k…) con un número a menos de
+    `_VENTANA_DINERO` tokens. Deja pasar las cantidades físicas ("8 horas",
+    "0,125 HH/m3"): sin palabra de dinero cerca, un número es un rendimiento.
     """
     t = texto or ""
-    m = _SENAL_MONEDA.search(t)
-    if m:
-        ini = max(0, m.start() - 20)
-        return _motivo_dinero(t[ini:m.end() + 20])
-    tokens = [re.sub(r"^\W+|\W+$", "", p) for p in t.split()]
+    for patron in (_SENAL_MONEDA, _MILES):
+        m = patron.search(t)
+        if m:
+            return _motivo_dinero(_alrededor(t, m))
+    tokens = _TOKEN.findall(t)
     for i, tok in enumerate(tokens):
         if not _RAIZ_DINERO.fullmatch(tok):
             continue
@@ -269,6 +311,15 @@ def test_un_rendimiento_ilegible_viaja_como_null():
     assert p["composicion_actual"][0]["rendimiento"] is None
 
 
+def test_los_campos_libres_del_cliente_no_cuelan_texto():
+    """`funcion` y `origen` solo viajan si son del vocabulario; un `codigo` con
+    pinta de monto viaja vacío. Lo explota solo un cliente hostil, pero es gratis."""
+    raro = dict(COMP, funcion="cuesta $45.000", origen="cotizado a 45000",
+                codigo="$45.000")
+    c = privacy.payload_chat(ITEM, [raro], CATALOGO)["composicion_actual"][0]
+    assert (c["funcion"], c["origen"], c["codigo"]) == ("", "", "")
+
+
 def test_insumo_encontrado_copia_campo_por_campo_sin_precio():
     ins = Insumo("4279", "CUADRILLA", "HR", "SUELDOS Y JORNALES", 40000, "COSTO INTERNO")
     obs = RendimientoObservado("4279", "HR", 14, 0.4, 0.62, 1.1)
@@ -306,14 +357,23 @@ def componente_mesa_to_dict(c: dict, catalogo: dict) -> dict[str, Any]:
     `hipotesis` NO viajan: son texto libre que una persona pudo editar, y un monto
     adentro pasaría por `assert_no_money` sin que nada salte. Nombre y unidad salen del
     catálogo (`catalogo`, ya filtrado a nombre/unidad/grupo), no del cliente.
+    `funcion` y `origen` solo viajan si son del vocabulario cerrado del contrato, y un
+    `codigo` que dispare el detector de dinero viaja vacío.
     """
+    # Import local, como hace `composicion._hipotesis_desde` en la otra dirección: el
+    # contrato no depende de nada a nivel de módulo y así no hay ciclo posible.
+    from apu_tool.dominio.composicion import FUNCIONES, ORIGENES
     cod = str(c.get("codigo", "") or "")[:40]
+    if texto_con_dinero(cod):
+        cod = ""
     info = catalogo.get(cod) or {}
+    funcion = str(c.get("funcion", "") or "")
+    origen = str(c.get("origen", "") or "")
     return {"codigo": cod, "nombre": info.get("nombre", ""),
             "unidad": info.get("unidad", ""),
-            "funcion": str(c.get("funcion", "") or "")[:40],
+            "funcion": funcion if funcion in FUNCIONES else "",
             "rendimiento": _rendimiento_o_none(c.get("rendimiento")),
-            "origen": str(c.get("origen", "") or "")[:40]}
+            "origen": origen if origen in ORIGENES else ""}
 
 
 def payload_chat(item, componentes: list, catalogo: dict) -> dict[str, Any]:
@@ -810,7 +870,7 @@ from apu_tool.dominio.ai_assist import OPS_CHAT, PROMPT_VERSION_CHAT, IANoDispon
 from apu_tool.dominio.compose import rendimientos_observados
 from apu_tool.dominio.composicion import propuesta_desde_json
 from apu_tool.dominio.matching import Matcher
-from apu_tool.nucleo.relevancia import _tokens, similarity
+from apu_tool.nucleo.relevancia import _tokens
 
 logger = logging.getLogger(__name__)
 
@@ -836,16 +896,14 @@ class Herramientas:
         return {"error": f"Herramienta desconocida: {nombre}"}
 
     def buscar_insumos(self, texto: str) -> dict:
-        palabras = [t for t in _tokens(texto) if len(t) >= 3]
-        if not palabras:
-            return {"consulta": texto, "insumos": []}
-        # ponytail: `search_insumos_por_palabras` es N+1 (hasta 61 round-trips en
-        # Postgres; docs/pendientes-agente-composicion.md §6). Con 4 búsquedas por
-        # mensaje es ~1-2 s contra Supabase, chico al lado de la llamada al modelo.
-        # Arreglarlo allá arregla esto. Ya filtra `oculto = 0`.
-        encontrados = self.alm.precios.search_insumos_por_palabras(palabras, limit=60)
-        ordenados = sorted(encontrados, key=lambda i: similarity(texto, i.nombre),
-                           reverse=True)[:MAX_RESULTADOS_INSUMOS]
+        if not [t for t in _tokens(texto) if len(t) >= 3]:
+            return {"consulta": texto, "insumos": []}     # "de la": nada que buscar
+        # La misma búsqueda del `BuscadorInsumo` de la mesa: AND de palabras, sin
+        # ocultos, rankeada por relevancia, 2 consultas. NO `search_insumos_por_palabras`:
+        # hace OR con LIMIT 60 sin orden ("tuberia pvc" casa 1451 insumos en el
+        # catálogo real y se rankeaban 60 al azar) y es N+1.
+        ordenados, _total = self.alm.precios.list_insumos(
+            texto, limit=MAX_RESULTADOS_INSUMOS)
         obs = rendimientos_observados(self.alm, [i.codigo for i in ordenados])
         return {"consulta": texto,
                 "insumos": [privacy.insumo_encontrado_to_dict(i, obs.get(i.codigo))
@@ -916,14 +974,26 @@ def correr(alm, advisor, mensajes, tabla=TABLA):
 @pytest.mark.parametrize("mensajes", [
     charla("agrega el cemento, cuesta $45.000"),
     charla("nos lo cotizaron a 45000", "Entendido.", "agrega un oficial"),
-    charla("agrega un oficial", "el precio es 12.500", "y un ayudante"),
 ])
-def test_un_monto_en_cualquier_mensaje_bloquea_sin_llamar_a_la_ia(alm, mensajes):
+def test_un_monto_en_un_mensaje_del_usuario_bloquea_sin_llamar(alm, mensajes):
     a = AdvisorGuion([])
     evs = correr(alm, a, mensajes)
     assert [e for e, _ in evs] == ["bloqueado"]
     assert "IA no puede ver precios" in evs[0][1]["motivo"]
     assert a.llamadas == []
+
+
+def test_un_mensaje_del_agente_con_cifras_se_omite_y_no_envenena_el_chat(alm):
+    """Revisión del plan: una respuesta legítima del agente ("cambié el valor a
+    0,62") disparaba el detector y bloqueaba todos los turnos siguientes, sin que la
+    persona pudiera sacarla del hilo. Se reemplaza y el turno sigue."""
+    a = AdvisorGuion([resp_final()])
+    evs = correr(alm, a, charla("sube el oficial", "Listo, cambié el valor a 0,62.",
+                                "ahora agrega un ayudante"))
+    assert evs[-1][0] == "respuesta"
+    enviados = json.dumps([m["content"] for m in a.llamadas[0]["mensajes"]
+                           if isinstance(m["content"], str)], ensure_ascii=False)
+    assert "0,62" not in enviados and "[mensaje omitido" in enviados
 
 
 def test_sin_mensaje_final_del_usuario_es_error_sin_llamar(alm):
@@ -1063,6 +1133,7 @@ MAX_TEXTO_MENSAJE = 1000
 # debería existir; si existe, esto corta en vez de girar para siempre.
 _MAX_VUELTAS = MAX_HERRAMIENTAS + 2
 MSG_REINTENTAR = "No pude responder, vuelve a intentar."
+MSG_OMITIDO = "[mensaje omitido: traía cifras que la IA no puede ver]"
 
 
 def _acotar(mensajes: list) -> list[dict]:
@@ -1122,10 +1193,14 @@ def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
     crudos = [c for c in (data.get("cambios") or []) if isinstance(c, dict)]
     codigos = [str(c.get("codigo", "") or "").strip()[:40] for c in crudos]
     catalogo = _catalogo(almacen, codigos)
-    hay_altas = any(c.get("op") == "agregar" for c in crudos)
-    # Una consulta, solo si hay altas: `get_candidatos_bulk` no filtra ocultos.
-    visibles = ({cod for _, cod, _ in almacen.precios.todos_no_ocultos()}
-                if hay_altas else set())
+    # `get_candidatos_bulk` no filtra ocultos: la visibilidad se mira por código, solo
+    # para las altas. NO `todos_no_ocultos()`: trae el catálogo entero (7167 filas)
+    # por respuesta, y el egress de Supabase ya fue un problema. Se pasa nombre ""
+    # y se filtran las filas de ESE código (la consulta es "código O nombre").
+    visibles = {cod for c, cod in zip(crudos, codigos)
+                if c.get("op") == "agregar" and cod and any(
+                    k == cod and not oculto for k, _n, oculto in
+                    almacen.precios.identidades_en_conflicto(cod, ""))}
     cambios, descartados = [], []
     for c, cod in zip(crudos, codigos):
         op = c.get("op")
@@ -1176,12 +1251,18 @@ def conversar(almacen: Almacen, item, componentes: list, mensajes: list, advisor
     if not mensajes or mensajes[-1]["rol"] != "usuario":
         yield ("error", {"detail": "No hay un mensaje tuyo que responder."})
         return
-    # TODOS, también los "del agente": el historial lo manda el cliente.
+    # TODOS se revisan: el historial lo manda el cliente. Los del usuario BLOQUEAN
+    # (la persona puede reescribir el suyo). Los "del agente" se REEMPLAZAN: bloquear
+    # por ellos envenenaría el chat, porque la persona no tiene cómo sacarlos del hilo.
+    # En los dos casos el texto con cifras no viaja.
     for m in mensajes:
         motivo = privacy.texto_con_dinero(m["texto"])
-        if motivo:
+        if not motivo:
+            continue
+        if m["rol"] == "usuario":
             yield ("bloqueado", {"motivo": motivo})
             return
+        m["texto"] = MSG_OMITIDO
 
     catalogo = _catalogo(almacen, [c.get("codigo") for c in componentes
                                    if isinstance(c, dict)])
@@ -2290,6 +2371,25 @@ test("deshabilitado: muestra el motivo y no deja escribir", () => {
   expect(screen.getByRole("img").getAttribute("data-estado")).toBe("deshabilitado");
 });
 
+test("el historial le recuerda al agente lo que propuso y qué pasó con eso", async () => {
+  chatComposicionStream.mockImplementation(
+    async (_i: number, _s: number, _c: unknown, onEvent: OnEv) => {
+      onEvent({ event: "respuesta", data: RESPUESTA });
+    });
+  montar();
+  escribirYEnviar("busca un soldador");
+  fireEvent.click(await screen.findByRole("button", { name: /descartar/i }));
+  escribirYEnviar("entonces otro");
+  await waitFor(() => expect(chatComposicionStream).toHaveBeenCalledTimes(2));
+  const cuerpo = chatComposicionStream.mock.calls[1][2] as {
+    mensajes: { rol: string; texto: string }[];
+  };
+  expect(cuerpo.mensajes[1]).toEqual({
+    rol: "agente",
+    texto: "Te propongo el soldador.\n(Propuse: + 7001 0,1 — descartado)",
+  });
+});
+
 test("los conflictos de aplicar se muestran", async () => {
   chatComposicionStream.mockImplementation(
     async (_i: number, _s: number, _c: unknown, onEvent: OnEv) => {
@@ -2320,6 +2420,7 @@ import AvatarIngeniero, { type EstadoAvatar } from "./AvatarIngeniero";
 import type {
   CambioAgente,
   ComponentePropuesto,
+  MensajeChat,
   RespuestaAgente,
 } from "@/lib/tipos";
 
@@ -2351,6 +2452,29 @@ const num = (n: number) =>
   Number.isFinite(n) ? n.toLocaleString("es-CO", { maximumFractionDigits: 4 }) : "—";
 
 const SIGNO = { agregar: "+", modificar: "~", quitar: "−" } as const;
+
+/** El servidor recorta a 20 igual; mandar más solo arriesga el 422 del tope del
+ *  cuerpo (100 mensajes) y dejaría el chat muerto hasta recargar. */
+const MAX_HISTORIAL = 20;
+const MAX_TEXTO = 1000;
+
+/** Lo que viaja como turno del agente: su texto más un resumen de lo que propuso y
+ *  qué pasó con eso. Sin esto, «sí, pero bájale al segundo» llega sin contexto. Los
+ *  rendimientos van con coma decimal y sin separador de miles: un «1.125» parecería
+ *  un monto al detector del servidor y el turno viajaría omitido. */
+function paraHistorial(e: Entrada): MensajeChat {
+  const r = e.respuesta;
+  if (e.rol !== "agente" || !r || r.cambios.length === 0) {
+    return { rol: e.rol, texto: e.texto };
+  }
+  const cambios = r.cambios
+    .map((c) => `${SIGNO[c.op]} ${c.codigo}`
+      + (c.componente ? ` ${String(c.componente.rendimiento).replace(".", ",")}` : ""))
+    .join("; ");
+  const destino = e.estado === "aplicado" ? "aplicado"
+    : e.estado === "descartado" ? "descartado" : "sin decidir";
+  return { rol: "agente", texto: `${e.texto}\n(Propuse: ${cambios} — ${destino})` };
+}
 
 let proximoId = 1;
 
@@ -2385,6 +2509,9 @@ export default function PanelAgente({
   async function enviar() {
     const t = texto.trim();
     if (!t || ocupado || deshabilitado) return;
+    // Sin esto, el "lista → espera" de la respuesta anterior puede caer en plena
+    // petición, rehabilitar la caja y permitir un doble envío.
+    if (temporizador.current) clearTimeout(temporizador.current);
     const previo = hilo;
     const conMensaje: Entrada[] = [...hilo, { id: proximoId++, rol: "usuario", texto: t }];
     setHilo(conMensaje);
@@ -2399,7 +2526,7 @@ export default function PanelAgente({
     try {
       await chatComposicionStream(
         corridaId, seq,
-        { mensajes: conMensaje.map(({ rol, texto: x }) => ({ rol, texto: x })), componentes },
+        { mensajes: conMensaje.slice(-MAX_HISTORIAL).map(paraHistorial), componentes },
         (ev) => {
           if (!montado.current) return;
           const d = (ev.data ?? {}) as { consulta?: string; motivo?: string; detail?: string };
@@ -2569,6 +2696,7 @@ export default function PanelAgente({
             <textarea
               aria-label="Mensaje para el agente"
               rows={3}
+              maxLength={MAX_TEXTO}
               value={texto}
               disabled={!!deshabilitado || ocupado}
               placeholder="Escribe tu instrucción… (Enter envía, Shift+Enter baja de línea)"
@@ -2598,7 +2726,7 @@ export default function PanelAgente({
 - [ ] **Step 4: Correr y ver que pasan**
 
 Run: `cd web && npx vitest run src/components/composicion/PanelAgente.test.tsx`
-Expected: PASS (5)
+Expected: PASS (6)
 
 - [ ] **Step 5: Commit**
 
@@ -2810,6 +2938,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: CLAUDE.md**
 
+0. En el diagrama de "Arquitectura (flujo)", cambiar `servicio/ (FastAPI, 72 endpoints)` por `servicio/ (FastAPI, 73 endpoints)`.
 1. En la tabla de `apu_tool/dominio/`, después de la fila de `composicion_agente.py`:
 ```
 | `composicion_chat.py`    | chat con el agente en la mesa de composición: herramientas de búsqueda (solo lectura, sin dinero) y bucle de tool use con tope; propone, no escribe |
@@ -2826,10 +2955,11 @@ mesa de composición ──► chat con el agente (busca, sin dinero) ──► 
   (agregar/modificar/quitar); la persona los aplica y eso es el `PUT` de siempre con
   `instruccion`, que deja `motivo="chat: …"`, `modelo=config.AI_MODEL` y
   `prompt_version="chat/v1"` (los pone el servidor). El chat **no persiste nada** y su
-  historial vive en el navegador; por eso el servidor revisa **todos** los mensajes —
-  también los "del agente"— con `privacy.texto_con_dinero` y responde `bloqueado` sin
-  llamar a la IA. Con la mesa vacía, el primer `PUT` va con `version_base = 0` y crea la
-  versión siguiente al historial crudo (el seq se reusa).
+  historial vive en el navegador; por eso el servidor revisa **todos** los mensajes con
+  `privacy.texto_con_dinero`: uno del usuario con dinero responde `bloqueado` sin llamar
+  a la IA, y uno "del agente" con cifras se reemplaza por `[mensaje omitido]` (bloquear
+  por él envenenaría el chat). Con la mesa vacía, el primer `PUT` va con
+  `version_base = 0` y crea la versión siguiente al historial crudo (el seq se reusa).
 ```
 4. En "No hacer", agregar:
 ```
@@ -2837,8 +2967,12 @@ mesa de composición ──► chat con el agente (busca, sin dinero) ──► 
   una persona pudo escribir un monto ahí. `privacy.componente_mesa_to_dict` copia solo los
   campos estructurados, a propósito.
 - No le quites al detector de dinero del chat (`privacy.texto_con_dinero`) los mensajes
-  "del agente": el historial lo manda el cliente. Y no le agregues "vale" (es "de
-  acuerdo" en Colombia) ni "peso" en singular (es peso físico).
+  "del agente": el historial lo manda el cliente. Pero tampoco hagas que BLOQUEEN: se
+  omiten, porque la persona no puede sacar una respuesta del agente del hilo. Y no le
+  agregues "vale" (es "de acuerdo" en Colombia) ni "peso" en singular (es peso físico).
+- No uses `search_insumos_por_palabras` para las búsquedas del agente: OR con LIMIT 60
+  sin orden (y N+1). `buscar_insumos` usa `list_insumos`, la búsqueda del buscador de la
+  mesa.
 - No cierres el bucle del chat con `tool_choice` forzado: los modelos nuevos lo rechazan
   con 400. El tope apaga las herramientas con `{"type": "none"}` sin sacarlas de `tools`.
 ```

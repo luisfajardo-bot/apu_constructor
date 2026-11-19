@@ -131,8 +131,8 @@ resuelve, entra; si no, entra a la mesa con `CODIGO_COMPARTIDO` y el ingeniero e
 puntos del chat que hoy toman `cands[0]` (`_catalogo` y la tarjeta de la propuesta) resuelven
 con el `nombre` del componente, y lo que se muestra o se le reenvía al agente es **siempre el
 nombre del catálogo**, nunca el que mandó el cliente (es texto libre: podría traer un monto).
-Se quita del prompt la regla del código compartido y se sube `PROMPT_VERSION_CHAT` a
-`"chat/v5"`.
+El prompt del chat no cambia (ya pide `nombre` y nunca mencionó el candado), así que
+`PROMPT_VERSION_CHAT` se queda en `"chat/v4"`: solo cambia la lógica del servidor.
 
 ### 3. Interfaz
 

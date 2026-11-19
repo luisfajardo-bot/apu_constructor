@@ -373,3 +373,36 @@ test("modo crear con inicial precarga la cabecera y abre con una fila en blanco"
   expect(screen.getByDisplayValue("PANTALLA ACUSTICA MODULAR")).toBeTruthy();
   expect(screen.getByDisplayValue("M2")).toBeTruthy();
 });
+
+test("un 422 de código compartido muestra el selector en la fila y reintenta", async () => {
+  const { ErrorApi } = await import("@/api/client");
+  const { editarApu } = await import("@/api/autoria");
+  const { listarInsumos } = await import("@/api/insumos");
+  const opciones = [
+    { nombre: "CEMENTO", unidad: "KG", oculto: false },
+    { nombre: "CEMENTO BLANCO", unidad: "BULTO", oculto: false },
+  ];
+  vi.mocked(editarApu)
+    .mockRejectedValueOnce(new ErrorApi("El código C1 es de varios insumos distintos", 422, {
+      mensaje: "El código C1 es de varios insumos distintos",
+      conflictos: [{ codigo: "C1", opciones }],
+    }))
+    .mockResolvedValueOnce({} as never);
+  vi.mocked(listarInsumos).mockResolvedValueOnce({
+    items: [{ id: 2, codigo: "C1", nombre: "CEMENTO BLANCO", unidad: "BULTO", grupo: "M",
+              precio: 3000, fuente: "", clasificacion: "", sin_precio: false }],
+    total: 1, limit: 15, offset: 0,
+  } as never);
+  render(<DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}}
+    modo="editar" inicial={inicialDemo as never} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Guardar cambios/ }));
+  const sel = await screen.findByLabelText("Insumo del código C1") as HTMLSelectElement;
+  fireEvent.change(sel, { target: { value: "1" } });
+  await waitFor(() => expect(screen.getByText("BULTO")).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: /Guardar cambios/ }));
+  await waitFor(() => expect(vi.mocked(editarApu)).toHaveBeenLastCalledWith(
+    "100", "DIURNO", expect.objectContaining({
+      componentes: [expect.objectContaining({ insumo_codigo: "C1",
+                                              insumo_nombre: "CEMENTO BLANCO" })],
+    })));
+});

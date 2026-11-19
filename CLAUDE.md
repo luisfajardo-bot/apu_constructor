@@ -622,7 +622,8 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   reales llegan a 830; el prompt de Componer es `composicion/v5`) y el validador emite
   `CODIGO_COMPARTIDO`, que es error porque la persona lo destraba en la mesa escogiendo la
   fila (pasa la prueba de arriba). El nombre que manda el agente o el cliente solo ESCOGE
-  la fila: lo que se guarda y se muestra es el del catálogo. Pendiente conocido: los
+  la fila: lo que se guarda en el APU y se muestra es el del catálogo (el expediente sí
+  conserva el `nombre` que escribió el modelo o la persona). Pendiente conocido: los
   sub-APU (`tipo="apu"`) siguen tomando `cands[0]` si su código choca con un insumo.
 - No cierres el bucle del chat con `tool_choice` forzado: los modelos nuevos lo rechazan
   con 400. El tope apaga las herramientas con `{"type": "none"}` sin sacarlas de `tools`.

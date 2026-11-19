@@ -199,8 +199,9 @@ def _catalogo_de(alm: Almacen, v: Optional[ComposicionRow]) -> dict[str, dict]:
     `opciones`; sin `nombre` si el del componente no resuelve).
 
     Va en la RESPUESTA y no en la fila persistida a propósito: la propuesta guarda
-    lo que dijo el modelo, que es solo el código; el nombre lo pone el catálogo y
-    tiene que leerse fresco, o quedaría viejo el día que alguien renombre un insumo.
+    lo que dijo el modelo (el código y el `nombre` que escribió, que puede ser una
+    paráfrasis); el nombre que se MUESTRA lo pone el catálogo y tiene que leerse
+    fresco, o quedaría viejo el día que alguien renombre un insumo.
     Sin esto la mesa muestra "4279 · 0,62 · mano_de_obra", que no se puede revisar.
 
     Se copian los campos clave por clave (`cruce.ficha`): `get_candidatos_bulk` devuelve

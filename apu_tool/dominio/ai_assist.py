@@ -306,7 +306,7 @@ _ESQUEMA_CHAT = {
                 "properties": {
                     "op": {"type": "string", "enum": list(OPS_CHAT)},
                     "codigo": {"type": "string"},
-                    # Varios insumos comparten código (586 en el catálogo real): con
+                    # Varios insumos comparten código (652 en el catálogo real): con
                     # el nombre la plataforma sabe cuál quiso decir el agente.
                     "nombre": {"type": "string"},
                     "componente": {**_COMPONENTE_ESQUEMA,

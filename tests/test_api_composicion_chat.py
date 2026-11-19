@@ -21,7 +21,7 @@ def test_put_con_instruccion_deja_el_rastro_del_chat(app_alm, corrida):
     v = alm.composiciones.vigente(corrida, 1)
     assert (v.version, v.estado) == (2, "editada")
     assert v.motivo == "chat: agrega un oficial"
-    assert v.prompt_version == "chat/v3"
+    assert v.prompt_version == "chat/v4"
     assert v.modelo == config.AI_MODEL
 
 

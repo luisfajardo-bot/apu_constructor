@@ -267,7 +267,7 @@ matching, modelo de IA, clasificación de precios.
   (`buscar_insumos`, `buscar_apus`, tope de 4 por mensaje) y **propone** cambios
   (agregar/modificar/quitar); la persona los aplica y eso es el `PUT` de siempre con
   `instruccion`, que deja `motivo="chat: …"`, `modelo=config.AI_MODEL` y
-  `prompt_version=PROMPT_VERSION_CHAT` (hoy `"chat/v3"`; los pone el servidor). El chat **no persiste nada** y su
+  `prompt_version=PROMPT_VERSION_CHAT` (hoy `"chat/v4"`; los pone el servidor). El chat **no persiste nada** y su
   historial vive en el navegador; por eso el servidor revisa **todos** los mensajes con
   `privacy.texto_con_dinero`: uno del usuario con dinero responde `bloqueado` sin llamar
   a la IA, y uno "del agente" con cifras se reemplaza por `[mensaje omitido]` (bloquear
@@ -610,5 +610,11 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
 - No uses `search_insumos_por_palabras` para las búsquedas del agente: OR con LIMIT 60
   sin orden (y N+1). `buscar_insumos` usa `list_insumos`, la búsqueda del buscador de la
   mesa.
+- No dejes que el chat agregue un código compartido (586 en el catálogo) sin mirar el
+  `nombre` que manda el agente: el alta (`autoria._componentes_de`) guarda
+  `get_candidatos(cod)[0]`, el de id menor, oculto o no. Pasa SOLO si el agente nombra
+  justo ese (`composicion_chat._motivo_compartido`); si no, se descarta diciendo qué se
+  guardaría. Bloquearlos todos dejaba sin HERRAMIENTA MENOR (6092, en 904 APUs) a cada
+  composición. El fix de raíz (que el nombre viaje hasta el alta) está pendiente.
 - No cierres el bucle del chat con `tool_choice` forzado: los modelos nuevos lo rechazan
   con 400. El tope apaga las herramientas con `{"type": "none"}` sin sacarlas de `tools`.

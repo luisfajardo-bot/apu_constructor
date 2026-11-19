@@ -157,7 +157,7 @@ def test_busca_y_responde_con_los_eventos_en_orden(alm):
     assert resp["cambios"][0]["codigo"] == "7001"
     assert resp["cambios"][0]["componente"]["rendimiento"] == 0.1
     assert resp["catalogo"]["7001"]["nombre"] == "OFICIAL SOLDADOR CERTIFICADO"
-    assert resp["prompt_version"] == "chat/v3" and resp["modelo"] == "falso"
+    assert resp["prompt_version"] == "chat/v4" and resp["modelo"] == "falso"
     # la segunda vuelta lleva el resultado de la herramienta, sin precios
     resultado = a.llamadas[1]["mensajes"][-1]["content"][0]
     assert resultado["type"] == "tool_result" and resultado["tool_use_id"] == "t0"
@@ -209,14 +209,49 @@ def test_descarta_un_alta_con_codigo_compartido_por_dos_insumos(alm):
                2000, "PRECIO IDU"),
     ])
     a = AdvisorGuion([resp_final("Te agrego la señal.", [
-        {"op": "agregar", "codigo": "8001", "componente": componente("8001")},
-        {"op": "agregar", "codigo": "6092", "componente": componente("6092")},
+        {"op": "agregar", "codigo": "8001", "nombre": "SEÑAL VERTICAL SR 90X30 INCLUYE POSTE",
+         "componente": componente("8001")},
+        {"op": "agregar", "codigo": "6092", "nombre": "HERRAMIENTA MENOR",
+         "componente": componente("6092")},
     ])])
     resp = correr(alm, a, charla("agrega la señal"))[-1][1]
     assert [c["codigo"] for c in resp["cambios"]] == ["6092"]
     (d,) = resp["descartados"]
-    assert d["codigo"] == "8001" and "compartido" in d["motivo"]
+    # El alta guardaría la REDUCCION (id menor): se dice qué se guardaría.
+    assert d["codigo"] == "8001" and "se guardaría como" in d["motivo"]
     assert "REDUCCION" in d["motivo"] and "SEÑAL VERTICAL" in d["motivo"]
+
+
+def test_un_codigo_compartido_pasa_si_el_agente_quiere_el_que_guarda_el_alta(alm):
+    """Smoke #3: el candado bloqueaba 6092 HERRAMIENTA MENOR (904 APUs) porque el
+    código también es «RELOCALIZACIÓN DE MEDIDOR…». Pero el alta guarda el de id
+    menor, que ES la herramienta: mesa, expediente y APU dicen lo mismo."""
+    alm.precios.insert_insumos([
+        Insumo("8001", "REDUCCION HD E.L. D=12 x 10", "UN", "ACCESORIOS", 1000,
+               "PRECIO IDU"),
+        Insumo("8001", "SEÑAL VERTICAL SR 90X30 INCLUYE POSTE", "UN", "SEÑALIZACION",
+               2000, "PRECIO IDU"),
+    ])
+    a = AdvisorGuion([resp_final("Te agrego la reducción.", [
+        {"op": "agregar", "codigo": "8001", "nombre": "REDUCCION HD E.L. D=12\" x 10\"",
+         "componente": componente("8001")}])])
+    resp = correr(alm, a, charla("agrega la reducción"))[-1][1]
+    assert [c["codigo"] for c in resp["cambios"]] == ["8001"]
+    assert resp["catalogo"]["8001"]["nombre"] == "REDUCCION HD E.L. D=12 x 10"
+    assert resp["descartados"] == []
+
+
+def test_un_codigo_compartido_sin_nombre_se_descarta(alm):
+    alm.precios.insert_insumos([
+        Insumo("8001", "REDUCCION HD E.L. D=12 x 10", "UN", "ACCESORIOS", 1000,
+               "PRECIO IDU"),
+        Insumo("8001", "SEÑAL VERTICAL SR 90X30 INCLUYE POSTE", "UN", "SEÑALIZACION",
+               2000, "PRECIO IDU"),
+    ])
+    a = AdvisorGuion([resp_final("Ahí va.", [
+        {"op": "agregar", "codigo": "8001", "componente": componente("8001")}])])
+    (d,) = correr(alm, a, charla("agrega el 8001"))[-1][1]["descartados"]
+    assert "no dijo cuál" in d["motivo"]
 
 
 def test_descarta_codigos_inexistentes_y_ocultos(alm):
@@ -286,19 +321,23 @@ def test_la_privacy_violation_dentro_del_bucle_sube(alm, monkeypatch):
         correr(alm, a, charla("busca un soldador"))
 
 
-def test_el_nombre_de_un_alta_es_el_del_insumo_visible_no_el_del_oculto(alm):
-    """Dos insumos con el mismo código: el de id menor está oculto. El catálogo de la
-    respuesta tiene que traer el nombre del VISIBLE."""
+def test_un_alta_cuyo_homonimo_oculto_va_primero_se_descarta(alm):
+    """Dos insumos con el mismo código y el de id menor OCULTO. Antes se aceptaba
+    mostrando el nombre del visible, pero el alta (`get_candidatos(cod)[0]`, que no
+    filtra ocultos) guardaría el OCULTO: la mesa y el APU dirían otra cosa que el chat.
+    Se descarta diciendo qué se guardaría."""
     alm.precios.insert_insumos([
         Insumo("8000", "NOMBRE VIEJO OCULTO", "UN", "EQ", 10, "COSTO INTERNO"),
         Insumo("8000", "NOMBRE VISIBLE", "UN", "EQ", 10, "COSTO INTERNO"),
     ])
     alm.precios.set_oculto(alm.precios.search_insumos("NOMBRE VIEJO OCULTO")[0].id, True)
     a = AdvisorGuion([resp_final("Ahí va.", [
-        {"op": "agregar", "codigo": "8000", "componente": componente("8000")}])])
+        {"op": "agregar", "codigo": "8000", "nombre": "NOMBRE VISIBLE",
+         "componente": componente("8000")}])])
     resp = correr(alm, a, charla("agrega el 8000"))[-1][1]
-    assert [c["codigo"] for c in resp["cambios"]] == ["8000"]
-    assert resp["catalogo"]["8000"]["nombre"] == "NOMBRE VISIBLE"
+    assert resp["cambios"] == []
+    (d,) = resp["descartados"]
+    assert "se guardaría como «NOMBRE VIEJO OCULTO»" in d["motivo"]
 
 
 def test_las_altas_repetidas_consultan_la_visibilidad_una_vez_por_codigo(alm, monkeypatch):

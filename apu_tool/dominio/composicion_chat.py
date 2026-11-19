@@ -22,9 +22,14 @@ from apu_tool.dominio.ai_assist import OPS_CHAT, PROMPT_VERSION_CHAT, IANoDispon
 from apu_tool.dominio.compose import rendimientos_observados
 from apu_tool.dominio.composicion import propuesta_desde_json
 from apu_tool.dominio.matching import Matcher
-from apu_tool.nucleo.relevancia import _tokens
+from apu_tool.nucleo.relevancia import _tokens, similarity
 
 logger = logging.getLogger(__name__)
+
+# Parecido mínimo entre el nombre que dice el agente y el del catálogo para darlo por
+# el mismo insumo cuando el código es compartido. El modelo copia el nombre del
+# resultado de búsqueda, pero puede abreviarlo o cambiarle comillas.
+MIN_PARECIDO_NOMBRE = 0.6
 
 MAX_RESULTADOS_INSUMOS = 15
 MIN_RESULTADOS_SIN_SUGERENCIA = 3
@@ -149,6 +154,28 @@ def _mensajes_api(mensajes: list[dict], contexto: str) -> list[dict]:
     return api
 
 
+def _motivo_compartido(cod: str, nombre: str, filas: list[tuple[str, bool]]):
+    """None si el alta de `cod` guardaría el insumo que nombra el agente; si no, el
+    motivo del descarte. `filas` = (nombre, oculto) en orden de id: filas[0] es el
+    que guarda el alta."""
+    def corto(n: str) -> str:
+        return f"«{n[:60]}»"
+
+    parecidos = [similarity(nombre, n) for n, _o in filas] if nombre.strip() else []
+    if not parecidos or max(parecidos) < MIN_PARECIDO_NOMBRE:
+        todos = " / ".join(corto(n) for n, _o in filas)
+        return (f"Código compartido por {len(filas)} insumos ({todos}) y el agente no "
+                "dijo cuál es: no se puede agregar por código.")
+    elegido = parecidos.index(max(parecidos))
+    primero, oculto = filas[0]
+    if elegido != 0 or oculto:
+        return (f"El código {cod} se guardaría como {corto(primero)}"
+                + (" (oculto)" if oculto else "")
+                + f", no como {corto(filas[elegido][0])}: comparten código. Hasta que "
+                "eso se arregle no se puede agregar por código; usa un equivalente.")
+    return None
+
+
 def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
     """La respuesta final, con los cambios filtrados por la plataforma.
 
@@ -171,23 +198,26 @@ def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
     # ponytail: solo el NOMBRE se corrige con la fila visible; `unidad` y `grupo` siguen
     # saliendo de `cands[0]` (ver `_catalogo`). Upgrade: `oculto` en `get_candidatos_bulk`.
     visibles = set()
-    # Código compartido por dos o más insumos VISIBLES (586 en el catálogo real). El
-    # contrato solo lleva el código, y el alta (`autoria._componentes_de`) resuelve
-    # con el primero por id: en el smoke real, «7406 SEÑAL VERTICAL SR 90x30» quedó
-    # como «7406 REDUCCION HD 12x10». Hasta que el nombre viaje con el código (fix
-    # aparte), un alta así se DESCARTA diciendo los nombres, no se adivina.
-    compartidos: dict[str, list[str]] = {}
+    # Código compartido por dos o más insumos (586 visibles en el catálogo real). El
+    # contrato del expediente solo lleva el código, y el alta
+    # (`autoria._componentes_de`) se queda con `get_candidatos(cod)[0]`: el de id
+    # MENOR, oculto o no. En el smoke real «7406 SEÑAL VERTICAL SR 90x30» quedó como
+    # «7406 REDUCCION HD 12x10». Regla: un código compartido pasa SOLO si el agente
+    # nombra justo el insumo que el alta va a guardar (y está visible); si no, se
+    # descarta diciendo qué se guardaría. Así chat, mesa, expediente y APU dicen lo
+    # mismo. Fix de raíz aparte: que el nombre viaje con el código hasta el alta.
+    compartidos: dict[str, list[tuple[str, bool]]] = {}
     for cod in {cod for c, cod in zip(crudos, codigos)
                 if c.get("op") == "agregar" and cod}:
-        nombres = [n for k, n, oculto in
-                   almacen.precios.identidades_en_conflicto(cod, "")
-                   if k == cod and not oculto]
-        if nombres:
+        # ORDER BY id en los dos backends: filas[0] es lo que guardaría el alta.
+        filas = [(n, bool(oculto)) for k, n, oculto in
+                 almacen.precios.identidades_en_conflicto(cod, "") if k == cod]
+        if any(not oculto for _n, oculto in filas):
             visibles.add(cod)
-            if cod in catalogo:
-                catalogo[cod]["nombre"] = nombres[0]
-        if len(nombres) > 1:
-            compartidos[cod] = nombres
+        if len(filas) > 1:
+            compartidos[cod] = filas
+        elif filas and cod in catalogo:
+            catalogo[cod]["nombre"] = filas[0][0]
     cambios, descartados = [], []
     for c, cod in zip(crudos, codigos):
         op = c.get("op")
@@ -199,12 +229,12 @@ def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
                                 "motivo": "No está en el catálogo (o está oculto)."})
             continue
         if op == "agregar" and cod in compartidos:
-            nombres = " / ".join(f"«{n[:60]}»" for n in compartidos[cod])
-            descartados.append({"codigo": cod, "motivo": (
-                f"Código compartido por {len(compartidos[cod])} insumos del catálogo "
-                f"({nombres}): por código no se sabe cuál es. Usa otro código "
-                "equivalente si existe.")})
-            continue
+            motivo = _motivo_compartido(cod, str(c.get("nombre", "") or ""),
+                                        compartidos[cod])
+            if motivo:
+                descartados.append({"codigo": cod, "motivo": motivo})
+                continue
+            catalogo.setdefault(cod, {})["nombre"] = compartidos[cod][0][0]
         comp = None
         if op != "quitar":
             p = propuesta_desde_json({"componentes": [c.get("componente")]})

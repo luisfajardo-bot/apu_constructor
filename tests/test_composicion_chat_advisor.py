@@ -55,6 +55,8 @@ def test_el_esquema_del_componente_es_el_mismo_de_componer():
     item = ai_assist._ESQUEMA_CHAT["properties"]["cambios"]["items"]
     comp = item["properties"]["componente"]
     assert comp["type"] == ["object", "null"]
+    # Códigos compartidos: el nombre dice cuál insumo quiso el agente.
+    assert "nombre" in item["required"]
     assert comp["properties"]["tipo"]["enum"] == ["insumo"]
     assert "sub_apu" not in comp["properties"]["funcion"]["enum"]
 

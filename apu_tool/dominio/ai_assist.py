@@ -233,7 +233,7 @@ _ESQUEMA_COMPOSICION = {
 # El chat de la mesa de composición (`dominio/composicion_chat.py`). Misma puerta al
 # SDK que `componer`, misma traducción de errores; distinto contrato: una vuelta de
 # un bucle de tool use, que termina en `{texto, cambios}`.
-PROMPT_VERSION_CHAT = "chat/v3"   # se sube A MANO al tocar el prompt o los esquemas
+PROMPT_VERSION_CHAT = "chat/v4"   # se sube A MANO al tocar el prompt o los esquemas
 
 _SISTEMA_CHAT = """\
 Eres un ingeniero de costos de obra civil que ayuda a una persona a completar la
@@ -267,6 +267,9 @@ Reglas estrictas:
   razón técnica concreta, pero propón el cambio solo si la tienes.
 - `op`: "agregar" un insumo que no está; "modificar" uno que ya está (manda el
   componente completo con el cambio); "quitar" uno que está (`componente` en null).
+- En cada cambio manda `nombre`: el nombre del insumo copiado tal como lo viste en la
+  búsqueda o en el APU de referencia. Varios insumos distintos comparten código, y sin
+  el nombre la plataforma no sabe cuál quieres.
 - En `componente`, `origen` dice de dónde sale el rendimiento. Sé honesto:
   "copiado_de_antecedente" o "ajustado_de_antecedente" solo si sale de un APU que
   viste en `buscar_apus` (cítalo en `referencias`); "calculado_desde_produccion" si
@@ -297,10 +300,13 @@ _ESQUEMA_CHAT = {
                 "properties": {
                     "op": {"type": "string", "enum": list(OPS_CHAT)},
                     "codigo": {"type": "string"},
+                    # Varios insumos comparten código (586 en el catálogo real): con
+                    # el nombre la plataforma sabe cuál quiso decir el agente.
+                    "nombre": {"type": "string"},
                     "componente": {**_COMPONENTE_ESQUEMA,
                                    "type": ["object", "null"]},
                 },
-                "required": ["op", "codigo", "componente"],
+                "required": ["op", "codigo", "nombre", "componente"],
                 "additionalProperties": False,
             },
         },

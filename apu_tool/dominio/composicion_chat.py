@@ -17,19 +17,14 @@ import logging
 from dataclasses import replace
 
 from apu_tool.datos.almacen import Almacen
-from apu_tool.dominio import privacy
+from apu_tool.dominio import cruce, privacy
 from apu_tool.dominio.ai_assist import OPS_CHAT, PROMPT_VERSION_CHAT, IANoDisponible
 from apu_tool.dominio.compose import rendimientos_observados
 from apu_tool.dominio.composicion import propuesta_desde_json
 from apu_tool.dominio.matching import Matcher
-from apu_tool.nucleo.relevancia import _tokens, similarity
+from apu_tool.nucleo.relevancia import _tokens
 
 logger = logging.getLogger(__name__)
-
-# Parecido mínimo entre el nombre que dice el agente y el del catálogo para darlo por
-# el mismo insumo cuando el código es compartido. El modelo copia el nombre del
-# resultado de búsqueda, pero puede abreviarlo o cambiarle comillas.
-MIN_PARECIDO_NOMBRE = 0.6
 
 MAX_RESULTADOS_INSUMOS = 15
 MIN_RESULTADOS_SIN_SUGERENCIA = 3
@@ -122,21 +117,20 @@ def _acotar(mensajes: list) -> list[dict]:
     return limpios
 
 
-def _catalogo(almacen: Almacen, codigos) -> dict[str, dict]:
-    """Nombre, unidad y grupo por código, en UNA consulta. Campo por campo: el
-    `Insumo` que devuelve el repo trae `precio`."""
-    cods = sorted({str(c) for c in codigos if c})
-    if not cods:
+def _catalogo(almacen: Almacen, componentes) -> dict[str, dict]:
+    """Ficha (nombre, unidad, grupo y, si el código es compartido, opciones) de cada
+    componente de la mesa, en UNA consulta. El nombre que manda el cliente solo se usa
+    para ESCOGER la fila: lo que se muestra y viaja al agente es el del catálogo (el
+    del cliente es texto libre y podría traer un monto)."""
+    comps = [c for c in componentes if isinstance(c, dict) and c.get("codigo")]
+    if not comps:
         return {}
+    bulk = almacen.precios.get_candidatos_bulk(sorted({str(c["codigo"]) for c in comps}))
     out = {}
-    # ponytail: `unidad` y `grupo` salen de `cands[0]`, que puede ser un homónimo oculto
-    # (`get_candidatos_bulk` no filtra ocultos e `Insumo` no trae `oculto`). Hoy no pasa
-    # en los datos reales. Upgrade: que `get_candidatos_bulk` exponga `oculto` y elegir
-    # el primer candidato visible.
-    for cod, cands in almacen.precios.get_candidatos_bulk(cods).items():
-        if cands:
-            out[cod] = {"nombre": cands[0].nombre, "unidad": cands[0].unidad,
-                        "grupo": cands[0].grupo}
+    for c in comps:
+        cod = str(c["codigo"])
+        if bulk.get(cod):
+            out[cod] = cruce.ficha(bulk[cod], str(c.get("nombre", "") or ""))
     return out
 
 
@@ -154,87 +148,48 @@ def _mensajes_api(mensajes: list[dict], contexto: str) -> list[dict]:
     return api
 
 
-def _motivo_compartido(cod: str, nombre: str, filas: list[tuple[str, bool]]):
-    """None si el alta de `cod` guardaría el insumo que nombra el agente; si no, el
-    motivo del descarte. `filas` = (nombre, oculto) en orden de id: filas[0] es el
-    que guarda el alta."""
-    def corto(n: str) -> str:
-        return f"«{n[:60]}»"
-
-    parecidos = [similarity(nombre, n) for n, _o in filas] if nombre.strip() else []
-    if not parecidos or max(parecidos) < MIN_PARECIDO_NOMBRE:
-        todos = " / ".join(corto(n) for n, _o in filas)
-        return (f"Código compartido por {len(filas)} insumos ({todos}) y el agente no "
-                "dijo cuál es: no se puede agregar por código.")
-    elegido = parecidos.index(max(parecidos))
-    primero, oculto = filas[0]
-    if elegido != 0 or oculto:
-        return (f"El código {cod} se guardaría como {corto(primero)}"
-                + (" (oculto)" if oculto else "")
-                + f", no como {corto(filas[elegido][0])}: comparten código. Hasta que "
-                "eso se arregle no se puede agregar por código; usa un equivalente.")
-    return None
-
-
 def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
     """La respuesta final, con los cambios filtrados por la plataforma.
 
-    Un `agregar` cuyo código no existe o está oculto se DESCARTA antes de mostrarse, y
-    se dice cuál y por qué: nunca se pierde en silencio. `modificar` sin componente
-    también se descarta. `quitar` y `modificar` no se cruzan con el catálogo: el
-    código ya está en la tabla, y si no está, `aplicarCambios` (web) lo reporta como
-    conflicto.
+    Un `agregar` cuyo código no existe, o cuya fila está oculta, se DESCARTA antes de
+    mostrarse, y se dice cuál y por qué: nunca se pierde en silencio. `modificar` sin
+    componente también se descarta. `quitar` y `modificar` no se cruzan con el
+    catálogo: el código ya está en la tabla, y si no está, `aplicarCambios` (web) lo
+    reporta como conflicto.
+
+    Código compartido por dos insumos: lo decide el NOMBRE (`cruce.elegir_fila`), igual
+    que en el alta. Si el nombre no alcanza el componente entra sin nombre y la mesa le
+    pide a la persona que escoja (`CODIGO_COMPARTIDO`); ya no se descarta.
     """
     data = data if isinstance(data, dict) else {}
     crudos = [c for c in (data.get("cambios") or []) if isinstance(c, dict)]
     codigos = [str(c.get("codigo", "") or "").strip()[:40] for c in crudos]
-    catalogo = _catalogo(almacen, codigos)
-    # `get_candidatos_bulk` no filtra ocultos (y `cands[0]` puede ser un homónimo
-    # oculto): para las altas, la visibilidad y el NOMBRE salen de la fila visible de
-    # ese código. NO `todos_no_ocultos()`: trae el catálogo entero (7167 filas) por
-    # respuesta, y el egress de Supabase ya fue un problema. Se pasa nombre "" y se
-    # filtran las filas de ESE código (la consulta es "código O nombre"). Una consulta
-    # por código distinto, no por cambio.
-    # ponytail: solo el NOMBRE se corrige con la fila visible; `unidad` y `grupo` siguen
-    # saliendo de `cands[0]` (ver `_catalogo`). Upgrade: `oculto` en `get_candidatos_bulk`.
-    visibles = set()
-    # Código compartido por dos o más insumos (586 visibles en el catálogo real). El
-    # contrato del expediente solo lleva el código, y el alta
-    # (`autoria._componentes_de`) se queda con `get_candidatos(cod)[0]`: el de id
-    # MENOR, oculto o no. En el smoke real «7406 SEÑAL VERTICAL SR 90x30» quedó como
-    # «7406 REDUCCION HD 12x10». Regla: un código compartido pasa SOLO si el agente
-    # nombra justo el insumo que el alta va a guardar (y está visible); si no, se
-    # descarta diciendo qué se guardaría. Así chat, mesa, expediente y APU dicen lo
-    # mismo. Fix de raíz aparte: que el nombre viaje con el código hasta el alta.
-    compartidos: dict[str, list[tuple[str, bool]]] = {}
-    for cod in {cod for c, cod in zip(crudos, codigos)
-                if c.get("op") == "agregar" and cod}:
-        # ORDER BY id en los dos backends: filas[0] es lo que guardaría el alta.
-        filas = [(n, bool(oculto)) for k, n, oculto in
-                 almacen.precios.identidades_en_conflicto(cod, "") if k == cod]
-        if any(not oculto for _n, oculto in filas):
-            visibles.add(cod)
-        if len(filas) > 1:
-            compartidos[cod] = filas
-        elif filas and cod in catalogo:
-            catalogo[cod]["nombre"] = filas[0][0]
+    # UNA consulta por respuesta: `Insumo.oculto` trae la visibilidad, así que no hace
+    # falta una consulta por código (el egress de Supabase ya fue un problema).
+    validos = sorted({c for c in codigos if c})
+    bulk = almacen.precios.get_candidatos_bulk(validos) if validos else {}
+    catalogo: dict[str, dict] = {}
     cambios, descartados = [], []
     for c, cod in zip(crudos, codigos):
         op = c.get("op")
         if op not in OPS_CHAT or not cod:
             descartados.append({"codigo": cod, "motivo": "Cambio ilegible."})
             continue
-        if op == "agregar" and (cod not in catalogo or cod not in visibles):
-            descartados.append({"codigo": cod,
-                                "motivo": "No está en el catálogo (o está oculto)."})
-            continue
-        if op == "agregar" and cod in compartidos:
-            motivo = _motivo_compartido(cod, str(c.get("nombre", "") or ""),
-                                        compartidos[cod])
-            if motivo:
-                descartados.append({"codigo": cod, "motivo": motivo})
+        cands = bulk.get(cod) or []
+        nombre = str(c.get("nombre", "") or "")
+        fila = cruce.elegir_fila(cands, nombre)
+        if op == "agregar":
+            if not cands or all(x.oculto for x in cands):
+                descartados.append({"codigo": cod,
+                                    "motivo": "No está en el catálogo (o está oculto)."})
                 continue
-            catalogo.setdefault(cod, {})["nombre"] = compartidos[cod][0][0]
+            if fila is not None and fila.oculto:
+                descartados.append({"codigo": cod,
+                                    "motivo": f"«{fila.nombre[:60]}» está oculto en el "
+                                              "catálogo."})
+                continue
+        if cands:
+            catalogo[cod] = cruce.ficha(cands, nombre)
         comp = None
         if op != "quitar":
             p = propuesta_desde_json({"componentes": [c.get("componente")]})
@@ -242,7 +197,11 @@ def _respuesta(almacen: Almacen, data, modelo: str) -> dict:
                 descartados.append({"codigo": cod,
                                     "motivo": "El agente no mandó el componente."})
                 continue
-            comp = replace(p.componentes[0], codigo=cod).to_dict()
+            # El nombre que se guarda es el del CATÁLOGO (la fila que eligió el nombre
+            # del agente), nunca el texto del agente. Si no resolvió, va vacío y la
+            # mesa le pide a la persona que escoja (CODIGO_COMPARTIDO).
+            comp = replace(p.componentes[0], codigo=cod,
+                           nombre=fila.nombre if fila else "").to_dict()
         cambios.append({"op": op, "codigo": cod, "componente": comp})
     return {"texto": str(data.get("texto", "") or "")[:2000], "cambios": cambios,
             "descartados": descartados, "catalogo": catalogo, "modelo": modelo,
@@ -288,8 +247,7 @@ def conversar(almacen: Almacen, item, componentes: list, mensajes: list, advisor
             return
         m["texto"] = MSG_OMITIDO
 
-    catalogo = _catalogo(almacen, [c.get("codigo") for c in componentes
-                                   if isinstance(c, dict)])
+    catalogo = _catalogo(almacen, componentes)
     contexto = privacy.safe_json(privacy.payload_chat(item, componentes, catalogo))
     api = _mensajes_api(mensajes, contexto)
     herramientas = Herramientas(almacen, item.shift)

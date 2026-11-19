@@ -477,9 +477,9 @@ def _componentes_para_autoria(propuesta: Optional[dict], turno: str) -> list[dic
     """La propuesta en el formato que espera `autoria._componentes_de`.
 
     El nombre SÍ se manda: es lo que le dice al alta cuál de las filas de un código
-    compartido va. La unidad la pone el catálogo. `ref_shift` se completa con el turno del APU cuando falta, igual que hace
-    el validador (`c.ref_shift or ctx.shift`): un sub-APU sin turno explícito es el
-    del mismo turno.
+    compartido va. La unidad la pone el catálogo. `ref_shift` se completa con el turno
+    del APU cuando falta, igual que hace el validador (`c.ref_shift or ctx.shift`): un
+    sub-APU sin turno explícito es el del mismo turno.
     """
     out = []
     for c in (propuesta or {}).get("componentes", []) or []:

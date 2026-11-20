@@ -34,6 +34,10 @@ class Insumo:
     # Distingue "sin tarifa en esta lista" de un $0 genuino, que la regla de negocio
     # prohíbe y que las alertas de costeo deben seguir mostrando.
     sin_precio: bool = False
+    # True = el insumo está oculto (eco de un APU sin uso real). No se borra: el costeo
+    # lo sigue viendo, y por eso `get_candidatos` lo devuelve. Lo usan las opciones de
+    # un código compartido para avisar que se está escogiendo uno oculto.
+    oculto: bool = False
 
     @property
     def es_confidencial(self) -> bool:

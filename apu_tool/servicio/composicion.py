@@ -21,7 +21,7 @@ from typing import Optional
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.datos.repositorio import CorridaEliminada, VersionYaExiste
-from apu_tool.dominio import composicion_agente, composicion_chat, privacy
+from apu_tool.dominio import composicion_agente, composicion_chat, cruce, privacy
 # Re-exportadas por el orquestador de dominio a propósito: ningún módulo de
 # `servicio/` importa la fachada del SDK: lo fija `tests/test_servicio_privacidad`
 # buscando el nombre de ese módulo como TEXTO en cada archivo de `servicio/`, así
@@ -194,14 +194,17 @@ def vista(alm: Almacen, corrida_id: int, seq: int) -> Optional[dict]:
 
 
 def _catalogo_de(alm: Almacen, v: Optional[ComposicionRow]) -> dict[str, dict]:
-    """Nombre, unidad y grupo de cada código de la propuesta vigente.
+    """Nombre, unidad y grupo de cada código de la propuesta vigente, de la fila que
+    dicen código + nombre del componente (y, si el código es de varios insumos, sus
+    `opciones`; sin `nombre` si el del componente no resuelve).
 
     Va en la RESPUESTA y no en la fila persistida a propósito: la propuesta guarda
-    lo que dijo el modelo, que es solo el código; el nombre lo pone el catálogo y
-    tiene que leerse fresco, o quedaría viejo el día que alguien renombre un insumo.
+    lo que dijo el modelo (el código y el `nombre` que escribió, que puede ser una
+    paráfrasis); el nombre que se MUESTRA lo pone el catálogo y tiene que leerse
+    fresco, o quedaría viejo el día que alguien renombre un insumo.
     Sin esto la mesa muestra "4279 · 0,62 · mano_de_obra", que no se puede revisar.
 
-    Se copian los TRES campos clave por clave: `get_candidatos_bulk` devuelve
+    Se copian los campos clave por clave (`cruce.ficha`): `get_candidatos_bulk` devuelve
     `Insumo`, que lleva `precio`, y volcar el objeto entero sacaría dinero por la API
     de la composición. Es la misma regla que `privacy.rendimiento_observado_to_dict`
     —copiar campo por campo en el borde— y por eso un campo nuevo en `Insumo` no
@@ -217,11 +220,14 @@ def _catalogo_de(alm: Almacen, v: Optional[ComposicionRow]) -> dict[str, dict]:
     codigos = [str(c.get("codigo", "")) for c in comps if c.get("codigo")]
     if not codigos:
         return {}
+    bulk = alm.precios.get_candidatos_bulk(codigos)
     out: dict[str, dict] = {}
-    for cod, cands in alm.precios.get_candidatos_bulk(codigos).items():
+    for c in comps:
+        cod = str(c.get("codigo", ""))
+        cands = bulk.get(cod) or []
         if cands:
-            out[cod] = {"nombre": cands[0].nombre, "unidad": cands[0].unidad,
-                        "grupo": cands[0].grupo}
+            # `cruce.ficha` escoge la fila por código + nombre y copia campo por campo.
+            out[cod] = cruce.ficha(cands, str(c.get("nombre", "") or ""))
     return out
 
 
@@ -454,26 +460,33 @@ def _con_lista_blanca(alm: Almacen, ctx, blanca: frozenset[str]):
     """
     faltan = sorted(c for c in blanca if c and c not in ctx.unidades_catalogo)
     unidades = dict(ctx.unidades_catalogo)
+    compartidos = dict(ctx.candidatos_compartidos)
     if faltan:
-        for cod, cands in alm.precios.get_candidatos_bulk(faltan).items():
+        bulk = alm.precios.get_candidatos_bulk(faltan)
+        for cod, cands in bulk.items():
             if cands:
                 unidades[cod] = cands[0].unidad or ""
-    return replace(ctx, codigos_permitidos=blanca, unidades_catalogo=unidades)
+        # Un código agregado por una persona (buscador o chat) también puede ser
+        # compartido: sin esto el validador no lo vería.
+        compartidos.update(cruce.compartidos(bulk))
+    return replace(ctx, codigos_permitidos=blanca, unidades_catalogo=unidades,
+                   candidatos_compartidos=compartidos)
 
 
 # ------------------------------------------------------------------- decisión
 def _componentes_para_autoria(propuesta: Optional[dict], turno: str) -> list[dict]:
     """La propuesta en el formato que espera `autoria._componentes_de`.
 
-    Nombre y unidad NO se mandan: los resuelve autoría desde el catálogo, que es la
-    fuente. `ref_shift` se completa con el turno del APU cuando falta, igual que hace
-    el validador (`c.ref_shift or ctx.shift`): un sub-APU sin turno explícito es el
-    del mismo turno.
+    El nombre SÍ se manda: es lo que le dice al alta cuál de las filas de un código
+    compartido va. La unidad la pone el catálogo. `ref_shift` se completa con el turno
+    del APU cuando falta, igual que hace el validador (`c.ref_shift or ctx.shift`): un
+    sub-APU sin turno explícito es el del mismo turno.
     """
     out = []
     for c in (propuesta or {}).get("componentes", []) or []:
         tipo = c.get("tipo") or "insumo"
         out.append({"insumo_codigo": c.get("codigo", ""),
+                    "insumo_nombre": c.get("nombre", "") or "",
                     "rendimiento": c.get("rendimiento"),
                     "tipo": tipo,
                     "ref_shift": (c.get("ref_shift") or turno) if tipo == "apu" else ""})

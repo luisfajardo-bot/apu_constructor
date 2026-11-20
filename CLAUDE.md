@@ -265,12 +265,16 @@ matching, modelo de IA, clasificación de precios.
   (`buscar_insumos`, `buscar_apus`, tope de 4 por mensaje) y **propone** cambios
   (agregar/modificar/quitar); la persona los aplica y eso es el `PUT` de siempre con
   `instruccion`, que deja `motivo="chat: …"`, `modelo=config.AI_MODEL` y
-  `prompt_version=PROMPT_VERSION_CHAT` (hoy `"chat/v4"`; los pone el servidor). El chat **no persiste nada** y su
+  `prompt_version=PROMPT_VERSION_CHAT` (hoy `"chat/v5"`; los pone el servidor). El chat **no persiste nada** y su
   historial vive en el navegador; por eso el servidor revisa **todos** los mensajes con
   `privacy.texto_con_dinero`: uno del usuario con dinero responde `bloqueado` sin llamar
   a la IA, y uno "del agente" con cifras se reemplaza por `[mensaje omitido]` (bloquear
   por él envenenaría el chat). Con la mesa vacía, el primer `PUT` va con
   `version_base = 0` y crea la versión siguiente al historial crudo (el seq se reusa).
+  Un código compartido por dos insumos lo resuelve el `nombre` que manda el agente
+  (`cruce.elegir`); si no alcanza, el componente entra sin nombre y la mesa pide escoger
+  (`CODIGO_COMPARTIDO`): ya no se descarta (`composicion_chat._motivo_compartido` ya no
+  existe), y un `modificar` hereda la fila que la mesa ya tenía escogida.
   Ojo para el reporte de correcciones: una edición a mano POSTERIOR a un Aplicar del chat
   hereda `modelo` y el `prompt_version` del chat (los hereda `_sello` de la versión base), y
   solo el `motivo` (`None` vs `"chat: …"`) distingue una de otra. Riesgo residual del
@@ -608,11 +612,18 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
 - No uses `search_insumos_por_palabras` para las búsquedas del agente: OR con LIMIT 60
   sin orden (y N+1). `buscar_insumos` usa `list_insumos`, la búsqueda del buscador de la
   mesa.
-- No dejes que el chat agregue un código compartido (586 en el catálogo) sin mirar el
-  `nombre` que manda el agente: el alta (`autoria._componentes_de`) guarda
-  `get_candidatos(cod)[0]`, el de id menor, oculto o no. Pasa SOLO si el agente nombra
-  justo ese (`composicion_chat._motivo_compartido`); si no, se descarta diciendo qué se
-  guardaría. Bloquearlos todos dejaba sin HERRAMIENTA MENOR (6092, en 904 APUs) a cada
-  composición. El fix de raíz (que el nombre viaje hasta el alta) está pendiente.
+- No vuelvas a elegir la fila de un código por `get_candidatos(cod)[0]`. 652 códigos del
+  catálogo son de DOS insumos (la hoja `INSUMOS_IDU-INT` pega el listado de insumos y el
+  de ítems de obra del IDU, cada uno con su numeración). La fila la decide código +
+  nombre con `dominio/cruce.py::elegir` —la misma regla del costeo—, y el alta
+  (`autoria._componentes_de`) es el embudo: si el nombre no alcanza lanza
+  `CodigoCompartido` (422 con `conflictos`) y el ingeniero escoge en la fila (diálogo de
+  APU y mesa). En la composición el componente lleva `nombre` (tope propio de 1000: los
+  reales llegan a 830; el prompt de Componer es `composicion/v5`) y el validador emite
+  `CODIGO_COMPARTIDO`, que es error porque la persona lo destraba en la mesa escogiendo la
+  fila (pasa la prueba de arriba). El nombre que manda el agente o el cliente solo ESCOGE
+  la fila: lo que se guarda en el APU y se muestra es el del catálogo (el expediente sí
+  conserva el `nombre` que escribió el modelo o la persona). Pendiente conocido: los
+  sub-APU (`tipo="apu"`) siguen tomando `cands[0]` si su código choca con un insumo.
 - No cierres el bucle del chat con `tool_choice` forzado: los modelos nuevos lo rechazan
   con 400. El tope apaga las herramientas con `{"type": "none"}` sin sacarlas de `tools`.

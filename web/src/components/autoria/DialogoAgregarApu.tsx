@@ -15,7 +15,9 @@ import type {
   LineaComposicion,
   ApuResumen,
   ConflictoAlta,
+  OpcionInsumo,
 } from "@/lib/tipos";
+import { ErrorApi } from "@/api/client";
 import { crearApu, editarApu, listarApus, getGruposApu, conflictoApu } from "@/api/autoria";
 import { listarInsumos } from "@/api/insumos";
 import { baseDe, codigoSugerido, nombreEsDistinto, normalizarNombre } from "@/lib/duplicarApu";
@@ -26,6 +28,7 @@ import {
   hayRendimientoInvalido,
 } from "@/lib/validacionApu";
 import BuscadorApu from "@/components/corrida/BuscadorApu";
+import SelectorCompartido, { sinResolver } from "@/components/SelectorCompartido";
 import SubApuBadge from "@/components/SubApuBadge";
 
 interface DialogoAgregarApuProps {
@@ -126,6 +129,10 @@ export function DialogoAgregarApu({
   const [ocupados, setOcupados] = useState<string[]>([]);
   const [grupos, setGrupos] = useState<string[]>([]);
   const [conflicto, setConflicto] = useState<ConflictoAlta | null>(null);
+  // Códigos que el backend no pudo resolver (422 `conflictos`): código -> opciones.
+  // Se reemplaza en cada 422 y se limpia al cerrar; la fila muestra el selector mientras
+  // su nombre no coincida con ninguna opción (un código puede estar en varias filas).
+  const [dudas, setDudas] = useState<Record<string, OpcionInsumo[]>>({});
 
   // Precarga la cabecera y la composición desde `inicial`. La usan los tres modos:
   // `editar` y `duplicar` traen un APU de la biblioteca, y `crear` lo usa desde
@@ -280,12 +287,33 @@ export function DialogoAgregarApu({
       setOcupados([]);
       setGrupos([]);
       setConflicto(null);
+      setDudas({});
     }
     onOpenChange(v);
   }
 
   function setFila(uid: number, parcial: Partial<FilaComp>) {
     setFilas((prev) => prev.map((f) => (f.uid === uid ? { ...f, ...parcial } : f)));
+  }
+
+  async function elegirOpcion(uid: number, codigo: string, o: OpcionInsumo) {
+    // Sin precio hasta saber el de ESTA fila: dejar el de la otra (o el que traía) haría
+    // que el campo Costo recalcule el rendimiento con un precio equivocado.
+    setFila(uid, { insumo_nombre: o.nombre, unidad: o.unidad, precio: 0 });
+    // El 422 no trae dinero a propósito: el precio sale del listado. Ese listado no
+    // trae los insumos ocultos (el selector sí los ofrece) y puede fallar: en ambos
+    // casos la fila queda sin precio ("—"), nunca con uno inventado.
+    let precio = 0;
+    try {
+      const res = await listarInsumos({ q: codigo, limit: 15 });
+      precio = res.items.find((x) => x.codigo === codigo && x.nombre === o.nombre)?.precio ?? 0;
+    } catch {
+      /* queda en 0 */
+    }
+    // Guardia contra la carrera: solo si la fila sigue siendo esta elección.
+    setFilas((prev) => prev.map((f) => (
+      f.uid === uid && f.insumo_codigo === codigo && f.insumo_nombre === o.nombre
+        ? { ...f, precio } : f)));
   }
 
   function quitarFila(uid: number) {
@@ -351,6 +379,14 @@ export function DialogoAgregarApu({
       handleOpenChange(false);
       onCreado(cab.codigo.trim(), cab.turno);
     } catch (e: unknown) {
+      const det = e instanceof ErrorApi ? (e.detail as { conflictos?: unknown } | null) : null;
+      if (det && Array.isArray(det.conflictos)) {
+        const mapa: Record<string, OpcionInsumo[]> = {};
+        for (const c of det.conflictos as { codigo: string; opciones: OpcionInsumo[] }[]) {
+          mapa[c.codigo] = c.opciones;
+        }
+        setDudas(mapa);
+      }
       const msg = e instanceof Error ? e.message : "Error al guardar el APU";
       toast.error(msg);
       setGuardando(false);
@@ -525,6 +561,14 @@ export function DialogoAgregarApu({
                                 precio: apu.costo_unitario,
                               })
                             }
+                          />
+                        ) : dudas[f.insumo_codigo]
+                          && sinResolver(dudas[f.insumo_codigo], f.insumo_nombre) ? (
+                          <SelectorCompartido
+                            codigo={f.insumo_codigo}
+                            opciones={dudas[f.insumo_codigo]}
+                            valor={f.insumo_nombre}
+                            onElegir={(o) => elegirOpcion(f.uid, f.insumo_codigo, o)}
                           />
                         ) : (
                           <BuscadorInsumo

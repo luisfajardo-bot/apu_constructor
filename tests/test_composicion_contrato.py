@@ -206,3 +206,16 @@ def test_un_codigo_absurdamente_largo_se_acota_en_el_parseo():
                                     justificacion="J" * 10_000))
     assert len(p.componentes[0].codigo) == 40
     assert len(p.componentes[0].justificacion) == 500
+
+
+def test_el_nombre_viaja_y_no_se_recorta_a_500():
+    largo = "TUBERIA PVC " * 75                     # ~900 caracteres, como los reales
+    p = propuesta_desde_json({"componentes": [{"codigo": "7406", "nombre": largo,
+                                               "rendimiento": 1}]})
+    assert len(p.componentes[0].nombre) > 800
+    assert p.componentes[0].to_dict()["nombre"] == p.componentes[0].nombre
+
+
+def test_una_version_vieja_sin_nombre_sigue_cargando():
+    p = propuesta_desde_json({"componentes": [{"codigo": "4279", "rendimiento": 1}]})
+    assert p.componentes[0].nombre == ""

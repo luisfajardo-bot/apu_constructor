@@ -373,3 +373,95 @@ test("modo crear con inicial precarga la cabecera y abre con una fila en blanco"
   expect(screen.getByDisplayValue("PANTALLA ACUSTICA MODULAR")).toBeTruthy();
   expect(screen.getByDisplayValue("M2")).toBeTruthy();
 });
+
+// En un 422 real el nombre de la fila no resolvió: no coincide con ninguna opción.
+const inicialC1 = {
+  ...inicialDemo,
+  composicion: [{ ...inicialDemo.composicion[0], insumo_nombre: "CEMENTO GRIS" }],
+};
+
+test("un 422 de código compartido muestra el selector en la fila y reintenta", async () => {
+  const { ErrorApi } = await import("@/api/client");
+  const { editarApu } = await import("@/api/autoria");
+  const { listarInsumos } = await import("@/api/insumos");
+  const opciones = [
+    { nombre: "CEMENTO", unidad: "KG", oculto: false },
+    { nombre: "CEMENTO BLANCO", unidad: "BULTO", oculto: false },
+  ];
+  vi.mocked(editarApu)
+    .mockRejectedValueOnce(new ErrorApi("El código C1 es de varios insumos distintos", 422, {
+      mensaje: "El código C1 es de varios insumos distintos",
+      conflictos: [{ codigo: "C1", opciones }],
+    }))
+    .mockResolvedValueOnce({} as never);
+  vi.mocked(listarInsumos).mockResolvedValueOnce({
+    items: [{ id: 2, codigo: "C1", nombre: "CEMENTO BLANCO", unidad: "BULTO", grupo: "M",
+              precio: 3000, fuente: "", clasificacion: "", sin_precio: false }],
+    total: 1, limit: 15, offset: 0,
+  } as never);
+  render(<DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}}
+    modo="editar" inicial={inicialC1 as never} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Guardar cambios/ }));
+  const sel = await screen.findByLabelText("Insumo del código C1") as HTMLSelectElement;
+  fireEvent.change(sel, { target: { value: "1" } });
+  await waitFor(() => expect(screen.getByText("BULTO")).toBeTruthy());
+  // El precio de la otra fila (2000) se reemplaza por el de la elegida: 2 × 3000.
+  await waitFor(() => expect((screen.getByLabelText("Costo") as HTMLInputElement).value)
+    .toBe("6000"));
+  fireEvent.click(screen.getByRole("button", { name: /Guardar cambios/ }));
+  await waitFor(() => expect(vi.mocked(editarApu)).toHaveBeenLastCalledWith(
+    "100", "DIURNO", expect.objectContaining({
+      componentes: [expect.objectContaining({ insumo_codigo: "C1",
+                                              insumo_nombre: "CEMENTO BLANCO" })],
+    })));
+});
+
+const OPCIONES_C1 = [
+  { nombre: "CEMENTO", unidad: "KG", oculto: false },
+  { nombre: "CEMENTO BLANCO", unidad: "BULTO", oculto: true },
+];
+
+async function dispararConflicto(inicial: unknown) {
+  const { ErrorApi } = await import("@/api/client");
+  const { editarApu } = await import("@/api/autoria");
+  vi.mocked(editarApu).mockRejectedValueOnce(new ErrorApi("varios", 422, {
+    mensaje: "varios", conflictos: [{ codigo: "C1", opciones: OPCIONES_C1 }],
+  }));
+  render(<DialogoAgregarApu open onOpenChange={() => {}} onCreado={() => {}}
+    modo="editar" inicial={inicial as never} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Guardar cambios/ }));
+}
+
+test("escoger un insumo oculto (el listado no lo trae) deja la fila sin precio, no con el de la otra", async () => {
+  const { listarInsumos } = await import("@/api/insumos");
+  vi.mocked(listarInsumos).mockResolvedValueOnce(
+    { items: [], total: 0, limit: 15, offset: 0 } as never);
+  await dispararConflicto(inicialC1);
+  fireEvent.change(await screen.findByLabelText("Insumo del código C1"),
+                   { target: { value: "1" } });
+  await waitFor(() => expect(screen.getByText("BULTO")).toBeTruthy());
+  await waitFor(() => expect(screen.queryByLabelText("Costo")).toBeNull());
+  expect(screen.queryByText("$2.000")).toBeNull();
+});
+
+test("si el listado falla, la fila queda sin precio", async () => {
+  const { listarInsumos } = await import("@/api/insumos");
+  vi.mocked(listarInsumos).mockRejectedValueOnce(new Error("red"));
+  await dispararConflicto(inicialC1);
+  fireEvent.change(await screen.findByLabelText("Insumo del código C1"),
+                   { target: { value: "0" } });
+  await waitFor(() => expect(screen.queryByLabelText("Costo")).toBeNull());
+  expect(screen.queryByText("$2.000")).toBeNull();
+});
+
+test("un código en dos filas: escoger en una no apaga el selector de la otra", async () => {
+  const dosFilas = {
+    ...inicialC1,
+    composicion: [inicialC1.composicion[0], { ...inicialC1.composicion[0] }],
+  };
+  await dispararConflicto(dosFilas);
+  const sels = await screen.findAllByLabelText("Insumo del código C1");
+  expect(sels.length).toBe(2);
+  fireEvent.change(sels[0], { target: { value: "0" } });
+  await waitFor(() => expect(screen.getAllByLabelText("Insumo del código C1").length).toBe(1));
+});

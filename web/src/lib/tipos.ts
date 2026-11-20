@@ -94,6 +94,9 @@ export interface ComponentePropuesto {
   justificacion: string;
   nivel_evidencia: "alto" | "medio" | "bajo";
   ref_shift: string;
+  /** Nombre del insumo en el catálogo: un código puede ser de dos insumos. Ausente
+   *  o "" en las versiones viejas del expediente. */
+  nombre?: string;
 }
 
 export interface Hallazgo {
@@ -160,10 +163,19 @@ export interface ComposicionVersion {
   motivo: string | null;
 }
 
-export interface EntradaCatalogo {
+/** Una de las filas de un código compartido. Sin precio a propósito. */
+export interface OpcionInsumo {
   nombre: string;
   unidad: string;
+  oculto: boolean;
+}
+
+export interface EntradaCatalogo {
+  nombre: string;          // "" si el código es compartido y el nombre no dice cuál
+  unidad: string;
   grupo: string;
+  /** Solo si el código es de dos o más insumos: para que el ingeniero escoja. */
+  opciones?: OpcionInsumo[];
 }
 
 export interface VistaComposicion {

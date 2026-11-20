@@ -675,7 +675,7 @@ def test_mapas_de_componentes_devuelve_marcas_y_historico():
     ]
     previos, hist = autoria._mapas_de_componentes(comps)
     assert previos == {"100": ("insumo", ""), "200": ("apu", "NOCTURNO")}
-    assert hist == {"100": 900.0, "200": 48000.0}
+    assert hist == {("100", "CEMENTO GRIS"): 900.0, ("200", "ARENA"): 48000.0}
 
 
 def test_mapas_de_componentes_codigo_repetido_gana_el_de_tipo_apu():
@@ -687,7 +687,7 @@ def test_mapas_de_componentes_codigo_repetido_gana_el_de_tipo_apu():
     ]
     previos, hist = autoria._mapas_de_componentes(comps)
     assert previos["100"] == ("apu", "DIURNO")
-    assert hist["100"] == 700.0
+    assert hist[("100", "X")] == 700.0
 
 
 def test_componentes_de_hereda_el_historico_del_mapa(tmp_path):

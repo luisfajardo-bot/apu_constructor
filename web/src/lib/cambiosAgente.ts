@@ -35,7 +35,12 @@ export function aplicarCambios(
       if (i < 0) {
         conflictos.push(`${c.codigo} ya no estaba en la tabla: no se modificó.`);
       } else if (nuevo) {
-        out = out.map((x, j) => (j === i ? { ...nuevo, codigo: c.codigo } : x));
+        // El agente puede mandar el componente sin nombre (el chat no lo pide al
+        // modificar): se conserva el que la fila ya tenía, o un código compartido
+        // volvería a quedar sin escoger.
+        out = out.map((x, j) => (j === i
+          ? { ...nuevo, codigo: c.codigo, nombre: nuevo.nombre || x.nombre }
+          : x));
       }
     }
   }

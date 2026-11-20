@@ -84,7 +84,7 @@ def sin_saldo(exc: BaseException) -> bool:
 # Versión del prompt de composición. Se guarda con cada propuesta: sin esto, cuando el
 # modelo empiece a proponer distinto no hay forma de saber si cambió el modelo o el
 # prompt. Se sube A MANO al tocar `_SISTEMA_COMPOSICION` o `_ESQUEMA_COMPOSICION`.
-PROMPT_VERSION = "composicion/v4"
+PROMPT_VERSION = "composicion/v5"
 
 _SISTEMA_COMPOSICION = """\
 Eres un ingeniero de costos de obra civil. Te dan una ACTIVIDAD de licitación que no
@@ -98,6 +98,9 @@ Tu tarea: proponer la composición del APU y EXPLICAR cada componente.
 Reglas estrictas:
 - Usa ÚNICAMENTE códigos de la lista de insumos disponibles. Un código que no esté ahí
   se rechaza entero: no inventes ninguno.
+- En cada componente manda `nombre`: el nombre del insumo copiado TAL CUAL aparece en
+  la lista de insumos disponibles. Varios insumos distintos comparten código, y sin el
+  nombre la plataforma no sabe cuál quieres.
 - NUNCA recibirás precios ni costos, y no debes inventarlos ni pedirlos.
 - Los rendimientos son cantidades FÍSICAS por unidad de la actividad.
 - En `rendimientos_observados`, `descartados_otra_unidad` cuenta filas del mismo
@@ -149,6 +152,9 @@ _ESQUEMA_COMPOSICION = {
                 "type": "object",
                 "properties": {
                     "codigo": {"type": "string"},
+                    # Varios insumos comparten código (652 en el catálogo real): el
+                    # nombre es lo que le dice al alta cuál es.
+                    "nombre": {"type": "string"},
                     # En esta fase el enum es MÁS CORTO que el vocabulario del
                     # contrato, a propósito: la lista blanca solo lleva códigos de
                     # insumo (el retriever filtra los sub-APUs), así que `tipo="apu"`
@@ -201,9 +207,9 @@ _ESQUEMA_COMPOSICION = {
                     "nivel_evidencia": {"type": "string",
                                         "enum": list(NIVELES_EVIDENCIA)},
                 },
-                "required": ["codigo", "tipo", "funcion", "rendimiento", "origen",
-                             "referencias", "hipotesis", "calculo", "justificacion",
-                             "nivel_evidencia"],
+                "required": ["codigo", "nombre", "tipo", "funcion", "rendimiento",
+                             "origen", "referencias", "hipotesis", "calculo",
+                             "justificacion", "nivel_evidencia"],
                 "additionalProperties": False,
             },
         },
@@ -233,7 +239,7 @@ _ESQUEMA_COMPOSICION = {
 # El chat de la mesa de composición (`dominio/composicion_chat.py`). Misma puerta al
 # SDK que `componer`, misma traducción de errores; distinto contrato: una vuelta de
 # un bucle de tool use, que termina en `{texto, cambios}`.
-PROMPT_VERSION_CHAT = "chat/v4"   # se sube A MANO al tocar el prompt o los esquemas
+PROMPT_VERSION_CHAT = "chat/v5"   # se sube A MANO al tocar el prompt o los esquemas
 
 _SISTEMA_CHAT = """\
 Eres un ingeniero de costos de obra civil que ayuda a una persona a completar la
@@ -300,7 +306,7 @@ _ESQUEMA_CHAT = {
                 "properties": {
                     "op": {"type": "string", "enum": list(OPS_CHAT)},
                     "codigo": {"type": "string"},
-                    # Varios insumos comparten código (586 en el catálogo real): con
+                    # Varios insumos comparten código (652 en el catálogo real): con
                     # el nombre la plataforma sabe cuál quiso decir el agente.
                     "nombre": {"type": "string"},
                     "componente": {**_COMPONENTE_ESQUEMA,

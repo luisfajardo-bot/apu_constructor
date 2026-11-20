@@ -157,7 +157,7 @@ def test_busca_y_responde_con_los_eventos_en_orden(alm):
     assert resp["cambios"][0]["codigo"] == "7001"
     assert resp["cambios"][0]["componente"]["rendimiento"] == 0.1
     assert resp["catalogo"]["7001"]["nombre"] == "OFICIAL SOLDADOR CERTIFICADO"
-    assert resp["prompt_version"] == "chat/v4" and resp["modelo"] == "falso"
+    assert resp["prompt_version"] == "chat/v5" and resp["modelo"] == "falso"
     # la segunda vuelta lleva el resultado de la herramienta, sin precios
     resultado = a.llamadas[1]["mensajes"][-1]["content"][0]
     assert resultado["type"] == "tool_result" and resultado["tool_use_id"] == "t0"
@@ -197,11 +197,9 @@ def test_respeta_el_tope_de_busquedas(alm):
     assert evs[-1][0] == "respuesta"
 
 
-def test_descarta_un_alta_con_codigo_compartido_por_dos_insumos(alm):
-    """Smoke real 2026-11-19: el agente propuso «7406 SEÑAL VERTICAL SR 90x30» y la
-    tabla mostró «7406 REDUCCION HD 12x10»: el código es de los dos insumos y la
-    plataforma tomó el primero. Por código no se pueden distinguir: se descarta y se
-    dicen los dos nombres."""
+def test_un_codigo_compartido_entra_con_el_nombre_que_dice_el_agente(alm):
+    """Smoke 2026-11-19: el agente propuso «7406 SEÑAL VERTICAL» y la tabla mostró la
+    REDUCCION. Ahora el alta elige por nombre, así que la señal entra como señal."""
     alm.precios.insert_insumos([
         Insumo("8001", "REDUCCION HD E.L. D=12 x 10", "UN", "ACCESORIOS", 1000,
                "PRECIO IDU"),
@@ -210,22 +208,15 @@ def test_descarta_un_alta_con_codigo_compartido_por_dos_insumos(alm):
     ])
     a = AdvisorGuion([resp_final("Te agrego la señal.", [
         {"op": "agregar", "codigo": "8001", "nombre": "SEÑAL VERTICAL SR 90X30 INCLUYE POSTE",
-         "componente": componente("8001")},
-        {"op": "agregar", "codigo": "6092", "nombre": "HERRAMIENTA MENOR",
-         "componente": componente("6092")},
-    ])])
+         "componente": componente("8001")}])])
     resp = correr(alm, a, charla("agrega la señal"))[-1][1]
-    assert [c["codigo"] for c in resp["cambios"]] == ["6092"]
-    (d,) = resp["descartados"]
-    # El alta guardaría la REDUCCION (id menor): se dice qué se guardaría.
-    assert d["codigo"] == "8001" and "se guardaría como" in d["motivo"]
-    assert "REDUCCION" in d["motivo"] and "SEÑAL VERTICAL" in d["motivo"]
+    (c,) = resp["cambios"]
+    assert c["componente"]["nombre"] == "SEÑAL VERTICAL SR 90X30 INCLUYE POSTE"
+    assert resp["catalogo"]["8001"]["nombre"] == "SEÑAL VERTICAL SR 90X30 INCLUYE POSTE"
+    assert resp["descartados"] == []
 
 
-def test_un_codigo_compartido_pasa_si_el_agente_quiere_el_que_guarda_el_alta(alm):
-    """Smoke #3: el candado bloqueaba 6092 HERRAMIENTA MENOR (904 APUs) porque el
-    código también es «RELOCALIZACIÓN DE MEDIDOR…». Pero el alta guarda el de id
-    menor, que ES la herramienta: mesa, expediente y APU dicen lo mismo."""
+def test_el_nombre_guardado_es_el_del_catalogo_no_el_del_agente(alm):
     alm.precios.insert_insumos([
         Insumo("8001", "REDUCCION HD E.L. D=12 x 10", "UN", "ACCESORIOS", 1000,
                "PRECIO IDU"),
@@ -236,12 +227,10 @@ def test_un_codigo_compartido_pasa_si_el_agente_quiere_el_que_guarda_el_alta(alm
         {"op": "agregar", "codigo": "8001", "nombre": "REDUCCION HD E.L. D=12\" x 10\"",
          "componente": componente("8001")}])])
     resp = correr(alm, a, charla("agrega la reducción"))[-1][1]
-    assert [c["codigo"] for c in resp["cambios"]] == ["8001"]
-    assert resp["catalogo"]["8001"]["nombre"] == "REDUCCION HD E.L. D=12 x 10"
-    assert resp["descartados"] == []
+    assert resp["cambios"][0]["componente"]["nombre"] == "REDUCCION HD E.L. D=12 x 10"
 
 
-def test_un_codigo_compartido_sin_nombre_se_descarta(alm):
+def test_un_codigo_compartido_sin_nombre_entra_y_lo_escoge_el_ingeniero(alm):
     alm.precios.insert_insumos([
         Insumo("8001", "REDUCCION HD E.L. D=12 x 10", "UN", "ACCESORIOS", 1000,
                "PRECIO IDU"),
@@ -250,8 +239,11 @@ def test_un_codigo_compartido_sin_nombre_se_descarta(alm):
     ])
     a = AdvisorGuion([resp_final("Ahí va.", [
         {"op": "agregar", "codigo": "8001", "componente": componente("8001")}])])
-    (d,) = correr(alm, a, charla("agrega el 8001"))[-1][1]["descartados"]
-    assert "no dijo cuál" in d["motivo"]
+    resp = correr(alm, a, charla("agrega el 8001"))[-1][1]
+    (c,) = resp["cambios"]
+    assert c["componente"]["nombre"] == ""
+    assert len(resp["catalogo"]["8001"]["opciones"]) == 2
+    assert "precio" not in str(resp["catalogo"]["8001"])
 
 
 def test_descarta_codigos_inexistentes_y_ocultos(alm):
@@ -321,11 +313,7 @@ def test_la_privacy_violation_dentro_del_bucle_sube(alm, monkeypatch):
         correr(alm, a, charla("busca un soldador"))
 
 
-def test_un_alta_cuyo_homonimo_oculto_va_primero_se_descarta(alm):
-    """Dos insumos con el mismo código y el de id menor OCULTO. Antes se aceptaba
-    mostrando el nombre del visible, pero el alta (`get_candidatos(cod)[0]`, que no
-    filtra ocultos) guardaría el OCULTO: la mesa y el APU dirían otra cosa que el chat.
-    Se descarta diciendo qué se guardaría."""
+def test_un_alta_con_homonimo_oculto_entra_si_nombra_el_visible(alm):
     alm.precios.insert_insumos([
         Insumo("8000", "NOMBRE VIEJO OCULTO", "UN", "EQ", 10, "COSTO INTERNO"),
         Insumo("8000", "NOMBRE VISIBLE", "UN", "EQ", 10, "COSTO INTERNO"),
@@ -335,19 +323,93 @@ def test_un_alta_cuyo_homonimo_oculto_va_primero_se_descarta(alm):
         {"op": "agregar", "codigo": "8000", "nombre": "NOMBRE VISIBLE",
          "componente": componente("8000")}])])
     resp = correr(alm, a, charla("agrega el 8000"))[-1][1]
-    assert resp["cambios"] == []
-    (d,) = resp["descartados"]
-    assert "se guardaría como «NOMBRE VIEJO OCULTO»" in d["motivo"]
+    assert resp["cambios"][0]["componente"]["nombre"] == "NOMBRE VISIBLE"
 
 
-def test_las_altas_repetidas_consultan_la_visibilidad_una_vez_por_codigo(alm, monkeypatch):
+def test_un_alta_que_nombra_el_oculto_se_descarta(alm):
+    alm.precios.insert_insumos([
+        Insumo("8000", "NOMBRE VIEJO OCULTO", "UN", "EQ", 10, "COSTO INTERNO"),
+        Insumo("8000", "NOMBRE VISIBLE", "UN", "EQ", 10, "COSTO INTERNO"),
+    ])
+    alm.precios.set_oculto(alm.precios.search_insumos("NOMBRE VIEJO OCULTO")[0].id, True)
+    a = AdvisorGuion([resp_final("Ahí va.", [
+        {"op": "agregar", "codigo": "8000", "nombre": "NOMBRE VIEJO OCULTO",
+         "componente": componente("8000")}])])
+    resp = correr(alm, a, charla("agrega el 8000"))[-1][1]
+    assert resp["cambios"] == [] and "oculto" in resp["descartados"][0]["motivo"]
+
+
+def test_la_respuesta_consulta_el_catalogo_una_sola_vez(alm, monkeypatch):
+    """UNA consulta por respuesta, no una por cambio. Se llama a `_respuesta` directo
+    para no contar la consulta del contexto de la mesa."""
+    from apu_tool.dominio import composicion_chat
     llamadas = []
-    original = alm.precios.identidades_en_conflicto
-    monkeypatch.setattr(alm.precios, "identidades_en_conflicto",
-                        lambda c, n: llamadas.append(c) or original(c, n))
-    a = AdvisorGuion([resp_final("Ok.", [
+    original = alm.precios.get_candidatos_bulk
+    monkeypatch.setattr(alm.precios, "get_candidatos_bulk",
+                        lambda cods, *a, **k: llamadas.append(list(cods)) or original(cods, *a, **k))
+    composicion_chat._respuesta(alm, {"texto": "Ok.", "cambios": [
         {"op": "agregar", "codigo": "6092", "componente": componente("6092")},
         {"op": "agregar", "codigo": "6092", "componente": componente("6092", 2.0)},
-    ])])
-    correr(alm, a, charla("agrega"))
-    assert llamadas == ["6092"]
+    ]}, "m")
+    assert llamadas == [["6092"]]
+
+
+def _dos_8001(alm):
+    alm.precios.insert_insumos([
+        Insumo("8001", "REDUCCION HD E.L. D=12 x 10", "UN", "ACCESORIOS", 1000,
+               "PRECIO IDU"),
+        Insumo("8001", "SEÑAL VERTICAL SR 90X30 INCLUYE POSTE", "UN", "SEÑALIZACION",
+               2000, "PRECIO IDU"),
+    ])
+
+
+SENAL = "SEÑAL VERTICAL SR 90X30 INCLUYE POSTE"
+
+
+def test_un_modificar_sin_nombre_conserva_la_fila_que_ya_escogio_la_mesa(alm):
+    """Defensa del servidor: el agente cambia el rendimiento y no repite el nombre; el
+    componente no puede volver a quedar sin nombre (y la persona a escoger de nuevo)."""
+    _dos_8001(alm)
+    mesa = [dict(componente("8001"), nombre=SENAL)]
+    a = AdvisorGuion([resp_final("Ajustado.", [
+        {"op": "modificar", "codigo": "8001", "componente": componente("8001", 3.0)}])])
+    resp = correr(alm, a, charla("sube el rendimiento"), tabla=mesa)[-1][1]
+    (c,) = resp["cambios"]
+    assert c["componente"]["nombre"] == SENAL and c["componente"]["rendimiento"] == 3.0
+
+
+def test_un_modificar_hereda_el_nombre_del_catalogo_no_el_texto_del_cliente(alm):
+    """El nombre de la mesa lo manda el cliente (texto libre): solo sirve para ESCOGER
+    la fila; lo que se guarda es el del catálogo."""
+    _dos_8001(alm)
+    mesa = [dict(componente("8001"), nombre="señal vertical sr 90x30 incluye poste")]
+    a = AdvisorGuion([resp_final("Ok.", [
+        {"op": "modificar", "codigo": "8001", "componente": componente("8001", 3.0)}])])
+    (c,) = correr(alm, a, charla("sube"), tabla=mesa)[-1][1]["cambios"]
+    assert c["componente"]["nombre"] == SENAL
+
+
+def test_un_modificar_con_mesa_sin_nombre_sigue_sin_nombre(alm):
+    _dos_8001(alm)
+    a = AdvisorGuion([resp_final("Ok.", [
+        {"op": "modificar", "codigo": "8001", "componente": componente("8001", 3.0)}])])
+    (c,) = correr(alm, a, charla("sube"), tabla=[componente("8001")])[-1][1]["cambios"]
+    assert c["componente"]["nombre"] == ""
+
+
+def test_el_contexto_del_agente_muestra_la_fila_que_nombra_el_componente(alm):
+    """`_catalogo` resuelve con el nombre del componente: sin eso, un código compartido
+    le llegaba al agente con el nombre de la primera fila."""
+    _dos_8001(alm)
+    a = AdvisorGuion([resp_final()])
+    correr(alm, a, charla("¿qué le falta?"), tabla=[dict(componente("8001"), nombre=SENAL)])
+    contexto = a.llamadas[0]["mensajes"][-1]["content"][0]["text"]
+    assert SENAL in contexto and "REDUCCION" not in contexto
+
+
+def test_catalogo_trae_la_ficha_de_la_fila_que_dice_el_nombre(alm):
+    from apu_tool.dominio import composicion_chat
+    _dos_8001(alm)
+    f = composicion_chat._catalogo(alm, [dict(componente("8001"), nombre=SENAL)])["8001"]
+    assert f["nombre"] == SENAL and f["unidad"] == "UN" and f["grupo"] == "SEÑALIZACION"
+    assert len(f["opciones"]) == 2 and "precio" not in str(f)

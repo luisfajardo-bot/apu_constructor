@@ -419,6 +419,8 @@ def _composicion_o_error(llamada):
                             detail="La corrida está congelada; actívala para modificar.")
     except VersionYaExiste as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except autoria.CodigoCompartido as e:
+        raise _http_codigo_compartido(e)
     except (composicion_svc.ComposicionInvalida, ValueError) as e:
         raise HTTPException(status_code=422, detail=str(e))
     if v is None:
@@ -1037,11 +1039,20 @@ def conflicto_apu(codigo: str = "", turno: str = "", nombre: str = "",
     return {"campo": d[0] if d else None, "motivo": d[1] if d else None}
 
 
+def _http_codigo_compartido(e: autoria.CodigoCompartido) -> HTTPException:
+    """422 con las opciones: la web las muestra en la fila para que el ingeniero
+    escoja. `detail.mensaje` es lo que ya lee `mensajeDeError` del cliente."""
+    return HTTPException(status_code=422,
+                         detail={"mensaje": str(e), "conflictos": e.conflictos})
+
+
 @router.post("/apus/crear")
 def crear_apu(body: ApuNuevoIn, alm: Almacen = Depends(get_almacen),
              actor=Depends(requiere_rol("editor"))):
     try:
         return autoria.crear_apu(alm, body.model_dump(), actor=actor)
+    except autoria.CodigoCompartido as e:
+        raise _http_codigo_compartido(e)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1094,6 +1105,8 @@ def editar_apu(codigo: str, turno: str, body: ApuEditIn,
                actor=Depends(requiere_rol("editor"))):
     try:
         r = autoria.editar_apu(alm, codigo, turno, body.model_dump(), actor=actor)
+    except autoria.CodigoCompartido as e:
+        raise _http_codigo_compartido(e)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if r is None:

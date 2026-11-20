@@ -204,3 +204,12 @@ def test_una_respuesta_sin_bloque_de_texto_da_propuesta_vacia():
             return SimpleNamespace(content=[SimpleNamespace(type="thinking")])
 
     assert SinTexto("").componer(ITEM, INSUMOS, EJEMPLOS, OBS).componentes == ()
+
+
+def test_el_esquema_de_componer_pide_el_nombre_del_insumo():
+    from apu_tool.dominio import ai_assist
+    item = ai_assist._ESQUEMA_COMPOSICION["properties"]["componentes"]["items"]
+    assert item["properties"]["nombre"] == {"type": "string"}
+    assert "nombre" in item["required"]
+    assert ai_assist.PROMPT_VERSION == "composicion/v5"
+    assert "`nombre`" in ai_assist._SISTEMA_COMPOSICION

@@ -50,3 +50,11 @@ test("no muta la lista de entrada", () => {
   aplicarCambios(actuales, [{ op: "quitar", codigo: "A", componente: null }]);
   expect(actuales).toHaveLength(1);
 });
+
+test("modificar sin nombre conserva el nombre que ya tenía la fila", () => {
+  const base = { ...comp("6092"), nombre: "HERRAMIENTA MENOR" };
+  const r = aplicarCambios([base], [
+    { op: "modificar", codigo: "6092", componente: { ...base, rendimiento: 2, nombre: "" } },
+  ]);
+  expect(r.componentes[0]).toMatchObject({ rendimiento: 2, nombre: "HERRAMIENTA MENOR" });
+});

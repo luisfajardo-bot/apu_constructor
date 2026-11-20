@@ -23,6 +23,7 @@ import openpyxl
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.datos.seed import _read_apus
+from apu_tool.dominio import cruce
 from apu_tool.nucleo.models import Apu, ApuComponent, Insumo
 from apu_tool.nucleo.relevancia import similarity
 from apu_tool.nucleo.texto import normalizar
@@ -192,25 +193,69 @@ def crear_insumo(alm: Almacen, datos: dict, actor=None, lista_id: Optional[int] 
     return _insumo_out(alm.precios.get_insumo_por_id(iid, lista_id=lista_id))
 
 
+class CodigoCompartido(ValueError):
+    """Uno o más componentes citan un código que es de varios insumos del catálogo y
+    el nombre no dice cuál. No se escribe nada: el ingeniero escoge en la fila.
+
+    `conflictos` = [{"codigo", "opciones": [{"nombre", "unidad", "oculto"}]}], sin
+    dinero (sale por la API). Es `ValueError` para que los llamadores que ya atrapan
+    `ValueError` no se rompan; las rutas la atrapan ANTES para responder 422 con las
+    opciones."""
+
+    def __init__(self, conflictos: list[dict]):
+        cods = ", ".join(c["codigo"] for c in conflictos)
+        super().__init__(
+            f"El código {cods} es de varios insumos distintos: escoge cuál va en la fila."
+            if len(conflictos) == 1 else
+            f"Los códigos {cods} son de varios insumos distintos: escoge cuál va en cada fila.")
+        self.conflictos = conflictos
+
+
 def _mapas_de_componentes(
     comps: list[ApuComponent],
-) -> tuple[dict[str, tuple[str, str]], dict[str, float]]:
-    """Marcas y precio histórico de una composición existente, por código de insumo.
+) -> tuple[dict[str, tuple[str, str]], dict[tuple[str, str], float]]:
+    """Marcas y precio histórico de una composición existente.
 
-    - `previos`: (tipo, ref_shift), para preservar la marca de sub-APU cuando el
-      componente entrante no trae `tipo` explícito (invariante de FIX 1).
-    - `hist`: `precio_unitario_hist`, para que duplicar o editar un APU no destruya
-      el respaldo histórico de los componentes que siguen siendo los mismos.
+    - `previos`, por código de insumo: (tipo, ref_shift), para preservar la marca de
+      sub-APU cuando el componente entrante no trae `tipo` explícito (invariante de FIX 1).
+    - `hist`, por (código, nombre normalizado): `precio_unitario_hist`, para que duplicar
+      o editar un APU no destruya el respaldo histórico de los componentes que siguen
+      siendo los mismos. Es por código + nombre porque un código puede ser de dos
+      insumos y el selector deja cambiar de fila dentro del mismo código: heredar el
+      histórico de la otra sería un respaldo con el precio de otro insumo.
 
     Si un código se repite, gana la primera aparición salvo que otra sea de
     `tipo == "apu"` (la regla que ya aplicaba `editar_apu` para las marcas)."""
     previos: dict[str, tuple[str, str]] = {}
-    hist: dict[str, float] = {}
+    hist: dict[tuple[str, str], float] = {}
     for c in comps:
         if c.insumo_codigo not in previos or c.tipo == "apu":
             previos[c.insumo_codigo] = (c.tipo, c.ref_shift)
-            hist[c.insumo_codigo] = c.precio_unitario_hist
+        clave = (c.insumo_codigo, normalizar(c.insumo_nombre))
+        if clave not in hist or c.tipo == "apu":
+            hist[clave] = c.precio_unitario_hist
     return previos, hist
+
+
+def _hist_de(hist: dict, cod: str, nombre: str, compartido: bool,
+             nombre_in: str = "") -> float:
+    """El histórico heredado para (código, nombre). Un código NO compartido cae al
+    respaldo por código (el contrato viejo: hay llamadores que pasan `{codigo: valor}`);
+    uno compartido NO, porque sería el histórico de otro insumo.
+
+    `nombre` es el canónico de la fila elegida; `nombre_in`, el que llegó. Si el que
+    llegó era una variante APROXIMADA, el histórico quedó guardado con ese nombre: un
+    `nombre_in` que resolvió a ESTA fila habla del mismo insumo, así que se prueba
+    también."""
+    h = hist.get((cod, normalizar(nombre)))
+    if h is None and nombre_in:
+        h = hist.get((cod, normalizar(nombre_in)))
+    if h is None and not compartido:
+        h = hist.get(cod)
+        if h is None:
+            h = next((v for k, v in hist.items()
+                      if isinstance(k, tuple) and k[0] == cod), None)
+    return max(PISO_HIST, h or 0.0)
 
 
 def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str,
@@ -222,12 +267,17 @@ def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str,
     preservarlas al editar cuando el componente entrante no trae `tipo` explícito
     (invariante de FIX 1: editar un APU no debe borrar las marcas de sub-APU).
 
-    `hist` (opcional): precio histórico de respaldo por código, del APU de origen
-    (duplicado) o del propio APU (edición). Lo que no está ahí no tiene histórico
-    que heredar y queda en `PISO_HIST`: nunca en 0 (regla "nada en $0")."""
+    `hist` (opcional): precio histórico de respaldo por (código, nombre normalizado), del
+    APU de origen (duplicado) o del propio APU (edición). Lo que no está ahí no tiene
+    histórico que heredar y queda en `PISO_HIST`: nunca en 0 (regla "nada en $0").
+
+    Un código que es de dos o más insumos se resuelve por NOMBRE (`cruce.elegir_fila`);
+    si el nombre no alcanza se junta la duda y, al final, se lanza `CodigoCompartido`
+    sin haber escrito nada."""
     previos = previos or {}
     hist = hist or {}
     comps: list[ApuComponent] = []
+    dudas: list[dict] = []
     for c in comp_dicts:
         cod = str(c.get("insumo_codigo", "") or "").strip()
         rend = _to_float(c.get("rendimiento"))
@@ -235,14 +285,6 @@ def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str,
             raise ValueError("Cada componente necesita un código de insumo.")
         if rend <= 0:
             raise ValueError(f"El rendimiento del insumo {cod} debe ser mayor que 0.")
-        # Resuelve nombre/unidad desde la base si el insumo existe (respaldo embebido);
-        # si no existe, se guarda lo que venga (enlace blando -> cruce huérfano al costear).
-        cands = alm.precios.get_candidatos(cod)
-        if cands:
-            nombre, unidad = cands[0].nombre, cands[0].unidad
-        else:
-            nombre = str(c.get("insumo_nombre", "") or "")
-            unidad = str(c.get("unidad", "") or "")
         tipo_in = c.get("tipo")
         if tipo_in:
             tipo, ref_shift = str(tipo_in), str(c.get("ref_shift", "") or "")
@@ -250,11 +292,32 @@ def _componentes_de(alm: Almacen, comp_dicts: list[dict], shift: str,
             tipo, ref_shift = previos[cod]
         else:
             tipo, ref_shift = "insumo", ""
+        nombre_in = str(c.get("insumo_nombre", "") or "")
+        cands = alm.precios.get_candidatos(cod)
+        compartido = tipo != "apu" and len(cands) > 1
+        if compartido:
+            # Código de dos o más insumos: la fila la decide el NOMBRE (la misma regla
+            # con la que se costea). Antes se guardaba `cands[0]` y se perdía el insumo
+            # que la persona había elegido, sin alerta (caso 4506 / 7406).
+            fila = cruce.elegir_fila(cands, nombre_in)
+            if fila is None:
+                dudas.append({"codigo": cod, "opciones": cruce.opciones(cands)})
+                continue
+            nombre, unidad = fila.nombre, fila.unidad
+        elif cands:
+            # Un solo insumo (o un sub-APU): como siempre, nombre/unidad del catálogo.
+            nombre, unidad = cands[0].nombre, cands[0].unidad
+        else:
+            # No existe: se guarda lo que venga (enlace blando -> cruce huérfano al costear).
+            nombre = nombre_in
+            unidad = str(c.get("unidad", "") or "")
         comps.append(ApuComponent(
             apu_codigo="", shift=shift, insumo_codigo=cod, insumo_nombre=nombre,
             unidad=unidad, rendimiento=rend,
-            precio_unitario_hist=max(PISO_HIST, hist.get(cod, 0.0)),
+            precio_unitario_hist=_hist_de(hist, cod, nombre, compartido, nombre_in),
             tipo=tipo, ref_shift=ref_shift))
+    if dudas:
+        raise CodigoCompartido(dudas)
     return comps
 
 

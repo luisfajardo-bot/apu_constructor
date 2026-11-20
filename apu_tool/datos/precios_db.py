@@ -319,10 +319,11 @@ class PreciosDB:
         return Insumo(codigo=r["codigo"], nombre=r["nombre"], unidad=r["unidad"] or "",
                       grupo=r["grupo"] or "", precio=r["precio"] or 0.0,
                       fuente_precio=r["fuente"] or "", id=r["id"],
-                      sin_precio=r["precio"] is None)
+                      sin_precio=r["precio"] is None,
+                      oculto=bool(r["oculto"]))
 
     _SELECT_INSUMO = (
-        "SELECT i.id, i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente "
+        "SELECT i.id, i.codigo, i.nombre, i.unidad, i.grupo, i.oculto, p.precio, p.fuente "
         "FROM insumos i LEFT JOIN insumo_precios p "
         "  ON p.insumo_id = i.id AND p.vigente = 1 AND p.lista_id = ? ")
 
@@ -421,7 +422,7 @@ class PreciosDB:
                 f"(p.fuente IS NULL OR UPPER(p.fuente) NOT IN ({placeholders})))")
             params += [s.upper() for s in config.PUBLIC_PRICE_SOURCES]
         wsql = (" WHERE " + " AND ".join(where)) if where else ""
-        campos = "i.id, i.codigo, i.nombre, i.unidad, i.grupo, p.precio, p.fuente"
+        campos = "i.id, i.codigo, i.nombre, i.unidad, i.grupo, i.oculto, p.precio, p.fuente"
         with self.connect() as conn:
             total = conn.execute(f"SELECT COUNT(*) {base}{wsql}", params).fetchone()[0]
             if q and int(total) <= relevancia.MAX_RANKEO:

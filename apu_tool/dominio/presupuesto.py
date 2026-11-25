@@ -13,9 +13,10 @@ normalizado (`elegir_hoja`) y las columnas se mapean por su encabezado
 (`encontrar_encabezado`), porque las letras de Excel cambian entre pliegos y los
 encabezados no.
 
-El precio contractual es el **valor unitario CON AIU**, que es el que concilia con el
-`VALOR TOTAL` y con los `Subtotal` del propio Excel; el básico sin AIU viaja aparte en
-`precio_contractual_sin_aiu`.
+El precio contractual es el **valor unitario BÁSICO, sin AIU** (desde `idu-f1/2`): el
+mismo valor va en `precio_contractual` y en `precio_contractual_sin_aiu`. La columna
+«incluye AIU» se lee SOLO para verificar contra el `VALOR TOTAL` y los `Subtotal` del
+Excel, que son con AIU, y se descarta: ningún campo la lleva.
 
 `leer_formulario_idu` NUNCA levanta por un problema de contenido: los errores
 bloqueantes y las advertencias viajan dentro de `LecturaPresupuesto`. Es deliberado — el
@@ -309,7 +310,10 @@ def encontrar_encabezado(filas: list[list]) -> tuple[int, dict[str, int], list[s
     return -1, {}, sorted(COLUMNAS_OBLIGATORIAS)
 
 
-PARSER_VERSION = "idu-f1/1"
+# idu-f1/1: el contractual era el valor CON AIU. idu-f1/2 (2026-11-25): es el básico sin
+# AIU. Va a `corrida.origen_json` y es lo único que distingue una corrida vieja de una
+# nueva: no hay migración.
+PARSER_VERSION = "idu-f1/2"
 
 
 @dataclass(frozen=True)
@@ -410,6 +414,9 @@ class _Recorrido:
         self.capitulos: list[Capitulo] = []
         self.subtotales: list[int] = []
         self.ignoradas = 0
+        # Suma de cantidad × «incluye AIU». SOLO para verificar contra los subtotales
+        # del Excel (`conciliacion`); no sale de esta clase.
+        self._total_con_aiu = 0
         self._cap: Optional[Capitulo] = None
         self._con_actividades: set[str] = set()
         self._vistos: set[tuple] = set()
@@ -496,10 +503,13 @@ class _Recorrido:
         if clave in self._vistos:
             self._duplicados.append(item_pago)
         self._vistos.add(clave)
+        # El VALOR TOTAL del Excel es cantidad × «incluye AIU»: con esa columna se
+        # verifica la fila, y después se descarta. Lo que entra al ítem es el básico.
         con_aiu = _to_float(_val(fila, m.get("unitario_con_aiu")))
-        sin_aiu = _to_float(_val(fila, m.get("unitario_sin_aiu")))
+        basico = _to_float(_val(fila, m.get("unitario_sin_aiu")))
         total_excel = _a_entero(_val(fila, m.get("total_excel")))
         recalculado = mul_redondeado(con_aiu, float(cantidad))
+        self._total_con_aiu += recalculado
         if total_excel and recalculado != total_excel:
             self.avisos.append(Advertencia(
                 "total_fila_no_concilia", n,
@@ -509,8 +519,10 @@ class _Recorrido:
             descripcion=desc,
             unidad=unidad,
             cantidad=float(cantidad),
-            precio_contractual=con_aiu,
-            precio_contractual_sin_aiu=sin_aiu,
+            precio_contractual=basico,
+            # El mismo valor: el campo se mantiene para que las corridas viejas
+            # (idu-f1/1, contractual CON AIU) se sigan leyendo igual.
+            precio_contractual_sin_aiu=basico,
             shift=self.shift,
             categoria=(f"{cap.codigo} · {cap.nombre}" if cap else ""),
             capitulo_codigo=(cap.codigo if cap else ""),
@@ -534,8 +546,8 @@ class _Recorrido:
                         f"descripción y turno: {', '.join(self._duplicados[:10])}.")
         sin_precio = [i.item for i in self.items if not (i.precio_contractual > 0)]
         if sin_precio:
-            errs.append("sin_contractual: estas actividades no traen valor unitario con "
-                        f"AIU legible: {', '.join(sin_precio[:10])}.")
+            errs.append("sin_contractual: estas actividades no traen valor unitario "
+                        f"básico (sin AIU) legible: {', '.join(sin_precio[:10])}.")
         total = self._contractual(self.items)
         por_capitulo = sum(
             self._contractual([i for i in self.items if i.capitulo_codigo == c.codigo])
@@ -548,18 +560,24 @@ class _Recorrido:
         return errs
 
     def conciliacion(self) -> dict:
-        con = self._contractual(self.items)
-        sin = sum(mul_redondeado(i.precio_contractual_sin_aiu, i.cantidad)
-                  for i in self.items)
+        """La verificación contra el Excel, y lo único de ella que se guarda.
+
+        Los `Subtotal` del Formulario 1 suman cantidad × «incluye AIU», así que se
+        comparan contra esa suma (`_total_con_aiu`). Esa suma NO se devuelve: el dict
+        va a `origen_json`, y ahí solo queda el contractual sin AIU, si cuadró y la
+        diferencia en pesos si no.
+        """
         suma_sub = sum(self.subtotales)
-        if self.subtotales and suma_sub != con:
+        con_aiu = self._total_con_aiu
+        ok = (not self.subtotales) or suma_sub == con_aiu
+        if not ok:
             self.avisos.append(Advertencia(
                 "subtotal_no_concilia", 0,
-                f"Los subtotales del Excel suman {suma_sub:,} y las actividades {con:,}."))
-        return {"contractual_con_aiu": con, "contractual_sin_aiu": sin,
-                "subtotales_excel": suma_sub,
-                "diferencia": (suma_sub - con) if self.subtotales else 0,
-                "subtotales_ok": (not self.subtotales) or suma_sub == con}
+                f"Los subtotales del Excel suman {suma_sub:,} y las actividades "
+                f"{con_aiu:,} (con AIU, como el Excel)."))
+        return {"contractual": self._contractual(self.items),
+                "subtotales_ok": ok,
+                "diferencia": (suma_sub - con_aiu) if self.subtotales else 0}
 
 
 def _to_float(v) -> float:
@@ -629,9 +647,9 @@ def read_presupuesto(path: Path | str, hoja: str = "",
     (la CLI la pasa con `--hoja`) y `_HOJAS_CANDIDATAS` ya la cubre por el fragmento
     `ppto oficial`, así que un archivo con `FOR 1-PPTO OFICIAL` se detecta igual.
 
-    OJO: el `precio_contractual` que devuelve ahora es el valor unitario CON AIU (la
-    columna que concilia con el VALOR TOTAL del Excel), no el básico sin AIU que usaba
-    la versión anterior. El básico viaja aparte, en `precio_contractual_sin_aiu`.
+    OJO: el `precio_contractual` que devuelve es el valor unitario BÁSICO, sin AIU
+    (lector `idu-f1/2`), y `precio_contractual_sin_aiu` trae el mismo valor. El valor
+    con AIU solo se usa para verificar el archivo contra el Excel y no se devuelve.
     """
     lectura = leer_formulario_idu(path, hoja=hoja or None,
                                   default_shift=default_shift)
@@ -719,8 +737,8 @@ def leer_formulario_idu(path: Path | str, hoja: Optional[str] = None,
         avisos.append(Advertencia(
             "oferta_diligenciada", 0,
             f"{con_oferta} fila(s) traen valores en las columnas de oferta o corrección. "
-            f"Esta versión NO las lee: el contractual sale del valor unitario oficial "
-            f"con AIU."))
+            f"Esta versión NO las lee: el contractual sale del valor unitario básico "
+            f"oficial (sin AIU)."))
 
     ctx = _Recorrido(mapeo, default_shift, avisos)
     for n, fila in enumerate(filas[idx_enc + 1:], start=idx_enc + 2):

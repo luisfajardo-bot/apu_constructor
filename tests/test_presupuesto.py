@@ -68,9 +68,9 @@ def test_read_presupuesto_items_y_herencia(tmp_path):
     assert exc.descripcion == "EXCAVACION MANUAL PARA RED"
     assert exc.unidad == "M3"
     assert exc.cantidad == 6445
-    # El contractual de la ruta IDU es el valor unitario CON AIU (col [10]), que es
-    # el que concilia con el VALOR TOTAL del Excel. El basico sin AIU viaja aparte.
-    assert exc.precio_contractual == 67153
+    # Desde idu-f1/2 el contractual de la ruta IDU es el básico SIN AIU (col [9]);
+    # la col [10] (con AIU) solo se usa para verificar contra el Excel.
+    assert exc.precio_contractual == 49473
     assert exc.precio_contractual_sin_aiu == 49473
     assert exc.shift == "DIURNO"
     assert "REDES ELÉCTRICAS EXTERNAS" in exc.categoria

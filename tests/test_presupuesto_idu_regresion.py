@@ -16,7 +16,8 @@ pytestmark = pytest.mark.skipif(
     not RUTA or not Path(RUTA).exists(),
     reason="define APU_IDU_F1_XLSX con la ruta del Formulario 1 real")
 
-CONTRACTUAL_CON_AIU = 158_456_072_140
+# Lo que manda desde idu-f1/2. El total con AIU (158.456.072.140) se sigue verificando
+# contra los subtotales del Excel, pero ya no se devuelve.
 CONTRACTUAL_SIN_AIU = 123_871_215_068
 
 
@@ -67,12 +68,13 @@ def test_prefijo_y_posicion_coinciden_en_todas(lectura):
 
 
 def test_conciliacion_exacta_contra_el_excel(lectura):
-    c = lectura.conciliacion
-    assert c["contractual_con_aiu"] == CONTRACTUAL_CON_AIU
-    assert c["contractual_sin_aiu"] == CONTRACTUAL_SIN_AIU
-    assert c["subtotales_excel"] == CONTRACTUAL_CON_AIU
-    assert c["diferencia"] == 0
-    assert c["subtotales_ok"] is True
+    assert lectura.conciliacion == {"contractual": CONTRACTUAL_SIN_AIU,
+                                    "subtotales_ok": True, "diferencia": 0}
+
+
+def test_el_contractual_es_el_basico(lectura):
+    assert all(i.precio_contractual == i.precio_contractual_sin_aiu
+               for i in lectura.items)
 
 
 def test_ninguna_fila_desconcilia_contra_su_valor_total(lectura):

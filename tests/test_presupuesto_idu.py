@@ -351,7 +351,7 @@ def test_lee_hoja_encabezado_y_estructura(tmp_path):
     assert lec.errores == []
     assert lec.hoja == "PROPUESTA ECONÓMICA"
     assert lec.fila_encabezado == 5               # 1-based, como lo ve el usuario
-    assert lec.parser_version == "idu-f1/1"
+    assert lec.parser_version == "idu-f1/2"
     assert [c.codigo for c in lec.capitulos] == ["1", "2"]
     assert [c.nombre for c in lec.capitulos] == ["PRELIMINARES", "PAVIMENTOS"]
     assert [c.orden for c in lec.capitulos] == [1, 2]
@@ -392,22 +392,22 @@ def test_preserva_el_item_original_y_recupera_el_cero(tmp_path):
     assert "2,011-N" in originales
 
 
-def test_las_dos_columnas_de_precio(tmp_path):
+def test_el_contractual_es_el_basico_sin_aiu(tmp_path):
     lec = leer_formulario_idu(escribir_formulario(tmp_path / "f1.xlsx"))
     replanteo = next(i for i in lec.items if i.item_pago_original == "1.001")
     assert replanteo.cantidad == 100
-    assert replanteo.precio_contractual == 1351             # col K, CON AIU
-    assert replanteo.precio_contractual_sin_aiu == 1056      # col J, SIN AIU
+    assert replanteo.precio_contractual == 1056             # col J, SIN AIU
+    assert replanteo.precio_contractual_sin_aiu == 1056     # el mismo valor
     assert replanteo.fila_origen > 0
 
 
 def test_conciliacion_contra_los_subtotales_del_excel(tmp_path):
+    # Verifica contra el Excel (con AIU), pero lo que devuelve —y va a
+    # origen_json— es el contractual SIN AIU. Ningún total con AIU.
     lec = leer_formulario_idu(escribir_formulario(tmp_path / "f1.xlsx"))
-    c = lec.conciliacion
-    assert c["subtotales_ok"] is True
-    assert c["diferencia"] == 0
-    assert c["contractual_con_aiu"] == c["subtotales_excel"]
-    assert c["contractual_sin_aiu"] < c["contractual_con_aiu"]
+    basico = sum(round(a[5] * a[6]) for a in ACTIVIDADES_CAP_1 + ACTIVIDADES_CAP_2)
+    assert lec.conciliacion == {"contractual": basico, "subtotales_ok": True,
+                                "diferencia": 0}
     assert [a for a in lec.advertencias if a.tipo == "total_fila_no_concilia"] == []
 
 
@@ -453,9 +453,9 @@ def test_avisa_si_la_oferta_viene_diligenciada(tmp_path):
     avisos = [a for a in lec.advertencias if a.tipo == "oferta_diligenciada"]
     assert len(avisos) == 1
     assert "2" in avisos[0].detalle           # cuántas filas traen oferta
-    # Y NO cambia el contractual: se sigue leyendo la columna oficial con AIU.
+    # Y NO cambia el contractual: se sigue leyendo el básico oficial (sin AIU).
     assert next(i for i in lec.items
-                if i.item_pago_original == "1.001").precio_contractual == 1351
+                if i.item_pago_original == "1.001").precio_contractual == 1056
 
 
 def test_read_presupuesto_sigue_funcionando(tmp_path):
@@ -492,3 +492,55 @@ def test_el_vocabulario_de_advertencias_solo_promete_lo_que_emite():
     fuente = Path("apu_tool/dominio/presupuesto.py").read_text(encoding="utf-8")
     emitidos = set(_re.findall(r'Advertencia\(\s*"([a-z_]+)"', fuente))
     assert set(TIPOS_ADVERTENCIA) == emitidos
+
+
+# ------------------------------------- idu-f1/2: el contractual es el básico sin AIU
+import dataclasses  # noqa: E402
+
+
+def _alterar(tmp_path, fila, columna, valor):
+    """El fixture con UNA celda cambiada. Columnas 1-based de Excel: 10 = básico sin
+    AIU, 11 = «incluye AIU», 12 = VALOR TOTAL. Fila 10 = la 1.001; fila 14 = el
+    Subtotal del capítulo 1."""
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    wb["PROPUESTA ECONÓMICA"].cell(row=fila, column=columna).value = valor
+    wb.save(p)
+    return leer_formulario_idu(p)
+
+
+def test_ningun_campo_del_item_trae_el_valor_con_aiu(tmp_path):
+    lec = leer_formulario_idu(escribir_formulario(tmp_path / "f1.xlsx"))
+    con_aiu = {a[7] for a in ACTIVIDADES_CAP_1 + ACTIVIDADES_CAP_2}
+    for it in lec.items:
+        assert it.precio_contractual == it.precio_contractual_sin_aiu
+        assert not con_aiu & set(dataclasses.asdict(it).values()), it.item
+
+
+def test_sin_contractual_salta_con_el_basico_vacio(tmp_path):
+    lec = _alterar(tmp_path, 10, 10, None)
+    assert any(e.startswith("sin_contractual") and "1.001" in e for e in lec.errores)
+
+
+def test_con_aiu_ilegible_sale_por_la_verificacion_de_fila(tmp_path):
+    # El básico está: no es `sin_contractual`. Pero sin el valor con AIU la fila no
+    # cuadra contra su VALOR TOTAL, y eso se avisa.
+    lec = _alterar(tmp_path, 10, 11, None)
+    assert not any(e.startswith("sin_contractual") for e in lec.errores)
+    assert [a.fila for a in lec.advertencias
+            if a.tipo == "total_fila_no_concilia"] == [10]
+    assert lec.conciliacion["subtotales_ok"] is False
+
+
+def test_un_valor_total_alterado_sigue_disparando_la_verificacion(tmp_path):
+    lec = _alterar(tmp_path, 10, 12, 135101)
+    assert [a.fila for a in lec.advertencias
+            if a.tipo == "total_fila_no_concilia"] == [10]
+    assert lec.errores == []
+
+
+def test_un_subtotal_alterado_sigue_disparando_la_verificacion(tmp_path):
+    lec = _alterar(tmp_path, 14, 12, 195421)        # el Excel dice 195.420
+    assert any(a.tipo == "subtotal_no_concilia" for a in lec.advertencias)
+    assert lec.conciliacion["subtotales_ok"] is False
+    assert lec.conciliacion["diferencia"] == 1

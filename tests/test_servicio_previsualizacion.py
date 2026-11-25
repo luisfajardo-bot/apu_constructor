@@ -30,7 +30,7 @@ def test_previsualizar_devuelve_capitulos_totales_y_conciliacion(tmp_path):
     assert prev["archivo"] == "f1.xlsx"
     assert prev["hoja"] == "PROPUESTA ECONÓMICA"
     assert prev["fila_encabezado"] == 5
-    assert prev["parser_version"] == "idu-f1/1"
+    assert prev["parser_version"] == "idu-f1/2"
     assert prev["actividades"] == 5
     assert [c["codigo"] for c in prev["capitulos"]] == ["1", "2"]
     assert prev["capitulos"][0]["actividades"] == 2
@@ -52,7 +52,7 @@ def test_el_total_de_la_previa_es_la_suma_de_sus_capitulos(tmp_path):
     assert prev["totales"]["contractual_sin_aiu"] == sum(
         c["contractual_sin_aiu"] for c in prev["capitulos"])
     # Y con lo que el parser concilió contra el Excel.
-    assert prev["totales"]["contractual"] == prev["conciliacion"]["contractual_con_aiu"]
+    assert prev["totales"]["contractual"] == prev["conciliacion"]["contractual"]
 
 
 def test_previsualizar_con_error_no_deja_aprobar(tmp_path):
@@ -113,12 +113,12 @@ def test_crear_corrida_guarda_el_origen(tmp_path):
     assert origen["entidad"] == "IDU"
     assert origen["formato"] == "idu_formulario_1"
     assert origen["hoja"] == "PROPUESTA ECONÓMICA"
-    assert origen["parser_version"] == "idu-f1/1"
+    assert origen["parser_version"] == "idu-f1/2"
     assert origen["estructura_confirmada"] is True
     assert origen["confirmada_por"] == "yo@test.co"
     assert origen["capitulos"] == 2
     assert origen["actividades"] == 5
-    assert origen["conciliacion"]["contractual_con_aiu"] > 0
+    assert origen["conciliacion"]["contractual"] > 0
     assert origen["importada_en"]
 
 
@@ -158,3 +158,21 @@ def test_una_actividad_huerfana_si_aparece_como_grupo(tmp_path):
     assert any(c["codigo"] == "" and c["nombre"] == "(sin capítulo)"
                for c in prev["capitulos"])
     assert any(a["tipo"] == "actividad_sin_capitulo" for a in prev["advertencias"])
+
+
+def test_el_origen_no_guarda_ningun_total_con_aiu(tmp_path):
+    import pytest
+    from apu_tool.dominio.privacy import PrivacyViolation, assert_no_money
+    from tests.fixtures_idu import ACTIVIDADES_CAP_1, ACTIVIDADES_CAP_2
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    lectura = svc.leer_para_corrida(EntidadOrigen.IDU, p.read_bytes(), "f1.xlsx")
+    origen = svc.origen_de(EntidadOrigen.IDU, lectura, "f1.xlsx", "yo@test.co")
+    filas = ACTIVIDADES_CAP_1 + ACTIVIDADES_CAP_2
+    basico = sum(round(a[5] * a[6]) for a in filas)
+    con_aiu = sum(round(a[5] * a[7]) for a in filas)
+    assert origen["conciliacion"] == {"contractual": basico, "subtotales_ok": True,
+                                      "diferencia": 0}
+    assert str(con_aiu) not in json.dumps(origen)
+    # Sigue siendo dinero: el objeto entero no cruza hacia la IA.
+    with pytest.raises(PrivacyViolation):
+        assert_no_money({"corrida": origen})

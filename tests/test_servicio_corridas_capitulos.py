@@ -47,19 +47,19 @@ def test_la_vista_trae_el_origen(tmp_path):
     vista = svc.vista_corrida(alm, _corrida_idu(tmp_path, alm))
     assert vista["origen"]["entidad"] == "IDU"
     assert vista["origen"]["hoja"] == "PROPUESTA ECONÓMICA"
-    assert vista["origen"]["parser_version"] == "idu-f1/1"
+    assert vista["origen"]["parser_version"] == "idu-f1/2"
 
 
-def test_cada_item_trae_su_capitulo_y_las_dos_bases(tmp_path):
+def test_cada_item_trae_su_capitulo_y_el_contractual_sin_aiu(tmp_path):
     alm = _almacen(tmp_path)
     vista = svc.vista_corrida(alm, _corrida_idu(tmp_path, alm))
     fila = vista["items"][0]
     assert fila["capitulo_codigo"] == "1"
     assert fila["capitulo_nombre"] == "PRELIMINARES"
     assert fila["item_pago_original"] == "1.001"
-    assert fila["precio_contractual"] == 1351
+    assert fila["precio_contractual"] == 1056
     assert fila["precio_contractual_sin_aiu"] == 1056
-    assert fila["contractual_total"] == 100 * 1351
+    assert fila["contractual_total"] == 100 * 1056
     assert fila["contractual_total_sin_aiu"] == 100 * 1056
 
 

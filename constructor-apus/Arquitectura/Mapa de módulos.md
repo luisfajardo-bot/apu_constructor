@@ -70,6 +70,7 @@ flowchart TD
 | `composicion.py` | Contrato de la composición asistida. |
 | `composicion_agente.py` | Orquestador de la composición asistida. |
 | `composicion_chat.py` | Chat con el agente en la mesa de composición. |
+| `consulta_chat.py` | Chat de consulta: preguntas de precios y totales sin que la IA vea dinero. |
 | `cruce.py` | Resolución del cruce insumo-de-APU -> insumo-de-catálogo, por código + nombre. |
 | `entrada.py` | Qué lector le toca a cada entidad. El ÚNICO punto de despacho. |
 | `integridad.py` | Chequeo de integridad del vínculo APU -> insumo (que cruza las dos bases). |

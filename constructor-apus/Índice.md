@@ -33,7 +33,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 66 plane
 
 | Fecha | Título |
 | --- | --- |
-| 2026-11-25 | [[Specs/2026-11-25-contractual-sin-aiu-design|El contractual que manda es el SIN AIU (ruta IDU, de aquí en adelante)]] |
+| 2026-11-25 | [[Specs/2026-11-25-contractual-sin-aiu-design|El contractual es el SIN AIU (ruta IDU, de aquí en adelante)]] |
 | 2026-11-25 | [[Specs/2026-11-25-chat-consulta-design|Chat de consulta: preguntas de precios y totales sin que la IA vea dinero]] |
 | 2026-11-19 | [[Specs/2026-11-19-codigos-compartidos-design|Códigos compartidos en el alta de APUs — diseño]] |
 | 2026-11-18 | [[Specs/2026-11-18-chat-agente-composicion-design|Chat con el agente en la mesa de composición — diseño]] |

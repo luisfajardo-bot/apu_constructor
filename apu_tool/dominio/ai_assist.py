@@ -512,7 +512,8 @@ class ApuAdvisor:
     def _turno(self, accion: str, pedir, mensajes: list, con_herramientas: bool):
         """Guardia común de las dos puertas de chat: sin cliente → IANoDisponible con
         el mensaje de `accion`; dinero → PrivacyViolation FUERA del try (el invariante
-        #1 nunca se traga); errores de credencial o saldo → IANoDisponible."""
+        #1 nunca se traga); errores de credencial o saldo → IANoDisponible. Los bloques
+        del SDK (no-dict) no se recorren; lo que armamos nosotros, sí."""
         if not self.enabled or self._client is None:
             if getattr(self, "_sdk_ausente", False):
                 raise IANoDisponible(

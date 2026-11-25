@@ -306,10 +306,10 @@ def insumo_encontrado_to_dict(ins, observado=None) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------- chat de consulta
-# Un número pegado a "mil"/"millones"/"k". El lookahead exige que no siga una letra:
+# Un número pegado a "mil"/"millones". El lookahead exige que no siga una letra:
 # así "3 milímetros" y "4 kg" pasan.
 _CIFRA_MILES_PALABRA = re.compile(
-    r"\d[\d.,]*\s*(?:mil(?:es)?|mill[oó]n(?:es)?|k)(?![^\W\d_])", re.IGNORECASE)
+    r"\d[\d.,]*\s*(?:mil(?:es)?|mill[oó]n(?:es)?)(?![^\W\d_])", re.IGNORECASE)
 
 
 def cifra_monetaria(texto: str) -> Optional[str]:
@@ -346,6 +346,11 @@ def apu_consulta_to_dict(codigo: str, nombre: str, turno: str) -> dict[str, Any]
 def corrida_consulta_to_dict(meta, carpeta: Optional[str]) -> dict[str, Any]:
     """`meta` es un `CorridaMeta`; NO se vuelca (trae `plan_json`/`origen` con dinero)."""
     nombre = meta.nombre or str(meta.archivo).rsplit(".", 1)[0]
+    # nombre y carpeta son texto libre de una persona: pueden traer un monto.
+    if cifra_monetaria(nombre):
+        nombre = f"corrida {meta.id}"
+    if carpeta and cifra_monetaria(carpeta):
+        carpeta = None
     return {"ref": f"corrida:{meta.id}", "nombre": nombre, "carpeta": carpeta,
             "estado": meta.estado, "modo": meta.modo}
 

@@ -12,7 +12,6 @@ from apu_tool.dominio import privacy
     "1,250,000 en total",
     "cerca de 3 millones",
     "como 200 mil",
-    "45k",
     "en pesos colombianos 12",
     "USD 30",
 ])
@@ -28,6 +27,8 @@ def test_cifra_monetaria_ataja_las_senales_fuertes(texto):
     "Hay 3 coincidencias para «tubería»",
     "8 horas de cuadrilla, 4 kg de alambre",
     "3 milímetros",
+    "LED 6500K",
+    "Transformador 11,4K/208V",
 ])
 def test_cifra_monetaria_deja_pasar_texto_normal_del_agente(texto):
     assert privacy.cifra_monetaria(texto) is None
@@ -56,3 +57,11 @@ def test_calidades_con_alerta_cubre_los_cruces_que_alertan():
     assert set(_MOTIVO_CRUCE) <= CALIDADES_CON_ALERTA
     assert CALIDAD_SIN_PRECIO_LISTA in CALIDADES_CON_ALERTA
     assert "exacto" not in CALIDADES_CON_ALERTA
+
+
+def test_nombre_y_carpeta_con_monto_no_salen():
+    meta = SimpleNamespace(id=9, nombre="Oferta $45.000", archivo="x.xlsx",
+                           estado="en_revision", modo="activa")
+    d = privacy.corrida_consulta_to_dict(meta, "Lote 1.250.000")
+    assert d["nombre"] == "corrida 9" and d["carpeta"] is None
+    assert "45.000" not in privacy.safe_json(d) and "1.250.000" not in privacy.safe_json(d)

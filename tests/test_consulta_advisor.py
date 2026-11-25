@@ -57,3 +57,10 @@ def test_el_chat_de_la_mesa_conserva_su_mensaje():
     """Regresión del refactor de `_turno`."""
     with pytest.raises(IANoDisponible, match="Conversar con el agente necesita ANTHROPIC"):
         ApuAdvisor(enabled=False).turno_chat([], con_herramientas=True)
+
+
+def test_sin_sdk_dice_que_falta_el_sdk():
+    a = ApuAdvisor(enabled=False)
+    a._sdk_ausente = True
+    with pytest.raises(IANoDisponible, match="Conversar con el agente necesita el SDK de anthropic instalado en el servidor"):
+        a.turno_chat([], con_herramientas=True)

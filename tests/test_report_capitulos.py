@@ -128,3 +128,43 @@ def test_el_detalle_categorizado_trae_las_dos_bases(tmp_path):
     enc, _filas = _tabla(out, "DETALLE")
     assert "P. Contractual sin AIU" in enc
     assert "Total Contractual sin AIU" in enc
+
+
+# ------------------------------------------------ corrida vieja (lector idu-f1/1)
+# `_item()` por defecto ES una fila vieja: 1351 con AIU en el contractual, 1056 aparte.
+_RESUMEN_DE_SIEMPRE = ["Ítem", "Descripción", "Und", "Cantidad",
+                       "P. Contractual", "P. Contractual sin AIU",
+                       "Costo Unit.", "Margen Unit.", "Margen %",
+                       "Total Contractual", "Total Contractual sin AIU",
+                       "Total Costo", "Margen Total",
+                       "Estado", "Confianza", "APU base"]
+
+
+def test_corrida_vieja_el_resumen_sale_igual_que_siempre(tmp_path):
+    out = tmp_path / "vieja.xlsx"
+    write_report([_ens(_item("1", "PRELIMINARES"))], out)
+    enc, filas = _tabla(out, "RESUMEN")
+    assert enc == _RESUMEN_DE_SIEMPRE
+    assert filas[0][4:6] == [1351, 1056]
+    assert filas[0][9:13] == [13510, 10560, 9000, 4510]
+    assert filas[-2][9:13] == [13510, 10560, 9000, 4510]      # TOTALES
+
+
+def test_corrida_vieja_la_hoja_de_capitulos_y_el_detalle_salen_igual(tmp_path):
+    apus = [_ens(_item("1", "PRELIMINARES"))]
+    a, b = tmp_path / "a.xlsx", tmp_path / "b.xlsx"
+    write_report(apus, a)
+    write_report_categorizado(apus, b)
+    enc, filas = _tabla(a, HOJA)
+    assert enc == ["Capítulo", "Nombre", "Actividades", "Con APU", "Sin APU",
+                   "Contractual", "Contractual sin AIU", "Costo interno",
+                   "Diferencia", "Margen %", "Cobertura", "Cobertura $", "Estado"]
+    assert filas[-1][5:9] == [13510, 10560, 9000, 4510]       # GRAN TOTAL
+    enc, filas = _tabla(b, "DETALLE")
+    assert enc == ["Ítem", "Descripción", "Und", "Cantidad",
+                   "P. Contractual", "P. Contractual sin AIU",
+                   "Costo Unit.", "Margen Unit.", "Margen %",
+                   "Total Contractual", "Total Contractual sin AIU",
+                   "Total Costo", "Margen Total", "Estado"]
+    subtotal = next(f for f in filas if str(f[1] or "").startswith("Subtotal"))
+    assert subtotal[9:13] == [13510, 10560, 9000, 4510]

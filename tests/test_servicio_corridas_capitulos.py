@@ -85,3 +85,35 @@ def test_los_capitulos_conservan_orden_y_asociacion_al_releer(tmp_path):
     segunda = svc.vista_corrida(alm2, cid)["capitulos"]
     assert primera == segunda
     assert [c["orden"] for c in segunda] == [1, 2]
+
+
+# ------------------------------------------------ corrida vieja (lector idu-f1/1)
+def _corrida_vieja(alm) -> int:
+    """Así quedó toda corrida IDU creada antes del 2026-11-25: el contractual CON AIU
+    en `precio_contractual` y el básico aparte. No se migra: tiene que verse igual."""
+    items = [LicitacionItem(
+        item="1.001", descripcion="REPLANTEO GENERAL", unidad="M2", cantidad=100.0,
+        precio_contractual=1351.0, shift="DIURNO", categoria="1 · PRELIMINARES",
+        codigo_sugerido="3007", capitulo_codigo="1", capitulo_nombre="PRELIMINARES",
+        item_pago_original="1.001", fila_origen=10, precio_contractual_sin_aiu=1056.0)]
+    origen = {"entidad": "IDU", "formato": "idu_formulario_1",
+              "parser_version": "idu-f1/1",
+              "conciliacion": {"contractual_con_aiu": 135100,
+                               "contractual_sin_aiu": 105600,
+                               "subtotales_excel": 135100, "diferencia": 0,
+                               "subtotales_ok": True}}
+    return svc.construir_corrida(alm, "vieja.xlsx", items, "DIURNO", False,
+                                 origen=origen)
+
+
+def test_una_corrida_vieja_se_ve_exactamente_igual(tmp_path):
+    alm = _almacen(tmp_path)
+    vista = svc.vista_corrida(alm, _corrida_vieja(alm))
+    fila = vista["items"][0]
+    assert (fila["precio_contractual"], fila["precio_contractual_sin_aiu"]) == (1351, 1056)
+    assert (fila["contractual_total"], fila["contractual_total_sin_aiu"]) == (135100, 105600)
+    assert vista["totales"]["contractual"] == 135100
+    cap = vista["capitulos"][0]
+    assert (cap["contractual"], cap["contractual_sin_aiu"]) == (135100, 105600)
+    assert vista["origen"]["parser_version"] == "idu-f1/1"
+    assert vista["origen"]["conciliacion"]["contractual_con_aiu"] == 135100

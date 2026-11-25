@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 65 planes, 72 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 65 planes, 73 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -33,6 +33,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 65 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-11-25 | [[Specs/2026-11-25-chat-consulta-design|Chat de consulta: preguntas de precios y totales sin que la IA vea dinero]] |
 | 2026-11-19 | [[Specs/2026-11-19-codigos-compartidos-design|Códigos compartidos en el alta de APUs — diseño]] |
 | 2026-11-18 | [[Specs/2026-11-18-chat-agente-composicion-design|Chat con el agente en la mesa de composición — diseño]] |
 | 2026-09-30 | [[Specs/2026-09-30-notas-insumos-apus-design|Notas en insumos y APUs (con menciones y respuestas)]] |

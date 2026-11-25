@@ -9,6 +9,7 @@ existe para evitar. Spec: docs/superpowers/specs/2026-11-25-chat-consulta-design
 from __future__ import annotations
 
 import logging
+import math
 import re
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -36,13 +37,14 @@ _CAMPOS_CAPITULO = {"contractual": "contractual", "costo": "costo",
 
 def pesos(v: float) -> str:
     """Como `web/src/lib/moneda.ts`, redondeando medio hacia arriba (regla del repo)."""
-    n = int(Decimal(str(v)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    n = math.floor(v + 0.5)                       # semántica de Math.round
     return "$" + f"{n:,}".replace(",", ".")
 
 
 def pct(v: float) -> str:
     """Como `pct` de `web/src/lib/moneda.ts` («12.3%»): el chat dice lo que dice la pantalla."""
-    return f"{(v or 0) * 100:.1f}%"
+    q = Decimal(str((v or 0) * 100)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    return f"{q}%"
 
 
 def _fmt(campo: str, v: float) -> str:
@@ -69,6 +71,7 @@ class _Resolutor:
             # Supabase): más de MAX_CORRIDAS_POR_RESPUESTA salen «no disponible».
             if len(self._vistas) >= MAX_CORRIDAS_POR_RESPUESTA:
                 return None
+            self._vistas[cid] = None    # antes de llamar: si falla, igual cuenta y no se repite
             self._vistas[cid] = vista_corrida(self.alm, cid)
         return self._vistas[cid]
 
@@ -84,7 +87,11 @@ class _Resolutor:
         return NO_DISPONIBLE
 
     def _insumo(self, ident: str) -> str:
-        ins = self.alm.precios.get_insumo_por_id(int(ident))   # lista Principal
+        try:
+            iid = int(ident)
+        except ValueError:
+            return NO_DISPONIBLE                       # id ilegible: no es un error
+        ins = self.alm.precios.get_insumo_por_id(iid)   # lista Principal
         if ins is None:
             return NO_DISPONIBLE
         if ins.sin_precio or not ins.precio > 0:     # regla "nada en $0"
@@ -93,6 +100,7 @@ class _Resolutor:
 
     def _apu(self, ident: str) -> str:
         codigo, _, turno = ident.rpartition("|")
+        codigo, turno = codigo.strip(), turno.strip()
         if not codigo:
             return NO_DISPONIBLE
         if self._pricing is None:
@@ -115,9 +123,15 @@ class _Resolutor:
                 if a else "")
 
     def _corrida(self, campo: str, ident: str) -> str:
-        v = self.vista(int(ident))
+        try:
+            cid = int(ident)
+        except ValueError:
+            return NO_DISPONIBLE
+        v = self.vista(cid)
         if v is None:
             return NO_DISPONIBLE
+        if not v["items"]:                             # regla "nada en $0"
+            return "sin actividades"
         s = _fmt(campo, v["totales"][_CAMPOS_CORRIDA[campo]])
         nota = self._nota_armado(v)
         if not nota and campo != "contractual":
@@ -133,7 +147,12 @@ class _Resolutor:
 
     def _capitulo(self, campo: str, ident: str) -> str:
         cid, _, cod = ident.partition(":")
-        v = self.vista(int(cid))
+        cid, cod = cid.strip(), cod.strip()
+        try:
+            cid = int(cid)
+        except ValueError:
+            return NO_DISPONIBLE
+        v = self.vista(cid)
         if v is None:
             return NO_DISPONIBLE
         cap = next((c for c in v["capitulos"] if c["codigo"] == cod), None)
@@ -158,8 +177,6 @@ def resolver(alm: Almacen, texto: str) -> str:
     def uno(m) -> str:
         try:
             return r.cifra(m.group(1).lower(), m.group(2).lower(), m.group(3).strip())
-        except (ValueError, TypeError, KeyError):
-            return NO_DISPONIBLE                       # id ilegible: no es un error
         except Exception:
             logger.exception("No se pudo resolver el marcador %s", m.group(0))
             return NO_DISPONIBLE

@@ -1,11 +1,14 @@
 """El reemplazo de marcadores: el único punto del chat de consulta que toca dinero.
 Las cifras se comparan contra las MISMAS funciones de la pantalla."""
+import logging
+
 import pytest
 
 from apu_tool.dominio.pricing import PricingEngine
 from apu_tool.servicio import consulta
 from apu_tool.servicio.consulta import NO_DISPONIBLE, SIN_PRECIO, pct, pesos, resolver
 from apu_tool.servicio.corridas import vista_corrida
+from apu_tool.nucleo.models import CorridaMeta
 from tests.consulta_base import almacen_consulta
 
 
@@ -16,8 +19,11 @@ def base(tmp_path):
 
 def test_formatos():
     assert pesos(1234567) == "$1.234.567"
-    assert pesos(-1500.5) == "$-1.501"
+    assert pesos(-1500.5) == "$-1.500"             # Math.round de la web
+    assert pesos(-2.5) == "$-2"
+    assert pct(0.0625) == "6.3%"
     assert pct(0.1234) == "12.3%"                  # igual que la web
+    assert pct(-0.0625) == "-6.3%"
 
 
 def test_marcador_con_mayusculas_igual_se_resuelve(base):
@@ -144,3 +150,47 @@ def test_el_texto_alrededor_no_se_toca(base):
 def test_llaves_crudas_nunca_llegan_a_la_persona(base):
     alm, _ = base
     assert resolver(alm, "{{pesos:cop:1}}") == NO_DISPONIBLE
+
+
+def test_bug_inesperado_queda_en_el_log(base, monkeypatch, caplog):
+    alm, ids = base
+    real = consulta.vista_corrida
+    monkeypatch.setattr(consulta, "vista_corrida",
+                        lambda a, cid: {k: v for k, v in real(a, cid).items()
+                                        if k != "totales"})
+    with caplog.at_level(logging.ERROR):
+        assert resolver(alm, f"{{{{costo:corrida:{ids['cali']}}}}}") == NO_DISPONIBLE
+    assert any(r.levelno == logging.ERROR for r in caplog.records)
+
+
+def test_corrida_que_falla_cuenta_para_el_tope_y_no_se_repite(base, monkeypatch):
+    alm, ids = base
+    llamadas = []
+
+    def revienta(a, cid):
+        llamadas.append(cid)
+        raise RuntimeError("boom")
+    monkeypatch.setattr(consulta, "vista_corrida", revienta)
+    resolver(alm, " ".join(f"{{{{costo:corrida:{i}}}}}" for i in range(1, 21)))
+    assert len(llamadas) <= consulta.MAX_CORRIDAS_POR_RESPUESTA
+    llamadas.clear()
+    resolver(alm, " ".join(["{{costo:corrida:7}}"] * 3))
+    assert len(llamadas) == 1
+
+
+def test_espacios_dentro_del_marcador(base):
+    alm, ids = base
+    assert resolver(alm, "{{ costo : apu : A1 | DIURNO }}") == "$22.000"
+    cid = ids["calle13"]
+    caps = {c["codigo"]: c for c in vista_corrida(alm, cid)["capitulos"]}
+    assert resolver(alm, f"{{{{ costo : capitulo : {cid} : 1 }}}}") == pesos(
+        caps["1"]["costo"])
+
+
+def test_corrida_sin_filas_no_dice_cero(base):
+    alm, _ = base
+    cid = alm.corridas.crear_corrida(CorridaMeta(
+        id=None, creada_en="2026-11-25T10:00:00", archivo="vacia.xlsx",
+        turno_def="DIURNO", use_ai=None, estado="en_revision",
+        carpeta_id=None, nombre="vacia"))
+    assert resolver(alm, f"{{{{costo:corrida:{cid}}}}}") == "sin actividades"

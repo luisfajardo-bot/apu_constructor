@@ -305,5 +305,70 @@ def insumo_encontrado_to_dict(ins, observado=None) -> dict[str, Any]:
                                         if observado is not None else None)}
 
 
+# --------------------------------------------------------------- chat de consulta
+# Un número pegado a "mil"/"millones". El lookahead exige que no siga una letra:
+# así "3 milímetros" y "4 kg" pasan.
+_CIFRA_MILES_PALABRA = re.compile(
+    r"\d[\d.,]*\s*(?:mil(?:es)?|mill[oó]n(?:es)?)(?![^\W\d_])", re.IGNORECASE)
+
+
+def cifra_monetaria(texto: str) -> Optional[str]:
+    """El fragmento con un monto si `texto` trae uno escrito, o None.
+
+    Más ANGOSTA que `texto_con_dinero` a propósito: solo señales fuertes (símbolo o
+    moneda, separador de miles, número pegado a mil/millones). Se usa sobre el texto
+    del AGENTE de consulta, que nombra proyectos con números al lado de palabras de
+    dinero («el costo de la Calle 13: {{…}}»); ahí la ventana de `texto_con_dinero`
+    omitiría casi toda respuesta. Un precio inventado se escribe con símbolo o con
+    miles, y eso es lo que esto ataja. Los mensajes del USUARIO siguen pasando por
+    `texto_con_dinero` completo.
+    """
+    t = texto or ""
+    for patron in (_SENAL_MONEDA, _MILES, _MILES_COMA, _CIFRA_MILES_PALABRA):
+        m = patron.search(t)
+        if m:
+            return _alrededor(t, m)
+    return None
+
+
+def insumo_consulta_to_dict(ins) -> dict[str, Any]:
+    """Un resultado de `buscar_insumos` del chat de consulta. `ins` LLEVA precio: se
+    copia campo por campo. El `ref` va por id porque 652 códigos son de dos insumos."""
+    return {"ref": f"insumo:{ins.id}", "insumo_codigo": ins.codigo,
+            "insumo_nombre": ins.nombre, "unidad": ins.unidad, "grupo": ins.grupo}
+
+
+def apu_consulta_to_dict(codigo: str, nombre: str, turno: str) -> dict[str, Any]:
+    return {"ref": f"apu:{codigo}|{turno}", "codigo": codigo, "nombre": nombre,
+            "turno": turno}
+
+
+def corrida_consulta_to_dict(meta, carpeta: Optional[str]) -> dict[str, Any]:
+    """`meta` es un `CorridaMeta`; NO se vuelca (trae `plan_json`/`origen` con dinero)."""
+    nombre = meta.nombre or str(meta.archivo).rsplit(".", 1)[0]
+    # nombre y carpeta son texto libre de una persona: pueden traer un monto.
+    if cifra_monetaria(nombre):
+        nombre = f"corrida {meta.id}"
+    if carpeta and cifra_monetaria(carpeta):
+        carpeta = None
+    return {"ref": f"corrida:{meta.id}", "nombre": nombre, "carpeta": carpeta,
+            "estado": meta.estado, "modo": meta.modo}
+
+
+def capitulo_consulta_to_dict(corrida_id: int, codigo: str, nombre: str,
+                              actividades: int) -> dict[str, Any]:
+    if cifra_monetaria(nombre):
+        nombre = f"capítulo {codigo}"
+    return {"ref": f"capitulo:{corrida_id}:{codigo}", "codigo": codigo,
+            "nombre": nombre, "actividades": actividades}
+
+
+def proyecto_consulta_to_dict(nombre: str, corridas: list,
+                              encontradas: int) -> dict[str, Any]:
+    if cifra_monetaria(nombre):
+        nombre = "proyecto (nombre omitido)"
+    return {"proyecto": nombre, "corridas": corridas, "corridas_encontradas": encontradas}
+
+
 class PrivacyViolation(RuntimeError):
     """Se intentó enviar un valor monetario a la IA."""

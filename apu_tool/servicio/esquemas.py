@@ -258,3 +258,9 @@ class ChatComposicionIn(BaseModel):
     mensajes: list[MensajeChatIn] = Field(max_length=100)
     componentes: list[ComponenteComposicionIn] = Field(default_factory=list,
                                                        max_length=80)
+
+
+class ChatConsultaIn(BaseModel):
+    """El historial del chat de consulta (lo guarda el navegador). Los mensajes del
+    agente llegan con MARCADORES, no con cifras; el servidor igual los revisa."""
+    mensajes: list[MensajeChatIn] = Field(max_length=100)

@@ -24,6 +24,20 @@ def resp_final(texto="Listo.", cambios=(), stop_reason="end_turn", crudo=None):
                            usage=USO)
 
 
+def resp_texto(texto):
+    """Respuesta final del chat de CONSULTA: texto plano, sin JSON."""
+    return SimpleNamespace(stop_reason="end_turn",
+                           content=[SimpleNamespace(type="text", text=texto)],
+                           usage=USO)
+
+
+def resp_llamada(nombre, entrada, id_="c0"):
+    """Una respuesta que pide UNA herramienta con una entrada arbitraria."""
+    return SimpleNamespace(
+        stop_reason="tool_use", usage=USO,
+        content=[SimpleNamespace(type="tool_use", id=id_, name=nombre, input=entrada)])
+
+
 def componente(codigo="6092", rendimiento=1.0, funcion="herramienta"):
     return {"codigo": codigo, "tipo": "insumo", "funcion": funcion,
             "rendimiento": rendimiento, "origen": "supuesto_tecnico",
@@ -42,6 +56,11 @@ class AdvisorGuion(ApuAdvisor):
         self.llamadas = []
 
     def _pedir_chat_al_sdk(self, mensajes, con_herramientas):
+        self.llamadas.append({"mensajes": list(mensajes),
+                              "con_herramientas": con_herramientas})
+        return self.respuestas.pop(0)
+
+    def _pedir_consulta_al_sdk(self, mensajes, con_herramientas):
         self.llamadas.append({"mensajes": list(mensajes),
                               "con_herramientas": con_herramientas})
         return self.respuestas.pop(0)

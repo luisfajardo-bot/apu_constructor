@@ -344,6 +344,88 @@ HERRAMIENTAS_CHAT = [
 ]
 MAX_TOKENS_CHAT = 16000
 
+# ------------------------------------------------------------ chat de consulta
+# `dominio/consulta_chat.py`. La IA entiende la pregunta y escribe MARCADORES; las
+# cifras las pone `servicio/consulta.py` cuando el modelo ya terminó. Salida en texto
+# plano: no hay nada estructurado que parsear, solo marcadores dentro del texto.
+PROMPT_VERSION_CONSULTA = "consulta/v1"   # se sube A MANO al tocar el prompt o las herramientas
+
+_SISTEMA_CONSULTA = """\
+Eres el asistente de consulta de costos de una empresa de obra civil. Respondes
+preguntas sobre el precio de un insumo, el costo de un APU (análisis de precios
+unitarios) de la biblioteca y los totales de una licitación (corrida) o de un
+capítulo de una corrida.
+
+NUNCA ves cifras de dinero y NUNCA las escribes. Ni montos, ni el símbolo $, ni las
+palabras pesos, mil o millones, ni cálculos. En el lugar de cada cifra escribes un
+MARCADOR y el sistema lo reemplaza por el valor real antes de mostrarlo:
+
+  {{<campo>:<ref>}}
+
+donde <ref> es EXACTAMENTE el campo `ref` de un resultado de herramienta que viste en
+esta conversación. Campos válidos según el tipo de ref:
+  - insumo:...    → precio          ej. {{precio:insumo:812}}
+  - apu:...       → costo           ej. {{costo:apu:4859|DIURNO}}
+  - corrida:...   → contractual, costo, diferencia, margen
+                                    ej. {{contractual:corrida:12}}
+  - capitulo:...  → contractual, costo, diferencia, margen
+                                    ej. {{costo:capitulo:12:2}}
+`diferencia` es contractual menos costo; `margen` es ese mismo margen en porcentaje.
+No inventes refs. Si no encontraste lo que te preguntan, dilo.
+
+Herramientas:
+- `buscar_insumos(texto)`: insumos del catálogo por palabras del nombre. Exige TODAS
+  las palabras: usa dos o tres esenciales ("tuberia pvc", el diámetro como 6"). Si
+  trae pocos, quita palabras antes de concluir que no existe.
+- `buscar_apus(texto)`: APUs de la biblioteca parecidos. Cuando preguntan por el costo
+  de una "actividad", es esto. Si hay versión diurna y nocturna, da las dos.
+- `buscar_proyectos(texto)`: proyectos (carpetas) y corridas por nombre. Pasa SOLO el
+  nombre ("la cali", "calle 13"), sin palabras como "proyecto" o "licitación".
+- `capitulos(corrida_id)`: los capítulos de una corrida. `corrida_id` es el número
+  que sigue a "corrida:" en el ref. Úsalo para preguntas como "redes húmedas de la
+  Calle 13": primero `buscar_proyectos`, después `capitulos`, y escoges el capítulo
+  por su nombre.
+Tienes un máximo de 4 búsquedas por mensaje.
+
+Reglas:
+- Con varias coincidencias, lista hasta 5 (nombre, unidad y su marcador). Si son
+  demasiadas o el proyecto es ambiguo, pregunta cuál.
+- Un proyecto puede tener varias corridas (suelen ser versiones de la misma
+  licitación): da una línea por corrida y NO digas un total del proyecto.
+- Los precios y costos de insumos y APUs son de la lista Principal. El costo interno
+  no lleva AIU; el contractual de una licitación del IDU sí lo lleva. Dilo cuando
+  compares contractual con costo.
+- Si una cifra sale marcada como parcial, no la presentes como definitiva.
+- Responde corto, en español de Colombia y tuteando. Texto plano; listas con "- ".
+- Solo respondes sobre precios, costos y totales. Para otra cosa, dilo en una línea.
+"""
+
+HERRAMIENTAS_CONSULTA = [
+    _herramienta("buscar_insumos",
+                 "Busca insumos del catálogo por palabras de su nombre. Devuelve hasta "
+                 "15 con ref, código, nombre, unidad y grupo. No devuelve precios.",
+                 "Palabras cortas del nombre del insumo, p. ej. 'tuberia pvc'."),
+    _herramienta("buscar_apus",
+                 "Busca APUs de la biblioteca parecidos a un texto, en los dos turnos. "
+                 "Devuelve ref, código, nombre y turno. No devuelve costos.",
+                 "Descripción corta de la actividad, p. ej. 'mezcla asfaltica'."),
+    _herramienta("buscar_proyectos",
+                 "Busca proyectos (carpetas) y corridas por nombre. Devuelve las "
+                 "corridas de cada proyecto con ref, nombre, carpeta, estado y modo. No "
+                 "devuelve totales.",
+                 "Solo el nombre del proyecto o la corrida, p. ej. 'calle 13'."),
+    {"name": "capitulos",
+     "description": "Los capítulos de una corrida: ref, código, nombre y número de "
+                    "actividades. No devuelve totales.",
+     "strict": True,
+     "input_schema": {"type": "object",
+                      "properties": {"corrida_id": {
+                          "type": "integer",
+                          "description": "El número que sigue a 'corrida:' en el ref."}},
+                      "required": ["corrida_id"], "additionalProperties": False}},
+]
+MAX_TOKENS_CONSULTA = 8000
+
 
 class ApuAdvisor:
     """Fachada sobre la IA. Sin credenciales, `componer` levanta `IANoDisponible`."""
@@ -427,6 +509,26 @@ class ApuAdvisor:
             messages=[{"role": "user", "content": contenido}],
         )
 
+    def _turno(self, accion: str, pedir, mensajes: list, con_herramientas: bool):
+        """Guardia común de las dos puertas de chat: sin cliente → IANoDisponible con
+        el mensaje de `accion`; dinero → PrivacyViolation FUERA del try (el invariante
+        #1 nunca se traga); errores de credencial o saldo → IANoDisponible. Los bloques
+        del SDK (no-dict) no se recorren; lo que armamos nosotros, sí."""
+        if not self.enabled or self._client is None:
+            if getattr(self, "_sdk_ausente", False):
+                raise IANoDisponible(
+                    f"{accion} necesita el SDK de anthropic instalado en el servidor.")
+            raise IANoDisponible(f"{accion} necesita ANTHROPIC_API_KEY en el servidor.")
+        privacy.assert_no_money(mensajes)
+        try:
+            return pedir(mensajes, con_herramientas)
+        except Exception as exc:
+            if credencial_invalida(exc):
+                raise IANoDisponible(MSG_CREDENCIAL) from exc
+            if sin_saldo(exc):
+                raise IANoDisponible(MSG_SIN_SALDO) from exc
+            raise
+
     def turno_chat(self, mensajes: list, *, con_herramientas: bool):
         """UNA vuelta del bucle del chat. Devuelve la respuesta cruda del SDK.
 
@@ -438,24 +540,28 @@ class ApuAdvisor:
         sacarlas de `tools`: el historial ya trae bloques `tool_use` que las nombran.
         No se usa `tool_choice` forzado: los modelos nuevos lo rechazan con 400.
         """
-        if not self.enabled or self._client is None:
-            if getattr(self, "_sdk_ausente", False):
-                raise IANoDisponible(
-                    "Conversar con el agente necesita el SDK de anthropic instalado "
-                    "en el servidor.")
-            raise IANoDisponible(
-                "Conversar con el agente necesita ANTHROPIC_API_KEY en el servidor.")
-        # FUERA del try, como en `componer`: el invariante #1 nunca se traga. Los
-        # bloques del SDK (no-dict) no se recorren; lo que armamos nosotros, sí.
-        privacy.assert_no_money(mensajes)
-        try:
-            return self._pedir_chat_al_sdk(mensajes, con_herramientas)
-        except Exception as exc:
-            if credencial_invalida(exc):
-                raise IANoDisponible(MSG_CREDENCIAL) from exc
-            if sin_saldo(exc):
-                raise IANoDisponible(MSG_SIN_SALDO) from exc
-            raise
+        return self._turno("Conversar con el agente", self._pedir_chat_al_sdk,
+                           mensajes, con_herramientas)
+
+    def turno_consulta(self, mensajes: list, *, con_herramientas: bool):
+        """UNA vuelta del bucle del chat de consulta (`dominio/consulta_chat.py`).
+        Misma guardia que `turno_chat`; distinto prompt y herramientas."""
+        return self._turno("Consultar al agente", self._pedir_consulta_al_sdk,
+                           mensajes, con_herramientas)
+
+    def _pedir_consulta_al_sdk(self, mensajes: list, con_herramientas: bool):
+        """La llamada pelada. Aparte para que los tests la sustituyan."""
+        return self._client.messages.create(
+            model=self.model,
+            max_tokens=MAX_TOKENS_CONSULTA,
+            system=_SISTEMA_CONSULTA,
+            thinking={"type": "adaptive"},
+            output_config={"effort": "low"},
+            tools=HERRAMIENTAS_CONSULTA,
+            tool_choice={"type": "auto"} if con_herramientas else {"type": "none"},
+            messages=mensajes,
+            cache_control={"type": "ephemeral"},
+        )
 
     def _pedir_chat_al_sdk(self, mensajes: list, con_herramientas: bool):
         """La llamada pelada. Aparte para que los tests la sustituyan sin simular el

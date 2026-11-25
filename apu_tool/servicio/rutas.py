@@ -28,6 +28,7 @@ from apu_tool.servicio import auditoria as auditoria_svc
 from apu_tool.servicio import autoria
 from apu_tool.servicio import carpetas as carpetas_svc
 from apu_tool.servicio import composicion as composicion_svc
+from apu_tool.servicio import consulta as consulta_svc
 from apu_tool.dominio import entrada
 from apu_tool.nucleo.models import EntidadOrigen
 from apu_tool.servicio import corridas as svc
@@ -45,7 +46,7 @@ from apu_tool.servicio import limites
 from pydantic import BaseModel
 from apu_tool.servicio.esquemas import (
     AgregarLineasIn, AjusteProyectoIn, ApuEditIn, ApuNuevoIn, BorrarLineasIn,
-    CambiosIn, ChatComposicionIn, ClasificarIn, ComposicionAprobarIn,
+    CambiosIn, ChatComposicionIn, ChatConsultaIn, ClasificarIn, ComposicionAprobarIn,
     ComposicionEditarIn,
     ComposicionRechazarIn, ConfirmarIn, ConfirmarLoteIn, EstadoIn, IgualarCostoIn,
     IgualarUmbralIn, InsumoNuevoIn, ListaPreciosIn, NotaEditarIn, NotaNuevaIn,
@@ -472,6 +473,20 @@ def chat_composicion(cid: int, seq: int, body: ChatComposicionIn,
         raise HTTPException(status_code=503, detail=str(e))
     if gen is None:
         raise HTTPException(status_code=404, detail="Fila no encontrada.")
+    return StreamingResponse(_event_stream(gen),
+                             media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
+
+
+@router.post("/consulta/chat")
+def chat_consulta(body: ChatConsultaIn, alm: Almacen = Depends(get_almacen),
+                  actor=Depends(requiere_rol("consulta"))):
+    """Preguntas de precios y totales. La IA no ve cifras: escribe marcadores y el
+    servidor los reemplaza (servicio/consulta.py). No persiste nada."""
+    try:
+        gen = consulta_svc.chat_stream(alm, body.model_dump())
+    except svc.IANoDisponible as e:
+        raise HTTPException(status_code=503, detail=str(e))
     return StreamingResponse(_event_stream(gen),
                              media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})

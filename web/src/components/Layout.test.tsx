@@ -12,6 +12,7 @@ import Layout from "./Layout";
 vi.mock("@/api/corridas", () => ({
   getStatus: vi.fn(async () => ({ insumos: 7095, apus: 1204, ia: false })),
 }));
+vi.mock("@/api/consulta", () => ({ chatConsultaStream: vi.fn() }));
 vi.mock("@/api/presencia", () => ({
   getPresencia: vi.fn(async () => ({
     en_linea: [

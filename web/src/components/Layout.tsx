@@ -5,6 +5,7 @@ import { getStatus } from "@/api/corridas";
 import { getPresencia } from "@/api/presencia";
 import type { StatusResponse, UsuarioEnLinea } from "@/lib/tipos";
 import { useAuth } from "@/lib/auth";
+import ChatConsulta from "@/components/consulta/ChatConsulta";
 import { Campanita } from "@/components/notas/Campanita";
 import { puede } from "@/components/rutas";
 import { Button } from "@/components/ui/button";
@@ -275,6 +276,8 @@ export default function Layout() {
       <main className="min-w-0 flex-1 overflow-auto bg-background">
         <Outlet />
       </main>
+      {/* En el Layout y no en una página: así sigue abierto al navegar. */}
+      <ChatConsulta iaDisponible={!!status?.ia} />
     </div>
   );
 }

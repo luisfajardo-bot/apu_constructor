@@ -63,9 +63,10 @@ corrida armada ──► revisión con IA (sin dinero) ──► propone veredic
 fila sin APU ──► composición con IA (sin dinero) ──► validación determinística
                                     └─► confianza calculada ──► aprueba usuario ──► autoria.crear_apu
 mesa de composición ──► chat con el agente (busca, sin dinero) ──► propone cambios ──► aplica usuario (PUT de la mesa)
+chat de consulta (siempre a mano) ──► IA busca (sin dinero) y escribe marcadores ──► servidor pone las cifras
 
 Interfaces sobre el mismo pipeline (dominio/pipeline.py):
-  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 73 endpoints) + web/ (React) para multiusuario
+  interfaz/{cli,gui}.py (local) · servicio/ (FastAPI, 74 endpoints) + web/ (React) para multiusuario
 ```
 
 `apu_tool/config.py` es transversal, fuera de cualquier paquete: rutas, umbrales de
@@ -114,6 +115,7 @@ matching, modelo de IA, clasificación de precios.
 | `privacy.py`             | frontera de precios para la IA (invariante #1) |
 | `ai_assist.py`           | IA acotada (Anthropic SDK): propone una composición a pedido (no compone; el usuario aprueba) |
 | `composicion_agente.py`  | orquestador del agente de composición (hermano de `revision.py`): `recuperar()`, `evaluar()`, `componer()` (eventos SSE) |
+| `consulta_chat.py`       | chat de consulta: herramientas sin dinero (insumos, APUs, proyectos, capítulos), gramática de marcadores, candado de cifras inventadas y bucle de tool use |
 | `composicion_chat.py`    | chat con el agente en la mesa de composición: herramientas de búsqueda (solo lectura, sin dinero) y bucle de tool use con tope; propone, no escribe |
 | `revision.py`            | revisión con IA de una corrida ya armada (propone, no aplica) |
 | `assemble.py`            | orquestador por ítem |
@@ -137,6 +139,7 @@ matching, modelo de IA, clasificación de precios.
 | `limites.py`           | límite de tamaño de subida + rate limiting |
 | `seguridad_headers.py` | middleware de headers de seguridad (HSTS, CSP, etc.) |
 | `corridas.py`          | lógica de servicio de corridas (armado en vivo, revisión con IA) |
+| `consulta.py`          | chat de consulta, el lado con dinero: reemplaza los marcadores con las cifras de `vista_corrida` y `PricingEngine` |
 | `composicion.py`       | lógica de servicio del agente de composición (hermano de `corridas.py`): recuperar, generar (SSE), editar, aprobar, rechazar |
 | `insumos.py`           | lógica de servicio para editar insumos |
 | `insumos_ocultos.py`   | insumos ocultos: eco de un APU, sin uso real (no se borran) |
@@ -284,6 +287,43 @@ matching, modelo de IA, clasificación de precios.
   diseño, porque «8 horas» y «3000 psi» tienen que pasar; y una especificación con punto
   de miles («3.000 psi») se bloquea a propósito, y el motivo le dice a la persona cómo
   escribirla.
+- **Chat de consulta (2026-11).** Un botón flotante en el Layout abre un chat que
+  responde precios de insumos, costos de APUs y totales de corridas o capítulos
+  (`POST /api/consulta/chat`, rol `consulta`, SSE, no persiste). La IA **no ve
+  cifras**: sus herramientas devuelven nombres y `ref`, y ella escribe marcadores
+  `{{campo:tipo:id}}` (`precio:insumo:<id>`, `costo:apu:<cod>|<TURNO>`,
+  `contractual|costo|diferencia|margen` sobre `corrida:<id>` o
+  `capitulo:<corrida>:<cod>`). `servicio/consulta.py::resolver` los reemplaza
+  DESPUÉS de la última vuelta, con `vista_corrida` y `PricingEngine`, para decir el
+  mismo número que la pantalla. Todo es lista Principal. Un marcador que no resuelve
+  sale «[cifra no disponible]», una cifra con filas sin costear o con el armado a
+  medias sale «(parcial: …)», y un insumo en $0 sale «sin precio». La respuesta trae
+  `texto` (con cifras, solo se muestra) y `crudo` (con marcadores, es lo único que
+  vuelve como historial). Las corridas de un proyecto no se suman. Spec:
+  `docs/superpowers/specs/2026-11-25-chat-consulta-design.md`.
+  Detalles que no son obvios: `MARCADOR` es de **lista cerrada** (campos
+  `precio|costo|contractual|diferencia|margen`, tipos `insumo|apu|corrida|capitulo`) y
+  `sin_marcadores` deja el ID visible para el detector —si borrara el marcador entero,
+  `{{x:y:vale $45.000}}` sería un hueco—; en el reemplazo, cualquier `{{…}}` que sobre
+  sale «[cifra no disponible]». Los mensajes del **usuario** se revisan crudos con
+  `texto_con_dinero` (un porcentaje también se bloquea); los del **agente** en el
+  historial se omiten si `cifra_monetaria` o un porcentaje aparecen, sin contar los
+  marcadores. El texto del agente se revisa con `privacy.cifra_monetaria` (señales
+  fuertes) y no con `texto_con_dinero`, que daría falsos positivos con «el costo de la
+  Calle 13». La limpieza de cifras inventadas va por línea, y antes de revisar se quitan
+  los nombres que trajeron las herramientas en ese mensaje, pero solo los que disparan el
+  detector («PESO 60.000 KG»). Los nombres de texto libre (proyecto, carpeta, corrida,
+  capítulo) pasan por `cifra_monetaria` antes de ir a la IA y, si traen un monto, se
+  reemplazan. Tope de `MAX_CORRIDAS_POR_RESPUESTA` = 5 corridas por respuesta, y una
+  corrida que falla cuenta. `pesos` y `pct` replican `web/src/lib/moneda.ts`
+  («$1.234», «12.3%»). En la web el hilo vive en `sessionStorage` (clave en
+  `lib/claves.ts`), se valida al restaurar y se borra al cerrar sesión; al servidor solo
+  viaja el `crudo`. `servicio/consulta.py` no puede nombrar el módulo de la fachada de la
+  IA (`tests/test_servicio_privacidad.py`), por eso `ApuAdvisor` se re-exporta desde
+  `dominio/consulta_chat.py`. Riesgo residual que se acepta: «¿cuánto cuesta el apu
+  4859?» se bloquea (falso positivo del detector compartido, fijado en una prueba); un
+  número suelto sin símbolo ni miles en el texto del agente pasa; y un código de capítulo
+  con forma de miles (`1.100`) omitiría su línea.
 - **Costo puesto a mano.** `corrida_item.costo_manual` (los dos backends) es el costo
   unitario que declaró una persona para una fila: lo escribe el botón "Igualar costo al
   contractual", que copia el `precio_contractual` de las filas marcadas. Es para los
@@ -629,3 +669,12 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   sub-APU (`tipo="apu"`) siguen tomando `cands[0]` si su código choca con un insumo.
 - No cierres el bucle del chat con `tool_choice` forzado: los modelos nuevos lo rechazan
   con 400. El tope apaga las herramientas con `{"type": "none"}` sin sacarlas de `tools`.
+- No le devuelvas al modelo una cifra resuelta. El reemplazo de marcadores va
+  DESPUÉS de la última vuelta (`servicio/consulta.py::_con_cifras`), y el
+  historial viaja con el `crudo`. Si un cliente manda el texto con cifras, el
+  servidor lo omite (`cifra_monetaria`), pero no dependas de eso.
+- No sumes en el chat de consulta. Las cifras salen de `vista_corrida` y
+  `PricingEngine`, y las corridas de un proyecto no se suman (suelen ser versiones
+  de la misma licitación).
+- No cambies `cifra_monetaria` por `texto_con_dinero` en el texto del agente de
+  consulta: omitiría casi toda respuesta que nombre un proyecto con número.

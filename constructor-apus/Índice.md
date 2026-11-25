@@ -1,6 +1,6 @@
 # Índice
 
-Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 66 planes, 74 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
+Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 67 planes, 74 specs. Las notas espejo no se editan aquí; la fuente de verdad sigue siendo `docs/` y la raíz del repo.
 
 ## Arquitectura y referencia
 
@@ -112,6 +112,7 @@ Vault autogenerada por `scripts/actualizar_vault.py` en cada commit — 66 plane
 
 | Fecha | Título |
 | --- | --- |
+| 2026-11-25 | [[Planes/2026-11-25-contractual-sin-aiu|El contractual es el SIN AIU (ruta IDU) — plan de implementación]] |
 | 2026-11-25 | [[Planes/2026-11-25-chat-consulta|Chat de consulta — plan de implementación]] |
 | 2026-11-19 | [[Planes/2026-11-19-codigos-compartidos|Códigos compartidos en el alta de APUs — Implementation Plan]] |
 | 2026-11-19 | [[Planes/2026-11-19-chat-agente-composicion|Chat con el agente en la mesa de composición — plan de implementación]] |

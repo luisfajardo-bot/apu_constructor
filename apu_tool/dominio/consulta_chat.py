@@ -126,18 +126,20 @@ class HerramientasConsulta:
         corridas = self.alm.corridas.listar_corridas()
         proyectos = [c for c in carpetas.values()
                      if c.parent_id is None and _casa(terminos, c.nombre)]
-        ids = {p.id for p in proyectos}
+        ids = {p.id for p in proyectos[:MAX_PROYECTOS]}
         salida = []
         for p in proyectos[:MAX_PROYECTOS]:
             suyas = [m for m in corridas
                      if (pr := proyecto_de(m.carpeta_id)) is not None and pr.id == p.id]
-            salida.append({"proyecto": p.nombre,
-                           "corridas": [dto(m) for m in suyas[:MAX_CORRIDAS]]})
+            salida.append(privacy.proyecto_consulta_to_dict(
+                p.nombre, [dto(m) for m in suyas[:MAX_CORRIDAS]], len(suyas)))
         sueltas = [m for m in corridas
                    if _casa(terminos, _nombre_corrida(m))
                    and getattr(proyecto_de(m.carpeta_id), "id", None) not in ids]
         return {"consulta": texto, "proyectos": salida,
-                "corridas": [dto(m) for m in sueltas[:MAX_CORRIDAS]]}
+                "proyectos_encontrados": len(proyectos),
+                "corridas": [dto(m) for m in sueltas[:MAX_CORRIDAS]],
+                "corridas_encontradas": len(sueltas)}
 
     def capitulos(self, corrida_id) -> dict:
         try:
@@ -165,8 +167,9 @@ class HerramientasConsulta:
 # ----------------------------------------------------------------- marcadores
 # `{{<campo>:<tipo>:<id>}}`. El id de un capítulo lleva ":" adentro (`12:2`) y el de
 # un APU lleva "|" (`4859|DIURNO`): por eso el id es "todo hasta las llaves".
-MARCADOR = re.compile(r"\{\{\s*([a-z_]+)\s*:\s*([a-z]+)\s*:\s*([^{}]*?)\s*\}\}",
-                      re.IGNORECASE)
+MARCADOR = re.compile(
+    r"\{\{\s*(precio|costo|contractual|diferencia|margen)\s*:\s*"
+    r"(insumo|apu|corrida|capitulo)\s*:\s*([^{}]+?)\s*\}\}", re.IGNORECASE)
 MSG_CIFRA_OMITIDA = "[se omitió una cifra que no vino del sistema]"
 # Un porcentaje en el historial "del agente" es un margen resuelto (margen_pct está en
 # `_FORBIDDEN_KEYS`): si un cliente manda el `texto` en vez del `crudo`, se omite.
@@ -189,8 +192,11 @@ def limpiar_cifras_inventadas(texto: str, conocidos=()) -> str:
     quitan (sin importar mayúsculas) ANTES de buscar cifras, porque 54 nombres reales
     del catálogo («BASCULA PESO 60.000 KG») disparan el detector y no son montos. Son
     datos del catálogo, no del modelo: quitarlos no abre ningún hueco."""
+    # Solo los nombres que disparan el detector: un capítulo «0» borraría todos los ceros.
     patrones = [re.compile(re.escape(n), re.IGNORECASE)
-                for n in sorted({n for n in conocidos if n}, key=len, reverse=True)]
+                for n in sorted({n for n in conocidos
+                                 if n and privacy.cifra_monetaria(n)},
+                                key=len, reverse=True)]
 
     def visible(linea: str) -> str:
         v = sin_marcadores(linea)
@@ -242,7 +248,11 @@ def conversar(almacen: Almacen, mensajes: list, advisor):
     # el chat). Los marcadores no cuentan en ninguno de los dos: son referencias.
     for m in mensajes:
         if m["rol"] == "usuario":
-            motivo = privacy.texto_con_dinero(sin_marcadores(m["texto"]))
+            # Crudo: una persona no escribe marcadores.
+            motivo = privacy.texto_con_dinero(m["texto"])
+            if not motivo and _PORCENTAJE.search(m["texto"]):
+                motivo = ("El mensaje trae un porcentaje. La IA no puede ver márgenes: "
+                          "quítalo y vuelve a enviarlo.")
             if motivo:
                 yield ("bloqueado", {"motivo": motivo})
                 return
@@ -283,6 +293,9 @@ def conversar(almacen: Almacen, mensajes: list, advisor):
                             "type": "tool_result", "tool_use_id": b.id,
                             "content": privacy.safe_json(
                                 herramientas.ejecutar(b.name, entrada))})
+                if not resultados:
+                    yield ("error", {"detail": MSG_REINTENTAR})
+                    return
                 api.append({"role": "user", "content": resultados})
                 yield ("pensando", {})
                 continue

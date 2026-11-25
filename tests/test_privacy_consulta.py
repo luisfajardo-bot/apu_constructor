@@ -65,3 +65,11 @@ def test_nombre_y_carpeta_con_monto_no_salen():
     d = privacy.corrida_consulta_to_dict(meta, "Lote 1.250.000")
     assert d["nombre"] == "corrida 9" and d["carpeta"] is None
     assert "45.000" not in privacy.safe_json(d) and "1.250.000" not in privacy.safe_json(d)
+
+
+def test_nombres_libres_con_monto_no_salen():
+    c = privacy.capitulo_consulta_to_dict(3, "2", "OBRAS VALOR $1.250.000", 4)
+    p = privacy.proyecto_consulta_to_dict("OBRA $45.000 ADICIONAL", [], 0)
+    assert "1.250.000" not in privacy.safe_json(c) and c["nombre"] == "capítulo 2"
+    assert "45.000" not in privacy.safe_json(p)
+    assert p["proyecto"] == "proyecto (nombre omitido)"

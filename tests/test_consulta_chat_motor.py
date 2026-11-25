@@ -151,3 +151,36 @@ def test_privacy_violation_no_se_traga(alm, monkeypatch):
     a = AdvisorGuion([resp_herramienta(("buscar_insumos", "tubo"))])
     with pytest.raises(privacy.PrivacyViolation):
         list(conversar(alm, [U("busca")], a))
+
+
+@pytest.mark.parametrize("texto", ["{{pesos:cop:45000}}", "{{usd:x:30}}"])
+def test_marcador_fuera_de_la_lista_cerrada_no_esconde_montos(alm, texto):
+    a = AdvisorGuion([resp_texto("Ok.")])
+    list(conversar(alm, [U("hola"), A(texto), U("y?")], a))
+    assert a.llamadas[0]["mensajes"][1]["content"] == MSG_OMITIDO
+
+
+@pytest.mark.parametrize("texto", ["el {{precio:es:45000}} del tubo",
+                                   "{{costo:corrida:45000}} del tubo",
+                                   "la calle 13 tiene margen 12.3%"])
+def test_usuario_se_revisa_crudo_y_con_porcentaje(alm, texto):
+    a = AdvisorGuion([])
+    eventos = list(conversar(alm, [U(texto)], a))
+    assert eventos[0][0] == "bloqueado" and a.llamadas == []
+
+
+def test_porcentaje_del_usuario_explica_el_motivo(alm):
+    eventos = list(conversar(alm, [U("margen 12.3%")], AdvisorGuion([])))
+    assert "porcentaje" in eventos[0][1]["motivo"]
+
+
+def test_conocido_sin_cifra_no_borra_los_demas_numeros():
+    assert limpiar_cifras_inventadas("El tubo vale 45.000", {"0"}) == MSG_CIFRA_OMITIDA
+
+
+def test_tool_use_sin_bloques_es_error_y_no_manda_contenido_vacio(alm):
+    from types import SimpleNamespace
+    from tests.chat_falso import USO
+    a = AdvisorGuion([SimpleNamespace(stop_reason="tool_use", content=[], usage=USO)])
+    eventos = list(conversar(alm, [U("hola")], a))
+    assert eventos[-1][0] == "error" and len(a.llamadas) == 1

@@ -357,8 +357,17 @@ def corrida_consulta_to_dict(meta, carpeta: Optional[str]) -> dict[str, Any]:
 
 def capitulo_consulta_to_dict(corrida_id: int, codigo: str, nombre: str,
                               actividades: int) -> dict[str, Any]:
+    if cifra_monetaria(nombre):
+        nombre = f"capítulo {codigo}"
     return {"ref": f"capitulo:{corrida_id}:{codigo}", "codigo": codigo,
             "nombre": nombre, "actividades": actividades}
+
+
+def proyecto_consulta_to_dict(nombre: str, corridas: list,
+                              encontradas: int) -> dict[str, Any]:
+    if cifra_monetaria(nombre):
+        nombre = "proyecto (nombre omitido)"
+    return {"proyecto": nombre, "corridas": corridas, "corridas_encontradas": encontradas}
 
 
 class PrivacyViolation(RuntimeError):

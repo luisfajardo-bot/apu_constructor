@@ -14,7 +14,8 @@ def base(tmp_path):
 def _sin_dinero(r):
     privacy.assert_no_money(r)
     texto = privacy.safe_json(r)
-    for prohibido in ("35000", "40000", "COSTO INTERNO", "PRECIO IDU"):
+    for prohibido in ("35000", "40000", "30000", "50000", "10000", "25000", "900000",
+                      "COSTO INTERNO", "PRECIO IDU"):
         assert prohibido not in texto
 
 

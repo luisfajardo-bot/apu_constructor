@@ -86,9 +86,13 @@ Gramática: `{{<campo>:<tipo>:<id>}}`. Es una lista cerrada:
 1. **Marcador inválido** (tipo o campo fuera de la lista, id que no existe, capítulo que
    la corrida no tiene): se reemplaza por **«[cifra no disponible]»**. Nunca se adivina
    ni se acerca a otro.
-2. **Cifra parcial.** Una corrida con el armado a medias (`armado` no es `None`) o un
-   capítulo con `completo: false` lleva la etiqueta **«(parcial: X de Y actividades
-   costeadas)»** pegada a la cifra. Un total de 290 de 1939 líneas que se ve entero es la
+2. **Cifra parcial.** Una corrida con el armado a medias (`armado` no es `None`) lleva
+   «(parcial: armado X de Y actividades)» en todos sus campos. Fuera de eso, el costo,
+   la diferencia y el margen de una corrida o de un capítulo con filas sin costear (sin
+   APU y sin costo a mano, la regla de `_costeada`) llevan **«(parcial: X de Y
+   actividades costeadas)»**. El contractual no lleva esa nota, porque esas filas sí
+   tienen contractual. Un capítulo completo en filas pero con alertas de costeo lleva
+   «(con alertas de costeo)». Un total de 290 de 1939 líneas que se ve entero es la
    misma mentira que `_exigir_armado_completo` evita en el cuadro.
 3. **Un `vista_corrida` por corrida y por respuesta.** Varios marcadores de la misma
    corrida comparten la vista (memo dentro de la respuesta). `vista_corrida` cuesta lo
@@ -104,9 +108,18 @@ Gramática: `{{<campo>:<tipo>:<id>}}`. Es una lista cerrada:
 ### Candado contra cifras inventadas
 
 El texto crudo del modelo (antes del reemplazo y **sin** los marcadores) pasa por
-`privacy.texto_con_dinero`. Si trae una cifra, el modelo la inventó: no tenía de dónde
+`privacy.cifra_monetaria`. Si trae una cifra, el modelo la inventó: no tenía de dónde
 sacarla. Ese párrafo se reemplaza por «[se omitió una cifra que no vino del sistema]».
 Toda cifra que ve la persona sale del servidor.
+
+`cifra_monetaria` es **más angosta** que `texto_con_dinero` a propósito. Solo mira las
+señales fuertes: símbolo o moneda, separador de miles y un número pegado a
+«mil»/«millones». Una respuesta normal del agente pone números de proyecto al lado de
+palabras de dinero, como «el costo de la Calle 13: {{…}}», y la ventana de
+`texto_con_dinero` («costo» y un número a menos de 3 palabras) la omitiría casi
+siempre. Un precio inventado se escribe con símbolo o con miles, y eso es lo que este
+candado ataja. Los mensajes **del usuario** siguen pasando por `texto_con_dinero`
+completo.
 
 ## Historial
 
@@ -119,8 +132,9 @@ Igual que en la mesa, el servidor no confía en el historial:
 
 - Un mensaje **del usuario** con dinero (`texto_con_dinero`) responde `bloqueado` sin
   llamar a la IA.
-- Uno **del agente** con cifras se reemplaza por `[mensaje omitido]`. No se bloquea,
-  porque eso envenenaría el chat.
+- Uno **del agente** con cifras (`cifra_monetaria`, sin contar los marcadores) se
+  reemplaza por `[mensaje omitido]`. No se bloquea, porque eso envenenaría el chat. Los
+  marcadores sí viajan: son referencias, no montos.
 
 Si un cliente viejo o con error manda la versión con cifras, el agente pierde ese
 mensaje y la cifra no viaja.
@@ -139,12 +153,13 @@ modelos nuevos rechazan el `tool_choice` forzado con 400.
   fila.
 - **`buscar_proyectos(texto)`** — busca por nombre en carpetas de nivel 1 y en corridas.
   Para cada carpeta que coincide devuelve sus corridas, incluidas las de subcarpetas.
-  Cada corrida va con nombre, carpeta, estado, modo, si tiene capítulos, número de
-  líneas y `ref`.
+  Cada corrida va con nombre, carpeta, estado, modo y `ref`.
 - **`capitulos(corrida_id)`** — código, nombre y número de actividades de cada
-  capítulo, con su `ref`. Los nombres salen de `vista_corrida(...)["capitulos"]`, copiados
-  **clave por clave** sin los montos, por el mismo motivo que `insumo_encontrado_to_dict`:
-  el borde hacia la IA no vuelca objetos.
+  capítulo, con su `ref`. Se cuentan desde las filas de la corrida
+  (`item.capitulo_codigo`), sin costear nada: `dominio/` no puede importar
+  `vista_corrida` (vive en `servicio/`), y para nombrar capítulos no hace falta dinero.
+  Las filas sin capítulo no salen. Cada resultado se arma con un helper de `privacy`,
+  clave por clave.
 
 Con varias coincidencias (cinco «tubería»), la IA lista las opciones, cada una con su
 marcador. Con demasiadas, pide precisar.
@@ -153,11 +168,13 @@ marcador. Con demasiadas, pide precisar.
 
 | Archivo | Qué hace |
 |---|---|
-| `apu_tool/dominio/consulta_chat.py` (nuevo) | herramientas sin dinero, prompt, bucle de tool use con tope. Reusa `_acotar` y el armado de mensajes de `composicion_chat.py` importándolos, no copiándolos. |
+| `apu_tool/dominio/consulta_chat.py` (nuevo) | herramientas sin dinero, gramática de marcadores, candado de cifras inventadas, bucle de tool use con tope. Importa `_acotar` y las constantes de `composicion_chat.py`. El bucle se **copia** (unas 40 líneas) en vez de extraerlo: extraerlo toca el chat de la mesa, que está en producción, y la respuesta final de los dos no se parece (JSON con cambios vs. texto con marcadores). |
+| `apu_tool/dominio/ai_assist.py` | `turno_consulta` en `ApuAdvisor` (la única puerta al SDK), con su prompt `consulta/v1` y sus herramientas. Salida en **texto plano**, sin esquema JSON. El guardia de "sin clave / sin SDK" se comparte con `turno_chat` en un helper `_turno`, con los mismos mensajes de hoy. |
+| `apu_tool/dominio/alertas.py` | `CALIDADES_CON_ALERTA`, público: las calidades de cruce que alertan. Lo usa el reemplazo para marcar un APU incompleto sin repetir la lista. |
 | `apu_tool/servicio/consulta.py` (nuevo) | reemplazo de marcadores: el único punto de este chat que toca dinero. Lee `vista_corrida`, `PricingEngine` y el catálogo. |
 | `apu_tool/dominio/privacy.py` | helpers `*_to_dict` para los resultados nuevos (corrida y capítulo sin montos). |
 | `apu_tool/servicio/rutas.py` | `POST /api/consulta/chat`, SSE, rol `consulta`, rate limit igual que el chat de la mesa. 503 sin `ANTHROPIC_API_KEY`. |
-| `web/src/components/consulta/ChatConsulta.tsx` (nuevo) | botón flotante con `AvatarIngeniero` y panel lateral. Reusa el render de mensajes de `PanelAgente` extrayendo lo común, no duplicándolo. |
+| `web/src/components/consulta/ChatConsulta.tsx` (nuevo) | botón flotante con `AvatarIngeniero` y panel lateral. **No** se extrae nada de `PanelAgente`: lo común (cabecera, caja de texto) son unas 30 líneas, y lo demás de `PanelAgente` es de la mesa (cambios, aplicar, descartar). Extraer arriesgaba el panel de producción por poco. |
 | `web/src/components/Layout.tsx` | monta `ChatConsulta`. El estado vive en el layout, así que el panel **sigue abierto al cambiar de página**; además se guarda en `sessionStorage` (envuelto en try/catch) para sobrevivir a un recargo. |
 | `CLAUDE.md` | sección del chat de consulta, `servicio/consulta.py` en la lista de quienes tocan dinero, y la regla del reemplazo en «No hacer». |
 

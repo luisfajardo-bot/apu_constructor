@@ -59,3 +59,17 @@ test("noAutorizado permanece true tras el signOut disparado por un 403 de /api/y
 
   await waitFor(() => expect(screen.getByText("no-autorizado")).not.toBeNull());
 });
+
+test("al quedar sin sesión se borra el hilo del chat de consulta", async () => {
+  let callback: ((e: string, s: unknown) => void) | undefined;
+  vi.mocked(supabase.auth.onAuthStateChange).mockImplementation(
+    (cb: (e: string, s: unknown) => void) => {
+      callback = cb;
+      return { data: { subscription: { unsubscribe: vi.fn() } } };
+    },
+  );
+  sessionStorage.setItem("chat-consulta", "{}");
+  render(<AuthProvider><Sonda /></AuthProvider>);
+  callback?.("SIGNED_OUT", null);
+  await waitFor(() => expect(sessionStorage.getItem("chat-consulta")).toBeNull());
+});

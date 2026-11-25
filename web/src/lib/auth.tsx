@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { getYo, type Yo } from "@/api/usuarios";
+import { CLAVE_CHAT_CONSULTA } from "@/lib/claves";
 
 type AuthCtx = {
   sesion: Session | null;
@@ -42,6 +43,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
       } else {
+        // El hilo del chat trae cifras: no debe sobrevivir a la sesión que lo hizo.
+        try { sessionStorage.removeItem(CLAVE_CHAT_CONSULTA); } catch { /* sin storage */ }
         setPerfil(null);
         setNoAutorizado(rechazado.current);  // preserva el "no autorizado" si venimos de un 403
       }

@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { chatConsultaStream } from "@/api/consulta";
 import AvatarIngeniero, { type EstadoAvatar } from "@/components/composicion/AvatarIngeniero";
+import { CLAVE_CHAT_CONSULTA as CLAVE } from "@/lib/claves";
 import type { MensajeChat, RespuestaConsulta } from "@/lib/tipos";
 
 interface Entrada {
@@ -14,14 +15,25 @@ interface Entrada {
   crudo?: string;
 }
 
-const CLAVE = "chat-consulta";
 const MAX_HISTORIAL = 20;
 const MAX_TEXTO = 1000;
 
 function leerGuardado(): { hilo: Entrada[]; abierto: boolean } {
   try {
     const v = JSON.parse(sessionStorage.getItem(CLAVE) ?? "null");
-    if (v && Array.isArray(v.hilo)) return { hilo: v.hilo, abierto: !!v.abierto };
+    if (v && Array.isArray(v.hilo)) {
+      const hilo: Entrada[] = v.hilo
+        .filter((e: Entrada | null) =>
+          e && (e.rol === "usuario" || e.rol === "agente") && typeof e.texto === "string"
+          && (e.crudo === undefined || typeof e.crudo === "string"))
+        .map((e: Entrada, i: number) => ({
+          id: i + 1, rol: e.rol, texto: e.texto,
+          ...(e.crudo !== undefined ? { crudo: e.crudo } : {}),
+        }));
+      // Recarga a mitad de una respuesta: el mensaje del usuario quedó sin contestar.
+      while (hilo.length && hilo[hilo.length - 1].rol === "usuario") hilo.pop();
+      return { hilo, abierto: !!v.abierto };
+    }
   } catch {
     /* storage bloqueado o JSON roto: se arranca vacío */
   }
@@ -46,7 +58,10 @@ export default function ChatConsulta({ iaDisponible }: { iaDisponible: boolean }
   const [aviso, setAviso] = useState<string | null>(null);
   const proximoId = useRef(Math.max(0, ...guardado.hilo.map((e) => e.id)) + 1);
   const cancelar = useRef<AbortController | null>(null);
-  const fin = useRef<HTMLDivElement | null>(null);
+  const log = useRef<HTMLDivElement | null>(null);
+  const botonFlotante = useRef<HTMLButtonElement | null>(null);
+  const volviendoACerrar = useRef(false);
+  const montado = useRef(true);
 
   useEffect(() => {
     try {
@@ -56,8 +71,27 @@ export default function ChatConsulta({ iaDisponible }: { iaDisponible: boolean }
     }
   }, [hilo, abierto]);
 
-  useEffect(() => () => cancelar.current?.abort(), []);
-  useEffect(() => fin.current?.scrollIntoView?.({ block: "end" }), [hilo, abierto]);
+  useEffect(() => {
+    montado.current = true;
+    return () => {
+      montado.current = false;
+      cancelar.current?.abort();
+    };
+  }, []);
+  useEffect(() => {
+    if (log.current) log.current.scrollTop = log.current.scrollHeight;
+  }, [hilo, abierto]);
+  useEffect(() => {
+    if (!abierto && volviendoACerrar.current) {
+      volviendoACerrar.current = false;
+      botonFlotante.current?.focus();
+    }
+  }, [abierto]);
+
+  function cerrar() {
+    volviendoACerrar.current = true;
+    setAbierto(false);
+  }
 
   const ocupado = estado === "pensando" || estado === "buscando";
   const visible: EstadoAvatar = iaDisponible ? estado : "deshabilitado";
@@ -81,6 +115,7 @@ export default function ChatConsulta({ iaDisponible }: { iaDisponible: boolean }
         conMensaje.slice(-MAX_HISTORIAL).map(paraHistorial),
         (ev) => {
           const d = (ev.data ?? {}) as { consulta?: string; motivo?: string; detail?: string };
+          if (!montado.current) return;
           if (ev.event === "pensando") {
             setEstado("pensando");
             setLinea("Pensando…");
@@ -99,6 +134,7 @@ export default function ChatConsulta({ iaDisponible }: { iaDisponible: boolean }
     } catch (e) {
       res.fallo = e instanceof Error ? e.message : "No pude responder, vuelve a intentar.";
     }
+    if (!montado.current) return;
     setLinea("");
     const r = res.r;
     if (r) {
@@ -117,16 +153,24 @@ export default function ChatConsulta({ iaDisponible }: { iaDisponible: boolean }
   if (!abierto) {
     return (
       <button
+        ref={botonFlotante}
         type="button"
         aria-label="Abrir el agente de consulta"
+        aria-disabled={!iaDisponible}
+        aria-describedby={iaDisponible ? undefined : "chat-consulta-sin-ia"}
         title={iaDisponible ? "Pregúntale al agente por precios y totales"
           : "El agente no está disponible: falta ANTHROPIC_API_KEY en el servidor."}
-        disabled={!iaDisponible}
-        onClick={() => setAbierto(true)}
-        className="fixed right-4 bottom-4 z-40 flex items-center gap-2 rounded-full border border-border bg-background py-1 pr-3 pl-1 text-xs text-foreground shadow-md hover:bg-muted disabled:opacity-50"
+        onClick={() => { if (iaDisponible) setAbierto(true); }}
+        className={"fixed right-4 bottom-4 z-40 flex items-center gap-2 rounded-full border border-border bg-background py-1 pr-3 pl-1 text-xs text-foreground shadow-md hover:bg-muted"
+          + (iaDisponible ? "" : " opacity-50")}
       >
         <AvatarIngeniero estado={visible} />
         Preguntar
+        {!iaDisponible && (
+          <span id="chat-consulta-sin-ia" className="sr-only">
+            El servidor no tiene IA configurada (falta ANTHROPIC_API_KEY).
+          </span>
+        )}
       </button>
     );
   }
@@ -134,6 +178,7 @@ export default function ChatConsulta({ iaDisponible }: { iaDisponible: boolean }
   return (
     <aside
       aria-label="Agente de consulta"
+      onKeyDown={(ev) => { if (ev.key === "Escape") cerrar(); }}
       className="fixed right-4 bottom-4 z-40 flex max-h-[75vh] w-[min(400px,calc(100vw-2rem))] flex-col gap-2 rounded border border-border bg-background p-3 shadow-lg"
     >
       <div className="flex items-center gap-2">
@@ -149,7 +194,7 @@ export default function ChatConsulta({ iaDisponible }: { iaDisponible: boolean }
             type="button"
             disabled={ocupado}
             className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground disabled:opacity-50"
-            onClick={() => { setHilo([]); setAviso(null); }}
+            onClick={() => { setHilo([]); setAviso(null); setEstado("espera"); setLinea(""); }}
           >
             Limpiar
           </button>
@@ -158,13 +203,13 @@ export default function ChatConsulta({ iaDisponible }: { iaDisponible: boolean }
           type="button"
           aria-label="Cerrar el agente de consulta"
           className="text-muted-foreground hover:text-foreground"
-          onClick={() => setAbierto(false)}
+          onClick={cerrar}
         >
           <X className="size-4" />
         </button>
       </div>
 
-      <div role="log" className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+      <div ref={log} role="log" className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
         {hilo.length === 0 && (
           <p className="text-xs text-muted-foreground">
             {"Pregúntame por el precio de un insumo, el costo de un APU o los totales de "
@@ -187,7 +232,6 @@ export default function ChatConsulta({ iaDisponible }: { iaDisponible: boolean }
             </p>
           </div>
         ))}
-        <div ref={fin} />
       </div>
 
       {aviso && (
@@ -199,6 +243,7 @@ export default function ChatConsulta({ iaDisponible }: { iaDisponible: boolean }
       <div className="flex flex-col gap-1">
         <textarea
           aria-label="Pregunta para el agente"
+          autoFocus
           rows={2}
           maxLength={MAX_TEXTO}
           value={texto}

@@ -48,3 +48,11 @@ def test_helpers_de_consulta_no_llevan_dinero():
     assert [s["ref"] for s in salida] == [
         "insumo:7", "apu:A1|DIURNO", "corrida:3", "capitulo:3:2"]
     assert salida[2]["nombre"] == "calle13"          # sin alias: el archivo sin extensión
+
+
+def test_calidades_con_alerta_cubre_los_cruces_que_alertan():
+    from apu_tool.dominio.alertas import CALIDADES_CON_ALERTA, _MOTIVO_CRUCE
+    from apu_tool.nucleo.models import CALIDAD_SIN_PRECIO_LISTA
+    assert set(_MOTIVO_CRUCE) <= CALIDADES_CON_ALERTA
+    assert CALIDAD_SIN_PRECIO_LISTA in CALIDADES_CON_ALERTA
+    assert "exacto" not in CALIDADES_CON_ALERTA

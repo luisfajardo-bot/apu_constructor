@@ -20,6 +20,10 @@ _MOTIVO_CRUCE = {
     CALIDAD_SIN_PRECIO_CATALOGO: "sin precio en el catálogo",
 }
 
+# Las calidades de cruce que hacen alertar a un componente. Pública para el chat de
+# consulta (`servicio/consulta.py`), que marca un APU incompleto sin repetir la lista.
+CALIDADES_CON_ALERTA = frozenset(_MOTIVO_CRUCE) | {CALIDAD_SIN_PRECIO_LISTA}
+
 
 def alertas_costeo(a: AssembledApu) -> list[str]:
     """Motivos de revisión de costo del ítem. Lista vacía = sin alerta.

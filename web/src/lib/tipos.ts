@@ -210,6 +210,16 @@ export interface MensajeChat {
   texto: string;
 }
 
+/** Respuesta del chat de consulta. `crudo` lleva MARCADORES ({{costo:corrida:12}}) y
+ *  es lo ÚNICO que vuelve como historial: la IA nunca ve cifras. `texto` trae las
+ *  cifras que puso el servidor y solo se muestra. */
+export interface RespuestaConsulta {
+  texto: string;
+  crudo: string;
+  modelo: string;
+  prompt_version: string;
+}
+
 export type OpCambioAgente = "agregar" | "modificar" | "quitar";
 
 /** Un cambio propuesto por el agente. `componente` es null solo en `quitar`. */

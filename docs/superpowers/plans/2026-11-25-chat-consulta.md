@@ -548,6 +548,8 @@ def almacen_consulta(tmp_path):
         Insumo("6092", "HERRAMIENTA MENOR", "GLB", "EQ", 2000, "PRECIO IDU"),
         Insumo("8001", "TUBERIA PVC 6 PULG", "ML", "MAT", 35000, "COSTO INTERNO"),
         Insumo("8002", "TUBERIA PVC 8 PULG", "ML", "MAT", 0, "COSTO INTERNO"),
+        # Nombre real del estilo de los 54 que disparan el detector de cifras.
+        Insumo("8003", "BASCULA PESO 60.000 KG", "UN", "EQ", 900000, "COSTO INTERNO"),
     ])
     alm.apus.insert_apus([
         Apu("A1", "MEZCLA ASFALTICA MDC-19", "M3", "DIURNO", "PAVIMENTOS"),
@@ -755,6 +757,10 @@ class HerramientasConsulta:
     def __init__(self, almacen: Almacen):
         self.alm = almacen
         self._matcher = None
+        # Nombres que salieron en resultados de ESTE mensaje. `conversar` los quita del
+        # texto del modelo antes de buscar cifras inventadas: 54 nombres reales del
+        # catálogo («PESO 60.000 KG») dispararían el detector, y no son montos.
+        self.nombres: set[str] = set()
 
     def ejecutar(self, nombre: str, entrada: dict) -> dict:
         entrada = entrada if isinstance(entrada, dict) else {}
@@ -778,6 +784,7 @@ class HerramientasConsulta:
         # `encontrados` y no `total`: `total` está en `_FORBIDDEN_KEYS`.
         out = {"consulta": texto, "encontrados": n,
                "insumos": [privacy.insumo_consulta_to_dict(i) for i in ordenados]}
+        self.nombres.update(i.nombre for i in ordenados)
         if n < MIN_RESULTADOS_SIN_SUGERENCIA:
             out["sugerencia"] = SUGERENCIA_POCOS
         return out
@@ -794,6 +801,7 @@ class HerramientasConsulta:
                 if (c.apu_codigo, turno) in vistos:
                     continue
                 vistos.add((c.apu_codigo, turno))
+                self.nombres.add(c.apu_nombre)
                 apus.append(privacy.apu_consulta_to_dict(c.apu_codigo, c.apu_nombre,
                                                          turno))
         return {"consulta": texto, "apus": apus}
@@ -847,6 +855,7 @@ class HerramientasConsulta:
                 continue
             c = caps.setdefault(cod, {"nombre": r.item.capitulo_nombre or "", "n": 0})
             c["n"] += 1
+        self.nombres.update(c["nombre"] for c in caps.values())
         return {"corrida_id": cid,
                 "capitulos": [privacy.capitulo_consulta_to_dict(cid, cod, c["nombre"],
                                                                 c["n"])
@@ -966,6 +975,20 @@ def test_limpiar_omite_la_linea_y_no_la_lista_entera():
         "- Tubo 6 {{precio:insumo:1}}\n" + MSG_CIFRA_OMITIDA)
 
 
+def test_limpiar_respeta_los_nombres_del_catalogo():
+    nombre = "BASCULA PESO 60.000 KG"
+    t = "- Bascula peso 60.000 kg: {{precio:insumo:3}}"
+    assert limpiar_cifras_inventadas(t, {nombre}) == t
+    assert limpiar_cifras_inventadas(t) == MSG_CIFRA_OMITIDA   # sin el nombre, se omite
+
+
+def test_un_nombre_buscado_no_se_omite_en_la_respuesta(alm):
+    a = AdvisorGuion([resp_herramienta(("buscar_insumos", "bascula")),
+                      resp_texto("- BASCULA PESO 60.000 KG: {{precio:insumo:3}}")])
+    eventos = list(conversar(alm, [U("cuanto vale la bascula")], a))
+    assert eventos[-1][1]["crudo"] == "- BASCULA PESO 60.000 KG: {{precio:insumo:3}}"
+
+
 def test_el_id_de_un_marcador_no_es_un_hueco_del_detector(alm):
     """Un cliente que arma el historial no puede esconder montos dentro de un marcador."""
     a = AdvisorGuion([resp_texto("Ok.")])
@@ -1058,13 +1081,26 @@ def sin_marcadores(texto: str) -> str:
     return MARCADOR.sub(lambda m: f" {m.group(3)} ", texto or "")
 
 
-def limpiar_cifras_inventadas(texto: str) -> str:
+def limpiar_cifras_inventadas(texto: str, conocidos=()) -> str:
     """Reemplaza cada LÍNEA que trae una cifra escrita por el modelo: no tenía de
     dónde sacarla, así que la inventó. Por línea y no por párrafo: una lista con «- »
-    es un solo párrafo, y 55 nombres reales de insumos («PESO 60.000 KG») disparan el
-    detector; omitir el párrafo se llevaría la lista entera."""
+    es un solo párrafo.
+
+    `conocidos` son los nombres que devolvieron las herramientas en este mensaje: se
+    quitan (sin importar mayúsculas) ANTES de buscar cifras, porque 54 nombres reales
+    del catálogo («BASCULA PESO 60.000 KG») disparan el detector y no son montos. Son
+    datos del catálogo, no del modelo: quitarlos no abre ningún hueco."""
+    patrones = [re.compile(re.escape(n), re.IGNORECASE)
+                for n in sorted({n for n in conocidos if n}, key=len, reverse=True)]
+
+    def visible(linea: str) -> str:
+        v = sin_marcadores(linea)
+        for p in patrones:
+            v = p.sub(" ", v)
+        return v
+
     return "\n".join(
-        MSG_CIFRA_OMITIDA if privacy.cifra_monetaria(sin_marcadores(p)) else p
+        MSG_CIFRA_OMITIDA if privacy.cifra_monetaria(visible(p)) else p
         for p in (texto or "").split("\n"))
 
 
@@ -1164,7 +1200,8 @@ def conversar(almacen: Almacen, mensajes: list, advisor):
             if not texto:
                 yield ("error", {"detail": MSG_REINTENTAR})
                 return
-            yield ("respuesta", {"crudo": limpiar_cifras_inventadas(texto),
+            yield ("respuesta", {"crudo": limpiar_cifras_inventadas(
+                                     texto, herramientas.nombres),
                                  "modelo": advisor.model,
                                  "prompt_version": PROMPT_VERSION_CONSULTA})
             return

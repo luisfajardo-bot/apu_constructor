@@ -99,15 +99,21 @@ Gramática: `{{<campo>:<tipo>:<id>}}`. Es una lista cerrada:
 5. **Precio de insumo sin tarifa** (`sin_precio`) o en $0: se muestra «sin precio en la
    lista Principal». La regla "nada en $0": un $0 nunca se presenta como precio.
 6. **APU con componentes sin precio:** si algún componente de `cost_apu` sale con una
-   `calidad_cruce` de alerta (sin precio, sin cruce), la cifra va con «(incompleto: N
-   componentes sin precio)». No se repite el texto de la alerta, que también lleva
+   `calidad_cruce` de alerta (sin precio, sin cruce), la cifra va con «(revisar: N de M
+   componentes con alerta de costeo)». El total de una corrida sin filas faltantes pero
+   con alertas (`totales.n_alertas_costeo`) va con «(con alertas de costeo)», igual que
+   el capítulo.
+7. **Tope:** máximo 5 corridas distintas por respuesta; las demás salen «no
+   disponible». Cada una es un `vista_corrida` completo.
+8. El porcentaje sale con el formato de la web («12.3%»), y los marcadores se aceptan
+   sin importar mayúsculas. No se repite el texto de la alerta, que también lleva
    montos (ver «No hacer» en CLAUDE.md).
 
 ### Candado contra cifras inventadas
 
 El texto crudo del modelo (antes del reemplazo y **sin** los marcadores) pasa por
 `privacy.cifra_monetaria`. Si trae una cifra, el modelo la inventó: no tenía de dónde
-sacarla. Ese párrafo se reemplaza por «[se omitió una cifra que no vino del sistema]».
+sacarla. Esa línea se reemplaza por «[se omitió una cifra que no vino del sistema]».
 Toda cifra que ve la persona sale del servidor.
 
 `cifra_monetaria` es **más angosta** que `texto_con_dinero` a propósito. Solo mira las
@@ -213,7 +219,13 @@ la pantalla de la corrida. Recalcular en `dominio` sería la tercera suma que
 - Endpoint: rol `consulta` alcanza; sin clave → 503.
 
 **Frontend (vitest):** el historial que se manda es el `crudo`; el panel sobrevive a
-navegar; sin IA el botón queda deshabilitado.
+un recargo (`sessionStorage`); sin IA el botón queda deshabilitado. Que sobreviva a
+navegar sale de vivir en el Layout y se comprueba en el navegador (smoke).
+
+**Candados del historial (revisión del plan):** el id de un marcador queda a la vista
+del detector (si no, `{{x:y:vale $45.000}}` sería un hueco), un porcentaje en el
+historial del agente se omite, y la cifra inventada se omite por **línea**, no por
+párrafo (una lista con «- » es un solo párrafo).
 
 **Smoke real con API key** antes del merge, con las cuatro preguntas de arriba contra la
 base real, y en el navegador antes del push.

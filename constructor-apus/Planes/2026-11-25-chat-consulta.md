@@ -457,7 +457,7 @@ En `class ApuAdvisor`, reemplaza **el cuerpo** de `turno_chat` (deja su docstrin
             raise
 
     def turno_chat(self, mensajes: list, *, con_herramientas: bool):
-        """(docstring actual, sin cambios)"""
+        # ← AQUÍ VA EL DOCSTRING ACTUAL DE turno_chat, COPIADO TAL CUAL (no lo borres).
         return self._turno("Conversar con el agente", self._pedir_chat_al_sdk,
                            mensajes, con_herramientas)
 
@@ -536,6 +536,10 @@ def _corrida(alm, nombre, carpeta_id, filas):
 
 def almacen_consulta(tmp_path):
     """Devuelve (alm, ids) con ids = {insumo_tubo, insumo_cero, calle13, cali}."""
+    from apu_tool import config
+    # `Almacen` IGNORA las rutas si hay DATABASE_URL, y esto llama `reset()`. El guard
+    # de tests/conftest.py solo protege dentro de pytest: este se defiende solo.
+    assert config.db_backend() == "sqlite", "la base de prueba nunca va contra Postgres"
     alm = Almacen(tmp_path / "precios.db", tmp_path / "apus.db",
                   tmp_path / "corridas.db")
     alm.init_schema()
@@ -579,8 +583,7 @@ def almacen_consulta(tmp_path):
 
 - [ ] **Step 2: Comprueba que la base se arma**
 
-Run: `python -c "import tempfile, pathlib; from tests.consulta_base import almacen_consulta; print(almacen_consulta(pathlib.Path(tempfile.mkdtemp()))[1])"`
-Expected: un dict con los 4 ids enteros. Si `LicitacionItem` no acepta `capitulo_codigo` como keyword, o si `CorridaMeta` no acepta `carpeta_id`/`nombre`, ajusta los nombres a los de `apu_tool/nucleo/models.py` (`LicitacionItem` línea ~260, `CorridaMeta` línea ~437) antes de seguir.
+No la corras con `python -c`: fuera de pytest no está el guard de `DATABASE_URL`. Se comprueba sola en la Tarea 5, que es la primera que la usa. Si ahí falla el armado de la base: si `LicitacionItem` no acepta `capitulo_codigo` como keyword, o si `CorridaMeta` no acepta `carpeta_id`/`nombre`, ajusta los nombres a los de `apu_tool/nucleo/models.py` (`LicitacionItem` línea ~260, `CorridaMeta` línea ~437) antes de seguir.
 
 - [ ] **Step 3: Commit**
 
@@ -946,7 +949,7 @@ def test_mensaje_del_agente_con_marcadores_viaja_intacto(alm):
     assert a.llamadas[0]["mensajes"][1]["content"] == crudo
 
 
-def test_cifra_inventada_por_el_modelo_se_omite_por_parrafo(alm):
+def test_cifra_inventada_por_el_modelo_se_omite(alm):
     a = AdvisorGuion([resp_texto(
         "Vale como $45.000.\n\nCalle 13: costo {{costo:corrida:1}}")])
     eventos = list(conversar(alm, [U("cuanto vale")], a))
@@ -957,6 +960,37 @@ def test_cifra_inventada_por_el_modelo_se_omite_por_parrafo(alm):
 def test_limpiar_no_toca_los_marcadores():
     t = "El costo de la Calle 13 es {{costo:corrida:13}}"
     assert limpiar_cifras_inventadas(t) == t
+
+
+def test_limpiar_omite_la_linea_y_no_la_lista_entera():
+    t = "- Tubo 6 {{precio:insumo:1}}\n- Báscula PESO 60.000 KG {{precio:insumo:2}}"
+    assert limpiar_cifras_inventadas(t) == (
+        "- Tubo 6 {{precio:insumo:1}}\n" + MSG_CIFRA_OMITIDA)
+
+
+def test_el_id_de_un_marcador_no_es_un_hueco_del_detector(alm):
+    """Un cliente que arma el historial no puede esconder montos dentro de un marcador."""
+    a = AdvisorGuion([resp_texto("Ok.")])
+    eventos = list(conversar(alm, [U("hola {{x:y:el tubo vale $45.000 pesos}}")], a))
+    assert eventos[0][0] == "bloqueado" and a.llamadas == []
+
+    a = AdvisorGuion([resp_texto("Ok.")])
+    list(conversar(alm, [U("hola"), A("ok {{costo:apu:cuesta $35.000 COP|DIURNO}}"),
+                         U("y?")], a))
+    assert a.llamadas[0]["mensajes"][1]["content"] == MSG_OMITIDO
+
+
+def test_historial_legitimo_con_codigos_viaja_intacto(alm):
+    crudo = "- {{costo:apu:4859 N|NOCTURNO}}\n- {{margen:capitulo:13:2}}"
+    a = AdvisorGuion([resp_texto("Ok.")])
+    list(conversar(alm, [U("hola"), A(crudo), U("y?")], a))
+    assert a.llamadas[0]["mensajes"][1]["content"] == crudo
+
+
+def test_un_porcentaje_resuelto_en_el_historial_se_omite(alm):
+    a = AdvisorGuion([resp_texto("Ok.")])
+    list(conversar(alm, [U("hola"), A("Total 850 y margen 12,3 %"), U("y?")], a))
+    assert a.llamadas[0]["mensajes"][1]["content"] == MSG_OMITIDO
 
 
 def test_el_tope_apaga_las_herramientas(alm):
@@ -992,10 +1026,12 @@ Expected: FAIL con `ImportError: cannot import name 'MSG_CIFRA_OMITIDA'`
 
 - [ ] **Step 3: Implementa**
 
-Reemplaza el bloque de import de `composicion_chat` en `apu_tool/dominio/consulta_chat.py` por este, que junta los dos, y agrega el de `ai_assist`:
+Reemplaza el bloque de import de `composicion_chat` en `apu_tool/dominio/consulta_chat.py` por este, que junta los dos, y agrega el de `ai_assist`. `ApuAdvisor` se **reexporta** desde aquí porque `servicio/` no puede nombrar `ai_assist` (`tests/test_servicio_privacidad.py::test_servicio_no_importa_ai_assist`); es el mismo patrón de `dominio/composicion_agente.py`:
 
 ```python
-from apu_tool.dominio.ai_assist import PROMPT_VERSION_CONSULTA, IANoDisponible
+from apu_tool.dominio.ai_assist import (  # noqa: F401  (re-export: servicio/ no importa la fachada de la IA)
+    PROMPT_VERSION_CONSULTA, ApuAdvisor, IANoDisponible,
+)
 from apu_tool.dominio.composicion_chat import (
     _MAX_VUELTAS, MAX_HERRAMIENTAS, MAX_RESULTADOS_APUS, MAX_RESULTADOS_INSUMOS,
     MIN_RESULTADOS_SIN_SUGERENCIA, MSG_OMITIDO, MSG_REINTENTAR, SUGERENCIA_POCOS,
@@ -1009,20 +1045,29 @@ Agrega al final del archivo:
 # ----------------------------------------------------------------- marcadores
 # `{{<campo>:<tipo>:<id>}}`. El id de un capítulo lleva ":" adentro (`12:2`) y el de
 # un APU lleva "|" (`4859|DIURNO`): por eso el id es "todo hasta las llaves".
-MARCADOR = re.compile(r"\{\{\s*([a-z_]+)\s*:\s*([a-z]+)\s*:\s*([^{}]*?)\s*\}\}")
+MARCADOR = re.compile(r"\{\{\s*([a-z_]+)\s*:\s*([a-z]+)\s*:\s*([^{}]*?)\s*\}\}",
+                      re.IGNORECASE)
 MSG_CIFRA_OMITIDA = "[se omitió una cifra que no vino del sistema]"
+# Un porcentaje en el historial "del agente" es un margen resuelto (margen_pct está en
+# `_FORBIDDEN_KEYS`): si un cliente manda el `texto` en vez del `crudo`, se omite.
+_PORCENTAJE = re.compile(r"\d\s*%")
 
 
 def sin_marcadores(texto: str) -> str:
-    return MARCADOR.sub(" ", texto or "")
+    """El texto con cada marcador reducido a su ID. El id queda A LA VISTA del
+    detector a propósito: si se borrara el marcador entero, `{{x:y:vale $45.000}}`
+    sería un hueco para pasarle montos al modelo (el texto viaja intacto)."""
+    return MARCADOR.sub(lambda m: f" {m.group(3)} ", texto or "")
 
 
 def limpiar_cifras_inventadas(texto: str) -> str:
-    """Reemplaza cada PÁRRAFO que trae una cifra escrita por el modelo: no tenía de
-    dónde sacarla, así que la inventó. Los marcadores no cuentan (son referencias)."""
-    return "\n\n".join(
+    """Reemplaza cada LÍNEA que trae una cifra escrita por el modelo: no tenía de
+    dónde sacarla, así que la inventó. Por línea y no por párrafo: una lista con «- »
+    es un solo párrafo, y 55 nombres reales de insumos («PESO 60.000 KG») disparan el
+    detector; omitir el párrafo se llevaría la lista entera."""
+    return "\n".join(
         MSG_CIFRA_OMITIDA if privacy.cifra_monetaria(sin_marcadores(p)) else p
-        for p in (texto or "").split("\n\n"))
+        for p in (texto or "").split("\n"))
 
 
 # ----------------------------------------------------------------------- bucle
@@ -1068,8 +1113,10 @@ def conversar(almacen: Almacen, mensajes: list, advisor):
             if motivo:
                 yield ("bloqueado", {"motivo": motivo})
                 return
-        elif privacy.cifra_monetaria(sin_marcadores(m["texto"])):
-            m["texto"] = MSG_OMITIDO
+        else:
+            visible = sin_marcadores(m["texto"])
+            if privacy.cifra_monetaria(visible) or _PORCENTAJE.search(visible):
+                m["texto"] = MSG_OMITIDO
 
     api = [{"role": "user" if m["rol"] == "usuario" else "assistant",
             "content": m["texto"]} for m in mensajes]
@@ -1175,7 +1222,20 @@ def base(tmp_path):
 def test_formatos():
     assert pesos(1234567) == "$1.234.567"
     assert pesos(-1500.5) == "$-1.501"
-    assert pct(0.1234) == "12,3 %"
+    assert pct(0.1234) == "12.3%"                  # igual que la web
+
+
+def test_marcador_con_mayusculas_igual_se_resuelve(base):
+    alm, _ = base
+    assert resolver(alm, "{{Costo:APU:A1|DIURNO}}") == "$22.000"
+
+
+def test_tope_de_corridas_por_respuesta(base, monkeypatch):
+    alm, ids = base
+    monkeypatch.setattr(consulta, "MAX_CORRIDAS_POR_RESPUESTA", 1)
+    texto = resolver(alm, f"{{{{costo:corrida:{ids['cali']}}}}} "
+                          f"{{{{costo:corrida:{ids['calle13']}}}}}")
+    assert texto.endswith(NO_DISPONIBLE) and not texto.startswith(NO_DISPONIBLE)
 
 
 def test_precio_de_insumo(base):
@@ -1312,7 +1372,9 @@ from decimal import ROUND_HALF_UP, Decimal
 from apu_tool import config
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio import consulta_chat
-from apu_tool.dominio.ai_assist import ApuAdvisor, IANoDisponible
+# OJO: ni en un comentario puede aparecer aquí el nombre del módulo de la fachada de
+# la IA: `test_servicio_no_importa_<…>` busca la subcadena en todo `servicio/`.
+from apu_tool.dominio.consulta_chat import ApuAdvisor, IANoDisponible
 from apu_tool.dominio.alertas import CALIDADES_CON_ALERTA
 from apu_tool.dominio.pricing import PricingEngine
 from apu_tool.servicio.corridas import vista_corrida
@@ -1321,6 +1383,7 @@ logger = logging.getLogger(__name__)
 
 NO_DISPONIBLE = "[cifra no disponible]"
 SIN_PRECIO = "sin precio en la lista Principal"
+MAX_CORRIDAS_POR_RESPUESTA = 5
 # Marcador → clave en la vista. Ojo: en `totales` la diferencia en pesos se llama
 # `margen` y el porcentaje `margen_pct`; en los capítulos, `diferencia` y `margen_pct`.
 _CAMPOS_CORRIDA = {"contractual": "contractual", "costo": "costo",
@@ -1336,7 +1399,8 @@ def pesos(v: float) -> str:
 
 
 def pct(v: float) -> str:
-    return f"{v * 100:.1f} %".replace(".", ",")
+    """Como `pct` de `web/src/lib/moneda.ts` («12.3%»): el chat dice lo que dice la pantalla."""
+    return f"{(v or 0) * 100:.1f}%"
 
 
 def _fmt(campo: str, v: float) -> str:
@@ -1359,6 +1423,10 @@ class _Resolutor:
 
     def vista(self, cid: int):
         if cid not in self._vistas:
+            # Cada corrida distinta es un `vista_corrida` completo (y egress de
+            # Supabase): más de MAX_CORRIDAS_POR_RESPUESTA salen «no disponible».
+            if len(self._vistas) >= MAX_CORRIDAS_POR_RESPUESTA:
+                return None
             self._vistas[cid] = vista_corrida(self.alm, cid)
         return self._vistas[cid]
 
@@ -1415,6 +1483,10 @@ class _Resolutor:
             hechas = sum(1 for it in items if _costeada(it))
             if hechas < len(items):
                 nota = f" (parcial: {hechas} de {len(items)} actividades costeadas)"
+            elif v["totales"].get("n_alertas_costeo"):
+                # Mismo criterio que el capítulo: filas con APU pero con algún
+                # componente en $0 o con cruce dudoso.
+                nota = " (con alertas de costeo)"
         return s + nota
 
     def _capitulo(self, campo: str, ident: str) -> str:
@@ -1443,7 +1515,7 @@ def resolver(alm: Almacen, texto: str) -> str:
 
     def uno(m) -> str:
         try:
-            return r.cifra(m.group(1), m.group(2), m.group(3).strip())
+            return r.cifra(m.group(1).lower(), m.group(2).lower(), m.group(3).strip())
         except (ValueError, TypeError, KeyError):
             return NO_DISPONIBLE                       # id ilegible: no es un error
         except Exception:
@@ -2131,9 +2203,14 @@ Ojo: con DATABASE_URL en el entorno, `Almacen()` lee la base de PRODUCCIÓN. Es 
 se quiere para tener "La Cali" y "Calle 13", y es seguro porque no se escribe nada.
 """
 import sys
+from pathlib import Path
 
-from apu_tool.datos.almacen import Almacen
-from apu_tool.servicio import consulta
+# `python scripts/x.py` pone scripts/ en sys.path, no la raíz (igual que
+# scripts/smoke_chat_composicion.py).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from apu_tool.datos.almacen import Almacen  # noqa: E402
+from apu_tool.servicio import consulta  # noqa: E402
 
 PREGUNTAS = [
     "¿Cuánto cuesta la actividad de mezcla asfáltica?",
@@ -2185,6 +2262,8 @@ Con el servidor local (`scripts/servidor_local.py` o la receta de la memoria «L
 - Sobrevive a un recargo.
 - A 390px de ancho no se sale de la pantalla.
 - Sin `ANTHROPIC_API_KEY`, el botón sale deshabilitado.
+- El botón **no tapa** los botones de las barras `sticky bottom-0` de `TablaItems.tsx` (~l. 665), `TablaInsumos.tsx` (~l. 271) y `Composicion.tsx` (~l. 736). Si tapa alguno, súbelo (`bottom-16`) o muévelo a la izquierda, y vuelve a probar.
+- Pregunta en el chat las cosas que el detector bloquea a propósito («costo calle 13», «precio del insumo 8001») y comprueba que el aviso le dice a la persona cómo reescribir. Si molesta en el uso real, es una decisión aparte (no aflojar el detector compartido sin hablarlo).
 
 - [ ] **Step 5: Commit del smoke**
 

@@ -17,9 +17,13 @@ import re
 
 from apu_tool.datos.almacen import Almacen
 from apu_tool.dominio import privacy
+from apu_tool.dominio.ai_assist import (  # noqa: F401  (re-export: servicio/ no importa la fachada de la IA)
+    PROMPT_VERSION_CONSULTA, ApuAdvisor, IANoDisponible,
+)
 from apu_tool.dominio.composicion_chat import (
-    MAX_RESULTADOS_APUS, MAX_RESULTADOS_INSUMOS, MIN_RESULTADOS_SIN_SUGERENCIA,
-    SUGERENCIA_POCOS,
+    _MAX_VUELTAS, MAX_HERRAMIENTAS, MAX_RESULTADOS_APUS, MAX_RESULTADOS_INSUMOS,
+    MIN_RESULTADOS_SIN_SUGERENCIA, MSG_OMITIDO, MSG_REINTENTAR, SUGERENCIA_POCOS,
+    _acotar,
 )
 from apu_tool.dominio.matching import Matcher
 from apu_tool.nucleo.relevancia import _tokens
@@ -156,3 +160,155 @@ class HerramientasConsulta:
                 "capitulos": [privacy.capitulo_consulta_to_dict(cid, cod, c["nombre"],
                                                                 c["n"])
                               for cod, c in caps.items()]}
+
+
+# ----------------------------------------------------------------- marcadores
+# `{{<campo>:<tipo>:<id>}}`. El id de un capítulo lleva ":" adentro (`12:2`) y el de
+# un APU lleva "|" (`4859|DIURNO`): por eso el id es "todo hasta las llaves".
+MARCADOR = re.compile(r"\{\{\s*([a-z_]+)\s*:\s*([a-z]+)\s*:\s*([^{}]*?)\s*\}\}",
+                      re.IGNORECASE)
+MSG_CIFRA_OMITIDA = "[se omitió una cifra que no vino del sistema]"
+# Un porcentaje en el historial "del agente" es un margen resuelto (margen_pct está en
+# `_FORBIDDEN_KEYS`): si un cliente manda el `texto` en vez del `crudo`, se omite.
+_PORCENTAJE = re.compile(r"\d\s*%")
+
+
+def sin_marcadores(texto: str) -> str:
+    """El texto con cada marcador reducido a su ID. El id queda A LA VISTA del
+    detector a propósito: si se borrara el marcador entero, `{{x:y:vale $45.000}}`
+    sería un hueco para pasarle montos al modelo (el texto viaja intacto)."""
+    return MARCADOR.sub(lambda m: f" {m.group(3)} ", texto or "")
+
+
+def limpiar_cifras_inventadas(texto: str, conocidos=()) -> str:
+    """Reemplaza cada LÍNEA que trae una cifra escrita por el modelo: no tenía de
+    dónde sacarla, así que la inventó. Por línea y no por párrafo: una lista con «- »
+    es un solo párrafo.
+
+    `conocidos` son los nombres que devolvieron las herramientas en este mensaje: se
+    quitan (sin importar mayúsculas) ANTES de buscar cifras, porque 54 nombres reales
+    del catálogo («BASCULA PESO 60.000 KG») disparan el detector y no son montos. Son
+    datos del catálogo, no del modelo: quitarlos no abre ningún hueco."""
+    patrones = [re.compile(re.escape(n), re.IGNORECASE)
+                for n in sorted({n for n in conocidos if n}, key=len, reverse=True)]
+
+    def visible(linea: str) -> str:
+        v = sin_marcadores(linea)
+        for p in patrones:
+            v = p.sub(" ", v)
+        return v
+
+    return "\n".join(
+        MSG_CIFRA_OMITIDA if privacy.cifra_monetaria(visible(p)) else p
+        for p in (texto or "").split("\n"))
+
+
+# ----------------------------------------------------------------------- bucle
+def _registrar_uso(resp, usadas: int) -> None:
+    uso = getattr(resp, "usage", None)
+    logger.info("chat consulta: entrada=%s salida=%s búsquedas=%s",
+                getattr(uso, "input_tokens", "?"), getattr(uso, "output_tokens", "?"),
+                usadas)
+
+
+def _consulta(nombre: str, entrada: dict) -> str:
+    if nombre == "capitulos":
+        return f"corrida {entrada.get('corrida_id', '')}"
+    return str(entrada.get("texto", ""))[:200]
+
+
+def conversar(almacen: Almacen, mensajes: list, advisor):
+    """Responde el último mensaje. Generador de eventos SSE:
+
+      ('bloqueado', {'motivo'})       el mensaje del usuario trae dinero
+      ('pensando',  {})
+      ('buscando',  {'herramienta', 'consulta'})
+      ('respuesta', {crudo, modelo, prompt_version})   crudo = texto CON marcadores
+      ('error',     {'detail'})
+
+    Las cifras NO las pone esto: `servicio/consulta.py` reemplaza los marcadores del
+    `crudo` cuando el modelo ya terminó. Una `PrivacyViolation` sube, como en la mesa.
+
+    ponytail: el bucle es copia del de `composicion_chat.conversar` (unas 40 líneas).
+    Extraerlo tocaría el chat de la mesa, en producción, y las dos respuestas finales
+    no se parecen. Si aparece un tercer chat, ahí se extrae.
+    """
+    mensajes = _acotar(mensajes)
+    if not mensajes or mensajes[-1]["rol"] != "usuario":
+        yield ("error", {"detail": "No hay un mensaje tuyo que responder."})
+        return
+    # El historial lo manda el cliente. Usuario: detector COMPLETO, bloquea (la
+    # persona reescribe). Agente: solo señales fuertes y se OMITE (bloquear envenenaría
+    # el chat). Los marcadores no cuentan en ninguno de los dos: son referencias.
+    for m in mensajes:
+        if m["rol"] == "usuario":
+            motivo = privacy.texto_con_dinero(sin_marcadores(m["texto"]))
+            if motivo:
+                yield ("bloqueado", {"motivo": motivo})
+                return
+        else:
+            visible = sin_marcadores(m["texto"])
+            if privacy.cifra_monetaria(visible) or _PORCENTAJE.search(visible):
+                m["texto"] = MSG_OMITIDO
+
+    api = [{"role": "user" if m["rol"] == "usuario" else "assistant",
+            "content": m["texto"]} for m in mensajes]
+    herramientas = HerramientasConsulta(almacen)
+    usadas = 0
+    yield ("pensando", {})
+    try:
+        for _ in range(_MAX_VUELTAS):
+            resp = advisor.turno_consulta(api, con_herramientas=usadas < MAX_HERRAMIENTAS)
+            _registrar_uso(resp, usadas)
+            parada = getattr(resp, "stop_reason", None)
+            if parada == "tool_use":
+                # El contenido COMPLETO, con el pensamiento: la API lo exige de vuelta.
+                api.append({"role": "assistant", "content": resp.content})
+                resultados = []
+                for b in resp.content:
+                    if getattr(b, "type", None) != "tool_use":
+                        continue
+                    usadas += 1
+                    entrada = b.input if isinstance(b.input, dict) else {}
+                    yield ("buscando", {"herramienta": b.name,
+                                        "consulta": _consulta(b.name, entrada)})
+                    if usadas > MAX_HERRAMIENTAS:
+                        resultados.append({
+                            "type": "tool_result", "tool_use_id": b.id,
+                            "is_error": True,
+                            "content": "Llegaste al tope de búsquedas de este "
+                                       "mensaje: responde con lo que ya tienes."})
+                    else:
+                        resultados.append({
+                            "type": "tool_result", "tool_use_id": b.id,
+                            "content": privacy.safe_json(
+                                herramientas.ejecutar(b.name, entrada))})
+                api.append({"role": "user", "content": resultados})
+                yield ("pensando", {})
+                continue
+            if parada == "refusal":
+                yield ("error", {"detail": "La IA no quiso responder ese mensaje. "
+                                           "Reformúlalo."})
+                return
+            if parada == "max_tokens":
+                yield ("error", {"detail": "La respuesta se cortó por longitud. "
+                                           "Pregunta algo más puntual."})
+                return
+            texto = "\n\n".join(b.text for b in resp.content
+                                if getattr(b, "type", None) == "text").strip()
+            if not texto:
+                yield ("error", {"detail": MSG_REINTENTAR})
+                return
+            yield ("respuesta", {"crudo": limpiar_cifras_inventadas(
+                                     texto, herramientas.nombres),
+                                 "modelo": advisor.model,
+                                 "prompt_version": PROMPT_VERSION_CONSULTA})
+            return
+        yield ("error", {"detail": MSG_REINTENTAR})
+    except privacy.PrivacyViolation:
+        raise                                   # el invariante #1 nunca se traga
+    except IANoDisponible as exc:
+        yield ("error", {"detail": str(exc)})
+    except Exception:
+        logger.exception("Falló una vuelta del chat de consulta")
+        yield ("error", {"detail": MSG_REINTENTAR})

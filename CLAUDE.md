@@ -17,7 +17,7 @@ La IA solo decide la **estructura** de los APUs (qué insumos, qué rendimiento)
   que recorre la estructura y **lanza `PrivacyViolation`** si encuentra un campo
   monetario. Preferimos *fallar* a *filtrar*.
 - Lo que la IA recibe son los tipos `DePriced*` de `apu_tool/nucleo/models.py`, sin campos de precio.
-- Solo `apu_tool/dominio/pricing.py` y `apu_tool/dominio/report.py` tocan dinero, y jamás se pasan a la IA.
+- Solo `apu_tool/dominio/pricing.py` y `apu_tool/dominio/report.py` tocan dinero (más `apu_tool/servicio/consulta.py`, que solo reemplaza los marcadores del chat de consulta DESPUÉS de la última vuelta de la IA), y jamás se pasan a la IA.
 
 Si agregas una llamada a la IA, construye el payload con helpers de `apu_tool/dominio/privacy.py` y
 serialízalo con `privacy.safe_json(...)`. Si agregas un campo monetario nuevo,
@@ -321,7 +321,12 @@ matching, modelo de IA, clasificación de precios.
   `dominio/consulta_chat.py`. Riesgo residual que se acepta: «¿cuánto cuesta el apu
   4859?» se bloquea (falso positivo del detector compartido, fijado en una prueba); un
   número suelto sin símbolo ni miles en el texto del agente pasa; y un código de capítulo
-  con forma de miles (`1.100`) omitiría su línea.
+  con forma de miles (`1.100`) omitiría su línea. Falsos positivos medidos del detector
+  sobre el mensaje del usuario: «cuanto cuesta la calle 13», «costo del capitulo 2 de la
+  calle 13», «precio tubo 6», «costo total calle 13» y «polisombra 65%» (por el chequeo de
+  porcentaje); se bloquean a propósito y el detector compartido no se afloja sin decidirlo.
+  Una línea del historial del agente con un nombre del catálogo que dispara el detector se
+  omite en el turno siguiente (por línea; el mensaje entero solo si todas disparan).
 - **Costo puesto a mano.** `corrida_item.costo_manual` (los dos backends) es el costo
   unitario que declaró una persona para una fila: lo escribe el botón "Igualar costo al
   contractual", que copia el `precio_contractual` de las filas marcadas. Es para los

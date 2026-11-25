@@ -62,6 +62,25 @@ def test_mensaje_del_agente_con_cifras_se_omite(alm):
     assert a.llamadas[0]["mensajes"][1]["content"] == MSG_OMITIDO
 
 
+def test_historial_del_agente_omite_por_linea(alm):
+    a = AdvisorGuion([resp_texto("Ok.")])
+    crudo = ("Opciones:\n- BASCULA PESO 60.000 KG {{precio:insumo:3}}\n"
+             "- Tubo {{precio:insumo:1}}")
+    list(conversar(alm, [U("hola"), A(crudo), U("y?")], a))
+    assert a.llamadas[0]["mensajes"][1]["content"] == (
+        "Opciones:\n" + MSG_CIFRA_OMITIDA + "\n- Tubo {{precio:insumo:1}}")
+    a = AdvisorGuion([resp_texto("Ok.")])
+    list(conversar(alm, [U("hola"), A("$45.000"), U("y?")], a))
+    assert a.llamadas[0]["mensajes"][1]["content"] == MSG_OMITIDO
+
+
+def test_buscando_no_lleva_cifras(alm):
+    a = AdvisorGuion([resp_herramienta(("buscar_insumos", "tubo de $45.000")),
+                      resp_texto("Ok.")])
+    eventos = list(conversar(alm, [U("hola")], a))
+    assert ("buscando", {"herramienta": "buscar_insumos", "consulta": "…"}) in eventos
+
+
 def test_mensaje_del_agente_con_marcadores_viaja_intacto(alm):
     crudo = "Calle 13: costo {{costo:corrida:13}}, margen {{margen:corrida:13}}"
     a = AdvisorGuion([resp_texto("Ok.")])

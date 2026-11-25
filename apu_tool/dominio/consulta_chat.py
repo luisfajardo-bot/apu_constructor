@@ -220,7 +220,8 @@ def _registrar_uso(resp, usadas: int) -> None:
 def _consulta(nombre: str, entrada: dict) -> str:
     if nombre == "capitulos":
         return f"corrida {entrada.get('corrida_id', '')}"
-    return str(entrada.get("texto", ""))[:200]
+    texto = str(entrada.get("texto", ""))[:200]
+    return "…" if privacy.cifra_monetaria(texto) else texto
 
 
 def conversar(almacen: Almacen, mensajes: list, advisor):
@@ -257,9 +258,17 @@ def conversar(almacen: Almacen, mensajes: list, advisor):
                 yield ("bloqueado", {"motivo": motivo})
                 return
         else:
-            visible = sin_marcadores(m["texto"])
-            if privacy.cifra_monetaria(visible) or _PORCENTAJE.search(visible):
+            # Por línea: un nombre del catálogo («PESO 60.000 KG») no tumba el mensaje.
+            def dispara(linea):
+                v = sin_marcadores(linea)
+                return bool(privacy.cifra_monetaria(v) or _PORCENTAJE.search(v))
+            lineas = m["texto"].split("\n")
+            con_texto = [l for l in lineas if l.strip()]
+            if con_texto and all(dispara(l) for l in con_texto):
                 m["texto"] = MSG_OMITIDO
+            else:
+                m["texto"] = "\n".join(MSG_CIFRA_OMITIDA if dispara(l) else l
+                                       for l in lineas)
 
     api = [{"role": "user" if m["rol"] == "usuario" else "assistant",
             "content": m["texto"]} for m in mensajes]

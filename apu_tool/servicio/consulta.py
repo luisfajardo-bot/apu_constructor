@@ -24,7 +24,7 @@ from apu_tool.servicio.corridas import vista_corrida
 logger = logging.getLogger(__name__)
 
 NO_DISPONIBLE = "[cifra no disponible]"
-_RESTO = re.compile(r"\{\{[^{}]*\}\}")   # marcador fuera de la lista cerrada: nunca llaves crudas
+_RESTO = re.compile(r"\{\{[^{}]*\}{0,2}")   # marcador fuera de la lista cerrada: nunca llaves crudas
 SIN_PRECIO = "sin precio en la lista Principal"
 MAX_CORRIDAS_POR_RESPUESTA = 5
 # Marcador → clave en la vista. Ojo: en `totales` la diferencia en pesos se llama
@@ -43,7 +43,7 @@ def pesos(v: float) -> str:
 
 def pct(v: float) -> str:
     """Como `pct` de `web/src/lib/moneda.ts` («12.3%»): el chat dice lo que dice la pantalla."""
-    q = Decimal(str((v or 0) * 100)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    q = Decimal((v or 0) * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
     return f"{q}%"
 
 

@@ -24,6 +24,12 @@ def test_formatos():
     assert pct(0.0625) == "6.3%"
     assert pct(0.1234) == "12.3%"                  # igual que la web
     assert pct(-0.0625) == "-6.3%"
+    assert pct(0.1235) == "12.3%"                  # el binario exacto, como toFixed de JS
+
+
+def test_llaves_mal_cerradas_no_pasan(base):
+    alm, _ = base
+    assert "{{" not in resolver(alm, "x {{costo:apu:4859|DIURNO}")
 
 
 def test_marcador_con_mayusculas_igual_se_resuelve(base):

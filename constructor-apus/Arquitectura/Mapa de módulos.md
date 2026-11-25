@@ -99,6 +99,7 @@ flowchart TD
 | `autoria.py` | Lógica de servicio para AGREGAR a la base: insumos y APUs nuevos. |
 | `carpetas.py` | Servicio de carpetas: reglas de negocio (profundidad máx. 2, unicidad de |
 | `composicion.py` | Lógica de servicio del expediente de composición asistida. |
+| `consulta.py` | Chat de consulta, el lado CON dinero: reemplaza los marcadores que escribió la IA |
 | `corridas.py` | Lógica de la capa de servicio para las corridas (armado web). |
 | `dependencias.py` | Inyección de dependencias de la API: el Almacen vive en app.state. |
 | `esquemas.py` | DTOs del contrato HTTP. Las respuestas de cuadro/ítems se devuelven como dict. |

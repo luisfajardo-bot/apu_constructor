@@ -65,6 +65,15 @@ def es_contractual_con_aiu(apus: list[AssembledApu]) -> bool:
                for a in apus)
 
 
+def rotulo_base_contractual(apus: list[AssembledApu]) -> str | None:
+    """Texto de la fila «Precio contractual» de la INFO. None si la base no se conoce
+    (corrida plana: ningún ítem trae básico > 0). ÚNICA fuente de los dos textos."""
+    if not any(a.item.precio_contractual_sin_aiu > 0 for a in apus):
+        return None
+    return ("Valor unitario CON AIU (corrida anterior al cambio)"
+            if es_contractual_con_aiu(apus) else "Valor unitario BÁSICO (sin AIU)")
+
+
 def hay_columna_sin_aiu(apus: list[AssembledApu]) -> bool:
     """¿Va la columna aparte «sin AIU»? ÚNICA regla, la usan las tres hojas.
 
@@ -273,6 +282,8 @@ def write_report(apus: list[AssembledApu], path: Path | str,
     # Qué tarifa costeó este cuadro. Sin esta fila, un cuadro de No Previstos y uno
     # contractual son indistinguibles en el archivo.
     meta.append(["Lista de precios", lista_nombre])
+    if (base := rotulo_base_contractual(apus)):
+        meta.append(["Precio contractual", base])
     meta.append(["Nota", "Los precios de costo NO fueron vistos por la IA. "
                          "La IA solo decidió la estructura de los APUs."])
     wb.save(path)

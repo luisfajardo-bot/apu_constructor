@@ -22,7 +22,7 @@ from apu_tool.nucleo.models import AssembledApu, MatchStatus
 from apu_tool.dominio.report import (_MONEY, _PCT, _REND, _STATUS_LABEL, _TOTAL_FILL,
                                      _WARN_FILL, _ALERT_FILL, _autosize, _style_header,
                                      _build_desviaciones, _sin_columna_aparte,
-                                     es_contractual_con_aiu, hay_columna_sin_aiu)
+                                     hay_columna_sin_aiu, rotulo_base_contractual)
 from apu_tool.dominio.alertas import alertas_costeo, filas_alertadas, motivo_alerta
 
 
@@ -301,8 +301,7 @@ def write_report_categorizado(apus: list[AssembledApu], path: Path | str,
     # Qué tarifa costeó este cuadro (ver write_report: misma razón).
     info.append(["Lista de precios", lista_nombre])
     info.append(["Precio contractual",
-                 "Valor unitario CON AIU (corrida anterior al cambio)"
-                 if es_contractual_con_aiu(apus) else "Valor unitario BÁSICO (sin AIU)"])
+                 rotulo_base_contractual(apus) or "Valor unitario BÁSICO (sin AIU)"])
     info.append(["Nota", "Los precios de costo NO fueron vistos por la IA. "
                          "La IA solo decidió la estructura de los APUs."])
     wb.save(path)

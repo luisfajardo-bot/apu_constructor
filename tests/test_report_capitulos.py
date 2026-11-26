@@ -244,3 +244,15 @@ def test_info_del_categorizado_rotula_la_base_segun_los_datos(tmp_path):
             "Valor unitario CON AIU (corrida anterior al cambio)")
     assert info([_ens(_nuevo())]) == "Valor unitario BÁSICO (sin AIU)"
     assert info([_ens(_item("1", "P", sin_aiu=0.0))]) == "Valor unitario BÁSICO (sin AIU)"
+
+
+def test_info_del_cuadro_rotula_la_base_solo_si_se_conoce(tmp_path):
+    def info(apus):
+        out = tmp_path / "w.xlsx"
+        write_report(apus, out)
+        ws = openpyxl.load_workbook(out)["INFO"]
+        return dict(ws.iter_rows(values_only=True))
+    assert info([_ens(_nuevo())])["Precio contractual"] == "Valor unitario BÁSICO (sin AIU)"
+    assert (info([_ens(_item("1", "P"))])["Precio contractual"] ==
+            "Valor unitario CON AIU (corrida anterior al cambio)")
+    assert "Precio contractual" not in info([_ens(_item("1", "P", sin_aiu=0.0))])

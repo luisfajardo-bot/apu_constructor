@@ -35,7 +35,8 @@ def test_previsualizar_devuelve_capitulos_totales_y_conciliacion(tmp_path):
     assert [c["codigo"] for c in prev["capitulos"]] == ["1", "2"]
     assert prev["capitulos"][0]["actividades"] == 2
     assert prev["capitulos"][0]["contractual"] > 0
-    assert prev["capitulos"][0]["contractual_sin_aiu"] > 0
+    # Una sola base: en una lectura nueva el «sin AIU» sería el mismo número.
+    assert "contractual_sin_aiu" not in prev["capitulos"][0]
     assert prev["conciliacion"]["subtotales_ok"] is True
     assert prev["errores"] == []
     assert prev["puede_aprobar"] is True
@@ -47,10 +48,8 @@ def test_el_total_de_la_previa_es_la_suma_de_sus_capitulos(tmp_path):
     # que ve. Es la misma regla de "no dupliques cálculos" aplicada a la previa.
     p = escribir_formulario(tmp_path / "f1.xlsx")
     prev = svc.previsualizar(EntidadOrigen.IDU, p.read_bytes(), "f1.xlsx")
-    assert prev["totales"]["contractual"] == sum(
-        c["contractual"] for c in prev["capitulos"])
-    assert prev["totales"]["contractual_sin_aiu"] == sum(
-        c["contractual_sin_aiu"] for c in prev["capitulos"])
+    assert prev["totales"] == {"contractual": sum(
+        c["contractual"] for c in prev["capitulos"])}
     # Y con lo que el parser concilió contra el Excel.
     assert prev["totales"]["contractual"] == prev["conciliacion"]["contractual"]
 

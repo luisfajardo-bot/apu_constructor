@@ -157,10 +157,8 @@ def previsualizar(entidad: EntidadOrigen, contenido: bytes,
         "capitulos": capitulos,
         "actividades": len(lectura.items),
         "filas_ignoradas": lectura.filas_ignoradas,
-        "totales": {
-            "contractual": sum(c["contractual"] for c in capitulos),
-            "contractual_sin_aiu": sum(c["contractual_sin_aiu"] for c in capitulos),
-        },
+        # Una sola base: desde idu-f1/2 el contractual YA es el sin AIU.
+        "totales": {"contractual": sum(c["contractual"] for c in capitulos)},
         "conciliacion": lectura.conciliacion,
         "errores": list(lectura.errores),
         "advertencias": [a.to_dict() for a in lectura.advertencias],
@@ -189,8 +187,7 @@ def _capitulos_de_lectura(lectura: LecturaPresupuesto) -> list[dict]:
         return []
     por_codigo: dict[str, dict] = {}
     for cap in lectura.capitulos:
-        por_codigo[cap.codigo] = {**cap.to_dict(), "actividades": 0,
-                                  "contractual": 0, "contractual_sin_aiu": 0}
+        por_codigo[cap.codigo] = {**cap.to_dict(), "actividades": 0, "contractual": 0}
     for it in lectura.items:
         fila = por_codigo.get(it.capitulo_codigo)
         if fila is None:
@@ -198,11 +195,9 @@ def _capitulos_de_lectura(lectura: LecturaPresupuesto) -> list[dict]:
                 "codigo": it.capitulo_codigo,
                 "nombre": it.capitulo_nombre or "(sin capítulo)",
                 "orden": len(por_codigo) + 1, "fila_origen": 0,
-                "actividades": 0, "contractual": 0, "contractual_sin_aiu": 0})
+                "actividades": 0, "contractual": 0})
         fila["actividades"] += 1
         fila["contractual"] += mul_redondeado(it.precio_contractual, it.cantidad)
-        fila["contractual_sin_aiu"] += mul_redondeado(
-            it.precio_contractual_sin_aiu, it.cantidad)
     return list(por_codigo.values())
 
 

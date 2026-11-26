@@ -301,6 +301,11 @@ matching, modelo de IA, clasificación de precios.
   `texto` (con cifras, solo se muestra) y `crudo` (con marcadores, es lo único que
   vuelve como historial). Las corridas de un proyecto no se suman. Spec:
   `docs/superpowers/specs/2026-11-25-chat-consulta-design.md`.
+  Prompt `consulta/v2`: el contractual se compara tal cual con el costo directo, y
+  `resolver` agrega « (con AIU)» a `contractual`, `diferencia` y `margen` (nunca a
+  `costo`) de una corrida o capítulo cuyo `origen.parser_version` es `idu-f1/1`
+  (`servicio/consulta.py::_nota_aiu`). La IA no ve la nota: el historial vuelve con
+  el `crudo`.
   Detalles que no son obvios: `MARCADOR` es de **lista cerrada** (campos
   `precio|costo|contractual|diferencia|margen`, tipos `insumo|apu|corrida|capitulo`) y
   `sin_marcadores` deja el ID visible para el detector —si borrara el marcador entero,
@@ -434,13 +439,51 @@ matching, modelo de IA, clasificación de precios.
   El capítulo de cada actividad **no tiene tabla**: viaja dentro de `item_json` y
   `plan_json` (`LicitacionItem.capitulo_codigo` / `capitulo_nombre`), que es donde ya
   viajaba `categoria`.
-- **Las dos bases del contractual.** En la ruta IDU, `precio_contractual` es el **valor
-  unitario CON AIU** (col K del Formulario 1), que es el que concilia exacto con el
-  `VALOR TOTAL` y con los subtotales del Excel. El básico sin AIU viaja aparte en
-  `precio_contractual_sin_aiu` y se muestra en columna propia, en la web y en el cuadro.
-  Ojo: el costo interno **no lleva AIU**, así que la diferencia contra el contractual
-  incluye el A.I.U. Medido sobre el archivo de referencia (1939 actividades):
-  158.456.072.140 con AIU, 123.871.215.068 sin AIU.
+- **El contractual del IDU es el SIN AIU (2026-11-25, lector `idu-f1/2`).** En una
+  corrida nueva de la ruta IDU, `precio_contractual` es el **valor unitario BÁSICO, sin
+  AIU**, comparable con el costo interno (costo directo); `precio_contractual_sin_aiu`
+  lleva el mismo valor y **no hay ningún campo con AIU**. La columna «incluye AIU» sigue
+  siendo obligatoria y se lee fila por fila **solo** para verificar el archivo contra el
+  `VALOR TOTAL` y los `Subtotal` del Excel (que son con AIU): `total_fila_no_concilia`,
+  `subtotal_no_concilia`. Después se descarta. En `origen_json.conciliacion` quedan
+  `contractual` (sin AIU), `subtotales_ok` y `diferencia`. Medido sobre el archivo de
+  referencia (1939 actividades): 123.871.215.068 sin AIU (lo que manda) y
+  158.456.072.140 con AIU (solo verificación).
+  - **Corridas viejas (`idu-f1/1`) no se migran ni se recalculan:** conservan su
+    contractual CON AIU y sus ítems de pago viejos. El plan de una corrida que se estaba
+    armando durante el deploy también quedó con `idu-f1/1`. Un proyecto puede mezclar
+    corridas vieja y nueva, y no se suman.
+  - **Columna aparte «sin AIU» en el cuadro**, una sola regla por datos
+    (`report.hay_columna_sin_aiu`, sin leer `origen_json`): sale si ningún ítem tiene
+    básico > 0 (corrida plana o vieja sin básico) o si algún básico > 0 difiere del
+    contractual (corrida IDU vieja, `es_contractual_con_aiu`). Una línea agregada a mano
+    (básico 0) no la hace volver. En una IDU nueva hay una sola columna, rotulada «(sin
+    AIU)»; la hoja INFO rotula «CON AIU (corrida anterior al cambio)» en las viejas.
+    La web previa dice «Contractual (sin AIU)» y «Verificación contra el Excel»; las
+    advertencias de verificación citan cifras con AIU, porque son las del Excel.
+  - **Formularios 2025:** los encabezados «VALOR UNITARIO SIN A.I.U.» / «CON A.I.U.» se
+    reconocen junto a los de 2026 **por igualdad** (`_ENCABEZADOS`), no por subcadena:
+    ese archivo trae también columnas «… OFERTADO» y «… CORREGIDO».
+  - **Ítem de pago con su precisión real** (`presupuesto.item_pago_texto`): si el formato
+    de la celda esconde decimales (`11.10325999999995` con formato de 4 da `11.10326`, no
+    `11.1033`) se usa el valor real, y así no hay `item_duplicado` falso; si no los
+    esconde, manda el formato, que recupera ceros (`2.010`). Con la regla vieja salían mal
+    102 ítems del Lote 5 y 138 del Lote 3.
+  - **Subtotales:** un `SUBTOTAL` cuenta como subtotal de capítulo solo si desde el
+    último contado se leyó alguna actividad o una fila relevante ignorada. Las filas de
+    resumen general («SUBTOTAL OBRAS (INCLUYE A.I.U)», «SUBTOTAL COSTOS ESTIMADOS DE
+    OBRAS») se ignoran: la regla es estructural y no por texto, porque los textos varían
+    entre lotes. Ignorarlas no es callarlas: cada `SUBTOTAL` descartado emite
+    `subtotal_ignorado` con su fila y su valor (dos por archivo en L5 y L3), porque un
+    Subtotal real cuyas filas cayeron sin aviso (Nº vacío, o un Nº sin forma de código
+    como `ESP-0099-XYZ`) llega por el mismo camino. Tampoco se distingue por valor: en
+    L5 el resumen vale 440.756.172.193 y las actividades 173.586.654.338.
+  - Riesgos residuales: el archivo de referencia de
+    `tests/test_presupuesto_idu_regresion.py` **no está en todas las máquinas** (ahí el
+    test sale *skipped*, y esa red no corre); el cierre de subtotales se midió sobre L5 y
+    L3.
+
+  Spec: `docs/superpowers/specs/2026-11-25-contractual-sin-aiu-design.md`.
 - **Notas de insumos y APUs.** Tabla `nota` en `seguridad.db` / schema `seguridad`, y
   no en precios/apus **a propósito**: `seed --force` reescribe esas dos bases. El dueño es
   un enlace blando por identidad (insumo `codigo|nombre_norm`, APU `codigo|TURNO`), nunca
@@ -683,3 +726,11 @@ precios y el orquestador. Corre `pytest` antes de dar algo por terminado.
   de la misma licitación).
 - No cambies `cifra_monetaria` por `texto_con_dinero` en el texto del agente de
   consulta: omitiría casi toda respuesta que nombre un proyecto con número.
+- No vuelvas a guardar el valor con AIU de la ruta IDU (ni en `LicitacionItem`, ni en
+  `plan_json`, ni en `origen_json`): se lee solo para verificar contra el Excel y se
+  descarta. Y no «le quites el AIU» a un valor dividiendo por un factor: el AIU varía por
+  actividad (entre 1,2781 y 1,2797 en el archivo de referencia), y el básico ya viene
+  escrito en el formulario. Tampoco borres de `_FORBIDDEN_KEYS` las claves que quedaron
+  muertas (`contractual_con_aiu`, `subtotales_excel`).
+- No decidas la columna «sin AIU» del cuadro en otro lado que `report.hay_columna_sin_aiu`,
+  ni cuentes un `SUBTOTAL` por su texto: la regla de subtotales es estructural.

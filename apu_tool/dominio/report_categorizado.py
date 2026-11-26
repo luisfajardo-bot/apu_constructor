@@ -21,7 +21,8 @@ from openpyxl.styles import Font
 from apu_tool.nucleo.models import AssembledApu, MatchStatus
 from apu_tool.dominio.report import (_MONEY, _PCT, _REND, _STATUS_LABEL, _TOTAL_FILL,
                                      _WARN_FILL, _ALERT_FILL, _autosize, _style_header,
-                                     _build_desviaciones)
+                                     _build_desviaciones, _sin_columna_aparte,
+                                     hay_columna_sin_aiu, rotulo_base_contractual)
 from apu_tool.dominio.alertas import alertas_costeo, filas_alertadas, motivo_alerta
 
 
@@ -159,8 +160,10 @@ def escribir_hoja_capitulos(ws, apus: list[AssembledApu]) -> None:
     for col in range(1, len(_COLUMNAS_CAPITULO) + 1):
         ws.cell(row=r, column=col).fill = _TOTAL_FILL
     ws.cell(row=r, column=2).font = Font(bold=True)
-    _autosize(ws, {1: 10, 2: 42, 3: 12, 4: 10, 5: 10, 6: 18, 7: 20, 8: 16,
-                   9: 16, 10: 10, 11: 11, 12: 12, 13: 12})
+    anchos = [10, 42, 12, 10, 10, 18, 20, 16, 16, 10, 11, 12, 12]
+    if not hay_columna_sin_aiu(apus):
+        _sin_columna_aparte(ws, (7,), anchos, ("Contractual",))
+    _autosize(ws, dict(enumerate(anchos, start=1)))
 
 
 def _build_detalle(ws, grupos: dict[str, list[AssembledApu]]) -> None:
@@ -212,8 +215,10 @@ def _build_detalle(ws, grupos: dict[str, list[AssembledApu]]) -> None:
             cell.number_format = _MONEY
             cell.font = Font(bold=True)
         ws.cell(row=r, column=2).font = Font(bold=True)
-    _autosize(ws, {1: 9, 2: 46, 3: 6, 4: 12, 5: 16, 6: 20, 7: 14, 8: 14, 9: 10,
-                   10: 18, 11: 20, 12: 16, 13: 16, 14: 12})
+    anchos = [9, 46, 6, 12, 16, 20, 14, 14, 10, 18, 20, 16, 16, 12]
+    if not hay_columna_sin_aiu([a for filas in grupos.values() for a in filas]):
+        _sin_columna_aparte(ws, (6, 11), anchos, ("P. Contractual", "Total Contractual"))
+    _autosize(ws, dict(enumerate(anchos, start=1)))
 
 
 def _build_apus(ws, apus: list[AssembledApu]) -> None:
@@ -295,7 +300,8 @@ def write_report_categorizado(apus: list[AssembledApu], path: Path | str,
     info.append(["Capítulos", len(grupos)])
     # Qué tarifa costeó este cuadro (ver write_report: misma razón).
     info.append(["Lista de precios", lista_nombre])
-    info.append(["Precio contractual", "Valor unitario BÁSICO (sin AIU)"])
+    info.append(["Precio contractual",
+                 rotulo_base_contractual(apus) or "Valor unitario BÁSICO (sin AIU)"])
     info.append(["Nota", "Los precios de costo NO fueron vistos por la IA. "
                          "La IA solo decidió la estructura de los APUs."])
     wb.save(path)

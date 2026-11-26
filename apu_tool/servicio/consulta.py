@@ -27,6 +27,12 @@ NO_DISPONIBLE = "[cifra no disponible]"
 _RESTO = re.compile(r"\{\{[^{}]*\}{0,2}")   # marcador fuera de la lista cerrada: nunca llaves crudas
 SIN_PRECIO = "sin precio en la lista Principal"
 MAX_CORRIDAS_POR_RESPUESTA = 5
+# Corridas leídas con el lector viejo del IDU: su contractual LLEVA AIU (antes del
+# 2026-11-25 el IDU se leía así). El costo interno es costo directo, así que esas
+# cifras se marcan para que nadie las compare sin darse cuenta. Spec:
+# docs/superpowers/specs/2026-11-25-contractual-sin-aiu-design.md
+PARSER_CON_AIU = "idu-f1/1"
+CON_AIU = " (con AIU)"
 # Marcador → clave en la vista. Ojo: en `totales` la diferencia en pesos se llama
 # `margen` y el porcentaje `margen_pct`; en los capítulos, `diferencia` y `margen_pct`.
 _CAMPOS_CORRIDA = {"contractual": "contractual", "costo": "costo",
@@ -54,6 +60,15 @@ def _fmt(campo: str, v: float) -> str:
 def _costeada(it: dict) -> bool:
     """La regla de `report_categorizado._costeada`, sobre la fila de la vista."""
     return bool(it.get("apu_codigo")) or (it.get("costo_unitario") or 0) > 0
+
+
+def _nota_aiu(v: dict, campo: str) -> str:
+    """« (con AIU)» en contractual, diferencia y margen de una corrida vieja del IDU.
+    `v["origen"]` es `origen_json` ya parseado, o None (corrida plana)."""
+    if campo == "costo":
+        return ""
+    return (CON_AIU if (v.get("origen") or {}).get("parser_version") == PARSER_CON_AIU
+            else "")
 
 
 class _Resolutor:
@@ -132,7 +147,7 @@ class _Resolutor:
             return NO_DISPONIBLE
         if not v["items"]:                             # regla "nada en $0"
             return "sin actividades"
-        s = _fmt(campo, v["totales"][_CAMPOS_CORRIDA[campo]])
+        s = _fmt(campo, v["totales"][_CAMPOS_CORRIDA[campo]]) + _nota_aiu(v, campo)
         nota = self._nota_armado(v)
         if not nota and campo != "contractual":
             items = v["items"]
@@ -158,7 +173,7 @@ class _Resolutor:
         cap = next((c for c in v["capitulos"] if c["codigo"] == cod), None)
         if cap is None:
             return NO_DISPONIBLE
-        s = _fmt(campo, cap[_CAMPOS_CAPITULO[campo]])
+        s = _fmt(campo, cap[_CAMPOS_CAPITULO[campo]]) + _nota_aiu(v, campo)
         nota = self._nota_armado(v)
         if not nota and campo != "contractual":
             if cap["sin_apu"]:

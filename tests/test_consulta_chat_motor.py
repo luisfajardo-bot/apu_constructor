@@ -30,7 +30,7 @@ def test_busca_y_responde_con_marcadores(alm):
     nombres = [e for e, _ in eventos]
     assert nombres == ["pensando", "buscando", "pensando", "respuesta"]
     assert eventos[-1][1]["crudo"] == "El tubo de 6 vale {{precio:insumo:1}}."
-    assert eventos[-1][1]["prompt_version"] == "consulta/v1"
+    assert eventos[-1][1]["prompt_version"] == "consulta/v2"
     resultado = a.llamadas[1]["mensajes"][-1]["content"][0]["content"]
     assert "TUBERIA PVC" in resultado and "35000" not in resultado
 

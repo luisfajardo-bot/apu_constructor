@@ -351,7 +351,7 @@ def test_lee_hoja_encabezado_y_estructura(tmp_path):
     assert lec.errores == []
     assert lec.hoja == "PROPUESTA ECONÓMICA"
     assert lec.fila_encabezado == 5               # 1-based, como lo ve el usuario
-    assert lec.parser_version == "idu-f1/1"
+    assert lec.parser_version == "idu-f1/2"
     assert [c.codigo for c in lec.capitulos] == ["1", "2"]
     assert [c.nombre for c in lec.capitulos] == ["PRELIMINARES", "PAVIMENTOS"]
     assert [c.orden for c in lec.capitulos] == [1, 2]
@@ -392,22 +392,22 @@ def test_preserva_el_item_original_y_recupera_el_cero(tmp_path):
     assert "2,011-N" in originales
 
 
-def test_las_dos_columnas_de_precio(tmp_path):
+def test_el_contractual_es_el_basico_sin_aiu(tmp_path):
     lec = leer_formulario_idu(escribir_formulario(tmp_path / "f1.xlsx"))
     replanteo = next(i for i in lec.items if i.item_pago_original == "1.001")
     assert replanteo.cantidad == 100
-    assert replanteo.precio_contractual == 1351             # col K, CON AIU
-    assert replanteo.precio_contractual_sin_aiu == 1056      # col J, SIN AIU
+    assert replanteo.precio_contractual == 1056             # col J, SIN AIU
+    assert replanteo.precio_contractual_sin_aiu == 1056     # el mismo valor
     assert replanteo.fila_origen > 0
 
 
 def test_conciliacion_contra_los_subtotales_del_excel(tmp_path):
+    # Verifica contra el Excel (con AIU), pero lo que devuelve —y va a
+    # origen_json— es el contractual SIN AIU. Ningún total con AIU.
     lec = leer_formulario_idu(escribir_formulario(tmp_path / "f1.xlsx"))
-    c = lec.conciliacion
-    assert c["subtotales_ok"] is True
-    assert c["diferencia"] == 0
-    assert c["contractual_con_aiu"] == c["subtotales_excel"]
-    assert c["contractual_sin_aiu"] < c["contractual_con_aiu"]
+    basico = sum(round(a[5] * a[6]) for a in ACTIVIDADES_CAP_1 + ACTIVIDADES_CAP_2)
+    assert lec.conciliacion == {"contractual": basico, "subtotales_ok": True,
+                                "diferencia": 0}
     assert [a for a in lec.advertencias if a.tipo == "total_fila_no_concilia"] == []
 
 
@@ -453,9 +453,9 @@ def test_avisa_si_la_oferta_viene_diligenciada(tmp_path):
     avisos = [a for a in lec.advertencias if a.tipo == "oferta_diligenciada"]
     assert len(avisos) == 1
     assert "2" in avisos[0].detalle           # cuántas filas traen oferta
-    # Y NO cambia el contractual: se sigue leyendo la columna oficial con AIU.
+    # Y NO cambia el contractual: se sigue leyendo el básico oficial (sin AIU).
     assert next(i for i in lec.items
-                if i.item_pago_original == "1.001").precio_contractual == 1351
+                if i.item_pago_original == "1.001").precio_contractual == 1056
 
 
 def test_read_presupuesto_sigue_funcionando(tmp_path):
@@ -492,3 +492,192 @@ def test_el_vocabulario_de_advertencias_solo_promete_lo_que_emite():
     fuente = Path("apu_tool/dominio/presupuesto.py").read_text(encoding="utf-8")
     emitidos = set(_re.findall(r'Advertencia\(\s*"([a-z_]+)"', fuente))
     assert set(TIPOS_ADVERTENCIA) == emitidos
+
+
+# ------------------------------------- idu-f1/2: el contractual es el básico sin AIU
+import dataclasses  # noqa: E402
+
+
+def _alterar(tmp_path, fila, columna, valor):
+    """El fixture con UNA celda cambiada. Columnas 1-based de Excel: 10 = básico sin
+    AIU, 11 = «incluye AIU», 12 = VALOR TOTAL. Fila 10 = la 1.001; fila 14 = el
+    Subtotal del capítulo 1."""
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    wb["PROPUESTA ECONÓMICA"].cell(row=fila, column=columna).value = valor
+    wb.save(p)
+    return leer_formulario_idu(p)
+
+
+def test_ningun_campo_del_item_trae_el_valor_con_aiu(tmp_path):
+    lec = leer_formulario_idu(escribir_formulario(tmp_path / "f1.xlsx"))
+    con_aiu = {a[7] for a in ACTIVIDADES_CAP_1 + ACTIVIDADES_CAP_2}
+    for it in lec.items:
+        assert it.precio_contractual == it.precio_contractual_sin_aiu
+        assert not con_aiu & set(dataclasses.asdict(it).values()), it.item
+
+
+def test_sin_contractual_salta_con_el_basico_vacio(tmp_path):
+    lec = _alterar(tmp_path, 10, 10, None)
+    assert any(e.startswith("sin_contractual") and "1.001" in e for e in lec.errores)
+
+
+def test_con_aiu_ilegible_sale_por_la_verificacion_de_fila(tmp_path):
+    # El básico está: no es `sin_contractual`. Pero sin el valor con AIU la fila no
+    # cuadra contra su VALOR TOTAL, y eso se avisa.
+    lec = _alterar(tmp_path, 10, 11, None)
+    assert not any(e.startswith("sin_contractual") for e in lec.errores)
+    assert [a.fila for a in lec.advertencias
+            if a.tipo == "total_fila_no_concilia"] == [10]
+    assert lec.conciliacion["subtotales_ok"] is False
+
+
+def test_un_valor_total_alterado_sigue_disparando_la_verificacion(tmp_path):
+    lec = _alterar(tmp_path, 10, 12, 135101)
+    assert [a.fila for a in lec.advertencias
+            if a.tipo == "total_fila_no_concilia"] == [10]
+    assert lec.errores == []
+
+
+def test_un_subtotal_alterado_sigue_disparando_la_verificacion(tmp_path):
+    lec = _alterar(tmp_path, 14, 12, 195421)        # el Excel dice 195.420
+    assert any(a.tipo == "subtotal_no_concilia" for a in lec.advertencias)
+    assert lec.conciliacion["subtotales_ok"] is False
+    assert lec.conciliacion["diferencia"] == 1
+
+
+# ------------------------------- formularios 2025: «SIN A.I.U.» / «CON A.I.U.»
+def test_encabezados_2025_leen_el_basico_y_no_ofertado_ni_corregido(tmp_path):
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    ws = wb["PROPUESTA ECONÓMICA"]
+    for fila in (5, 25):                      # encabezado y su repetición a mitad
+        ws.cell(row=fila, column=10).value = "VALOR UNITARIO SIN A.I.U."
+        ws.cell(row=fila, column=11).value = "VALOR UNITARIO CON A.I.U."
+        ws.cell(row=fila, column=15).value = "VALOR UNITARIO SIN AIU OFERTADO"
+        ws.cell(row=fila, column=16).value = "VALOR UNITARIO SIN AIU\nCORREGIDO"
+        ws.cell(row=fila, column=17).value = "VALOR UNITARIO CON AIU\nCORREGIDO"
+    for fila in (10, 11, 16, 17, 18):         # valores distintos en las columnas trampa
+        for col in (15, 16, 17):
+            ws.cell(row=fila, column=col).value = 999999
+    wb.save(p)
+    lec = leer_formulario_idu(p)
+    assert lec.errores == []
+    replanteo = next(i for i in lec.items if i.item_pago_original == "1.001")
+    assert replanteo.precio_contractual == 1056
+    basico = sum(round(a[5] * a[6]) for a in ACTIVIDADES_CAP_1 + ACTIVIDADES_CAP_2)
+    assert lec.conciliacion == {"contractual": basico, "subtotales_ok": True,
+                                "diferencia": 0}
+
+
+# ------------------- el ítem de pago con su precisión real, aunque el formato la esconda
+def test_item_pago_texto_no_deja_que_el_formato_esconda_digitos():
+    # L5/L3: el 11.10326 viene con formato de 4 decimales; mostrado como «11.1033»
+    # chocaba con el 11.1033 de verdad de dos filas más abajo (item_duplicado falso).
+    assert item_pago_texto(11.10325999999995, "0.0000") == "11.10326"
+    assert item_pago_texto(11.1033, "0.0000") == "11.1033"
+    # Ruido de float bajo el formato: no son dígitos escondidos.
+    assert item_pago_texto(7.189000000000003, "0.000") == "7.189"
+    assert item_pago_texto(13.503999999999998, "0.000") == "13.504"
+    # Y el cero significativo se sigue recuperando del formato.
+    assert item_pago_texto(2.01, "0.000") == "2.010"
+
+
+def test_decimales_del_formato_solo_cuenta_la_parte_decimal_de_la_primera_seccion():
+    from apu_tool.dominio.presupuesto import _decimales_del_formato
+    assert _decimales_del_formato("0.000_);(0.000)") == 3
+    assert _decimales_del_formato('"No." 0.000') == 3
+    assert _decimales_del_formato("0.000") == 3
+    assert _decimales_del_formato("#,##0.000") == 3
+    assert _decimales_del_formato("0") == 0
+    assert _decimales_del_formato("General") == 0
+    assert _decimales_del_formato("@") == 0
+    assert item_pago_texto(2.01, "0.000_);(0.000)") == "2.010"
+
+
+def test_dos_items_que_el_formato_igualaba_no_son_duplicados(tmp_path):
+    # Filas 21 y 22 del fixture: las dos nocturnas del capítulo 2. Misma descripción y
+    # turno; los ítems solo se distinguen en el quinto decimal.
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    ws = wb["PROPUESTA ECONÓMICA"]
+    for fila, item in ((21, 2.10325999999995), (22, 2.1033)):
+        ws.cell(row=fila, column=4).value = item
+        ws.cell(row=fila, column=4).number_format = "0.0000"
+    ws.cell(row=22, column=7).value = ws.cell(row=21, column=7).value
+    wb.save(p)
+    lec = leer_formulario_idu(p)
+    assert lec.errores == []
+    originales = {i.item_pago_original for i in lec.items}
+    assert {"2.10326", "2.1033"} <= originales
+
+
+# ------------------------ el resumen general del final no es subtotal de capítulo
+def _con_resumen_subtotal(tmp_path):
+    """El fixture con las dos filas de resumen (28 y 29) rotuladas «SUBTOTAL …», como
+    en L5 y L3: la columna Nº empieza por «subtotal» pero no cierran ningún capítulo."""
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    ws = wb["PROPUESTA ECONÓMICA"]
+    ws.cell(row=28, column=3).value = "SUBTOTAL OBRAS (INCLUYE A.I.U)"
+    ws.cell(row=29, column=3).value = "SUBTOTAL OBRAS ( A + B + C + D )"
+    wb.save(p)
+    return p
+
+
+def test_las_filas_de_resumen_no_se_suman_como_subtotales(tmp_path):
+    lec = leer_formulario_idu(_con_resumen_subtotal(tmp_path))
+    assert lec.errores == []
+    assert lec.conciliacion["subtotales_ok"] is True
+    assert lec.conciliacion["diferencia"] == 0
+    assert not any(a.tipo == "subtotal_no_concilia" for a in lec.advertencias)
+    # Se descartan, pero no callados: cada una deja su aviso con su fila.
+    assert [a.fila for a in lec.advertencias
+            if a.tipo == "subtotal_ignorado"] == [28, 29]
+
+
+def test_subtotal_de_filas_sin_forma_de_codigo_no_se_descarta_callado(tmp_path):
+    # El caso medido: el capítulo 2 lee una actividad (fila 18), la cierra un Subtotal
+    # parcial (fila 20) y después vienen dos filas con un Nº que no tiene forma de
+    # código. Su Subtotal (fila 23, 10.889.117) no cierra nada leído: se descarta, pero
+    # tiene que avisar, porque es plata del presupuesto que no entró.
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    ws = wb["PROPUESTA ECONÓMICA"]
+    ws.cell(row=20, column=3).value = "Subtotal "
+    ws.cell(row=20, column=7).value = None
+    ws.cell(row=20, column=12).value = 228840
+    for fila in (21, 22):
+        ws.cell(row=fila, column=3).value = "ESP-0099-XYZ"
+    ws.cell(row=23, column=12).value = 10889117
+    wb.save(p)
+    lec = leer_formulario_idu(p)
+    avisos = [a for a in lec.advertencias if a.tipo == "subtotal_ignorado"]
+    assert [a.fila for a in avisos] == [23]
+    assert "fila 23" in avisos[0].detalle
+
+
+def test_subtotal_antes_de_la_primera_actividad_avisa(tmp_path):
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    ws = wb["PROPUESTA ECONÓMICA"]
+    ws.cell(row=9, column=3).value = "Subtotal "      # antes de la 1.001 (fila 10)
+    ws.cell(row=9, column=12).value = 1000
+    wb.save(p)
+    lec = leer_formulario_idu(p)
+    assert [a.fila for a in lec.advertencias
+            if a.tipo == "subtotal_ignorado"] == [9]
+
+
+def test_subtotal_de_un_capitulo_cuyas_filas_no_entraron_sigue_contando(tmp_path):
+    # Las dos actividades del capítulo 1 con cantidad ilegible: ninguna entra, pero
+    # parecían actividades. Su Subtotal tiene que seguir contando para que la
+    # verificación lo note; si se tratara como fila de resumen, la diferencia se iría
+    # callada.
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    for fila in (10, 13):
+        wb["PROPUESTA ECONÓMICA"].cell(row=fila, column=9).value = "n/a"
+    wb.save(p)
+    lec = leer_formulario_idu(p)
+    assert lec.conciliacion["subtotales_ok"] is False

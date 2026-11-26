@@ -44,8 +44,7 @@ export default function PreviaIdu({ previa, cargando, onAprobar, onCancelar,
         actividades. Filas ignoradas: {n(previa.filas_ignoradas)}.
       </p>
       <p className="mt-1 text-xs">
-        Contractual (con AIU) {cop(previa.totales.contractual)} · sin AIU{" "}
-        {cop(previa.totales.contractual_sin_aiu)}
+        Contractual (sin AIU) {cop(previa.totales.contractual)}
       </p>
       <p
         className={
@@ -54,8 +53,8 @@ export default function PreviaIdu({ previa, cargando, onAprobar, onCancelar,
         }
       >
         {conciliacionOk
-          ? "Conciliación contra el Excel: cuadra."
-          : `Conciliación contra el Excel: no cuadra (diferencia ${cop(
+          ? "Verificación contra el Excel: OK."
+          : `Verificación contra el Excel: no cuadra (diferencia ${cop(
               previa.conciliacion.diferencia ?? 0,
             )}).`}
       </p>
@@ -108,8 +107,7 @@ export default function PreviaIdu({ previa, cargando, onAprobar, onCancelar,
                 <th scope="col" className="p-1 text-left">Capítulo</th>
                 <th scope="col" className="p-1 text-left">Nombre</th>
                 <th scope="col" className="p-1 text-right">Actividades</th>
-                <th scope="col" className="p-1 text-right">Contractual (c/AIU)</th>
-                <th scope="col" className="p-1 text-right">Contractual (s/AIU)</th>
+                <th scope="col" className="p-1 text-right">Contractual (sin AIU)</th>
               </tr>
             </thead>
             <tbody>
@@ -119,9 +117,6 @@ export default function PreviaIdu({ previa, cargando, onAprobar, onCancelar,
                   <td className="p-1">{c.nombre}</td>
                   <td className="p-1 text-right">{n(c.actividades)}</td>
                   <td className="p-1 text-right tabular-nums">{cop(c.contractual)}</td>
-                  <td className="p-1 text-right tabular-nums">
-                    {cop(c.contractual_sin_aiu)}
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -131,9 +126,6 @@ export default function PreviaIdu({ previa, cargando, onAprobar, onCancelar,
                 <td className="p-1 text-right">{n(previa.actividades)}</td>
                 <td className="p-1 text-right tabular-nums">
                   {cop(previa.totales.contractual)}
-                </td>
-                <td className="p-1 text-right tabular-nums">
-                  {cop(previa.totales.contractual_sin_aiu)}
                 </td>
               </tr>
             </tfoot>

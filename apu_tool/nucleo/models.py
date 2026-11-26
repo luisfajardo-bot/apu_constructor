@@ -273,8 +273,10 @@ class LicitacionItem:
     capitulo_nombre: str = ""          # "PAVIMENTOS"
     item_pago_original: str = ""       # "2,001-N" tal cual venía, para auditoría
     fila_origen: int = 0               # fila del Excel de la que salió, 1-based
-    # Valor unitario SIN AIU. Es DINERO: va a privacy._FORBIDDEN_KEYS y NO viaja en
-    # licitacion_item_to_dict. `precio_contractual` sigue siendo el que manda (con AIU).
+    # Valor unitario básico SIN AIU. Es DINERO: va a privacy._FORBIDDEN_KEYS y NO viaja
+    # en licitacion_item_to_dict. Desde el lector idu-f1/2 es el MISMO valor que
+    # `precio_contractual`; en una corrida vieja (idu-f1/1) `precio_contractual` es el
+    # CON AIU y este es el básico. 0 en una corrida plana.
     precio_contractual_sin_aiu: float = 0.0
 
 
@@ -396,9 +398,9 @@ class AssembledApu:
     def contractual_total_sin_aiu(self) -> int:
         """El contractual del ítem sin AIU. Misma regla de redondeo que su gemelo.
 
-        La ruta IDU lee las DOS bases del Formulario 1: `precio_contractual` es el valor
-        unitario CON AIU (el que concilia con el VALOR TOTAL del Excel) y este es el
-        básico sin AIU. 0 en una corrida que no venga del IDU.
+        Igual a `contractual_total` en una corrida IDU nueva (lector idu-f1/2); distinto
+        en una vieja (idu-f1/1), donde `precio_contractual` es el CON AIU. 0 en una
+        corrida que no venga del IDU.
         """
         return mul_redondeado(self.item.precio_contractual_sin_aiu, self.item.cantidad)
 

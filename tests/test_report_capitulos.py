@@ -168,3 +168,78 @@ def test_corrida_vieja_la_hoja_de_capitulos_y_el_detalle_salen_igual(tmp_path):
                    "Total Costo", "Margen Total", "Estado"]
     subtotal = next(f for f in filas if str(f[1] or "").startswith("Subtotal"))
     assert subtotal[9:13] == [13510, 10560, 9000, 4510]
+
+
+# --------------------------------------- idu-f1/2: una sola base del contractual
+def _nuevo(cap_cod="1", cap_nom="PRELIMINARES", item="1.001"):
+    """Ítem leído con el lector idu-f1/2: el contractual YA es el básico sin AIU."""
+    return _item(cap_cod, cap_nom, con_aiu=1056.0, sin_aiu=1056.0, item=item)
+
+
+def test_hay_columna_sin_aiu_se_decide_por_datos():
+    from apu_tool.dominio.report import hay_columna_sin_aiu
+    nueva = _ens(_nuevo())
+    assert hay_columna_sin_aiu([nueva]) is False
+    assert hay_columna_sin_aiu([_ens(_item("1", "PRELIMINARES"))]) is True   # vieja
+    assert hay_columna_sin_aiu([_ens(_item(sin_aiu=0.0))]) is True           # plana
+    assert hay_columna_sin_aiu([]) is True                 # sin ítems: lo de siempre
+
+
+def test_linea_agregada_a_mano_no_hace_reaparecer_la_columna(tmp_path):
+    from apu_tool.dominio.report import hay_columna_sin_aiu
+    # Corrida nueva (básico == contractual > 0) + una línea a mano con básico 0.
+    apus = [_ens(_nuevo()), _ens(_item(sin_aiu=0.0, item="9"))]
+    assert hay_columna_sin_aiu(apus) is False
+    out = tmp_path / "mixta.xlsx"
+    write_report(apus, out)
+    enc, _ = _tabla(out, "RESUMEN")
+    assert "P. Contractual sin AIU" not in enc
+    assert "P. Contractual (sin AIU)" in enc
+
+
+def test_corrida_nueva_el_resumen_trae_una_sola_columna_de_contractual(tmp_path):
+    out = tmp_path / "nueva.xlsx"
+    write_report([_ens(_nuevo())], out)
+    enc, filas = _tabla(out, "RESUMEN")
+    assert enc == ["Ítem", "Descripción", "Und", "Cantidad",
+                   "P. Contractual (sin AIU)", "Costo Unit.", "Margen Unit.",
+                   "Margen %", "Total Contractual (sin AIU)", "Total Costo",
+                   "Margen Total", "Estado", "Confianza", "APU base"]
+    assert filas[0][4] == 1056
+    assert filas[0][8:11] == [10560, 9000, 1560]
+    assert filas[-2][8:11] == [10560, 9000, 1560]             # TOTALES
+    assert abs(filas[-1][10] - 1560 / 10560) < 1e-9           # MARGEN % GLOBAL
+    ws = openpyxl.load_workbook(out)["RESUMEN"]
+    assert ws.cell(row=2, column=10).number_format == "#,##0"  # Total Costo
+    assert ws.cell(row=2, column=8).number_format == "0.0%"    # Margen %
+
+
+def test_corrida_nueva_capitulos_y_detalle_sin_columna_aparte(tmp_path):
+    apus = [_ens(_nuevo()), _ens(_nuevo("2", "PAVIMENTOS", item="2.001"))]
+    a, b = tmp_path / "a.xlsx", tmp_path / "b.xlsx"
+    write_report(apus, a)
+    write_report_categorizado(apus, b)
+    enc, filas = _tabla(a, HOJA)
+    assert enc == ["Capítulo", "Nombre", "Actividades", "Con APU", "Sin APU",
+                   "Contractual (sin AIU)", "Costo interno", "Diferencia",
+                   "Margen %", "Cobertura", "Cobertura $", "Estado"]
+    assert filas[-1][5:8] == [21120, 18000, 3120]             # GRAN TOTAL
+    assert _tabla(a, HOJA) == _tabla(b, HOJA)                 # la misma hoja en los dos
+    enc, filas = _tabla(b, "DETALLE")
+    assert enc == ["Ítem", "Descripción", "Und", "Cantidad",
+                   "P. Contractual (sin AIU)", "Costo Unit.", "Margen Unit.",
+                   "Margen %", "Total Contractual (sin AIU)", "Total Costo",
+                   "Margen Total", "Estado"]
+    subtotales = [f for f in filas if str(f[1] or "").startswith("Subtotal")]
+    assert [f[8:11] for f in subtotales] == [[10560, 9000, 1560]] * 2
+
+
+def test_info_del_categorizado_rotula_la_base_segun_los_datos(tmp_path):
+    def info(apus):
+        out = tmp_path / "i.xlsx"
+        write_report_categorizado(apus, out)
+        ws = openpyxl.load_workbook(out)["INFO"]
+        return dict(ws.iter_rows(values_only=True))["Precio contractual"]
+    assert info([_ens(_item("1", "P"))]) ==         "Valor unitario CON AIU (corrida anterior al cambio)"
+    assert info([_ens(_nuevo())]) == "Valor unitario BÁSICO (sin AIU)"
+    assert info([_ens(_item("1", "P", sin_aiu=0.0))]) == "Valor unitario BÁSICO (sin AIU)"

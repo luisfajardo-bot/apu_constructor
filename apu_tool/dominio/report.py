@@ -57,6 +57,42 @@ def _autosize(ws, widths: dict[int, int]) -> None:
         ws.column_dimensions[get_column_letter(col)].width = w
 
 
+def es_contractual_con_aiu(apus: list[AssembledApu]) -> bool:
+    """Corrida IDU vieja (`idu-f1/1`): hay básico (> 0) y es distinto del contractual,
+    que en esa corrida LLEVA AIU. Se decide por datos: el cuadro no recibe `origen_json`."""
+    return any(a.item.precio_contractual_sin_aiu > 0
+               and a.item.precio_contractual_sin_aiu != a.item.precio_contractual
+               for a in apus)
+
+
+def hay_columna_sin_aiu(apus: list[AssembledApu]) -> bool:
+    """¿Va la columna aparte «sin AIU»? ÚNICA regla, la usan las tres hojas.
+
+    Sí si NINGÚN ítem trae básico > 0 (corrida plana o vieja sin básico, o sin ítems:
+    el cuadro de siempre) o si es una corrida IDU vieja (`es_contractual_con_aiu`).
+    No en una corrida IDU nueva (`idu-f1/2`): el contractual YA es el básico y la columna
+    repetiría la principal. Una línea agregada a mano (básico 0) no la hace reaparecer.
+    """
+    return not any(a.item.precio_contractual_sin_aiu > 0 for a in apus)         or es_contractual_con_aiu(apus)
+
+
+def _sin_columna_aparte(ws, columnas: tuple[int, ...], anchos: list[int],
+                        rotulos: tuple[str, ...]) -> None:
+    """Corrida IDU nueva: quita las columnas «sin AIU» (1-based) ya escritas y le
+    agrega «(sin AIU)» al rótulo del contractual que queda.
+
+    `delete_cols` corre los valores Y los estilos de las celdas, así que los formatos
+    y rellenos que se pusieron por índice siguen en su lugar. Los anchos no se corren
+    solos: `anchos` (uno por columna, en orden) se edita en el lugar.
+    """
+    for col in sorted(columnas, reverse=True):
+        ws.delete_cols(col)
+        del anchos[col - 1]
+    for celda in ws[1]:
+        if celda.value in rotulos:
+            celda.value = f"{celda.value} (sin AIU)"
+
+
 def _build_resumen(ws, apus: list[AssembledApu]) -> None:
     headers = ["Ítem", "Descripción", "Und", "Cantidad",
                "P. Contractual", "P. Contractual sin AIU",
@@ -121,8 +157,10 @@ def _build_resumen(ws, apus: list[AssembledApu]) -> None:
     ws.cell(row=ws.max_row, column=13).number_format = _PCT
     ws.cell(row=ws.max_row, column=2).font = Font(bold=True)
 
-    _autosize(ws, {1: 8, 2: 50, 3: 6, 4: 12, 5: 16, 6: 20, 7: 14, 8: 14, 9: 10,
-                   10: 18, 11: 20, 12: 16, 13: 16, 14: 12, 15: 10, 16: 10})
+    anchos = [8, 50, 6, 12, 16, 20, 14, 14, 10, 18, 20, 16, 16, 12, 10, 10]
+    if not hay_columna_sin_aiu(apus):
+        _sin_columna_aparte(ws, (6, 11), anchos, ("P. Contractual", "Total Contractual"))
+    _autosize(ws, dict(enumerate(anchos, start=1)))
 
 
 def _build_desglose(ws, apus: list[AssembledApu]) -> None:

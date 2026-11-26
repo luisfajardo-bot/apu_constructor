@@ -473,7 +473,11 @@ matching, modelo de IA, clasificación de precios.
     último contado se leyó alguna actividad o una fila relevante ignorada. Las filas de
     resumen general («SUBTOTAL OBRAS (INCLUYE A.I.U)», «SUBTOTAL COSTOS ESTIMADOS DE
     OBRAS») se ignoran: la regla es estructural y no por texto, porque los textos varían
-    entre lotes.
+    entre lotes. Ignorarlas no es callarlas: cada `SUBTOTAL` descartado emite
+    `subtotal_ignorado` con su fila y su valor (dos por archivo en L5 y L3), porque un
+    Subtotal real cuyas filas cayeron sin aviso (Nº vacío, o un Nº sin forma de código
+    como `ESP-0099-XYZ`) llega por el mismo camino. Tampoco se distingue por valor: en
+    L5 el resumen vale 440.756.172.193 y las actividades 173.586.654.338.
   - Riesgos residuales: el archivo de referencia de
     `tests/test_presupuesto_idu_regresion.py` **no está en todas las máquinas** (ahí el
     test sale *skipped*, y esa red no corre); el cierre de subtotales se midió sobre L5 y

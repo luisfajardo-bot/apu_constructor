@@ -83,11 +83,16 @@ def norm_encabezado(s) -> str:
 
 
 def _decimales_del_formato(formato: str) -> int:
-    """Cuántos decimales declara un formato numérico de Excel: '0.000' -> 3, '0' -> 0."""
-    f = str(formato or "")
-    if "." not in f:
-        return 0
-    return sum(1 for c in f.split(".", 1)[1] if c in "0#")
+    """Cuántos decimales declara un formato numérico de Excel: '0.000' -> 3, '0' -> 0.
+
+    Solo la primera sección (la de los positivos), sin literales entre comillas ni los
+    `_x`/`\\x` de relleno, y solo los `0`/`#` seguidos al punto: `0.000_);(0.000)` es 3,
+    no 7, y el punto de `"No." 0.000` no es el decimal.
+    """
+    f = str(formato or "").split(";", 1)[0]
+    f = re.sub(r'"[^"]*"|[_\\].', "", f)
+    m = re.search(r"\.([0#]*)", f)
+    return len(m.group(1)) if m else 0
 
 
 def item_pago_texto(valor, formato: str = "") -> str:
@@ -361,6 +366,9 @@ TIPOS_ADVERTENCIA = (
     "capitulo_ambiguo", "total_fila_no_concilia", "subtotal_no_concilia",
     "codigo_apu_vacio", "unidad_vacia", "encabezado_repetido",
     "fila_relevante_ignorada", "oferta_diligenciada",
+    # Un SUBTOTAL que no cierra ninguna actividad leída: el resumen general del final
+    # (normal, dos por archivo en L5 y L3) o el de un capítulo cuyas filas no entraron.
+    "subtotal_ignorado",
 )
 
 
@@ -453,7 +461,18 @@ class _Recorrido:
             # A.I.U)», «SUBTOTAL OBRAS ( A + B + C + D )» en L5 y L3), que suma los
             # subtotales de capítulo y, contado, duplicaría la verificación.
             self.ignoradas += 1
-            if tipo == ENCABEZADO:
+            if tipo == SUBTOTAL:
+                # Se descarta, pero no callado: un Subtotal real cuyas filas cayeron
+                # sin aviso (Nº vacío, o un Nº sin forma de código) llega igual acá, y
+                # el valor no sirve para distinguirlo del resumen (en L5 el resumen
+                # vale 440.756.172.193 y las actividades 173.586.654.338).
+                valor = _a_entero(_val(fila, m.get("total_excel")))
+                self.avisos.append(Advertencia(
+                    "subtotal_ignorado", n,
+                    f"Se ignoró el SUBTOTAL de la fila {n} («{codigo[:60]}», "
+                    f"{valor:,}): no cierra ninguna actividad leída. Si es el subtotal "
+                    f"de un capítulo, revisa sus filas."))
+            elif tipo == ENCABEZADO:
                 self.avisos.append(Advertencia(
                     "encabezado_repetido", n, "Fila de encabezado repetida; se ignoró."))
             elif tipo == IGNORADA and _es_codigo_item(codigo) and desc:

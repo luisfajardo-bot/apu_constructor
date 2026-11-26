@@ -583,6 +583,18 @@ def test_item_pago_texto_no_deja_que_el_formato_esconda_digitos():
     assert item_pago_texto(2.01, "0.000") == "2.010"
 
 
+def test_decimales_del_formato_solo_cuenta_la_parte_decimal_de_la_primera_seccion():
+    from apu_tool.dominio.presupuesto import _decimales_del_formato
+    assert _decimales_del_formato("0.000_);(0.000)") == 3
+    assert _decimales_del_formato('"No." 0.000') == 3
+    assert _decimales_del_formato("0.000") == 3
+    assert _decimales_del_formato("#,##0.000") == 3
+    assert _decimales_del_formato("0") == 0
+    assert _decimales_del_formato("General") == 0
+    assert _decimales_del_formato("@") == 0
+    assert item_pago_texto(2.01, "0.000_);(0.000)") == "2.010"
+
+
 def test_dos_items_que_el_formato_igualaba_no_son_duplicados(tmp_path):
     # Filas 21 y 22 del fixture: las dos nocturnas del capítulo 2. Misma descripción y
     # turno; los ítems solo se distinguen en el quinto decimal.
@@ -619,6 +631,42 @@ def test_las_filas_de_resumen_no_se_suman_como_subtotales(tmp_path):
     assert lec.conciliacion["subtotales_ok"] is True
     assert lec.conciliacion["diferencia"] == 0
     assert not any(a.tipo == "subtotal_no_concilia" for a in lec.advertencias)
+    # Se descartan, pero no callados: cada una deja su aviso con su fila.
+    assert [a.fila for a in lec.advertencias
+            if a.tipo == "subtotal_ignorado"] == [28, 29]
+
+
+def test_subtotal_de_filas_sin_forma_de_codigo_no_se_descarta_callado(tmp_path):
+    # El caso medido: el capítulo 2 lee una actividad (fila 18), la cierra un Subtotal
+    # parcial (fila 20) y después vienen dos filas con un Nº que no tiene forma de
+    # código. Su Subtotal (fila 23, 10.889.117) no cierra nada leído: se descarta, pero
+    # tiene que avisar, porque es plata del presupuesto que no entró.
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    ws = wb["PROPUESTA ECONÓMICA"]
+    ws.cell(row=20, column=3).value = "Subtotal "
+    ws.cell(row=20, column=7).value = None
+    ws.cell(row=20, column=12).value = 228840
+    for fila in (21, 22):
+        ws.cell(row=fila, column=3).value = "ESP-0099-XYZ"
+    ws.cell(row=23, column=12).value = 10889117
+    wb.save(p)
+    lec = leer_formulario_idu(p)
+    avisos = [a for a in lec.advertencias if a.tipo == "subtotal_ignorado"]
+    assert [a.fila for a in avisos] == [23]
+    assert "fila 23" in avisos[0].detalle
+
+
+def test_subtotal_antes_de_la_primera_actividad_avisa(tmp_path):
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    ws = wb["PROPUESTA ECONÓMICA"]
+    ws.cell(row=9, column=3).value = "Subtotal "      # antes de la 1.001 (fila 10)
+    ws.cell(row=9, column=12).value = 1000
+    wb.save(p)
+    lec = leer_formulario_idu(p)
+    assert [a.fila for a in lec.advertencias
+            if a.tipo == "subtotal_ignorado"] == [9]
 
 
 def test_subtotal_de_un_capitulo_cuyas_filas_no_entraron_sigue_contando(tmp_path):

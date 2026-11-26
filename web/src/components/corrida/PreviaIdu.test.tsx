@@ -9,17 +9,17 @@ const BASE: PreviaPresupuesto = {
   archivo: "f1.xlsx",
   hoja: "PROPUESTA ECONÓMICA",
   fila_encabezado: 10,
-  parser_version: "idu-f1/1",
+  parser_version: "idu-f1/2",
   capitulos: [
     { codigo: "1", nombre: "PRELIMINARES", orden: 1, fila_origen: 13,
-      actividades: 2, contractual: 137605594, contractual_sin_aiu: 107565459 },
+      actividades: 2, contractual: 107565459 },
     { codigo: "2", nombre: "PAVIMENTOS", orden: 2, fila_origen: 21,
-      actividades: 42, contractual: 37144267929, contractual_sin_aiu: 29037106963 },
+      actividades: 42, contractual: 29037106963 },
   ],
   actividades: 1939,
   filas_ignoradas: 804,
-  totales: { contractual: 158456072140, contractual_sin_aiu: 123871215068 },
-  conciliacion: { subtotales_ok: true, diferencia: 0 },
+  totales: { contractual: 123871215068 },
+  conciliacion: { contractual: 123871215068, subtotales_ok: true, diferencia: 0 },
   errores: [],
   advertencias: [],
   filas_senaladas: [],
@@ -50,8 +50,17 @@ describe("PreviaIdu", () => {
   it("lista los capítulos con su contractual en formato colombiano", () => {
     render(<PreviaIdu {...props(BASE)} />);
     expect(screen.getByText("PRELIMINARES")).toBeTruthy();
-    expect(screen.getByText("$137.605.594")).toBeTruthy();
     expect(screen.getByText("$107.565.459")).toBeTruthy();
+  });
+
+  it("muestra el contractual sin AIU y la verificación, sin ninguna cifra con AIU", () => {
+    render(<PreviaIdu {...props(BASE)} />);
+    expect(screen.getByText("Contractual (sin AIU) $123.871.215.068")).toBeTruthy();
+    expect(screen.getByText("Verificación contra el Excel: OK.")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Contractual (sin AIU)" }))
+      .toBeTruthy();
+    expect(screen.getAllByRole("columnheader")).toHaveLength(4);
+    expect(screen.queryByText(/con AIU|c\/AIU|s\/AIU/)).toBeNull();
   });
 
   it("aprueba sin fricción cuando no hay ni errores ni advertencias", () => {

@@ -274,7 +274,8 @@ export interface ItemCuadro {
   capitulo_nombre: string;
   /** El ítem de pago tal como venía en el Formulario 1 ("2,001-N"). */
   item_pago_original: string;
-  /** Valor unitario básico SIN AIU. `precio_contractual` es el que INCLUYE AIU. */
+  /** Valor unitario básico SIN AIU. En una corrida IDU nueva (lector idu-f1/2) es igual a
+   *  `precio_contractual`; en una vieja (idu-f1/1), `precio_contractual` es el CON AIU. */
   precio_contractual_sin_aiu: number;
   contractual_total_sin_aiu: number;
 }
@@ -833,8 +834,8 @@ export interface CapituloPrevia {
   orden: number;
   fila_origen: number;
   actividades: number;
+  /** Contractual SIN AIU: desde el lector idu-f1/2 es el único que hay. */
   contractual: number;
-  contractual_sin_aiu: number;
 }
 
 /** Lo que se detectó en el archivo, ANTES de crear nada. */
@@ -848,11 +849,11 @@ export interface PreviaPresupuesto {
   capitulos: CapituloPrevia[];
   actividades: number;
   filas_ignoradas: number;
-  totales: { contractual: number; contractual_sin_aiu: number };
+  totales: { contractual: number };
+  /** Verificación contra el Excel. Ningún total con AIU: el contractual sin AIU, si
+   *  los subtotales cuadraron y la diferencia en pesos si no. */
   conciliacion: {
-    contractual_con_aiu?: number;
-    contractual_sin_aiu?: number;
-    subtotales_excel?: number;
+    contractual?: number;
     diferencia?: number;
     subtotales_ok?: boolean;
   };

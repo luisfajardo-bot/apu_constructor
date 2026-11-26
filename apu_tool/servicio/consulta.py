@@ -67,7 +67,8 @@ def _nota_aiu(v: dict, campo: str) -> str:
     `v["origen"]` es `origen_json` ya parseado, o None (corrida plana)."""
     if campo == "costo":
         return ""
-    return CON_AIU if (v.get("origen") or {}).get("parser_version") == PARSER_CON_AIU         else ""
+    return (CON_AIU if (v.get("origen") or {}).get("parser_version") == PARSER_CON_AIU
+            else "")
 
 
 class _Resolutor:

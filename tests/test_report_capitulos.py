@@ -240,6 +240,7 @@ def test_info_del_categorizado_rotula_la_base_segun_los_datos(tmp_path):
         write_report_categorizado(apus, out)
         ws = openpyxl.load_workbook(out)["INFO"]
         return dict(ws.iter_rows(values_only=True))["Precio contractual"]
-    assert info([_ens(_item("1", "P"))]) ==         "Valor unitario CON AIU (corrida anterior al cambio)"
+    assert (info([_ens(_item("1", "P"))]) ==
+            "Valor unitario CON AIU (corrida anterior al cambio)")
     assert info([_ens(_nuevo())]) == "Valor unitario BÁSICO (sin AIU)"
     assert info([_ens(_item("1", "P", sin_aiu=0.0))]) == "Valor unitario BÁSICO (sin AIU)"

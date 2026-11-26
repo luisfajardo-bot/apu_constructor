@@ -73,7 +73,8 @@ def hay_columna_sin_aiu(apus: list[AssembledApu]) -> bool:
     No en una corrida IDU nueva (`idu-f1/2`): el contractual YA es el básico y la columna
     repetiría la principal. Una línea agregada a mano (básico 0) no la hace reaparecer.
     """
-    return not any(a.item.precio_contractual_sin_aiu > 0 for a in apus)         or es_contractual_con_aiu(apus)
+    return (not any(a.item.precio_contractual_sin_aiu > 0 for a in apus)
+        or es_contractual_con_aiu(apus))
 
 
 def _sin_columna_aparte(ws, columnas: tuple[int, ...], anchos: list[int],

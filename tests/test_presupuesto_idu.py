@@ -544,3 +544,27 @@ def test_un_subtotal_alterado_sigue_disparando_la_verificacion(tmp_path):
     assert any(a.tipo == "subtotal_no_concilia" for a in lec.advertencias)
     assert lec.conciliacion["subtotales_ok"] is False
     assert lec.conciliacion["diferencia"] == 1
+
+
+# ------------------------------- formularios 2025: «SIN A.I.U.» / «CON A.I.U.»
+def test_encabezados_2025_leen_el_basico_y_no_ofertado_ni_corregido(tmp_path):
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    ws = wb["PROPUESTA ECONÓMICA"]
+    for fila in (5, 25):                      # encabezado y su repetición a mitad
+        ws.cell(row=fila, column=10).value = "VALOR UNITARIO SIN A.I.U."
+        ws.cell(row=fila, column=11).value = "VALOR UNITARIO CON A.I.U."
+        ws.cell(row=fila, column=15).value = "VALOR UNITARIO SIN AIU OFERTADO"
+        ws.cell(row=fila, column=16).value = "VALOR UNITARIO SIN AIU\nCORREGIDO"
+        ws.cell(row=fila, column=17).value = "VALOR UNITARIO CON AIU\nCORREGIDO"
+    for fila in (10, 11, 16, 17, 18):         # valores distintos en las columnas trampa
+        for col in (15, 16, 17):
+            ws.cell(row=fila, column=col).value = 999999
+    wb.save(p)
+    lec = leer_formulario_idu(p)
+    assert lec.errores == []
+    replanteo = next(i for i in lec.items if i.item_pago_original == "1.001")
+    assert replanteo.precio_contractual == 1056
+    basico = sum(round(a[5] * a[6]) for a in ACTIVIDADES_CAP_1 + ACTIVIDADES_CAP_2)
+    assert lec.conciliacion == {"contractual": basico, "subtotales_ok": True,
+                                "diferencia": 0}

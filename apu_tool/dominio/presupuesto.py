@@ -224,8 +224,8 @@ _ENCABEZADOS: dict[str, tuple[str, ...]] = {
     "descripcion":      ("descripcion",),
     "unidad":           ("und", "unidad"),
     "cantidad":         ("cantidad",),
-    "unitario_sin_aiu": ("valor unitario basico sin aiu",),
-    "unitario_con_aiu": ("valor unitario incluye aiu",),
+    "unitario_sin_aiu": ("valor unitario basico sin aiu", "valor unitario sin aiu"),
+    "unitario_con_aiu": ("valor unitario incluye aiu", "valor unitario con aiu"),
     "total_excel":      ("valor total",),
 }
 

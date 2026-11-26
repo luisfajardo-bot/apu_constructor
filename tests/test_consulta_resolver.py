@@ -1,5 +1,6 @@
 """El reemplazo de marcadores: el único punto del chat de consulta que toca dinero.
 Las cifras se comparan contra las MISMAS funciones de la pantalla."""
+import json
 import logging
 
 import pytest
@@ -200,3 +201,39 @@ def test_corrida_sin_filas_no_dice_cero(base):
         turno_def="DIURNO", use_ai=None, estado="en_revision",
         carpeta_id=None, nombre="vacia"))
     assert resolver(alm, f"{{{{costo:corrida:{cid}}}}}") == "sin actividades"
+
+
+# ------------------------------------------- corridas viejas del IDU (idu-f1/1)
+def _origen(alm, cid, version):
+    alm.corridas.set_origen(cid, json.dumps({"entidad": "IDU",
+                                             "parser_version": version}))
+
+
+def test_corrida_vieja_del_idu_dice_con_aiu_menos_en_el_costo(base):
+    alm, ids = base
+    cid = ids["cali"]
+    _origen(alm, cid, "idu-f1/1")
+    t = vista_corrida(alm, cid)["totales"]
+    assert resolver(alm, f"{{{{contractual:corrida:{cid}}}}}") ==         pesos(t["contractual"]) + " (con AIU)"
+    assert resolver(alm, f"{{{{diferencia:corrida:{cid}}}}}") ==         pesos(t["margen"]) + " (con AIU)"
+    assert resolver(alm, f"{{{{margen:corrida:{cid}}}}}") ==         pct(t["margen_pct"]) + " (con AIU)"
+    # El costo interno es costo directo en toda corrida: nunca lleva la nota.
+    assert resolver(alm, f"{{{{costo:corrida:{cid}}}}}") == pesos(t["costo"])
+
+
+def test_capitulo_de_una_corrida_vieja_dice_con_aiu(base):
+    alm, ids = base
+    cid = ids["calle13"]
+    _origen(alm, cid, "idu-f1/1")
+    cap = next(c for c in vista_corrida(alm, cid)["capitulos"] if c["codigo"] == "1")
+    assert resolver(alm, f"{{{{contractual:capitulo:{cid}:1}}}}") ==         pesos(cap["contractual"]) + " (con AIU)"
+    assert resolver(alm, f"{{{{costo:capitulo:{cid}:1}}}}") == pesos(cap["costo"])
+
+
+def test_corrida_nueva_del_idu_no_lleva_nota(base):
+    alm, ids = base
+    cid = ids["cali"]
+    _origen(alm, cid, "idu-f1/2")
+    t = vista_corrida(alm, cid)["totales"]
+    assert resolver(alm, f"{{{{contractual:corrida:{cid}}}}}") == pesos(t["contractual"])
+    assert "AIU" not in resolver(alm, f"{{{{margen:corrida:{cid}}}}}")

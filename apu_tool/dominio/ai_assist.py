@@ -348,7 +348,7 @@ MAX_TOKENS_CHAT = 16000
 # `dominio/consulta_chat.py`. La IA entiende la pregunta y escribe MARCADORES; las
 # cifras las pone `servicio/consulta.py` cuando el modelo ya terminó. Salida en texto
 # plano: no hay nada estructurado que parsear, solo marcadores dentro del texto.
-PROMPT_VERSION_CONSULTA = "consulta/v1"   # se sube A MANO al tocar el prompt o las herramientas
+PROMPT_VERSION_CONSULTA = "consulta/v2"   # se sube A MANO al tocar el prompt o las herramientas
 
 _SISTEMA_CONSULTA = """\
 Eres el asistente de consulta de costos de una empresa de obra civil. Respondes
@@ -393,8 +393,10 @@ Reglas:
 - Un proyecto puede tener varias corridas (suelen ser versiones de la misma
   licitación): da una línea por corrida y NO digas un total del proyecto.
 - Los precios y costos de insumos y APUs son de la lista Principal. El costo interno
-  no lleva AIU; el contractual de una licitación del IDU sí lo lleva. Dilo cuando
-  compares contractual con costo.
+  es costo directo, sin AIU, y el contractual también, así que se comparan tal cual.
+  Algunas corridas viejas del IDU tienen el contractual con AIU: en esas, el sistema
+  le agrega «(con AIU)» a la cifra cuando reemplaza el marcador. Tú no lo escribes
+  ni lo adivinas.
 - Si una cifra sale marcada como parcial, no la presentes como definitiva.
 - Responde corto, en español de Colombia y tuteando. Texto plano; listas con "- ".
 - Solo respondes sobre precios, costos y totales. Para otra cosa, dilo en una línea.

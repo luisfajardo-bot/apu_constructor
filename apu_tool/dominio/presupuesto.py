@@ -108,13 +108,16 @@ def item_pago_texto(valor, formato: str = "") -> str:
         if valor != valor:               # NaN
             return ""
         decimales = _decimales_del_formato(formato)
-        if decimales:
+        # El formato manda solo si no esconde dígitos. En L5 y L3 el 11.10326 viene con
+        # formato de 4 decimales: mostrado como «11.1033» chocaba con el 11.1033 de
+        # verdad (item_duplicado falso). Comparar a 9 decimales absorbe el ruido del
+        # float (7.189000000000003 sigue siendo 7.189).
+        if decimales and round(valor, decimales) == round(valor, 9):
             return f"{valor:.{decimales}f}"
-        # `str(valor)` y NO `f"{valor:g}"`: `:g` corta a 6 cifras significativas, así
-        # que 123456.789 saldría "123457" — perder un dígito es exactamente lo que esta
-        # función existe para evitar. `str` de un float da la representación más corta
-        # que vuelve al mismo número, sin tope ni notación científica en este rango.
-        return str(int(valor)) if valor.is_integer() else str(valor)
+        # La precisión real, sin ceros de cola. NO `f"{valor:g}"`: `:g` corta a 6 cifras
+        # significativas, así que 123456.789 saldría "123457" — perder un dígito es
+        # exactamente lo que esta función existe para evitar.
+        return f"{valor:.9f}".rstrip("0").rstrip(".")
     if isinstance(valor, int):
         return str(valor)
     return str(valor).strip()
@@ -421,6 +424,8 @@ class _Recorrido:
         self._con_actividades: set[str] = set()
         self._vistos: set[tuple] = set()
         self._duplicados: list[str] = []
+        # Hubo actividades desde el último Subtotal contado: el próximo las cierra.
+        self._por_cerrar = False
 
     def procesar(self, fila: list, n: int) -> None:
         m = self.mapeo
@@ -439,14 +444,23 @@ class _Recorrido:
                           else config.SHIFT_DIURNO)
         elif tipo == ACTIVIDAD:
             self._agregar_actividad(fila, codigo, item_pago, desc, cantidad, n)
-        elif tipo == SUBTOTAL:
+        elif tipo == SUBTOTAL and self._por_cerrar:
             self.subtotales.append(_a_entero(_val(fila, m.get("total_excel"))))
+            self._por_cerrar = False
         else:
+            # Un SUBTOTAL que llega acá no cierra nada: no hubo actividades desde el
+            # anterior. Es el resumen general del final («SUBTOTAL OBRAS (INCLUYE
+            # A.I.U)», «SUBTOTAL OBRAS ( A + B + C + D )» en L5 y L3), que suma los
+            # subtotales de capítulo y, contado, duplicaría la verificación.
             self.ignoradas += 1
             if tipo == ENCABEZADO:
                 self.avisos.append(Advertencia(
                     "encabezado_repetido", n, "Fila de encabezado repetida; se ignoró."))
             elif tipo == IGNORADA and _es_codigo_item(codigo) and desc:
+                # Cuenta como actividad para cerrar el subtotal: si las filas de un
+                # capítulo no entraron, su Subtotal sigue contando y la verificación
+                # lo nota, en vez de tomarlo por resumen y callarse la diferencia.
+                self._por_cerrar = True
                 # Tiene código de APU y descripción: parece una actividad de verdad,
                 # pero su cantidad no es un número positivo (texto, cero, vacío, una
                 # fórmula sin valor almacenado). Irse callada sería borrar una actividad
@@ -499,6 +513,7 @@ class _Recorrido:
         if not codigo:
             self.avisos.append(Advertencia("codigo_apu_vacio", n,
                                            f"«{desc[:60]}» no trae código de APU."))
+        self._por_cerrar = True
         clave = (normalizar_item_pago(item_pago), normalizar(desc), self.shift)
         if clave in self._vistos:
             self._duplicados.append(item_pago)

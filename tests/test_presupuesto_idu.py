@@ -568,3 +568,68 @@ def test_encabezados_2025_leen_el_basico_y_no_ofertado_ni_corregido(tmp_path):
     basico = sum(round(a[5] * a[6]) for a in ACTIVIDADES_CAP_1 + ACTIVIDADES_CAP_2)
     assert lec.conciliacion == {"contractual": basico, "subtotales_ok": True,
                                 "diferencia": 0}
+
+
+# ------------------- el ítem de pago con su precisión real, aunque el formato la esconda
+def test_item_pago_texto_no_deja_que_el_formato_esconda_digitos():
+    # L5/L3: el 11.10326 viene con formato de 4 decimales; mostrado como «11.1033»
+    # chocaba con el 11.1033 de verdad de dos filas más abajo (item_duplicado falso).
+    assert item_pago_texto(11.10325999999995, "0.0000") == "11.10326"
+    assert item_pago_texto(11.1033, "0.0000") == "11.1033"
+    # Ruido de float bajo el formato: no son dígitos escondidos.
+    assert item_pago_texto(7.189000000000003, "0.000") == "7.189"
+    assert item_pago_texto(13.503999999999998, "0.000") == "13.504"
+    # Y el cero significativo se sigue recuperando del formato.
+    assert item_pago_texto(2.01, "0.000") == "2.010"
+
+
+def test_dos_items_que_el_formato_igualaba_no_son_duplicados(tmp_path):
+    # Filas 21 y 22 del fixture: las dos nocturnas del capítulo 2. Misma descripción y
+    # turno; los ítems solo se distinguen en el quinto decimal.
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    ws = wb["PROPUESTA ECONÓMICA"]
+    for fila, item in ((21, 2.10325999999995), (22, 2.1033)):
+        ws.cell(row=fila, column=4).value = item
+        ws.cell(row=fila, column=4).number_format = "0.0000"
+    ws.cell(row=22, column=7).value = ws.cell(row=21, column=7).value
+    wb.save(p)
+    lec = leer_formulario_idu(p)
+    assert lec.errores == []
+    originales = {i.item_pago_original for i in lec.items}
+    assert {"2.10326", "2.1033"} <= originales
+
+
+# ------------------------ el resumen general del final no es subtotal de capítulo
+def _con_resumen_subtotal(tmp_path):
+    """El fixture con las dos filas de resumen (28 y 29) rotuladas «SUBTOTAL …», como
+    en L5 y L3: la columna Nº empieza por «subtotal» pero no cierran ningún capítulo."""
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    ws = wb["PROPUESTA ECONÓMICA"]
+    ws.cell(row=28, column=3).value = "SUBTOTAL OBRAS (INCLUYE A.I.U)"
+    ws.cell(row=29, column=3).value = "SUBTOTAL OBRAS ( A + B + C + D )"
+    wb.save(p)
+    return p
+
+
+def test_las_filas_de_resumen_no_se_suman_como_subtotales(tmp_path):
+    lec = leer_formulario_idu(_con_resumen_subtotal(tmp_path))
+    assert lec.errores == []
+    assert lec.conciliacion["subtotales_ok"] is True
+    assert lec.conciliacion["diferencia"] == 0
+    assert not any(a.tipo == "subtotal_no_concilia" for a in lec.advertencias)
+
+
+def test_subtotal_de_un_capitulo_cuyas_filas_no_entraron_sigue_contando(tmp_path):
+    # Las dos actividades del capítulo 1 con cantidad ilegible: ninguna entra, pero
+    # parecían actividades. Su Subtotal tiene que seguir contando para que la
+    # verificación lo note; si se tratara como fila de resumen, la diferencia se iría
+    # callada.
+    p = escribir_formulario(tmp_path / "f1.xlsx")
+    wb = openpyxl.load_workbook(p)
+    for fila in (10, 13):
+        wb["PROPUESTA ECONÓMICA"].cell(row=fila, column=9).value = "n/a"
+    wb.save(p)
+    lec = leer_formulario_idu(p)
+    assert lec.conciliacion["subtotales_ok"] is False
